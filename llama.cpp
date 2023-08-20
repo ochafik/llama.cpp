@@ -1412,7 +1412,8 @@ static struct ggml_cgraph * llama_build_graph(
      const llama_token * tokens,
            const float * embd,
                    int   n_tokens,
-                   int   n_past) {
+                   int   n_past,
+                  bool   compute_outputs = true) {
 
     LLAMA_ASSERT((!tokens && embd) || (tokens && !embd));
 
@@ -1596,6 +1597,8 @@ static struct ggml_cgraph * llama_build_graph(
        
             if (il == n_layer - 1 && !lctx.logits_all && N > 1)
             {
+                if (!compute_outputs) break;
+
                 GGML_ASSERT(  cur->n_dims == 2 &&   cur->ne[0] == n_embd &&   cur->ne[1] == N);
                 GGML_ASSERT(inpSA->n_dims == 2 && inpSA->ne[0] == n_embd && inpSA->ne[1] == N);
                 // From here on, we only care about the last token and its logits.
@@ -1763,6 +1766,7 @@ static struct ggml_cgraph * llama_build_graph(
     lctx.use_buf(ctx0, 0);
 
     // norm
+    if (compute_outputs)
     {
         cur = ggml_rms_norm(ctx0, inpL, rms_norm_eps);
         offload_func_nr(cur);
@@ -1775,8 +1779,11 @@ static struct ggml_cgraph * llama_build_graph(
     }
 
     // lm_head
-    cur = ggml_mul_mat(ctx0, model.output, cur);
-    ggml_set_name(cur, "result_output");
+    if (compute_outputs)
+    {
+        cur = ggml_mul_mat(ctx0, model.output, cur);
+        ggml_set_name(cur, "result_output");
+    }
 
     lctx.use_buf(ctx0, -1);
 
@@ -1811,6 +1818,7 @@ static struct ggml_cgraph * llama_build_graph(
 //   - n_tokens   number of tokens
 //   - n_past:    the context size so far
 //   - n_threads: number of threads to use
+//   - compute_outputs: if false, neither the logits nor the embeddings are computed, only the kv-cache is updated
 //
 static bool llama_eval_internal(
          llama_context & lctx,
@@ -1819,7 +1827,8 @@ static bool llama_eval_internal(
                    int   n_tokens,
                    int   n_past,
                    int   n_threads,
-            const char * cgraph_fname) {
+            const char * cgraph_fname,
+                  bool   compute_outputs = true) {
 
     LLAMA_ASSERT((!tokens && embd) || (tokens && !embd));
 
@@ -1845,7 +1854,7 @@ static bool llama_eval_internal(
     ggml_allocr_reset(lctx.alloc);
 #endif
 
-    ggml_cgraph * gf = llama_build_graph(lctx, tokens, embd, n_tokens, n_past);
+    ggml_cgraph * gf = llama_build_graph(lctx, tokens, embd, n_tokens, n_past, compute_outputs);
 
 #ifdef LLAMA_USE_ALLOCATOR
     ggml_allocr_alloc_graph(lctx.alloc, gf);
@@ -1857,11 +1866,14 @@ static bool llama_eval_internal(
     // otherwise, the threads are spin-lock waiting for the BLAS calls and are degrading the performance
     n_threads = N >= 32 && ggml_cpu_has_blas() && !ggml_cpu_has_gpublas() ? 1 : n_threads;
 
-    struct ggml_tensor * res = gf->nodes[gf->n_nodes - 1];
-    struct ggml_tensor * embeddings = gf->nodes[gf->n_nodes - 2];
-
-    LLAMA_ASSERT(strcmp(res->name, "result_output") == 0);
-    LLAMA_ASSERT(strcmp(embeddings->name, "result_norm") == 0);
+    struct ggml_tensor * res = NULL;
+    struct ggml_tensor * embeddings = NULL;
+    if (compute_outputs) {
+        res = gf->nodes[gf->n_nodes - 1];
+        embeddings = gf->nodes[gf->n_nodes - 2];
+        LLAMA_ASSERT(strcmp(res->name, "result_output") == 0);
+        LLAMA_ASSERT(strcmp(embeddings->name, "result_norm") == 0);
+    }
 
 #if GGML_USE_MPI
     const int64_t n_layer = hparams.n_layer;
@@ -1872,9 +1884,11 @@ static bool llama_eval_internal(
     if (lctx.ctx_metal) {
         ggml_metal_set_n_cb     (lctx.ctx_metal, n_threads);
         ggml_metal_graph_compute(lctx.ctx_metal, gf);
-        ggml_metal_get_tensor   (lctx.ctx_metal, res);
-        if (!lctx.embedding.empty()) {
-            ggml_metal_get_tensor(lctx.ctx_metal, embeddings);
+        if (compute_outputs) {
+            ggml_metal_get_tensor   (lctx.ctx_metal, res);
+            if (!lctx.embedding.empty()) {
+                ggml_metal_get_tensor(lctx.ctx_metal, embeddings);
+            }
         }
     } else {
         ggml_graph_compute_helper(lctx.work_buffer, gf, n_threads);
@@ -1906,6 +1920,7 @@ static bool llama_eval_internal(
     //}
 
     // extract logits
+    if (compute_outputs)
     {
         auto & logits_out = lctx.logits;
 
@@ -1922,7 +1937,8 @@ static bool llama_eval_internal(
     }
 
     // extract embeddings
-    if (!lctx.embedding.empty()) {
+    if (compute_outputs && !lctx.embedding.empty())
+    {
         auto & embedding_out = lctx.embedding;
 
         embedding_out.resize(n_embd);
@@ -4195,8 +4211,9 @@ int llama_eval(
            const llama_token * tokens,
                          int   n_tokens,
                          int   n_past,
-                         int   n_threads) {
-    if (!llama_eval_internal(*ctx, tokens, nullptr, n_tokens, n_past, n_threads, nullptr)) {
+                         int   n_threads,
+                        bool   compute_outputs) {
+    if (!llama_eval_internal(*ctx, tokens, nullptr, n_tokens, n_past, n_threads, nullptr, compute_outputs)) {
         LLAMA_LOG_ERROR("%s: failed to eval\n", __func__);
         return 1;
     }
