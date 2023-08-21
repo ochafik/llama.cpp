@@ -1841,6 +1841,7 @@ struct ggml_tensor * find_input(struct ggml_cgraph * gf, const char *name) {
         GGML_ASSERT(strcmp(node->name, name) && "Requested tensor is not an input but a computation node");
         for (int j = 0; j < GGML_MAX_SRC; j++) {
             auto src = node->src[j];
+            if (!src) break;
             if (strcmp(src->name, "inp_tokens") == 0) {
                 return src;
             }
