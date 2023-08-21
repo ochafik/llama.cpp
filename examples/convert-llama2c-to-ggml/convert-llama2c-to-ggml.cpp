@@ -106,13 +106,13 @@ int checkpoint_init_weights(TransformerWeights *w, Config* p, FILE* f, bool shar
     if (fread(w->w2, sizeof(float), p->n_layers * p->hidden_dim * p->dim, f) != static_cast<size_t>(p->n_layers * p->hidden_dim * p->dim)) return 1;
     if (fread(w->w3, sizeof(float), p->n_layers * p->dim * p->hidden_dim, f) != static_cast<size_t>(p->n_layers * p->dim * p->hidden_dim)) return 1;
     if (fread(w->rms_final_weight, sizeof(float), p->dim, f) != static_cast<size_t>(p->dim)) return 1;
-    
+
     // Skip freq_cis_real & freq_cis_imag
     int head_size = p->dim / p->n_heads;
     fseek(f, p->seq_len * head_size * sizeof(float), SEEK_CUR);
-    
+
     if (!shared_weights && fread(w->wcls, sizeof(float), p->vocab_size * p->dim, f) != static_cast<size_t>(p->vocab_size * p->dim)) return 1;
-    
+
     // Check we didn't forget to read anything
     auto curr = ftell(f);
     fseek(f, 0, SEEK_END);
