@@ -1407,6 +1407,76 @@ static bool llama_model_load(
     }
 }
 
+bool op_has_interpolatable_int_params(ggml_op op) {
+    switch (op) {
+        case GGML_OP_ROPE:
+        case GGML_OP_VIEW:
+        case GGML_OP_DIAG_MASK_INF:
+            return true;
+        default:
+            return false;
+    }
+}
+
+class graph_interpolator {
+    typedef std::pair<int, int> param_ref; // <node_id, op_param_id>
+    class interpolated_param {
+    public:
+        param_ref ref;
+        // Variable is `a * n_tokens + b * n_past + c`
+        int32_t a, b, c;
+    };
+    std::vector<interpolated_param> params_;
+
+ public:
+    bool build(struct ggml_cgraph * gf1, struct ggml_cgraph * gf2, struct ggml_cgraph * gf3) {
+        std::map<param_ref, std::array<int, 3>> observed_params;
+
+        if (gf1->n_nodes != gf2->n_nodes || gf1->n_nodes != gf3->n_nodes) {
+            return false;
+        }
+
+        for (int i = 0; i < gf1->n_nodes; ++i) {
+            auto & node1 = gf1->nodes[i];
+            auto & node2 = gf2->nodes[i];
+            auto & node3 = gf3->nodes[i];
+            if (node1->op != node2->op || node1->op != node3->op) {
+                return false;
+            }
+            if (node1->n_dims != node2->n_dims || node1->n_dims != node3->n_dims) {
+                // Technically could relax that rule and interpolate the dims
+                return false;
+            }
+            if (strcmp(node1->name, node2->name) != 0 || strcmp(node1->name, node3->name) != 0) {
+                return false;
+            }
+            // if (strcmp(node1->name, "Kcur") == 0) {
+            //     printf("Found Kcur\n");
+            // }
+            if (memcmp(node1, node2, sizeof(*node1)) == 0 && memcmp(node1, node3, sizeof(*node1)) == 0) {
+                continue;
+            }
+            for (size_t ip = 0; ip < GGML_MAX_OP_PARAMS / sizeof(int32_t); ip++) {
+                if (node1->op_params[ip] != node2->op_params[ip] || node1->op_params[ip] != node3->op_params[ip]) {
+                    if (!op_has_interpolatable_int_params(node1->op)) {
+                        printf("node %s (op %s) has a different param at position %lu but does not have interpolatable int params\n", 
+                            node1->name, ggml_op_name(node1->op), ip);
+                        return false;
+                    }
+                    observed_params[{i, ip}] = {node1->op_params[ip], node2->op_params[ip], node3->op_params[ip]};
+                }
+            }
+
+            // if (node.op == GGML_OP_PARAM) {
+            //     param_ref ref = { .node_id = i, .op_param_id = node.op_param_id };
+            //     observed_params[ref].push_back(0);
+            // }
+        }
+        printf("\n[Found %lu params to interpolate to reuse computation graph!]\n", observed_params.size());
+        return true;
+    }
+};
+
 static struct ggml_cgraph * llama_build_graph(
          llama_context & lctx,
                   bool   use_tokens,
@@ -1828,7 +1898,67 @@ static bool llama_eval_internal(
     ggml_allocr_reset(lctx.alloc);
 #endif
 
+    typedef std::pair<int, int> build_args; // <n_tokens, n_past>
+
+    static graph_interpolator interpolator;
+    static std::map<
+             build_args, 
+             std::pair<
+               ggml_cgraph,
+               std::map<ggml_tensor*, ggml_tensor>>> graph_cache;
+    static bool interpolator_built = false;
+    
     ggml_cgraph * gf = llama_build_graph(lctx, tokens != NULL, n_tokens, n_past);
+
+    build_args args = {n_tokens, n_past};
+    if (!interpolator_built) {
+        if (graph_cache.find(args) == graph_cache.end()) {
+            auto &cached = graph_cache[args];
+            cached.first = *gf;
+            auto &graph = cached.first;
+            auto &clones = cached.second;
+
+            for (int i = 0; i < graph.n_nodes; i++) {
+                clones[graph.nodes[i]] = *graph.nodes[i];
+                graph.nodes[i] = &clones[graph.nodes[i]];
+            }
+            for (int i = 0; i < graph.n_leafs; i++) {
+                if (clones.find(graph.leafs[i]) == clones.end()) {
+                    clones[graph.leafs[i]] = *graph.leafs[i];
+                    graph.leafs[i] = &clones[graph.leafs[i]];
+                }
+            }
+            for (int i = 0; i < graph.n_nodes; i++) {
+                for (int is = 0; is < GGML_MAX_SRC; is++) {
+                    auto &src = graph.nodes[i]->src[is];
+                    if (!src) continue;
+                    auto it = clones.find(src);
+                    GGML_ASSERT(it != clones.end());
+                    src = &it->second;
+                }
+            }
+            for (int i = 0; i < graph.n_leafs; i++) {
+                for (int is = 0; is < GGML_MAX_SRC; is++) {
+                    auto &src = graph.leafs[i]->src[is];
+                    if (!src) continue;
+                    auto it = clones.find(src);
+                    GGML_ASSERT(it != clones.end());
+                    src = &it->second;
+                }
+            }
+        }
+        if (graph_cache.size() == 3) {
+            auto it = graph_cache.begin();
+            static ggml_cgraph *gf1 = &(it++)->second.first;
+            static ggml_cgraph *gf2 = &(it++)->second.first;
+            static ggml_cgraph *gf3 = &(it++)->second.first;
+            
+            if (interpolator.build(gf1, gf2, gf3)) {
+                printf("Ready to interpolate graph calls!!\n");
+            }
+            interpolator_built = true;
+        }
+    }
 
 #ifdef LLAMA_USE_ALLOCATOR
     ggml_allocr_alloc_graph(lctx.alloc, gf);
