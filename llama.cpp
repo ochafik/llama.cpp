@@ -1593,7 +1593,7 @@ static struct ggml_cgraph * llama_build_graph(
                 ggml_build_forward_expand(gf, ggml_cpy(ctx0, Kcur, k));
                 ggml_build_forward_expand(gf, ggml_cpy(ctx0, Vcur, v));
             }
-       
+
             if (il == n_layer - 1 && !lctx.logits_all)
             {
                 // From here on, we only care about the last token and its logits.
