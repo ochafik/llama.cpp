@@ -1823,7 +1823,7 @@ static void llm_load_tensors(
     (void) main_gpu;
     (void) mul_mat_q;
 #if defined(GGML_USE_CUBLAS)
-    LLAMA_LOG_INFO("%s: using CUDA for GPU acceleration\n", __func__);
+    LLAMA_LOG_INFO("%s: using " GGML_CUDA_NAME " for GPU acceleration\n", __func__);
     ggml_cuda_set_main_device(main_gpu);
     ggml_cuda_set_mul_mat_q(mul_mat_q);
 #define LLAMA_BACKEND_OFFLOAD       GGML_BACKEND_GPU
@@ -3041,11 +3041,8 @@ static std::string llama_escape_whitespace(const std::string& text) {
     return result;
 }
 
-static std::string llama_unescape_whitespace(const std::string& word) {
-    if (word.length() >= 3 && word.substr(0, 3) == "\xe2\x96\x81") {
-        return std::string(" ") + word.substr(3);
-    }
-    return word;
+static void llama_unescape_whitespace(std::string & word) {
+    replace_all(word, "\xe2\x96\x81", " ");
 }
 
 struct llm_symbol {
@@ -4111,7 +4108,7 @@ void llama_sample_grammar(struct llama_context * ctx, llama_token_data_array * c
             if (!allow_eos) {
                 candidates->data[i].logit = -INFINITY;
             }
-        } else if (text.empty()) {
+        } else if (text.empty() || text[0] == 0) {
             candidates->data[i].logit = -INFINITY;
         } else {
             candidates_decoded.push_back(decode_utf8(text.c_str(), grammar->partial_utf8));
@@ -5859,7 +5856,7 @@ int llama_token_to_str_with_model(const struct llama_model * model, llama_token 
         if (llama_is_normal_token(model->vocab, token)) {
             std::string result = model->vocab.id_to_token[token].text;
             if (llama_vocab_get_type(model->vocab) == LLAMA_VOCAB_TYPE_SPM) {
-                result = llama_unescape_whitespace(result);
+                llama_unescape_whitespace(result);
             }
             if (length < (int) result.length()) {
                 return -result.length();
