@@ -2209,7 +2209,7 @@ static struct ggml_cgraph * llm_build_llama(
 
     if (use_tokens) {
         struct ggml_tensor * inp_tokens = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, N);
-
+        ggml_allocr_alloc(lctx.alloc, inp_tokens);
         ggml_set_name(inp_tokens, "inp_tokens");
 
         inpL = ggml_get_rows(ctx0, model.tok_embeddings, inp_tokens);
@@ -2219,7 +2219,7 @@ static struct ggml_cgraph * llm_build_llama(
 #endif
 
         inpL = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, n_embd, N);
-
+        ggml_allocr_alloc(lctx.alloc, inpL);
         ggml_set_name(inpL, "inp_embeddings");
     }
 
@@ -2249,9 +2249,6 @@ static struct ggml_cgraph * llm_build_llama(
 
     struct ggml_tensor * KQ_scale = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, 1);
     ggml_allocr_alloc(lctx.alloc, KQ_scale);
-    if (!ggml_allocr_is_measure(lctx.alloc)) {
-        ggml_set_f32(KQ_scale, 1.0f/sqrtf(float(n_embd)/n_head));
-    }
     ggml_set_name(KQ_scale, "1/sqrt(n_embd_head)");
 
     for (int il = 0; il < n_layer; ++il) {
@@ -2530,7 +2527,7 @@ static struct ggml_cgraph * llm_build_falcon(
 
     if (use_tokens) {
         struct ggml_tensor * inp_tokens = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, N);
-
+        ggml_allocr_alloc(lctx.alloc, inp_tokens);
         ggml_set_name(inp_tokens, "inp_tokens");
 
         inpL = ggml_get_rows(ctx0, model.tok_embeddings, inp_tokens);
@@ -2540,7 +2537,7 @@ static struct ggml_cgraph * llm_build_falcon(
 #endif
 
         inpL = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, n_embd, N);
-
+        ggml_allocr_alloc(lctx.alloc, inpL);
         ggml_set_name(inpL, "inp_embeddings");
     }
 
@@ -2570,9 +2567,6 @@ static struct ggml_cgraph * llm_build_falcon(
 
     struct ggml_tensor * KQ_scale = ggml_new_tensor_1d(ctx0, GGML_TYPE_F32, 1);
     ggml_allocr_alloc(lctx.alloc, KQ_scale);
-    if (!ggml_allocr_is_measure(lctx.alloc)) {
-        ggml_set_f32(KQ_scale, 1.0f/sqrtf(float(n_embd)/n_head));
-    }
     ggml_set_name(KQ_scale, "1/sqrt(n_embd_head)");
 
     for (int il = 0; il < n_layer; ++il) {
@@ -2870,6 +2864,7 @@ static bool llama_eval_internal(
     GGML_ASSERT(!!kv_self.ctx);
 
     const int64_t n_embd  = hparams.n_embd;
+    const int64_t n_head  = hparams.n_head;
     const int64_t n_vocab = hparams.n_vocab;
 
     ggml_allocr_reset(lctx.alloc);
@@ -2901,12 +2896,11 @@ static bool llama_eval_internal(
     n_threads = N >= 32 && ggml_cpu_has_blas() && !ggml_cpu_has_gpublas() ? 1 : n_threads;
 
     if (tokens) {
-        struct ggml_tensor * input = get_graph_input(gf, "inp_tokens");
-        memcpy(input->data, tokens, N*ggml_element_size(input));
+        memcpy(get_graph_input(gf, "inp_tokens")->data, tokens, N*sizeof(*tokens));
     } else {
-        struct ggml_tensor * input = get_graph_input(gf, "inp_embeddings");
-        memcpy(input->data, embd, N * n_embd * ggml_element_size(input));
+        memcpy(get_graph_input(gf, "inp_embeddings")->data, embd, N*n_embd*sizeof(*embd));
     }
+    ggml_set_f32(get_graph_input(gf, "1/sqrt(n_embd_head)"), 1.0f/sqrtf(float(n_embd)/n_head));
 
     struct ggml_tensor * res        = get_graph_output(gf, "result_output");
     struct ggml_tensor * embeddings = get_graph_output(gf, "result_norm");
