@@ -2315,11 +2315,11 @@ static struct ggml_cgraph * llm_build_llama(
 
             struct ggml_tensor * Kcur = ggml_rope_custom_inplace(ctx0, ggml_reshape_3d(ctx0, tmpk, n_embd_head, n_head_kv, N), n_past, n_embd_head, 0, 0, freq_base, freq_scale);
             offload_func_kq(Kcur);
-            ggml_set_name(Kcur, "Kcur");
+            ggml_format_name(Kcur, "Kcur%d", il);
 
             struct ggml_tensor * Qcur = ggml_rope_custom_inplace(ctx0, ggml_reshape_3d(ctx0, tmpq, n_embd_head, n_head, N),    n_past, n_embd_head, 0, 0, freq_base, freq_scale);
             offload_func_kq(Qcur);
-            ggml_set_name(Qcur, "Qcur");
+            ggml_format_name(Qcur, "Qcur%d", il);
 
             // store key and value to memory
             {
@@ -2335,13 +2335,13 @@ static struct ggml_cgraph * llm_build_llama(
 
                 struct ggml_tensor * k = ggml_view_1d(ctx0, kv_self.k, N*n_embd_gqa, (ggml_element_size(kv_self.k)*n_embd_gqa)*(il*n_ctx + n_past));
                 offload_func_kq(k);
-                ggml_set_name(k, "k");
+                ggml_format_name(k, "k%d", il);
 
                 struct ggml_tensor * v = ggml_view_2d(ctx0, kv_self.v, N, n_embd_gqa,
                         (   n_ctx)*ggml_element_size(kv_self.v),
                         (il*n_ctx)*ggml_element_size(kv_self.v)*n_embd_gqa + n_past*ggml_element_size(kv_self.v));
                 offload_func_v(v);
-                ggml_set_name(v, "v");
+                ggml_format_name(v, "v%d", il);
 
                 // important: storing RoPE-ed version of K in the KV cache!
                 ggml_build_forward_expand(gf, ggml_cpy(ctx0, Kcur, k));
@@ -2359,7 +2359,7 @@ static struct ggml_cgraph * llm_build_llama(
                         ggml_element_size(kv_self.k)*n_embd_head,
                         ggml_element_size(kv_self.k)*n_embd_gqa*n_ctx*il);
             offload_func_kq(K);
-            ggml_set_name(K, "K");
+            ggml_format_name(K, "K%d", il);
 
             // K * Q
             struct ggml_tensor * KQ = ggml_mul_mat(ctx0, K, Q);
