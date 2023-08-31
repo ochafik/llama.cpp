@@ -150,6 +150,32 @@ static std::string format(const char * fmt, ...) {
     return std::string(buf.data(), size);
 }
 
+struct ggml_tensor * get_graph_input(struct ggml_cgraph * gf, const char *name) {
+    for (int i = 0; i < gf->n_nodes; ++i) {
+        GGML_ASSERT(strcmp(gf->nodes[i]->name, name) && "Requested tensor is not an input but a computation node");
+        for (int j = 0; j < GGML_MAX_SRC; j++) {
+            if (!gf->nodes[i]->src[j]) {
+                break;
+            }
+            if (strcmp(gf->nodes[i]->src[j]->name, name) == 0) {
+                return gf->nodes[i]->src[j];
+            }
+        }
+    }
+    GGML_ASSERT(false && "Input tensor not found");
+    return NULL;
+}
+
+struct ggml_tensor * get_graph_output(struct ggml_cgraph * gf, const char *name) {
+    for (int i = gf->n_nodes - 1; i >= 0; --i) {
+        if (strcmp(gf->nodes[i]->name, name) == 0) {
+            return gf->nodes[i];
+        }
+    }
+    GGML_ASSERT(false && "Output tensor not found");
+    return NULL;
+}
+
 //
 // gguf constants (sync with gguf.py)
 //
@@ -2794,32 +2820,6 @@ static struct ggml_cgraph * llama_build_graph(
     };
 
     return result;
-}
-
-struct ggml_tensor * get_graph_input(struct ggml_cgraph * gf, const char *name) {
-    for (int i = 0; i < gf->n_nodes; ++i) {
-        GGML_ASSERT(strcmp(gf->nodes[i]->name, name) && "Requested tensor is not an input but a computation node");
-        for (int j = 0; j < GGML_MAX_SRC; j++) {
-            if (!gf->nodes[i]->src[j]) {
-                break;
-            }
-            if (strcmp(gf->nodes[i]->src[j]->name, name) == 0) {
-                return gf->nodes[i]->src[j];
-            }
-        }
-    }
-    GGML_ASSERT(false && "Input tensor not found");
-    return NULL;
-}
-
-struct ggml_tensor * get_graph_output(struct ggml_cgraph * gf, const char *name) {
-    for (int i = gf->n_nodes - 1; i >= 0; --i) {
-        if (strcmp(gf->nodes[i]->name, name) == 0) {
-            return gf->nodes[i];
-        }
-    }
-    GGML_ASSERT(false && "Output tensor not found");
-    return NULL;
 }
 
 // evaluate the transformer
