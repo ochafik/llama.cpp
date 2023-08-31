@@ -2350,7 +2350,7 @@ static struct ggml_cgraph * llm_build_llama(
 
             struct ggml_tensor * Q = ggml_permute(ctx0, Qcur, 0, 2, 1, 3);
             offload_func_kq(Q);
-            ggml_set_name(Q, "Q");
+            ggml_format_name(Q, "Q%d", il);
 
             struct ggml_tensor * K =
                 ggml_view_3d(ctx0, kv_self.k,
@@ -2364,23 +2364,23 @@ static struct ggml_cgraph * llm_build_llama(
             // K * Q
             struct ggml_tensor * KQ = ggml_mul_mat(ctx0, K, Q);
             offload_func_kq(KQ);
-            ggml_set_name(KQ, "KQ");
+            ggml_format_name(KQ, "KQ%d", il);
 
             // KQ_scaled = KQ / sqrt(n_embd_head)
             // KQ_scaled shape [n_past + N, N, n_head, 1]
             struct ggml_tensor * KQ_scaled = ggml_scale_inplace(ctx0, KQ, KQ_scale);
             offload_func_kq(KQ_scaled);
-            ggml_set_name(KQ_scaled, "KQ_scaled");
+            ggml_format_name(KQ_scaled, "KQ_scaled%d", il);
 
             // KQ_masked = mask_past(KQ_scaled)
             struct ggml_tensor * KQ_masked = ggml_diag_mask_inf_inplace(ctx0, KQ_scaled, n_past);
             offload_func_kq(KQ_masked);
-            ggml_set_name(KQ_masked, "KQ_masked");
+            ggml_format_name(KQ_masked, "KQ_masked%d", il);
 
             // KQ = soft_max(KQ_masked)
             struct ggml_tensor * KQ_soft_max = ggml_soft_max_inplace(ctx0, KQ_masked);
             offload_func_v(KQ_soft_max);
-            ggml_set_name(KQ_soft_max, "KQ_soft_max");
+            ggml_format_name(KQ_soft_max, "KQ_soft_max%d", il);
 
             // split cached V into n_head heads
             struct ggml_tensor * V =
@@ -2390,12 +2390,12 @@ static struct ggml_cgraph * llm_build_llama(
                         ggml_element_size(kv_self.v)*n_ctx*n_embd_head,
                         ggml_element_size(kv_self.v)*n_ctx*n_embd_gqa*il);
             offload_func_v(V);
-            ggml_set_name(V, "V");
+            ggml_format_name(V, "V%d", il);
 
 #if 1
             struct ggml_tensor * KQV = ggml_mul_mat(ctx0, V, KQ_soft_max);
             offload_func_v(KQV);
-            ggml_set_name(KQV, "KQV");
+            ggml_format_name(KQV, "KQV%d", il);
 #else
             // make V contiguous in memory to speed up the matmul, however we waste time on the copy
             // on M1 this is faster for the perplexity computation, but ~5% slower for the single-token generation
