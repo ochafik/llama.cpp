@@ -2895,12 +2895,16 @@ static bool llama_eval_internal(
     // otherwise, the threads are spin-lock waiting for the BLAS calls and are degrading the performance
     n_threads = N >= 32 && ggml_cpu_has_blas() && !ggml_cpu_has_gpublas() ? 1 : n_threads;
 
+    struct ggml_tensor * input = NULL;
     if (tokens) {
-        memcpy(get_graph_input(gf, "inp_tokens")->data, tokens, N*sizeof(*tokens));
+        input = get_graph_input(gf, "inp_tokens");
+        memcpy(input->data, tokens, N*ggml_element_size(input));
     } else {
-        memcpy(get_graph_input(gf, "inp_embeddings")->data, embd, N*n_embd*sizeof(*embd));
+        input = get_graph_input(gf, "inp_embeddings");
+        memcpy(input->data, embd, N * n_embd * ggml_element_size(input));
     }
-    ggml_set_f32(get_graph_input(gf, "1/sqrt(n_embd_head)"), 1.0f/sqrtf(float(n_embd)/n_head));
+    struct ggml_tensor * KQ_scale = get_graph_input(gf, "1/sqrt(n_embd_head)");
+    ggml_set_f32(KQ_scale, 1.0f/sqrtf(float(n_embd)/n_head));
 
     struct ggml_tensor * res        = get_graph_output(gf, "result_output");
     struct ggml_tensor * embeddings = get_graph_output(gf, "result_norm");
@@ -2912,6 +2916,9 @@ static bool llama_eval_internal(
 
 #ifdef GGML_USE_METAL
     if (lctx.ctx_metal) {
+        ggml_metal_set_tensor   (lctx.ctx_metal, input);
+        ggml_metal_set_tensor   (lctx.ctx_metal, KQ_scale);
+
         ggml_metal_set_n_cb     (lctx.ctx_metal, n_threads);
         ggml_metal_graph_compute(lctx.ctx_metal, gf);
         ggml_metal_get_tensor   (lctx.ctx_metal, res);
