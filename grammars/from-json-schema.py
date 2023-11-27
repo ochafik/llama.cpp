@@ -69,13 +69,14 @@ def process_type(schema):
 def main(schema: str):
   schema = get_schema(schema)
   print('\nroot ::= ' + ' '.join(process_type(schema)) + '''
-value  ::= object | array | string | number | ("true" | "false" | "null")
+value  ::= object | array | string | number | boolean | "null"
 object ::= "{" ( string ":" value ("," string ":" value)* )? "}"
 array  ::= "[" ( value ("," value)* )? "]"
 string ::= "\\"" (
   [^"\\\\] |
   "\\\\" (["\\\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]) # escapes
 )* "\\""
+boolean ::= "true" | "false"
 integer ::= "-"? ([0-9] | [1-9] [0-9]*)
 number ::= integer ("." [0-9]+)? ([eE] [-+]? [0-9]+)?
 ''')
