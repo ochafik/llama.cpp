@@ -9,8 +9,10 @@
 
 #ifdef GGML_USE_CUBLAS
 #  include "ggml-cuda.h"
-#elif defined(GGML_USE_CLBLAST)
+#elif defined(GGML_USE_OPENCL)
 #  include "ggml-opencl.h"
+#elif defined(GGML_USE_CLBLAST)
+#  include "ggml-clblast.h"
 #endif
 
 #ifdef GGML_USE_METAL
@@ -1424,9 +1426,13 @@ struct llama_model {
         }
 #endif
 
-#if defined(GGML_USE_CLBLAST)
+#if defined(GGML_USE_OPENCL)
         for (size_t i = 0; i < tensors_by_name.size(); ++i) {
             ggml_cl_free_data(tensors_by_name[i].second);
+        }
+#elif defined(GGML_USE_CLBLAST)
+        for (size_t i = 0; i < tensors_by_name.size(); ++i) {
+            ggml_clblast_free_data(tensors_by_name[i].second);
         }
 #endif
     }
@@ -2091,7 +2097,7 @@ struct llama_model_loader {
                         free(cur->data);
                     }
                     break;
-#elif defined(GGML_USE_CLBLAST)
+#elif defined(GGML_USE_OPENCL)
                 case GGML_BACKEND_GPU:
                     ggml_cl_transform_tensor(cur->data, cur);
                     if (!use_mmap) {
@@ -2712,10 +2718,12 @@ static void llm_load_tensors(
         llama_backend_offload = GGML_BACKEND_GPU;
         llama_backend_offload_split = GGML_BACKEND_GPU_SPLIT;
     }
-#elif defined(GGML_USE_CLBLAST)
+#elif defined(GGML_USE_OPENCL)
         LLAMA_LOG_INFO("%s: using OpenCL for GPU acceleration\n", __func__);
         llama_backend_offload = GGML_BACKEND_GPU;
         llama_backend_offload_split = GGML_BACKEND_GPU;
+#elif defined(GGML_USE_CLBLAST)
+        LLAMA_LOG_INFO("%s: using CLBlast for GPU acceleration of matrix multiplications\n", __func__);
 #endif
 
     // prepare memory for the weights
@@ -3328,7 +3336,7 @@ static void llm_load_tensors(
 
         LLAMA_LOG_INFO("%s: mem required  = %7.2f MiB\n", __func__, mem_required / 1024.0 / 1024.0);
 
-#if defined(GGML_USE_CUBLAS) || defined(GGML_USE_CLBLAST)
+#if defined(GGML_USE_CUBLAS) || defined(GGML_USE_OPENCL)
         const int n_gpu = std::min(n_gpu_layers, int(hparams.n_layer));
 
         LLAMA_LOG_INFO("%s: offloading %d repeating layers to GPU\n", __func__, n_gpu);
@@ -3339,7 +3347,7 @@ static void llm_load_tensors(
 #ifdef GGML_USE_CUBLAS
         const int max_backend_supported_layers = hparams.n_layer + 3;
         const int max_offloadable_layers       = hparams.n_layer + 3;
-#elif GGML_USE_CLBLAST
+#elif GGML_USE_OPENCL
         const int max_backend_supported_layers = hparams.n_layer + 1;
         const int max_offloadable_layers       = hparams.n_layer + 1;
 #endif // GGML_USE_CUBLAS
@@ -3348,7 +3356,7 @@ static void llm_load_tensors(
         LLAMA_LOG_INFO("%s: VRAM used: %.2f MiB\n", __func__, vram_weights / 1024.0 / 1024.0);
 #else
         (void) n_gpu_layers;
-#endif // defined(GGML_USE_CUBLAS) || defined(GGML_USE_CLBLAST)
+#endif // defined(GGML_USE_CUBLAS) || defined(GGML_USE_OPENCL)
     }
 
     // populate `tensors_by_name`

@@ -253,8 +253,10 @@ inline static void * ggml_aligned_malloc(size_t size) {
 
 #if defined(GGML_USE_ACCELERATE)
 #include <Accelerate/Accelerate.h>
-#if defined(GGML_USE_CLBLAST) // allow usage of CLBlast alongside Accelerate functions
+#if defined(GGML_USE_OPENCL) // allow usage of CLBlast alongside Accelerate functions
 #include "ggml-opencl.h"
+#elif defined(GGML_USE_CLBLAST) // allow usage of CLBlast alongside Accelerate functions
+#include "ggml-clblast.h"
 #endif
 #elif defined(GGML_USE_OPENBLAS)
 #if defined(GGML_BLAS_USE_MKL)
@@ -264,8 +266,10 @@ inline static void * ggml_aligned_malloc(size_t size) {
 #endif
 #elif defined(GGML_USE_CUBLAS)
 #include "ggml-cuda.h"
-#elif defined(GGML_USE_CLBLAST)
+#elif defined(GGML_USE_OPENCL)
 #include "ggml-opencl.h"
+#elif defined(GGML_USE_CLBLAST)
+#include "ggml-clblast.h"
 #endif
 
 // floating point type used to accumulate sums
@@ -2228,8 +2232,10 @@ struct ggml_context * ggml_init(struct ggml_init_params params) {
 
 #if defined(GGML_USE_CUBLAS)
         ggml_init_cublas();
-#elif defined(GGML_USE_CLBLAST)
+#elif defined(GGML_USE_OPENCL)
         ggml_cl_init();
+#elif defined(GGML_USE_CLBLAST)
+        ggml_clblast_init();
 #endif
 
         ggml_setup_op_has_task_pass();
@@ -7593,7 +7599,7 @@ static void ggml_compute_forward_mul_f32(
     const int ith = params->ith;
     const int nth = params->nth;
 
-#ifdef GGML_USE_CLBLAST
+#ifdef GGML_USE_OPENCL
     if (src1->backend == GGML_BACKEND_GPU) {
         if (ith == 0) {
             ggml_cl_mul(src0, src1, dst);
@@ -9428,10 +9434,17 @@ static void ggml_compute_forward_mul_mat(
     // nb01 >= nb00 - src0 is not transposed
     //   compute by src0 rows
 
-#if defined(GGML_USE_CLBLAST)
+#if defined(GGML_USE_OPENCL)
     if (ggml_cl_can_mul_mat(src0, src1, dst)) {
         if (params->ith == 0 && params->type == GGML_TASK_COMPUTE) {
             ggml_cl_mul_mat(src0, src1, dst, params->wdata, params->wsize);
+        }
+        return;
+    }
+#elif defined(GGML_USE_CLBLAST)
+    if (ggml_clblast_can_mul_mat(src0, src1, dst)) {
+        if (params->ith == 0 && params->type == GGML_TASK_COMPUTE) {
+            ggml_clblast_mul_mat(src0, src1, dst, params->wdata, params->wsize);
         }
         return;
     }
@@ -9632,6 +9645,7 @@ static void ggml_compute_forward_out_prod_f32(
 
     // TODO: #if defined(GGML_USE_CUBLAS) ggml_cuda_out_prod
     // TODO: #if defined(GGML_USE_CLBLAST)
+    // TODO: #if defined(GGML_USE_OPENCL)
 
 #if defined(GGML_USE_ACCELERATE) || defined(GGML_USE_OPENBLAS)
     bool use_blas = ggml_is_matrix(src0) &&
@@ -15558,8 +15572,13 @@ static int ggml_get_n_tasks(struct ggml_tensor * node, int n_threads) {
                     n_tasks = 1; // TODO: this actually is doing nothing
                                  //       the threads are still spinning
                 }
-#elif defined(GGML_USE_CLBLAST)
+#elif defined(GGML_USE_OPENCL)
                 if (ggml_cl_can_mul_mat(node->src[0], node->src[1], node)) {
+                    n_tasks = 1; // TODO: this actually is doing nothing
+                                 //       the threads are still spinning
+                }
+#elif defined(GGML_USE_CLBLAST)
+                if (ggml_clblast_can_mul_mat(node->src[0], node->src[1], node)) {
                     n_tasks = 1; // TODO: this actually is doing nothing
                                  //       the threads are still spinning
                 }
@@ -15874,9 +15893,13 @@ struct ggml_cplan ggml_graph_plan(struct ggml_cgraph * cgraph, int n_threads) {
                 {
                     const enum ggml_type vec_dot_type = type_traits[node->src[0]->type].vec_dot_type;
 
-#if defined(GGML_USE_CLBLAST)
+#if defined(GGML_USE_OPENCL)
                     if (ggml_cl_can_mul_mat(node->src[0], node->src[1], node)) {
                         cur = ggml_cl_mul_mat_get_wsize(node->src[0], node->src[1], node);
+                    } else
+#elif defined(GGML_USE_CLBLAST)
+                    if (ggml_clblast_can_mul_mat(node->src[0], node->src[1], node)) {
+                        cur = ggml_clblast_mul_mat_get_wsize(node->src[0], node->src[1], node);
                     } else
 #endif
 #if defined(GGML_USE_ACCELERATE) || defined(GGML_USE_OPENBLAS)
@@ -19124,7 +19147,7 @@ int ggml_cpu_has_wasm_simd(void) {
 }
 
 int ggml_cpu_has_blas(void) {
-#if defined(GGML_USE_ACCELERATE) || defined(GGML_USE_OPENBLAS) || defined(GGML_USE_CUBLAS) || defined(GGML_USE_CLBLAST)
+#if defined(GGML_USE_ACCELERATE) || defined(GGML_USE_OPENBLAS) || defined(GGML_USE_CUBLAS) || defined(GGML_USE_CLBLAST) || defined(GGML_USE_OPENCL)
     return 1;
 #else
     return 0;
@@ -19140,7 +19163,7 @@ int ggml_cpu_has_cublas(void) {
 }
 
 int ggml_cpu_has_clblast(void) {
-#if defined(GGML_USE_CLBLAST)
+#if defined(GGML_USE_CLBLAST) || defined(GGML_USE_OPENCL)
     return 1;
 #else
     return 0;

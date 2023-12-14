@@ -92,6 +92,7 @@ set(LLAMA_CUDA_PEER_MAX_BATCH_SIZE "128" CACHE STRING
                                              "llama: max. batch size for using peer access")
 option(LLAMA_HIPBLAS                         "llama: use hipBLAS"                               OFF)
 option(LLAMA_CLBLAST                         "llama: use CLBlast"                               OFF)
+option(LLAMA_OPENCL                          "llama: use OpenCL"                                OFF)
 option(LLAMA_METAL                           "llama: use Metal"                                 ${LLAMA_METAL_DEFAULT})
 option(LLAMA_METAL_NDEBUG                    "llama: disable Metal debugging"                   OFF)
 option(LLAMA_MPI                             "llama: use MPI"                                   OFF)
@@ -339,14 +340,30 @@ if (LLAMA_CLBLAST)
     if (CLBlast_FOUND)
         message(STATUS "CLBlast found")
 
-        set(GGML_HEADERS_OPENCL ggml-opencl.h)
-        set(GGML_SOURCES_OPENCL ggml-opencl.cpp)
+        set(GGML_HEADERS_CLBLAST ggml-clblast.h)
+        set(GGML_SOURCES_CLBLAST ggml-clblast.cpp)
 
         add_compile_definitions(GGML_USE_CLBLAST)
 
         set(LLAMA_EXTRA_LIBS ${LLAMA_EXTRA_LIBS} clblast)
     else()
         message(WARNING "CLBlast not found")
+    endif()
+endif()
+
+if (LLAMA_OPENCL)
+    find_package(CLBlast)
+    if (CLBlast_FOUND)
+        message(STATUS "OpenCL found")
+
+        set(GGML_HEADERS_OPENCL ggml-opencl.h)
+        set(GGML_SOURCES_OPENCL ggml-opencl.cpp)
+
+        add_compile_definitions(GGML_USE_OPENCL)
+
+        set(LLAMA_EXTRA_LIBS ${LLAMA_EXTRA_LIBS} clblast)
+    else()
+        message(WARNING "OpenCL not found")
     endif()
 endif()
 
@@ -659,6 +676,7 @@ add_library(ggml OBJECT
             ggml-quants.h
             ${GGML_SOURCES_CUDA} ${GGML_HEADERS_CUDA}
             ${GGML_SOURCES_OPENCL} ${GGML_HEADERS_OPENCL}
+            ${GGML_SOURCES_CLBLAST} ${GGML_HEADERS_CLBLAST}
             ${GGML_SOURCES_METAL} ${GGML_HEADERS_METAL}
             ${GGML_SOURCES_MPI} ${GGML_HEADERS_MPI}
             ${GGML_SOURCES_EXTRA} ${GGML_HEADERS_EXTRA}
@@ -738,7 +756,7 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/LlamaConfig.cmake
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Llama)
 
 set(GGML_PUBLIC_HEADERS "ggml.h"
-        "${GGML_HEADERS_CUDA}" "${GGML_HEADERS_OPENCL}"
+        "${GGML_HEADERS_CUDA}" "${GGML_HEADERS_OPENCL}" "${GGML_HEADERS_CLBLAST}"
         "${GGML_HEADERS_METAL}" "${GGML_HEADERS_MPI}" "${GGML_HEADERS_EXTRA}")
 
 set_target_properties(ggml PROPERTIES PUBLIC_HEADER "${GGML_PUBLIC_HEADERS}")
