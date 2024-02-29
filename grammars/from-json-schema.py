@@ -71,7 +71,7 @@ def process_type(path, schema, defs, type_to_def_name={}):
       repetition = '*'
       if min_items == 1: repetition = '+'
       elif min_items > 1: print("min_items > 1 not supported yet", file=sys.stderr)
-      yield from ['"["', "(", *process_type(path + ['[]'], items, defs, type_to_def_name), '","', ")", repetition, '"]"']
+      yield from ['"["', "(", *process_type(path + ['[]'], items, defs, type_to_def_name), '","', ")" + repetition, '"]"']
     else:
       assert otype == 'object', f"Unknown type {otype}: {schema}"
       if properties is not None:
@@ -83,13 +83,13 @@ def process_type(path, schema, defs, type_to_def_name={}):
         if schema.get('uniqueItems', False): print("uniqueItems not supported yet", file=sys.stderr)
 
         def gen_kv(k):
-          return [get_ref(f'{k}_kv', [f'"\\"{k}\\":"', *process_type(path + [k], properties[k], defs, type_to_def_name)])]
+          return [get_ref(f'{k}-kv', [f'"\\"{k}\\":"', *process_type(path + [k], properties[k], defs, type_to_def_name)])]
         
         def get_opt_kv(k):
-          # return get_ref(f'{k}_kv_opt', ["(", '","', gen_kv(k), ")?"])
+          # return get_ref(f'{k}-kv_opt', ["(", '","', gen_kv(k), ")?"])
           return ["(", '","', *gen_kv(k), ")?"]
 
-        yield from ["{", *join_iter([t for k in required for t in gen_kv(k)], '","')]
+        yield from ['"{"', *join_iter([t for k in required for t in gen_kv(k)], '","')]
         
         if len(optional) > 0:
           yield "("
@@ -129,7 +129,7 @@ def main(url: str, definition: Optional[str] = None):
   schema = get_schema(url)
   if definition is not None:
     schema = schema['definitions'][definition]
-  elif 'properties' not in schema:
+  elif 'type' not in schema and 'properties' not in schema:
     print(f"Schema has no properties, please specify the name of a definition to process. Valid definitions: " + ', '.join(schema['definitions'].keys()), file=sys.stderr)
     return 1
 
