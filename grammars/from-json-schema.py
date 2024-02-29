@@ -102,7 +102,7 @@ def process_type(path, schema, defs, type_to_def_name={}):
             else:
               yield from gen_kv(k)
             if len(rest) > 0:
-              yield get_ref(f'{k}_rest', [*get_recursive_refs(rest, first_is_optional=True)])
+              yield get_ref(f'{k}-rest', [*get_recursive_refs(rest, first_is_optional=True)])
             
           for i in range(len(optional)):
             if i > 0: yield "|"
