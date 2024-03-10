@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 from dataclasses import dataclass
+import itertools
 import json
 import re
 import sys
@@ -29,7 +30,7 @@ GRAMMAR_LITERAL_ESCAPE_RE = re.compile(r'[\r\n]')
 GRAMMAR_LITERAL_ESCAPES = {'\r': '\\r', '\n': '\\n'}
 
 
-def resolve_refs(schema):
+def resolve_refs(schema: dict):
     def visit(n: dict):
         if isinstance(n, list):
             return [visit(x) for x in n]
@@ -62,10 +63,10 @@ def resolve_refs(schema):
 @dataclass
 class Rule:
     def optimize(self):
-        raise NotImplementedError()
-        # return self
+        raise NotImplementedError(f'{self.__class__.__name__}.optimize() not implemented')
+
     def __str__(self):
-        raise NotImplementedError()
+        raise NotImplementedError(f'{self.__class__.__name__}.__str__() not implemented')
 
 @dataclass
 class LiteralRule(Rule):
@@ -93,6 +94,9 @@ def _format_range_char(c):
 class RangeRule(Rule):
     negated: bool
     items: List[Union[Tuple[str, str], str]]
+
+    def optimize(self):
+        return self
 
     def __str__(self):
         def format_item(item):
@@ -138,9 +142,14 @@ class SequenceRule(Rule):
     rules: List[Rule]
 
     def optimize(self):
-        if len(self.rules) == 1:
-            return self.rules[0].optimize()
-        return SequenceRule(rules=[r.optimize() for r in self.rules])
+        rules = []
+        for t, g in itertools.groupby(self.rules, lambda x: x.__class__):
+            if t == LiteralRule:
+                rules.append(LiteralRule(literal=''.join(x.literal for x in g)))
+            else:
+                for x in g:
+                    rules.append(x.optimize())
+        return self.rules[0] if len(self.rules) == 1 else SequenceRule(rules=rules)
 
     def __str__(self):
         return ' '.join((str(r) for r in self.rules))
@@ -213,7 +222,7 @@ class Schema:
         return UnionSchema(alt_schemas=list(map(Schema._from_json, alt_schemas)))
 
     @staticmethod
-    def _from_json(schema: 'Schema') -> Rule:
+    def _from_json(schema: dict) -> 'Schema':
         schema_type = schema.get('type')
         # ref = schema.get('$ref')
 
@@ -290,7 +299,7 @@ class Schema:
                     max_items=schema.get("maxItems"))
             
         elif schema_type in (None, 'string') and 'pattern' in schema:
-            return PatternSchema(schema['pattern'])
+            return PatternSchema(pattern=schema['pattern'])
 
         # elif ref is not None and ref.startswith('https://'):
         #     import requests
@@ -304,9 +313,6 @@ class Schema:
         else:
             raise ValueError(f'Unrecognized schema: {json.dumps(schema, indent=2)}')
 
-    def to_rule(self, rules: Dict[str, Rule]):
-        pass
-    
 def join_lists(sep, lists):
     out = []
     for i, l in enumerate(lists):
@@ -466,7 +472,7 @@ class GrammarBuilder:
                     kv_rule = prop_kv_rules[k]
                     if first_is_optional:
                         res = RepeatRule(
-                            sub=lit_space(',') + [kv_rule],
+                            sub=SequenceRule(rules=lit_space(',') + [kv_rule]),
                             min_times=0,
                             max_times=1
                         )
@@ -476,7 +482,7 @@ class GrammarBuilder:
                         res = SequenceRule(rules=[
                             res,
                             self._add_rule(
-                                self.sub_name(name, f'{k}-rest'),
+                                _sub_name(name, f'{k}-rest'),
                                 get_recursive_refs(rest, first_is_optional=True)
                             )
                         ])
