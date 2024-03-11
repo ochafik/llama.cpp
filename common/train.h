@@ -97,9 +97,11 @@ struct train_opt_callback_data {
     llama_token                * tokens_data;
     size_t                       tokens_size;
     size_t                     * samples_begin;
+    size_t                     * samples_completion_begin;
     size_t                     * samples_size;
     size_t                     * shuffled_samples_offs;
     size_t                     * shuffled_samples_begin;
+    size_t                     * shuffled_samples_completion_begin;
     size_t                     * shuffled_samples_size;
     size_t                       samples_count;
     struct ggml_tensor         * tokens_input;
@@ -154,6 +156,7 @@ size_t tokenize_file(
         unsigned                   context_length,
         std::vector<llama_token> & out_tokens,
         std::vector<size_t>      & out_samples_begin,
+        std::vector<size_t>      & out_samples_completion_begin,
         std::vector<size_t>      & out_samples_size);
 
 int64_t get_example_targets_batch(
@@ -163,6 +166,7 @@ int64_t get_example_targets_batch(
         int64_t                example_id,
         const size_t         * samples_offs,
         const size_t         * samples_begin,
+        const size_t         * samples_completion_begin,
         const size_t         * samples_size,
               size_t           samples_count,
         const llama_token    * train_data,
@@ -181,8 +185,10 @@ mt19937_state shuffle_samples(
         const mt19937_state & rng_state,
         size_t              * shuffled_offs,
         size_t              * shuffled_begins,
+        size_t              * shuffled_completion_begins,
         size_t              * shuffled_sizes,
         const size_t        * begins,
+        const size_t        * completion_begins,
         const size_t        * sizes,
         size_t                count);
 

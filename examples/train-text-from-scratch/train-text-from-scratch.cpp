@@ -1129,6 +1129,7 @@ int main(int argc, char ** argv) {
 
     std::vector<llama_token> train_tokens;
     std::vector<size_t> train_samples_begin;
+    std::vector<size_t> train_samples_completion_begin;
     std::vector<size_t> train_samples_size;
     printf("%s: tokenize training data\n", __func__);
     tokenize_file(lctx,
@@ -1139,6 +1140,7 @@ int main(int argc, char ** argv) {
             n_tokens,
             train_tokens,
             train_samples_begin,
+            train_samples_completion_begin,
             train_samples_size);
     GGML_ASSERT(train_samples_begin.size() == train_samples_size.size());
 
@@ -1160,9 +1162,11 @@ int main(int argc, char ** argv) {
     }
     std::vector<size_t> train_shuffled_samples_offs;
     std::vector<size_t> train_shuffled_samples_begin;
+    std::vector<size_t> train_shuffled_samples_completion_begin;
     std::vector<size_t> train_shuffled_samples_size;
     train_shuffled_samples_offs.resize(train_samples_begin.size());
     train_shuffled_samples_begin.resize(train_samples_begin.size());
+    train_shuffled_samples_completion_begin.resize(train_samples_completion_begin.size());
     train_shuffled_samples_size.resize(train_samples_size.size());
     train->shuffle_rng_state_next = shuffle_samples(
         train->shuffle_rng_state_current,
@@ -1170,6 +1174,7 @@ int main(int argc, char ** argv) {
         train_shuffled_samples_begin.data(),
         train_shuffled_samples_size.data(),
         train_samples_begin.data(),
+        train_samples_completion_begin.data(),
         train_samples_size.data(),
         train_samples_size.size());
     printf("%s: begin training\n", __func__);

@@ -217,6 +217,7 @@ int64_t get_example_targets_batch(
     int64_t                example_id,
     const size_t         * samples_offs,
     const size_t         * samples_begin,
+    const size_t         * samples_completion_begin,
     const size_t         * samples_size,
           size_t           samples_count,
     const llama_token    * train_data,
@@ -247,6 +248,7 @@ int64_t get_example_targets_batch(
         size_t sample_idx   = (example_id + used_samples) % samples_count;
         size_t sample_offs  = sample_random_offsets ? samples_offs[sample_idx] : 0;
         size_t sample_begin = samples_begin[sample_idx];
+        size_t sample_completion_begin = samples_completion_begin[sample_idx];
         size_t sample_size  = samples_size[sample_idx];
         ++used_samples;
 
@@ -273,6 +275,7 @@ int64_t get_example_targets_batch(
                     sample_offs  = 0;
                     sample_idx   = (example_id + used_samples) % samples_count;
                     sample_begin = samples_begin[sample_idx];
+                    sample_completion_begin = samples_completion_begin[sample_idx];
                     sample_size  = samples_size[sample_idx];
                     ++used_samples;
                 }
@@ -316,8 +319,10 @@ std::string shuffle_samples(
         const std::string & rng_state,
         size_t            * shuffled_offs,
         size_t            * shuffled_begins,
+        size_t            * shuffled_completion_begins,
         size_t            * shuffled_sizes,
         const size_t      * begins,
+        const size_t      * completion_begins,
         const size_t      * sizes,
         size_t              count) {
     if (count == 0) return rng_state;
@@ -350,6 +355,10 @@ std::string shuffle_samples(
     // reorder begins and sizes by sorted indices
     for (unsigned i=0; i<count; ++i) {
         shuffled_begins[i] = begins[idcs[i]];
+    }
+
+    for (unsigned i=0; i<count; ++i) {
+        shuffled_completion_begins[i] = completion_begins[idcs[i]];
     }
 
     for (unsigned i=0; i<count; ++i) {
@@ -829,12 +838,14 @@ size_t tokenize_file(
         unsigned                   context_length,
         std::vector<llama_token> & out_tokens,
         std::vector<size_t>      & out_samples_begin,
+        std::vector<size_t>      & out_samples_completion_begin,
         std::vector<size_t>      & out_samples_size) {
     struct llama_file f(filename, "rb");
 
     if (f.size == 0) {
         out_tokens.clear();
         out_samples_begin.clear();
+        out_samples_completion_begin.clear();
         out_samples_size.clear();
         printf("%s: warning: empty or not existing training data file '%s'\n",
             __func__, filename);
@@ -884,16 +895,20 @@ size_t tokenize_file(
         // generate sample starts at all token positions
         out_samples_begin.clear();
         out_samples_begin.push_back(0);
+        out_samples_completion_begin.push_back(0);
         out_samples_size.push_back(std::min((size_t) context_length, out_tokens.size()));
         size_t end = (out_tokens.size() >= context_length) ? (out_tokens.size() - context_length) : 0;
         for (size_t sample_begin = 1; sample_begin < end; ++sample_begin) {
             out_samples_begin.push_back(sample_begin);
+            // TODO: jump to ### Response:
+            out_samples_completion_begin.push_back(sample_begin);
             out_samples_size.push_back(context_length);
         }
     } else {
         // split data into samples and tokenize each sample
         std::string data_str(buf.data(), buf.size());
         out_samples_begin.clear();
+        out_samples_completion_begin.clear();
         out_samples_size.clear();
         out_tokens.clear();
 
@@ -901,6 +916,8 @@ size_t tokenize_file(
         size_t sample_begin = data_str.find(sample_start, 0);
         while (sample_begin != std::string::npos) {
             out_samples_begin.push_back(sample_begin);
+            // TODO: jump to ### Response: (before next sample begin!)
+            out_samples_completion_begin.push_back(sample_begin);
             const size_t search_start = sample_begin + sample_start.size();
             sample_begin = data_str.find(sample_start, search_start);
         }
@@ -957,12 +974,14 @@ size_t tokenize_file(
             if (sample_size > 0) {
                 // llama_tokenize expects zero terminated string,
                 // copy sample into buffer and zero terminate it.
+                // TODO: use out_samples_completion_begin
                 buf_sample.resize(sample_size);
                 memcpy(buf_sample.data(), data_str.data() + sample_begin, sample_size);
 
                 // printf("sample: '%s'\n", buf_sample.data());
 
                 // tokenize the sample
+                // TODO: tokenize twice: before completion begin, and from completion begin
                 tok_sample.resize(buf_sample.size() + n_max_tokens_overhead);
                 int n_tokens = llama_tokenize(llama_get_model(lctx),
                     buf_sample.data(),
@@ -993,10 +1012,13 @@ size_t tokenize_file(
                 // write out tokens, start and size of sample
                 // overwrite the string start position with the token start position
                 out_samples_begin[i] = out_tokens.size();
+                // TODO: handle ### Result: begin offset
+                out_samples_completion_begin[i] = out_tokens.size();
                 out_samples_size[i] = (size_t) n_tokens;
                 out_tokens.insert(out_tokens.end(), tok_sample.begin(), tok_sample.begin() + n_tokens);
             } else {
                 out_samples_begin[i] = out_tokens.size();
+                out_samples_completion_begin[i] = out_tokens.size();
                 out_samples_size[i] = 0;
             }
 
@@ -1473,6 +1495,7 @@ void train_opt_callback(void * vdata, int accum_step, float * sched, bool * canc
         train->shuffle_next_sample,
         data->shuffled_samples_offs,
         data->shuffled_samples_begin,
+        data->shuffled_samples_completion_begin,
         data->shuffled_samples_size,
         data->samples_count,
         data->tokens_data,
@@ -1494,8 +1517,10 @@ void train_opt_callback(void * vdata, int accum_step, float * sched, bool * canc
             train->shuffle_rng_state_current,
             data->shuffled_samples_offs,
             data->shuffled_samples_begin,
+            data->shuffled_samples_completion_begin,
             data->shuffled_samples_size,
             data->samples_begin,
+            data->samples_completion_begin,
             data->samples_size,
             data->samples_count);
         train->shuffle_next_sample = 0;

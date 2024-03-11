@@ -1725,6 +1725,7 @@ int main(int argc, char ** argv) {
     // tokenize data
     std::vector<llama_token> train_tokens;
     std::vector<size_t> train_samples_begin;
+    std::vector<size_t> train_samples_completion_begin;
     std::vector<size_t> train_samples_size;
     printf("%s: tokenize training data from %s\n", __func__, params.common.fn_train_data);
     printf("%s: sample-start: %s\n", __func__, params.common.sample_start.c_str());
@@ -1737,6 +1738,7 @@ int main(int argc, char ** argv) {
             n_tokens,
             train_tokens,
             train_samples_begin,
+            train_samples_completion_begin,
             train_samples_size);
     GGML_ASSERT(train_samples_begin.size() == train_samples_size.size());
 
@@ -1770,16 +1772,20 @@ int main(int argc, char ** argv) {
     }
     std::vector<size_t> train_shuffled_samples_offs;
     std::vector<size_t> train_shuffled_samples_begin;
+    std::vector<size_t> train_shuffled_samples_completion_begin;
     std::vector<size_t> train_shuffled_samples_size;
     train_shuffled_samples_offs.resize(train_samples_begin.size());
     train_shuffled_samples_begin.resize(train_samples_begin.size());
+    train_shuffled_samples_completion_begin.resize(train_samples_completion_begin.size());
     train_shuffled_samples_size.resize(train_samples_size.size());
     train->shuffle_rng_state_next = shuffle_samples(
         train->shuffle_rng_state_current,
         train_shuffled_samples_offs.data(),
         train_shuffled_samples_begin.data(),
+        train_shuffled_samples_completion_begin.data(),
         train_shuffled_samples_size.data(),
         train_samples_begin.data(),
+        train_samples_completion_begin.data(),
         train_samples_size.data(),
         train_samples_size.size());
 
@@ -1806,6 +1812,7 @@ int main(int argc, char ** argv) {
     opt_cb_data.samples_size           = train_samples_size.data();
     opt_cb_data.shuffled_samples_offs  = train_shuffled_samples_offs.data();
     opt_cb_data.shuffled_samples_begin = train_shuffled_samples_begin.data();
+    opt_cb_data.shuffled_samples_completion_begin = train_shuffled_samples_completion_begin.data();
     opt_cb_data.shuffled_samples_size  = train_shuffled_samples_size.data();
     opt_cb_data.samples_count          = train_samples_size.size();
     opt_cb_data.tokens_input           = tokens_input;
