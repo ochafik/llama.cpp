@@ -65,6 +65,20 @@ class SchemaConverter:
         )
         return f'"{escaped}"'
 
+    def not_literal(self, literal: str) -> str:
+        out = []
+        def recurse(i: int):
+            if i < len(literal):
+                out.append(f'[^{literal[i]}] ')
+                if i < len(literal) - 1:
+                    out.append('(')
+                    recurse(i + 1)
+                    out.append(')?')
+        out.append('(')
+        recurse(0)
+        out.append(' [\\U00000000-\\U0010FFFF]* )?')
+        return ''.join(out)
+
     def _add_rule(self, name, rule):
         esc_name = INVALID_RULE_CHARS_RE.sub('-', name)
         if esc_name not in self._rules or self._rules[esc_name] == rule:
