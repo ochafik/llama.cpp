@@ -1,4 +1,4 @@
-// WARNING: This file was ported from json-schema-to-grammar.py, please fix bugs / add features there first.
+// WARNING: This file was ported from json_schema_to_grammar.py, please fix bugs / add features there first.
 const SPACE_RULE = '" "?';
 
 const PRIMITIVE_RULES = {
