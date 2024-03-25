@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
+import json
 import sys
 from pathlib import Path
-from gguf.gguf_reader import GGUFReader
 
+from gguf.gguf_reader import GGUFReader
+from gguf.constants import GGUFValueType, Keys, TokenType
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -20,9 +22,13 @@ def read_gguf_file(gguf_file_path):
     # List all key-value pairs in a columnized format
     print("Key-Value Pairs:")
     max_key_length = max(len(key) for key in reader.fields.keys())
+    max_value_length = 2048
+    
     for key, field in reader.fields.items():
-        value = field.parts[field.data[0]]
-        print(f"{key:{max_key_length}} : {value}")
+        value_str = json.dumps(field.read())
+        if len(value_str) > max_value_length:
+            value_str = value_str[0:max_value_length] + "..."
+        print(f"{key:{max_key_length}} : {value_str}")
     print("----")
 
     # List all tensors

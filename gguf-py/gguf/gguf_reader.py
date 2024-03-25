@@ -49,6 +49,31 @@ class ReaderField(NamedTuple):
 
     types: list[GGUFValueType] = []
 
+    def read(self) -> Any:
+        assert len(self.types) > 0 and len(self.types) <= 2
+        is_array = self.types[0] == GGUFValueType.ARRAY
+        data_type = self.types[-1]
+
+        if data_type == GGUFValueType.STRING:
+            data = [bytes(self.parts[i]).decode("utf-8") for i in self.data]
+        elif data_type in (
+                GGUFValueType.INT8, GGUFValueType.UINT8,
+                GGUFValueType.INT16, GGUFValueType.UINT16,
+                GGUFValueType.INT32, GGUFValueType.UINT32,
+                GGUFValueType.INT64, GGUFValueType.UINT64):
+            data = [int(self.parts[i]) for i in self.data]
+        elif data_type in (GGUFValueType.FLOAT32, GGUFValueType.FLOAT64):
+            data = [float(self.parts[i]) for i in self.data]
+        elif data_type == GGUFValueType.BOOL:
+            data = [bool(self.parts[i]) for i in self.data]
+        else:
+            raise NotImplementedError(f"Unsupported data type: {data_type}")
+
+        if is_array:
+            return data
+        else:
+            assert len(data) == 1
+            return data[0]
 
 class ReaderTensor(NamedTuple):
     name: str
