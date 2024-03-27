@@ -36,6 +36,9 @@ DATE_RULES = {
     'date-time-string': '"\\"" date-time "\\"" space',
 }
 
+DOTALL = '[\\U00000000-\\U0010FFFF]'
+DOT = '[\\U00000000-\\x09\\x0B\\x0C\\x0E-\\U0010FFFF]'
+
 RESERVED_NAMES = set(["root", *PRIMITIVE_RULES.keys(), *DATE_RULES.keys()])
 
 INVALID_RULE_CHARS_RE = re.compile(r'[^a-zA-Z0-9-]+')
@@ -65,19 +68,28 @@ class SchemaConverter:
         )
         return f'"{escaped}"'
 
-    def not_literal(self, literal: str) -> str:
-        out = []
+    def not_literal(self, literal: str, dotall: bool = True, maybe_escaped_underscores = False) -> str:
+        '''
+            not_literal('a') -> '[^a]'
+            not_literal('abc') -> '([^a] | "a" ([^b] | "b" ([^c])?)?)?'
+        '''
+        assert len(literal) > 0, 'Empty literal not supported'
         def recurse(i: int):
-            if i < len(literal):
-                out.append(f'[^{literal[i]}] ')
-                if i < len(literal) - 1:
-                    out.append('(')
-                    recurse(i + 1)
-                    out.append(')?')
-        out.append('(')
-        recurse(0)
-        out.append(' [\\U00000000-\\U0010FFFF]* )?')
-        return ''.join(out)
+            c = literal[i]
+            if maybe_escaped_underscores and c == '_':
+                yield f'[^{c}\\\\]'
+                yield ' | '
+                yield f'"\\\\"? "{c}"'
+            else:
+                yield f'[^{c}]'
+            if i < len(literal) - 1:
+                yield ' | '
+                yield self._format_literal(c)
+                yield ' ('
+                yield from recurse(i + 1)
+                yield ')?'
+                    
+        return ''.join(('(', *recurse(0), ')'))
 
     def _add_rule(self, name, rule):
         esc_name = INVALID_RULE_CHARS_RE.sub('-', name)
@@ -183,10 +195,10 @@ class SchemaConverter:
 
             def get_dot():
                 if self._dotall:
-                    rule = '[\\U00000000-\\U0010FFFF]'
+                    rule = DOTALL
                 else:
                     # Accept any character... except \n and \r line break chars (\x0A and \xOD)
-                    rule = '[\\U00000000-\\x09\\x0B\\x0C\\x0E-\\U0010FFFF]'
+                    rule = DOT
                 return self._add_rule(f'dot', rule)
 
             def join_seq():
