@@ -12,8 +12,12 @@ SPACE_RULE = '" "?'
 
 PRIMITIVE_RULES = {
     'boolean': '("true" | "false") space',
-    'number': '("-"? ([0-9] | [1-9] [0-9]*)) ("." [0-9]+)? ([eE] [-+]? [0-9]+)? space',
-    'integer': '("-"? ([0-9] | [1-9] [0-9]*)) space',
+    'integral-part': '[0-9] | [1-9] [0-9]? [0-9]? [0-9]? [0-9]? [0-9]? [0-9]? [0-9]? [0-9]? [0-9]? [0-9]?',
+    'decimal-part': '[0-9] [0-9]? [0-9]? [0-9]? [0-9]? [0-9]? [0-9]? [0-9]? [0-9]? [0-9]? [0-9]?',
+    # 'number': '("-"? ([0-9] | [1-9] [0-9]*)) ("." [0-9]+)? ([eE] [-+]? [0-9]+)? space',
+    # 'integer': '("-"? ([0-9] | [1-9] [0-9]*)) space',
+    'number': '("-"? integral-part) ("." decimal-part)? ([eE] [-+]? integral-part)? space',
+    'integer': '("-"? integral-part) space',
     'value'  : 'object | array | string | number | boolean',
     'object' : '"{" space ( string ":" space value ("," space string ":" space value)* )? "}" space',
     'array'  : '"[" space ( value ("," space value)* )? "]" space',
@@ -24,7 +28,7 @@ PRIMITIVE_RULES = {
       )* "\"" space''',
     'null': '"null" space',
 }
-OBJECT_RULE_NAMES = ['object', 'array', 'string', 'number', 'boolean', 'null', 'value']
+OBJECT_RULE_NAMES = ['object', 'array', 'string', 'integral-part', 'decimal-part', 'number', 'boolean', 'null', 'value']
 
 # TODO: support "uri", "email" string formats
 DATE_RULES = {
@@ -58,7 +62,11 @@ class SchemaConverter:
         self._allow_fetch = allow_fetch
         self._dotall = dotall
         self._raw_pattern = raw_pattern
-        self._rules = {'space': SPACE_RULE}
+        self._rules = {
+            'space': SPACE_RULE,
+            'integral-part': PRIMITIVE_RULES['integral-part'],
+            'decimal-part': PRIMITIVE_RULES['decimal-part'],
+        }
         self._refs = {}
         self._refs_being_resolved = set()
 
@@ -328,7 +336,10 @@ class SchemaConverter:
         ref_name = ref.split('/')[-1]
         if ref_name not in self._rules and ref not in self._refs_being_resolved:
             self._refs_being_resolved.add(ref)
-            resolved = self._refs[ref]
+            try:
+                resolved = self._refs[ref]
+            except KeyError as e:
+                raise ValueError(f'Unresolved reference: {ref} (known refs: {", ".join(self._refs.keys())})') from e
             ref_name = self.visit(resolved, ref_name)
             self._refs_being_resolved.remove(ref)
         return ref_name
@@ -337,6 +348,7 @@ class SchemaConverter:
         return self._format_literal(json.dumps(value))
 
     def visit(self, schema, name):
+        assert isinstance(schema, dict), f'Expected schema to be a dict, got {schema}'
         schema_type = schema.get('type')
         schema_format = schema.get('format')
         rule_name = name + '-' if name in RESERVED_NAMES else name or 'root'
