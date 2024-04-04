@@ -17,9 +17,6 @@ class BuiltinRule:
         self.content = content
         self.deps = deps or []
 
-    def __str__(self):
-        assert false
-
 _up_to_15_digits = _build_repetition('[0-9]', 15)
 
 # whitespace is constrained to a single space char to prevent model "running away" in
