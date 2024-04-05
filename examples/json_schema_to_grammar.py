@@ -22,38 +22,38 @@ _up_to_15_digits = _build_repetition('[0-9]', 15)
 # whitespace is constrained to a single space char to prevent model "running away" in
 # whitespace. Also maybe improves generation quality?
 SPACE_RULE = '" "?'
-        
+
 PRIMITIVE_RULES = {
-    'boolean': BuiltinRule('("true" | "false") space', []),
-    'decimal-part': BuiltinRule('[0-9] ' + _up_to_15_digits, []),
+    'boolean'      : BuiltinRule('("true" | "false") space', []),
+    'decimal-part' : BuiltinRule('[0-9] ' + _up_to_15_digits, []),
     'integral-part': BuiltinRule('[0-9] | [1-9] ' + _up_to_15_digits, []),
-    'number': BuiltinRule('("-"? integral-part) ("." decimal-part)? ([eE] [-+]? integral-part)? space', ['integral-part', 'decimal-part']),
-    'integer': BuiltinRule('("-"? integral-part) space', ['integral-part']),
-    'value'  : BuiltinRule('object | array | string | number | boolean | null', ['object', 'array', 'string', 'number', 'boolean', 'null']),
-    'object' : BuiltinRule('"{" space ( string ":" space value ("," space string ":" space value)* )? "}" space', ['string', 'value']),
-    'array'  : BuiltinRule('"[" space ( value ("," space value)* )? "]" space', ['value']),
-    'uuid'   : BuiltinRule('"\\"" ' + ' "-" '.join('[0-9a-fA-F]' * n for n in [8, 4, 4, 4, 12]) + ' "\\"" space', []),
-    'string': BuiltinRule(r''' "\"" (
+    'number'       : BuiltinRule('("-"? integral-part) ("." decimal-part)? ([eE] [-+]? integral-part)? space', ['integral-part', 'decimal-part']),
+    'integer'      : BuiltinRule('("-"? integral-part) space', ['integral-part']),
+    'value'        : BuiltinRule('object | array | string | number | boolean | null', ['object', 'array', 'string', 'number', 'boolean', 'null']),
+    'object'       : BuiltinRule('"{" space ( string ":" space value ("," space string ":" space value)* )? "}" space', ['string', 'value']),
+    'array'        : BuiltinRule('"[" space ( value ("," space value)* )? "]" space', ['value']),
+    'uuid'         : BuiltinRule('"\\"" ' + ' "-" '.join('[0-9a-fA-F]' * n for n in [8, 4, 4, 4, 12]) + ' "\\"" space', []),
+    'string'       : BuiltinRule(r''' "\"" (
         [^"\\] |
         "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
       )* "\"" space''', []),
-    'null': BuiltinRule('"null" space', []),
+    'null'         : BuiltinRule('"null" space', []),
 }
 
 # TODO: support "uri", "email" string formats
 STRING_FORMAT_RULES = {
-    'date'   : BuiltinRule('[0-9] [0-9] [0-9] [0-9] "-" ( "0" [1-9] | "1" [0-2] ) "-" ( \"0\" [1-9] | [1-2] [0-9] | "3" [0-1] )', []),
-    'time'   : BuiltinRule('([01] [0-9] | "2" [0-3]) ":" [0-5] [0-9] ":" [0-5] [0-9] ( "." [0-9] [0-9] [0-9] )? ( "Z" | ( "+" | "-" ) ( [01] [0-9] | "2" [0-3] ) ":" [0-5] [0-9] )', []),
-    'date-time': BuiltinRule('date "T" time', ['date', 'time']),
-    'date-string': BuiltinRule('"\\"" date "\\"" space', ['date']),
-    'time-string': BuiltinRule('"\\"" time "\\"" space', ['time']),
+    'date'            : BuiltinRule('[0-9] [0-9] [0-9] [0-9] "-" ( "0" [1-9] | "1" [0-2] ) "-" ( \"0\" [1-9] | [1-2] [0-9] | "3" [0-1] )', []),
+    'time'            : BuiltinRule('([01] [0-9] | "2" [0-3]) ":" [0-5] [0-9] ":" [0-5] [0-9] ( "." [0-9] [0-9] [0-9] )? ( "Z" | ( "+" | "-" ) ( [01] [0-9] | "2" [0-3] ) ":" [0-5] [0-9] )', []),
+    'date-time'       : BuiltinRule('date "T" time', ['date', 'time']),
+    'date-string'     : BuiltinRule('"\\"" date "\\"" space', ['date']),
+    'time-string'     : BuiltinRule('"\\"" time "\\"" space', ['time']),
     'date-time-string': BuiltinRule('"\\"" date-time "\\"" space', ['date-time']),
 }
 
 DOTALL = '[\\U00000000-\\U0010FFFF]'
 DOT = '[\\U00000000-\\x09\\x0B\\x0C\\x0E-\\U0010FFFF]'
 
-RESERVED_NAMES = set(["root", *PRIMITIVE_RULES.keys(), *STRING_FORMAT_RULES.keys()])
+RESERVED_NAMES = set(["root", "dot", *PRIMITIVE_RULES.keys(), *STRING_FORMAT_RULES.keys()])
 
 INVALID_RULE_CHARS_RE = re.compile(r'[^a-zA-Z0-9-]+')
 GRAMMAR_LITERAL_ESCAPE_RE = re.compile(r'[\r\n"]')
@@ -102,7 +102,7 @@ class SchemaConverter:
                 yield ' ('
                 yield from recurse(i + 1)
                 yield ')?'
-                    
+
         return ''.join(('(', *recurse(0), ')'))
 
     def _add_rule(self, name, rule):
@@ -301,9 +301,10 @@ class SchemaConverter:
                             sub = id
 
                         seq[-1] = (
-                            ' '.join(
-                                ([f'"{sub[1:-1] * min_times}"'] if sub_is_literal else [sub] * min_times) +
-                                ([f'{sub}?'] * (max_times - min_times) if max_times is not None else [f'{sub}*'])),
+                            ' '.join((
+                                *([f'"{sub[1:-1] * min_times}"'] if sub_is_literal else [sub] * min_times),
+                                (_build_repetition(sub, max_times - min_times) if max_times is not None else [f'{sub}*'])
+                            )),
                             False
                         )
                 else:
@@ -460,7 +461,7 @@ class SchemaConverter:
         assert isinstance(rule, BuiltinRule), f'rule: {rule}'
         assert isinstance(rule.content, str), f'{name}: {rule.content}'
         n = self._add_rule(name, rule.content)
-        
+
         for dep in rule.deps:
             dep_rule = PRIMITIVE_RULES.get(dep) or STRING_FORMAT_RULES.get(dep)
             assert dep_rule, f'Rule {dep} not known'

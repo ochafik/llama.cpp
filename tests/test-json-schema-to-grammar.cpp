@@ -385,7 +385,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
         })""",
         R"""(
             dot ::= [\U00000000-\x09\x0B\x0C\x0E-\U0010FFFF]
-            root ::= "\"" ("(" root-1 root-1? root-1? ")")? root-1 root-1 root-1 "-" root-1 root-1 root-1 root-1 " and" dot dot dot "\"" space
+            root ::= "\"" ("(" root-1 (root-1 (root-1)?)? ")")? root-1 root-1 root-1  "-" root-1 root-1 root-1 root-1  " and" dot dot dot "\"" space
             root-1 ::= [0-9]
             space ::= " "?
         )"""
