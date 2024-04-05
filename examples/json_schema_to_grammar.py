@@ -426,9 +426,7 @@ class SchemaConverter:
                     successive_items = list_item_operator * (min_items - 1)
                     min_items -= 1
                 if max_items is not None and max_items > min_items:
-                    # TODO: avoid grammar branch explosion here
                     successive_items += _build_repetition(list_item_operator, max_items - min_items - 1)
-                    # successive_items += (list_item_operator + "?") * (max_items - min_items - 1)
                 else:
                     successive_items += list_item_operator + "*"
                 if min_items == 0:
@@ -458,8 +456,6 @@ class SchemaConverter:
             return self._add_primitive('root' if rule_name == 'root' else schema_type, PRIMITIVE_RULES[schema_type])
 
     def _add_primitive(self, name: str, rule: BuiltinRule):
-        assert isinstance(rule, BuiltinRule), f'rule: {rule}'
-        assert isinstance(rule.content, str), f'{name}: {rule.content}'
         n = self._add_rule(name, rule.content)
 
         for dep in rule.deps:
@@ -468,12 +464,6 @@ class SchemaConverter:
             if dep not in self._rules:
                 self._add_primitive(dep, dep_rule)
         return n
-
-    def _build_number_rule(self):
-        _up_to_15_digits = _build_repetition('[0-9]', 15)
-        decimal_rule = self._add_rule('decimal-part', f'[0-9] {_up_to_15_digits}')
-        integral_rule = self._add_rule('integral-part', f'[0-9] | [1-9] {_up_to_15_digits}')
-        return self._add_rule('number', f'("-"? {integral_rule}) ("." {decimal_rule})? ([eE] [-+]? {integral_rule})? space')
 
     def _build_object_rule(self, properties: List[Tuple[str, Any]], required: Set[str], name: str, additional_properties: Union[bool, Any]):
         prop_order = self._prop_order
