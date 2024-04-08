@@ -132,13 +132,16 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
         })""",
         R"""(
             date ::= [0-9] [0-9] [0-9] [0-9] "-" ( "0" [1-9] | "1" [0-2] ) "-" ( "0" [1-9] | [1-2] [0-9] | "3" [0-1] )
+            date-string ::= "\"" date "\"" space
             date-time ::= date "T" time
+            date-time-string ::= "\"" date-time "\"" space
             root ::= "[" space tuple-0 "," space uuid "," space tuple-2 "," space tuple-3 "]" space
             space ::= " "?
             time ::= ([01] [0-9] | "2" [0-3]) ":" [0-5] [0-9] ":" [0-5] [0-9] ( "." [0-9] [0-9] [0-9] )? ( "Z" | ( "+" | "-" ) ( [01] [0-9] | "2" [0-3] ) ":" [0-5] [0-9] )
-            tuple-0 ::= date
-            tuple-2 ::= time
-            tuple-3 ::= date-time
+            time-string ::= "\"" time "\"" space
+            tuple-0 ::= date-string
+            tuple-2 ::= time-string
+            tuple-3 ::= date-time-string
             uuid ::= "\"" [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F] "-" [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F] "-" [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F] "-" [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F] "-" [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F] "\"" space
         )"""
     });
@@ -385,7 +388,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
         })""",
         R"""(
             dot ::= [\U00000000-\x09\x0B\x0C\x0E-\U0010FFFF]
-            root ::= "\"" ("(" root-1 (root-1 (root-1)?)? ")")? root-1 root-1 root-1  "-" root-1 root-1 root-1 root-1  " and" dot dot dot "\"" space
+            root ::= "\"" ("(" root-1 (root-1 (root-1)?)? ")")? root-1 root-1 root-1 "-" root-1 root-1 root-1 root-1 " and" dot dot dot "\"" space
             root-1 ::= [0-9]
             space ::= " "?
         )"""

@@ -287,10 +287,13 @@ class SchemaConverter:
                     (sub, sub_is_literal) = seq[-1]
 
                     if min_times == 0 and max_times is None:
+                        sub = f'"{sub}"' if sub_is_literal else sub
                         seq[-1] = (f'{sub}*', False)
                     elif min_times == 0 and max_times == 1:
+                        sub = f'"{sub}"' if sub_is_literal else sub
                         seq[-1] = (f'{sub}?', False)
                     elif min_times == 1 and max_times is None:
+                        sub = f'"{sub}"' if sub_is_literal else sub
                         seq[-1] = (f'{sub}+', False)
                     else:
                         if not sub_is_literal:
@@ -300,13 +303,17 @@ class SchemaConverter:
                                 sub_rule_ids[sub] = id
                             sub = id
 
-                        seq[-1] = (
-                            ' '.join((
-                                *([f'"{sub[1:-1] * min_times}"'] if sub_is_literal else [sub] * min_times),
-                                (_build_repetition(sub, max_times - min_times) if max_times is not None else [f'{sub}*'])
-                            )),
-                            False
-                        )
+                        if sub_is_literal and min_times > 0:
+                            result = '"' + (sub[1:-1] * min_times) + '"'
+                        else:
+                            result = ' '.join([sub] * min_times)
+
+                        if min_times < max_times:
+                            if min_times > 0:
+                                result += ' '
+                            result += _build_repetition(sub, max_times - min_times)
+
+                        seq[-1] = (result, False)
                 else:
                     literal = ''
                     while i < length:
@@ -444,8 +451,9 @@ class SchemaConverter:
                 PRIMITIVE_RULES['uuid']
             )
 
-        elif schema_type in (None, 'string') and schema_format in STRING_FORMAT_RULES:
-            return self._add_rule(rule_name, self._add_primitive(schema_format, STRING_FORMAT_RULES[schema_format]))
+        elif schema_type in (None, 'string') and f'{schema_format}-string' in STRING_FORMAT_RULES:
+            prim_name = f'{schema_format}-string'
+            return self._add_rule(rule_name, self._add_primitive(prim_name, STRING_FORMAT_RULES[prim_name]))
 
         elif (schema_type == 'object') or (len(schema) == 0):
             return self._add_rule(rule_name, self._add_primitive('object', PRIMITIVE_RULES['object']))

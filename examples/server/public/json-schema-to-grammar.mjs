@@ -15,7 +15,7 @@ class BuiltinRule {
   }
 }
 
-const UP_TO_15_DIGITS = _buildRepetition('[0-9]', 15); 
+const UP_TO_15_DIGITS = _buildRepetition('[0-9]', 15);
 
 const PRIMITIVE_RULES = {
   boolean        : new BuiltinRule('("true" | "false") space', []),
@@ -292,13 +292,20 @@ export class SchemaConverter {
               sub = id;
             }
 
-            const repeatedSub = Array.from({ length: minTimes }, () => subIsLiteral ? `"${sub.slice(1, -1).repeat(minTimes)}"` : sub);
-            if (maxTimes !== undefined){
-              repeatedSub.push(_buildRepetition(sub, maxTimes - minTimes));
+            let result;
+            if (subIsLiteral && minTimes > 0) {
+              result = `"${sub.slice(1, -1).repeat(minTimes)}"`;
             } else {
-              repeatedSub.push(`${sub}*`);
+              result = Array.from({ length: minTimes }, () => sub).join(' ');
             }
-            seq[seq.length - 1] = [repeatedSub.join(' '), false];
+
+            if (minTimes < maxTimes) {
+              if (minTimes > 0) {
+                result += ' ';
+              }
+              result += _buildRepetition(sub, maxTimes - minTimes);
+            }
+            seq[seq.length - 1] = [result, false];
           }
         } else {
           let literal = '';
@@ -440,8 +447,9 @@ export class SchemaConverter {
         ruleName === 'root' ? 'root' : schemaFormat,
         PRIMITIVE_RULES['uuid']
       );
-    } else if ((schemaType === undefined || schemaType === 'string') && schema.format in STRING_FORMAT_RULES) {
-      return this._addRule(ruleName, this._addPrimitive(schemaFormat, STRING_FORMAT_RULES[schemaFormat]));
+    } else if ((schemaType === undefined || schemaType === 'string') && `${schema.format}-string` in STRING_FORMAT_RULES) {
+      const primName = `${schema.format}-string`
+      return this._addRule(ruleName, this._addPrimitive(primName, STRING_FORMAT_RULES[primName]));
     } else if ((schemaType === 'object') || (Object.keys(schema).length === 0)) {
       return this._addRule(ruleName, this._addPrimitive('object', PRIMITIVE_RULES['object']));
     } else {
