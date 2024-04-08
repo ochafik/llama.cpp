@@ -10,6 +10,8 @@ Inference of Meta's [LLaMA](https://arxiv.org/abs/2302.13971) model (and others)
 
 ### Recent API changes
 
+- [2024 Apr 4] State and session file functions reorganized under `llama_state_*` https://github.com/ggerganov/llama.cpp/pull/6341
+- [2024 Mar 26] Logits and embeddings API updated for compactness https://github.com/ggerganov/llama.cpp/pull/6122
 - [2024 Mar 13] Add `llama_synchronize()` + `llama_context_params.n_ubatch` https://github.com/ggerganov/llama.cpp/pull/6017
 - [2024 Mar 8] `llama_kv_cache_seq_rm()` returns a `bool` instead of `void`, and new `llama_n_seq_max()` returns the upper limit of acceptable `seq_id` in batches (relevant when dealing with multiple sequences) https://github.com/ggerganov/llama.cpp/pull/5328
 - [2024 Mar 4] Embeddings API updated https://github.com/ggerganov/llama.cpp/pull/5796
@@ -17,12 +19,13 @@ Inference of Meta's [LLaMA](https://arxiv.org/abs/2302.13971) model (and others)
 
 ### Hot topics
 
+- **MoE memory layout has been updated - reconvert models for `mmap` support and regenerate `imatrix` https://github.com/ggerganov/llama.cpp/pull/6387**
+- Model sharding instructions using `gguf-split` https://github.com/ggerganov/llama.cpp/discussions/6404
 - Fix major bug in Metal batched inference https://github.com/ggerganov/llama.cpp/pull/6225
-- Multi-GPU pipeline parallelizm support https://github.com/ggerganov/llama.cpp/pull/6017
+- Multi-GPU pipeline parallelism support https://github.com/ggerganov/llama.cpp/pull/6017
 - Looking for contributions to add Deepseek support: https://github.com/ggerganov/llama.cpp/issues/5981
 - Quantization blind testing: https://github.com/ggerganov/llama.cpp/discussions/5962
 - Initial Mamba support has been added: https://github.com/ggerganov/llama.cpp/pull/5328
-- Support loading sharded model, using `gguf-split` CLI https://github.com/ggerganov/llama.cpp/pull/6187
 
 ----
 
@@ -114,7 +117,10 @@ Typically finetunes of the base models below are supported as well.
 - [x] [CodeShell](https://github.com/WisdomShell/codeshell)
 - [x] [Gemma](https://ai.google.dev/gemma)
 - [x] [Mamba](https://github.com/state-spaces/mamba)
+- [x] [Xverse](https://huggingface.co/models?search=xverse)
 - [x] [Command-R](https://huggingface.co/CohereForAI/c4ai-command-r-v01)
+- [x] [SEA-LION](https://huggingface.co/models?search=sea-lion)
+- [x] [GritLM-7B](https://huggingface.co/GritLM/GritLM-7B) + [GritLM-8x7B](https://huggingface.co/GritLM/GritLM-8x7B)
 
 **Multimodal models:**
 
@@ -138,6 +144,7 @@ Typically finetunes of the base models below are supported as well.
 - JavaScript/Wasm (works in browser): [tangledgroup/llama-cpp-wasm](https://github.com/tangledgroup/llama-cpp-wasm)
 - Typescript/Wasm (nicer API, available on npm): [ngxson/wllama](https://github.com/ngxson/wllama)
 - Ruby: [yoshoku/llama_cpp.rb](https://github.com/yoshoku/llama_cpp.rb)
+- Rust (more features): [edgenai/llama_cpp-rs](https://github.com/edgenai/llama_cpp-rs)
 - Rust (nicer API): [mdrokz/rust-llama.cpp](https://github.com/mdrokz/rust-llama.cpp)
 - Rust (more direct bindings): [utilityai/llama-cpp-rs](https://github.com/utilityai/llama-cpp-rs)
 - C#/.NET: [SciSharp/LLamaSharp](https://github.com/SciSharp/LLamaSharp)
@@ -147,6 +154,7 @@ Typically finetunes of the base models below are supported as well.
 - Java: [kherud/java-llama.cpp](https://github.com/kherud/java-llama.cpp)
 - Zig: [deins/llama.cpp.zig](https://github.com/Deins/llama.cpp.zig)
 - Flutter/Dart: [netdur/llama_cpp_dart](https://github.com/netdur/llama_cpp_dart)
+- PHP (API bindings and features built on top of llama.cpp): [distantmagic/resonance](https://github.com/distantmagic/resonance) [(more info)](https://github.com/ggerganov/llama.cpp/pull/6326)
 
 **UI:**
 
@@ -173,6 +181,12 @@ Unless otherwise noted these projects are open-source with permissive licensing:
 - [Mobile-Artificial-Intelligence/maid](https://github.com/Mobile-Artificial-Intelligence/maid) (MIT)
 - [Msty](https://msty.app) (proprietary)
 - [LLMFarm](https://github.com/guinmoon/LLMFarm?tab=readme-ov-file) (MIT)
+- [KanTV](https://github.com/zhouwg/kantv?tab=readme-ov-file)(Apachev2.0 or later)
+- [Dot](https://github.com/alexpinel/Dot) (GPL)
+- [MindMac](https://mindmac.app) (proprietary)
+- [KodiBot](https://github.com/firatkiral/kodibot) (GPL)
+
+*(to have a project listed here, it should clearly state that it depends on `llama.cpp`)*
 
 ---
 
@@ -448,30 +462,27 @@ Building the program with BLAS support may lead to some performance improvements
 
   Check [Optimizing and Running LLaMA2 on Intel® CPU](https://www.intel.com/content/www/us/en/content-details/791610/optimizing-and-running-llama2-on-intel-cpu.html) for more information.
 
-- #### cuBLAS
+- #### CUDA
 
-  This provides BLAS acceleration using the CUDA cores of your Nvidia GPU. Make sure to have the CUDA toolkit installed. You can download it from your Linux distro's package manager (e.g. `apt install nvidia-cuda-toolkit`) or from here: [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads).
+  This provides GPU acceleration using the CUDA cores of your Nvidia GPU. Make sure to have the CUDA toolkit installed. You can download it from your Linux distro's package manager (e.g. `apt install nvidia-cuda-toolkit`) or from here: [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads).
 
   For Jetson user, if you have Jetson Orin, you can try this: [Offical Support](https://www.jetson-ai-lab.com/tutorial_text-generation.html). If you are using an old model(nano/TX2), need some additional operations before compiling.
 
   - Using `make`:
     ```bash
-    make LLAMA_CUBLAS=1
+    make LLAMA_CUDA=1
     ```
   - Using `CMake`:
 
     ```bash
     mkdir build
     cd build
-    cmake .. -DLLAMA_CUBLAS=ON
+    cmake .. -DLLAMA_CUDA=ON
     cmake --build . --config Release
     ```
 
   The environment variable [`CUDA_VISIBLE_DEVICES`](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#env-vars) can be used to specify which GPU(s) will be used. The following compilation options are also available to tweak performance:
 
-<!---
-  | LLAMA_CUDA_CUBLAS       | Boolean                |   false | Use cuBLAS instead of custom CUDA kernels for prompt processing. Faster for all quantization formats except for q4_0 and q8_0, especially for k-quants. Increases VRAM usage (700 MiB for 7b, 970 MiB for 13b, 1430 MiB for 33b). |
---->
   | Option                         | Legal values           | Default | Description |
   |--------------------------------|------------------------|---------|-------------|
   | LLAMA_CUDA_FORCE_DMMV          | Boolean                |   false | Force the use of dequantization + matrix vector multiplication kernels instead of using kernels that do matrix vector multiplication on quantized data. By default the decision is made based on compute capability (MMVQ for 6.1/Pascal/GTX 1000 or higher). Does not affect k-quants. |
@@ -510,7 +521,7 @@ Building the program with BLAS support may lead to some performance improvements
     set PATH=%HIP_PATH%\bin;%PATH%
     mkdir build
     cd build
-    cmake -G Ninja -DAMDGPU_TARGETS=gfx1100 -DLLAMA_HIPBLAS=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ ..
+    cmake -G Ninja -DAMDGPU_TARGETS=gfx1100 -DLLAMA_HIPBLAS=ON -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=Release ..
     cmake --build .
     ```
     Make sure that `AMDGPU_TARGETS` is set to the GPU arch you want to compile for. The above example uses `gfx1100` that corresponds to Radeon RX 7900XTX/XT/GRE. You can find a list of targets [here](https://llvm.org/docs/AMDGPUUsage.html#processors)

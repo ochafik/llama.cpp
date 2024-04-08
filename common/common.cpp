@@ -16,6 +16,7 @@
 #include <unordered_set>
 #include <vector>
 #include <cinttypes>
+#include <codecvt>
 
 #if defined(__APPLE__) && defined(__MACH__)
 #include <sys/types.h>
@@ -27,7 +28,6 @@
 #ifndef NOMINMAX
 #   define NOMINMAX
 #endif
-#include <codecvt>
 #include <locale>
 #include <windows.h>
 #include <fcntl.h>
@@ -48,12 +48,12 @@
 #pragma warning(disable: 4244 4267) // possible loss of data
 #endif
 
-#if (defined(GGML_USE_CUBLAS) || defined(GGML_USE_SYCL))
-#define GGML_USE_CUBLAS_SYCL
+#if (defined(GGML_USE_CUDA) || defined(GGML_USE_SYCL))
+#define GGML_USE_CUDA_SYCL
 #endif
 
-#if (defined(GGML_USE_CUBLAS) || defined(GGML_USE_SYCL)) || defined(GGML_USE_VULKAN)
-#define GGML_USE_CUBLAS_SYCL_VULKAN
+#if (defined(GGML_USE_CUDA) || defined(GGML_USE_SYCL)) || defined(GGML_USE_VULKAN)
+#define GGML_USE_CUDA_SYCL_VULKAN
 #endif
 
 #if defined(LLAMA_USE_CURL)
@@ -861,9 +861,9 @@ bool gpt_params_find_arg(int argc, char ** argv, const std::string & arg, gpt_pa
             return true;
         }
         params.main_gpu = std::stoi(argv[i]);
-#ifndef GGML_USE_CUBLAS_SYCL
-        fprintf(stderr, "warning: llama.cpp was compiled without cuBLAS/SYCL. Setting the main GPU has no effect.\n");
-#endif // GGML_USE_CUBLAS_SYCL
+#ifndef GGML_USE_CUDA_SYCL
+        fprintf(stderr, "warning: llama.cpp was compiled without CUDA/SYCL. Setting the main GPU has no effect.\n");
+#endif // GGML_USE_CUDA_SYCL
         return true;
     }
     if (arg == "--split-mode" || arg == "-sm") {
@@ -889,9 +889,9 @@ bool gpt_params_find_arg(int argc, char ** argv, const std::string & arg, gpt_pa
             invalid_param = true;
             return true;
         }
-#ifndef GGML_USE_CUBLAS_SYCL
-        fprintf(stderr, "warning: llama.cpp was compiled without cuBLAS/SYCL. Setting the split mode has no effect.\n");
-#endif // GGML_USE_CUBLAS_SYCL
+#ifndef GGML_USE_CUDA_SYCL
+        fprintf(stderr, "warning: llama.cpp was compiled without CUDA/SYCL. Setting the split mode has no effect.\n");
+#endif // GGML_USE_CUDA_SYCL
         return true;
     }
     if (arg == "--tensor-split" || arg == "-ts") {
@@ -917,9 +917,9 @@ bool gpt_params_find_arg(int argc, char ** argv, const std::string & arg, gpt_pa
                 params.tensor_split[i] = 0.0f;
             }
         }
-#ifndef GGML_USE_CUBLAS_SYCL_VULKAN
-        fprintf(stderr, "warning: llama.cpp was compiled without cuBLAS/SYCL/Vulkan. Setting a tensor split has no effect.\n");
-#endif // GGML_USE_CUBLAS_SYCL
+#ifndef GGML_USE_CUDA_SYCL_VULKAN
+        fprintf(stderr, "warning: llama.cpp was compiled without CUDA/SYCL/Vulkan. Setting a tensor split has no effect.\n");
+#endif // GGML_USE_CUDA_SYCL_VULKAN
         return true;
     }
     if (arg == "--no-mmap") {
@@ -1062,8 +1062,8 @@ bool gpt_params_find_arg(int argc, char ** argv, const std::string & arg, gpt_pa
         params.ignore_eos = true;
         return true;
     }
-    if (arg == "--no-penalize-nl") {
-        sparams.penalize_nl = false;
+    if (arg == "--penalize-nl") {
+        sparams.penalize_nl = true;
         return true;
     }
     if (arg == "-l" || arg == "--logit-bias") {
@@ -1373,7 +1373,7 @@ void gpt_print_usage(int /*argc*/, char ** argv, const gpt_params & params) {
     printf("  -dt N, --defrag-thold N\n");
     printf("                        KV cache defragmentation threshold (default: %.1f, < 0 - disabled)\n", params.defrag_thold);
     printf("  --ignore-eos          ignore end of stream token and continue generating (implies --logit-bias 2-inf)\n");
-    printf("  --no-penalize-nl      do not penalize newline token\n");
+    printf("  --penalize-nl         penalize newline tokens\n");
     printf("  --temp N              temperature (default: %.1f)\n", (double)sparams.temp);
     printf("  --all-logits          return logits for all tokens in the batch (default: disabled)\n");
     printf("  --hellaswag           compute HellaSwag score over random tasks from datafile supplied with -f\n");
@@ -1498,6 +1498,77 @@ std::string gpt_random_prompt(std::mt19937 & rng) {
     }
 
     GGML_UNREACHABLE();
+}
+
+// Validate if a filename is safe to use
+// To validate a full path, split the path by the OS-specific path separator, and validate each part with this function
+bool validate_file_name(const std::string & filename) {
+    if (!filename.length()) {
+        // Empty filename invalid
+        return false;
+    }
+    if (filename.length() > 255) {
+        // Limit at common largest possible filename on Linux filesystems
+        // to avoid unnecessary further validation
+        // (On systems with smaller limits it will be caught by the OS)
+        return false;
+    }
+
+    std::u32string filename_utf32;
+    try {
+        std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> converter;
+        filename_utf32 = converter.from_bytes(filename);
+
+        // If the reverse conversion mismatches, it means overlong UTF-8 sequences were used,
+        // or invalid encodings were encountered. Reject such attempts
+        std::string filename_reencoded = converter.to_bytes(filename_utf32);
+        if (filename_reencoded != filename) {
+            return false;
+        }
+    } catch (const std::exception &) {
+        return false;
+    }
+
+    // Check for forbidden codepoints:
+    // - Control characters
+    // - Unicode equivalents of illegal characters
+    // - UTF-16 surrogate pairs
+    // - UTF-8 replacement character
+    // - Byte order mark (BOM)
+    // - Illegal characters: / \ : * ? " < > |
+    for (char32_t c : filename_utf32) {
+        if (c <= 0x1F // Control characters (C0)
+            || c == 0x7F // Control characters (DEL)
+            || (c >= 0x80 && c <= 0x9F) // Control characters (C1)
+            || c == 0xFF0E // Fullwidth Full Stop (period equivalent)
+            || c == 0x2215 // Division Slash (forward slash equivalent)
+            || c == 0x2216 // Set Minus (backslash equivalent)
+            || (c >= 0xD800 && c <= 0xDFFF) // UTF-16 surrogate pairs
+            || c == 0xFFFD // Replacement Character (UTF-8)
+            || c == 0xFEFF // Byte Order Mark (BOM)
+            || c == '/' || c == '\\' || c == ':' || c == '*' // Illegal characters
+            || c == '?' || c == '"' || c == '<' || c == '>' || c == '|') {
+            return false;
+        }
+    }
+
+    // Reject any leading or trailing ' ', or any trailing '.', these are stripped on Windows and will cause a different filename
+    // Unicode and other whitespace is not affected, only 0x20 space
+    if (filename.front() == ' ' || filename.back() == ' ' || filename.back() == '.') {
+        return false;
+    }
+
+    // Reject any ".." (currently stricter than necessary, it should be fine to just check for == ".." instead)
+    if (filename.find("..") != std::string::npos) {
+        return false;
+    }
+
+    // Reject "."
+    if (filename == ".") {
+        return false;
+    }
+
+    return true;
 }
 
 //
@@ -1922,11 +1993,6 @@ struct llama_model * llama_load_model_from_url(
 
     // Initialize libcurl
     auto * curl = curl_easy_init();
-
-    if (!curl) {
-        fprintf(stderr, "%s: error initializing libcurl\n", __func__);
-        return NULL;
-    }
 
     if (!curl) {
         fprintf(stderr, "%s: error initializing libcurl\n", __func__);
@@ -2387,7 +2453,7 @@ void dump_non_result_info_yaml(FILE * stream, const gpt_params & params, const l
     fprintf(stream, "cpu_has_avx512: %s\n",      ggml_cpu_has_avx512()      ? "true" : "false");
     fprintf(stream, "cpu_has_avx512_vbmi: %s\n", ggml_cpu_has_avx512_vbmi() ? "true" : "false");
     fprintf(stream, "cpu_has_avx512_vnni: %s\n", ggml_cpu_has_avx512_vnni() ? "true" : "false");
-    fprintf(stream, "cpu_has_cublas: %s\n",      ggml_cpu_has_cublas()      ? "true" : "false");
+    fprintf(stream, "cpu_has_cuda: %s\n",        ggml_cpu_has_cuda()        ? "true" : "false");
     fprintf(stream, "cpu_has_vulkan: %s\n",      ggml_cpu_has_vulkan()      ? "true" : "false");
     fprintf(stream, "cpu_has_clblast: %s\n",     ggml_cpu_has_clblast()     ? "true" : "false");
     fprintf(stream, "cpu_has_kompute: %s\n",     ggml_cpu_has_kompute()     ? "true" : "false");
@@ -2489,7 +2555,7 @@ void dump_non_result_info_yaml(FILE * stream, const gpt_params & params, const l
     fprintf(stream, "n_predict: %d # default: -1 (unlimited)\n", params.n_predict);
     fprintf(stream, "n_probs: %d # only used by server binary, default: 0\n", sparams.n_probs);
     fprintf(stream, "no_mmap: %s # default: false\n", !params.use_mmap ? "true" : "false");
-    fprintf(stream, "no_penalize_nl: %s # default: false\n", !sparams.penalize_nl ? "true" : "false");
+    fprintf(stream, "penalize_nl: %s # default: false\n", sparams.penalize_nl ? "true" : "false");
     fprintf(stream, "ppl_output_type: %d # default: 0\n", params.ppl_output_type);
     fprintf(stream, "ppl_stride: %d # default: 0\n", params.ppl_stride);
     fprintf(stream, "presence_penalty: %f # default: 0.0\n", sparams.penalty_present);
