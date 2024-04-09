@@ -75,6 +75,7 @@ class ReaderField(NamedTuple):
             assert len(data) == 1
             return data[0]
 
+
 class ReaderTensor(NamedTuple):
     name: str
     tensor_type: GGMLQuantizationType
