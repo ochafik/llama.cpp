@@ -4,7 +4,6 @@ import sys
 from pathlib import Path
 
 from gguf.gguf_reader import GGUFReader
-from gguf.constants import GGUFValueType, Keys, TokenType
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -23,7 +22,7 @@ def read_gguf_file(gguf_file_path):
     print("Key-Value Pairs:")
     max_key_length = max(len(key) for key in reader.fields.keys())
     max_value_length = 2048
-    
+
     for key, field in reader.fields.items():
         value_str = json.dumps(field.read())
         if len(value_str) > max_value_length:
