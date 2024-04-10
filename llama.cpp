@@ -11795,6 +11795,9 @@ static void llama_grammar_advance_stack(
         case LLAMA_GRETYPE_RULE_REF: {
             const size_t                  rule_id = static_cast<size_t>(pos->value);
             const llama_grammar_element * subpos  = rules[rule_id].data();
+
+            // new_stacks.reserve(new_stacks.size() + rules[rule_id].size());
+
             do {
                 // init new stack without the top (pos)
                 std::vector<const llama_grammar_element *> new_stack(stack.begin(), stack.end() - 1);
@@ -11836,12 +11839,14 @@ static void llama_grammar_advance_stack(
 // be positioned at a character range (see `llama_grammar_advance_stack`), and
 // produces the N possible stacks if the given char is accepted at those
 // positions
-std::vector<std::vector<const llama_grammar_element *>> llama_grammar_accept(
+void llama_grammar_accept(
         const std::vector<std::vector<llama_grammar_element>>         & rules,
         const std::vector<std::vector<const llama_grammar_element *>> & stacks,
-        const uint32_t                                                  chr) {
+        const uint32_t                                                  chr,
+        std::vector<std::vector<const llama_grammar_element *>>       & new_stacks) {
 
-    std::vector<std::vector<const llama_grammar_element *>> new_stacks;
+    // std::vector<std::vector<const llama_grammar_element *>> new_stacks;
+    new_stacks.clear();
 
     for (const auto & stack : stacks) {
         if (stack.empty()) {
@@ -11861,7 +11866,7 @@ std::vector<std::vector<const llama_grammar_element *>> llama_grammar_accept(
         }
     }
 
-    return new_stacks;
+    // return new_stacks;
 }
 
 static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates(
@@ -12721,8 +12726,10 @@ void llama_grammar_accept_token(struct llama_context * ctx, struct llama_grammar
     // Note terminating 0 in decoded string
     const auto   decoded     = decode_utf8(piece, grammar->partial_utf8);
     const auto & code_points = decoded.first;
+    std::vector<std::vector<const llama_grammar_element *>> tmp_new_stacks;
     for (auto it = code_points.begin(), end = code_points.end() - 1; it != end; ++it) {
-        grammar->stacks = llama_grammar_accept(grammar->rules, grammar->stacks, *it);
+        llama_grammar_accept(grammar->rules, grammar->stacks, *it, tmp_new_stacks);
+        tmp_new_stacks.swap(grammar->stacks);
     }
     grammar->partial_utf8 = decoded.second;
     GGML_ASSERT(!grammar->stacks.empty());
