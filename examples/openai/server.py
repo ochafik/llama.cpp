@@ -1,18 +1,11 @@
-# https://gist.github.com/ochafik/a3d4a5b9e52390544b205f37fb5a0df3
-# pip install "fastapi[all]" "uvicorn[all]" sse-starlette jsonargparse jinja2 pydantic
-
 import json, sys
 from pathlib import Path
 import time
 
-from pydantic import TypeAdapter
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
 from examples.openai.llama_cpp_server_api import LlamaCppServerCompletionRequest
 from examples.openai.gguf_kvs import GGUFKeyValues, Keys
-from examples.openai.api import ChatCompletionResponse, Choice, Message, ChatCompletionRequest, Usage
-from examples.openai.prompting import ChatHandlerArgs, ChatTemplate, ToolsPromptStyle, get_chat_handler, ChatHandler
+from examples.openai.api import ChatCompletionResponse, Choice, ChatCompletionRequest, Usage
+from examples.openai.prompting import ChatHandlerArgs, ChatTemplate, ToolsPromptStyle, get_chat_handler
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -76,44 +69,6 @@ def main(
 
         spawn_subprocess(cmd)
         endpoint = f"http://{server_host}:{server_port}"
-
-
-    # print(chat_template.render([
-    #     Message(**{
-    #         "role": "user",
-    #         "name": None,
-    #         "tool_call_id": None,
-    #         "content": "What is the sum of 2535 squared and 32222000403 then multiplied by one and a half. What's a third of the result?",
-    #         "tool_calls": None
-    #     }),
-    #     Message(**{
-    #         "role": "assistant",
-    #         # "name": None,
-    #         "tool_call_id": None,
-    #         "content": "?",
-    #         "tool_calls": [
-    #             {
-    #                 # "id": "call_531873",
-    #                 "type": "function",
-    #                 "function": {
-    #                     "name": "add",
-    #                     "arguments": {
-    #                         "a": 2535,
-    #                         "b": 32222000403
-    #                     }
-    #                 }
-    #             }
-    #         ]
-    #     }),
-    #     Message(**{
-    #         "role": "tool",
-    #         "name": "add",
-    #         "tool_call_id": "call_531873",
-    #         "content": "32222002938",
-    #         "tool_calls": None
-    #     })
-    # ], add_generation_prompt=True))
-    # exit(0)
 
     app = FastAPI()
 
