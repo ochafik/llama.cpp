@@ -11848,6 +11848,8 @@ void llama_grammar_accept(
     // std::vector<std::vector<const llama_grammar_element *>> new_stacks;
     new_stacks.clear();
 
+    std::vector<const llama_grammar_element *> new_stack;
+
     for (const auto & stack : stacks) {
         if (stack.empty()) {
             continue;
@@ -11858,7 +11860,9 @@ void llama_grammar_accept(
             const llama_grammar_element * pos = match.second;
 
             // update top of stack to next element, if any
-            std::vector<const llama_grammar_element *> new_stack(stack.begin(), stack.end() - 1);
+            new_stack.clear();
+            new_stack.assign(stack.begin(), stack.end() - 1);
+            // std::vector<const llama_grammar_element *> new_stack(stack.begin(), stack.end() - 1);
             if (!llama_grammar_is_end_of_sequence(pos)) {
                 new_stack.push_back(pos);
             }
