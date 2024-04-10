@@ -2193,6 +2193,10 @@ struct llama_context {
     // memory buffers used to evaluate the model
     std::vector<uint8_t> buf_compute_meta;
     ggml_backend_sched_t sched = nullptr;
+    
+    std::vector<std::pair<std::vector<uint32_t>, llama_partial_utf8>> candidates_decoded;
+    std::vector<llama_grammar_candidate>                              candidates_grammar;
+    std::vector<std::string> token_pieces;
 
     ggml_abort_callback abort_callback      = nullptr;
     void *              abort_callback_data = nullptr;
@@ -12478,14 +12482,23 @@ void llama_sample_grammar(struct llama_context * ctx, llama_token_data_array * c
 
     const llama_token eos = llama_token_eos(&ctx->model);
 
-    std::vector<std::pair<std::vector<uint32_t>, llama_partial_utf8>> candidates_decoded;
-    candidates_decoded.reserve(candidates->size);
-    std::vector<llama_grammar_candidate>                              candidates_grammar;
-    candidates_grammar.reserve(candidates->size);
+    ctx->candidates_decoded.clear();
+    ctx->candidates_decoded.reserve(candidates->size);
+    ctx->candidates_grammar.clear();
+    ctx->candidates_grammar.reserve(candidates->size);
 
+    if (ctx->token_pieces.empty()) {
+        auto n_vocab = llama_n_vocab(llama_get_model(ctx));
+        ctx->token_pieces.resize(n_vocab);
+        for (llama_token id = 0; id < n_vocab; ++id) {
+            ctx->token_pieces[id] = llama_token_to_piece(ctx, id);
+        }
+    }
+    
     for (size_t i = 0; i < candidates->size; ++i) {
         const llama_token id    = candidates->data[i].id;
-        const std::string piece = llama_token_to_piece(ctx, id);
+        // const std::string piece = llama_token_to_piece(ctx, id);
+        const auto & piece = ctx->token_pieces[id];
         if (id == eos) {
             if (!allow_eos) {
                 candidates->data[i].logit = -INFINITY;
@@ -12493,12 +12506,12 @@ void llama_sample_grammar(struct llama_context * ctx, llama_token_data_array * c
         } else if (piece.empty() || piece[0] == 0) {
             candidates->data[i].logit = -INFINITY;
         } else {
-            candidates_decoded.push_back(decode_utf8(piece, grammar->partial_utf8));
-            candidates_grammar.push_back({ i, candidates_decoded.back().first.data(), candidates_decoded.back().second });
+            ctx->candidates_decoded.push_back(decode_utf8(piece, grammar->partial_utf8));
+            ctx->candidates_grammar.push_back({ i, ctx->candidates_decoded.back().first.data(), ctx->candidates_decoded.back().second });
         }
     }
 
-    const auto rejects = llama_grammar_reject_candidates(grammar->rules, grammar->stacks, candidates_grammar);
+    const auto rejects = llama_grammar_reject_candidates(grammar->rules, grammar->stacks, ctx->candidates_grammar);
     for (const auto & reject : rejects) {
         candidates->data[reject.index].logit = -INFINITY;
     }
