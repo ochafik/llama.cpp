@@ -12725,10 +12725,11 @@ void llama_grammar_accept_token(struct llama_context * ctx, struct llama_grammar
         GGML_ASSERT(false);
     }
 
-    const std::string piece = llama_token_to_piece(ctx, token);
-
     // Note terminating 0 in decoded string
-    const auto   decoded     = decode_utf8(piece, grammar->partial_utf8);
+    const auto   decoded     = 
+        grammar->partial_utf8.n_remain > 0 ? decode_utf8(ctx->token_pieces[token], grammar->partial_utf8)
+        : ctx->fully_decoded_tokens[token];
+
     const auto & code_points = decoded.first;
     std::vector<std::vector<const llama_grammar_element *>> tmp_new_stacks;
     for (auto it = code_points.begin(), end = code_points.end() - 1; it != end; ++it) {
