@@ -1087,8 +1087,8 @@ typedef std::vector<llama_grammar_sequence> llama_grammar_rule;
 struct llama_grammar_element_pos {
     // Index of the rule in the grammar
     size_t rule_id;
-    // Index of the alternative in the rule
-    size_t alternative;
+    // Index of the alternative in the rule (-1 if the position is before chosing alternatives of a rule)
+    int alternative;
     // Position in sequence
     size_t position;
 };
@@ -1114,6 +1114,10 @@ struct llama_grammar_char_ranges {
 };
 
 struct llama_grammar {
+    size_t start_rule_index;
+
+    bool alternatives_pending;
+    
     const std::vector<llama_grammar_rule>   rules;
 
     std::vector<std::vector<llama_grammar_char_ranges>> alternative_head_sets;

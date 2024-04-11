@@ -11694,8 +11694,11 @@ std::pair<std::vector<uint32_t>, llama_partial_utf8> decode_utf8(
 
 // returns true iff pos points to the end of one of the definitions of a rule
 static bool llama_grammar_is_end_of_sequence(
+        // const llama_grammar                     * grammar,
         const std::vector<llama_grammar_rule>   & rules,
         const llama_grammar_element_pos         & p) {
+    GGML_ASSERT(p.rule_id < rules.size());
+    GGML_ASSERT(p.alternative < rules[p.rule_id].size());
     const auto & seq = rules[p.rule_id][p.alternative];
     return p.position >= seq.size();
 }
@@ -11811,14 +11814,15 @@ static bool llama_grammar_match_partial_char(
 
 static void print_stack(const std::vector<const llama_grammar_element_pos>        & stack) {
     for (const auto & p : stack) {
-        printf("  %ld, %ld, %ld\n", p.rule_id, p.alternative, p.position);
+        printf("  %ld, %d, %ld\n", p.rule_id, p.alternative, p.position);
     }
 
 }
 // transforms a grammar pushdown stack into N possible stacks, all ending
 // at a character range (terminal element)
 static void llama_grammar_advance_stack(
-        const std::vector<llama_grammar_rule>                     & rules,
+        const struct llama_grammar                                * grammar,
+        // const std::vector<llama_grammar_rule>                     & rules,
         const std::vector<const llama_grammar_element_pos>        & stack,
         std::vector<std::vector<const llama_grammar_element_pos>> & new_stacks) {
 
@@ -11831,18 +11835,18 @@ static void llama_grammar_advance_stack(
     }
 
     const llama_grammar_element_pos & p = stack.back();
-    const llama_grammar_sequence & seq = rules[p.rule_id][p.alternative];
+    const llama_grammar_sequence & seq = grammar->rules[p.rule_id][p.alternative];
     const llama_grammar_element * pos = &seq[p.position];
 
     switch (pos->type) {
         case LLAMA_GRETYPE_RULE_REF: {
             const size_t rule_id = static_cast<size_t>(pos->value);
-            const llama_grammar_rule & ref_rule = rules[rule_id];
+            const llama_grammar_rule & ref_rule = grammar->rules[rule_id];
 
             const llama_grammar_element_pos next_in_seq { p.rule_id, p.alternative, p.position + 1 };
-            const auto has_next = !llama_grammar_is_end_of_sequence(rules, next_in_seq);
+            const auto has_next = !llama_grammar_is_end_of_sequence(grammar->rules, next_in_seq);
 
-            for (size_t i_ref_alt = 0, n_ref_alt = ref_rule.size(); i_ref_alt < n_ref_alt; ++i_ref_alt) {
+            for (int i_ref_alt = 0, n_ref_alt = ref_rule.size(); i_ref_alt < n_ref_alt; ++i_ref_alt) {
                 const auto & referenced_alt = ref_rule[i_ref_alt];
 
                 // init new stack without the top (pos)
@@ -11855,7 +11859,7 @@ static void llama_grammar_advance_stack(
                     // if alternate is nonempty, add to stack
                     new_stack.push_back({ rule_id, i_ref_alt, 0 });
                 }
-                llama_grammar_advance_stack(rules, new_stack, new_stacks);
+                llama_grammar_advance_stack(grammar, new_stack, new_stacks);
             }
             break;
         }
@@ -11877,12 +11881,39 @@ static void llama_grammar_advance_stack(
     
 }
 
+static void llama_grammar_flush_pending_alternatives_exploration(
+        struct llama_grammar * grammar,
+        const uint32_t          chr) {
+    if (!grammar->alternatives_pending) {
+        return;
+    }
+    grammar->alternatives_pending = false;
+
+
+    // const auto & start_rule = vec_rules[start_rule_index];
+    // for (size_t i_alt = 0, n_alt = start_rule.size(); i_alt < n_alt; ++i_alt) {
+    //     std::vector<const llama_grammar_element_pos> stack;
+    //     llama_grammar_element_pos pos { start_rule_index, i_alt, 0 };
+    //     if (!llama_grammar_is_end_of_sequence(vec_rules, pos)) {
+    //         // if alternate is nonempty, add to stack
+    //         stack.push_back(pos);
+    //     }
+    //     llama_grammar_advance_stack(vec_rules, stack, stacks);
+    // }
+}
+
+// takes a set of possible pushdown stacks on a grammar, which are can
+// be positioned at a character range or at a production / alternative choice (see `llama_grammar_advance_stack`), and
+// produces the N possible stacks if the given char is accepted at those
+// positions
+
 // takes a set of possible pushdown stacks on a grammar, which are required to
 // be positioned at a character range (see `llama_grammar_advance_stack`), and
 // produces the N possible stacks if the given char is accepted at those
 // positions
 static void llama_grammar_accept(
-        const std::vector<llama_grammar_rule>                           & rules,
+        const struct llama_grammar                                      * grammar,
+        // const std::vector<llama_grammar_rule>                           & rules,
         const std::vector<std::vector<const llama_grammar_element_pos>> & stacks,
         const uint32_t                                                    chr,
         std::vector<std::vector<const llama_grammar_element_pos>>       & new_stacks) {
@@ -11892,12 +11923,20 @@ static void llama_grammar_accept(
 
     // std::vector<const llama_grammar_element_pos> new_stack;
 
+    // grammar->flush_pending_alternatives_exploration(chr);
+
     for (const auto & stack : stacks) {
         if (stack.empty()) {
             continue;
         }
 
-        auto match = llama_grammar_match_char(rules, stack.back(), chr);
+        // const auto & pos = stack.back();
+        // if (pos.alternative < 0) {
+        //     // Let's choose which alternatives we go for
+        // } else {
+
+
+        auto match = llama_grammar_match_char(grammar->rules, stack.back(), chr);
         if (match.first) {
             const llama_grammar_element_pos & pos = match.second;
 
@@ -11905,10 +11944,10 @@ static void llama_grammar_accept(
             // new_stack.clear();
             // new_stack.assign(stack.begin(), stack.end() - 1);
             std::vector<const llama_grammar_element_pos> new_stack(stack.begin(), stack.end() - 1);
-            if (!llama_grammar_is_end_of_sequence(rules, pos)) {
+            if (!llama_grammar_is_end_of_sequence(grammar->rules, pos)) {
                 new_stack.push_back(pos);
             }
-            llama_grammar_advance_stack(rules, new_stack, new_stacks);
+            llama_grammar_advance_stack(grammar, new_stack, new_stacks);
         }
     }
 
@@ -11916,12 +11955,14 @@ static void llama_grammar_accept(
 }
 
 static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates(
-        const std::vector<llama_grammar_rule>                           & rules,
+        const struct llama_grammar                                      * grammar,
+        // const std::vector<llama_grammar_rule>                           & rules,
         const std::vector<std::vector<const llama_grammar_element_pos>> & stacks,
         const std::vector<llama_grammar_candidate>                      & candidates);
 
 static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates_for_stack(
-        const std::vector<llama_grammar_rule>                 & rules,
+        const struct llama_grammar                            * grammar,
+        // const std::vector<llama_grammar_rule>                 & rules,
         const std::vector<const llama_grammar_element_pos>    & stack,
         const std::vector<llama_grammar_candidate>            & candidates) {
 
@@ -11947,27 +11988,27 @@ static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates_for_
             // reached end of full codepoints in token, reject iff it ended in a partial sequence
             // that cannot satisfy this position in grammar
             if (tok.partial_utf8.n_remain != 0 &&
-                    !llama_grammar_match_partial_char(rules, stack_pos, tok.partial_utf8)) {
+                    !llama_grammar_match_partial_char(grammar->rules, stack_pos, tok.partial_utf8)) {
                 rejects.push_back(tok);
             }
-        } else if (llama_grammar_match_char(rules, stack_pos, *tok.code_points).first) {
+        } else if (llama_grammar_match_char(grammar->rules, stack_pos, *tok.code_points).first) {
             next_candidates.push_back({ tok.index, tok.code_points + 1, tok.partial_utf8 });
         } else {
             rejects.push_back(tok);
         }
     }
 
-    const auto & stack_pos_after = llama_grammar_match_char(rules, stack_pos, 0).second;
+    const auto & stack_pos_after = llama_grammar_match_char(grammar->rules, stack_pos, 0).second;
 
     // update top of stack to next element, if any
     std::vector<const llama_grammar_element_pos> stack_after(stack.begin(), stack.end() - 1);
-    if (!llama_grammar_is_end_of_sequence(rules, stack_pos_after)) {
+    if (!llama_grammar_is_end_of_sequence(grammar->rules, stack_pos_after)) {
         stack_after.push_back(stack_pos_after);
     }
     std::vector<std::vector<const llama_grammar_element_pos>> next_stacks;
-    llama_grammar_advance_stack(rules, stack_after, next_stacks);
+    llama_grammar_advance_stack(grammar, stack_after, next_stacks);
 
-    auto next_rejects = llama_grammar_reject_candidates(rules, next_stacks, next_candidates);
+    auto next_rejects = llama_grammar_reject_candidates(grammar, next_stacks, next_candidates);
     for (const auto & tok : next_rejects) {
         rejects.push_back({ tok.index, tok.code_points - 1, tok.partial_utf8 });
     }
@@ -11976,19 +12017,20 @@ static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates_for_
 }
 
 static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates(
-        const std::vector<llama_grammar_rule>                           & rules,
+        const struct llama_grammar                                      * grammar,
+        // const std::vector<llama_grammar_rule>                           & rules,
         const std::vector<std::vector<const llama_grammar_element_pos>> & stacks,
         const std::vector<llama_grammar_candidate>                      & candidates) {
-    GGML_ASSERT(!stacks.empty()); // REVIEW
+    GGML_ASSERT(!grammar->stacks.empty()); // REVIEW
 
     if (candidates.empty()) {
         return std::vector<llama_grammar_candidate>();
     }
 
-    auto rejects = llama_grammar_reject_candidates_for_stack(rules, stacks.front(), candidates);
+    auto rejects = llama_grammar_reject_candidates_for_stack(grammar, stacks.front(), candidates);
 
     for (size_t i = 1, size = stacks.size(); i < size; ++i) {
-        rejects = llama_grammar_reject_candidates_for_stack(rules, stacks[i], rejects);
+        rejects = llama_grammar_reject_candidates_for_stack(grammar, stacks[i], rejects);
     }
     return rejects;
 }
@@ -12038,7 +12080,7 @@ struct llama_grammar * llama_grammar_init(
         visited[i_rule].resize(vec_rules[i_rule].size());
     }
 
-    std::function<void(size_t, size_t)> get_head_charset = [&](size_t rule_id, size_t alternative) {
+    std::function<void(size_t, int)> get_head_charset = [&](size_t rule_id, int alternative) {
         if (rule_id >= n_rules || alternative >= vec_rules[rule_id].size()) {
             throw std::runtime_error("Invalid rule_id or alternative");
         }
@@ -12136,20 +12178,23 @@ struct llama_grammar * llama_grammar_init(
         printf("\n");
     }
 
+    auto alternatives_pending = true;
+    auto * grammar = new llama_grammar{ start_rule_index, alternatives_pending, std::move(vec_rules), std::move(alternative_head_sets), {}, {} };
+
     // loop over alternates of start rule to build initial stacks
-    std::vector<std::vector<const llama_grammar_element_pos>> stacks;
-    const auto & start_rule = vec_rules[start_rule_index];
-    for (size_t i_alt = 0, n_alt = start_rule.size(); i_alt < n_alt; ++i_alt) {
+    // std::vector<std::vector<const llama_grammar_element_pos>> stacks;
+    const auto & start_rule = grammar->rules[start_rule_index];
+    for (int i_alt = 0, n_alt = start_rule.size(); i_alt < n_alt; ++i_alt) {
         std::vector<const llama_grammar_element_pos> stack;
         llama_grammar_element_pos pos { start_rule_index, i_alt, 0 };
-        if (!llama_grammar_is_end_of_sequence(vec_rules, pos)) {
+        if (!llama_grammar_is_end_of_sequence(grammar->rules, pos)) {
             // if alternate is nonempty, add to stack
             stack.push_back(pos);
         }
-        llama_grammar_advance_stack(vec_rules, stack, stacks);
+        llama_grammar_advance_stack(grammar, stack, grammar->stacks);
     }
 
-    return new llama_grammar{ std::move(vec_rules), std::move(alternative_head_sets), std::move(stacks), {} };
+    return grammar;
 }
 
 void llama_grammar_free(struct llama_grammar * grammar) {
@@ -12696,7 +12741,7 @@ void llama_sample_grammar(struct llama_context * ctx, llama_token_data_array * c
     }
     // printf("total: %d, had_remaining_partial: %d\n", total, had_remaining_partial);
 
-    const auto rejects = llama_grammar_reject_candidates(grammar->rules, grammar->stacks, ctx->candidates_grammar);
+    const auto rejects = llama_grammar_reject_candidates(grammar, grammar->stacks, ctx->candidates_grammar);
     for (const auto & reject : rejects) {
         candidates->data[reject.index].logit = -INFINITY;
     }
@@ -12891,7 +12936,7 @@ void llama_grammar_accept_token(struct llama_context * ctx, struct llama_grammar
     const auto & code_points = decoded.first;
     std::vector<std::vector<const llama_grammar_element_pos>> tmp_new_stacks;
     for (auto it = code_points.begin(), end = code_points.end() - 1; it != end; ++it) {
-        llama_grammar_accept(grammar->rules, grammar->stacks, *it, tmp_new_stacks);
+        llama_grammar_accept(grammar, grammar->stacks, *it, tmp_new_stacks);
         tmp_new_stacks.swap(grammar->stacks);
     }
     grammar->partial_utf8 = decoded.second;
