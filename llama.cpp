@@ -11700,6 +11700,31 @@ static bool llama_grammar_is_end_of_sequence(
     return p.position >= seq.size();
 }
 
+static void llama_grammar_extract_charset(
+        const std::vector<llama_grammar_rule> & rules,
+        const llama_grammar_element_pos       & p,
+        llama_grammar_char_ranges    & cs) {
+    const llama_grammar_sequence & seq = rules[p.rule_id][p.alternative];
+    // const llama_grammar_element   & e   = seq[p.position];
+
+    size_t position = p.position;    
+    cs.is_positive = seq[position].type == LLAMA_GRETYPE_CHAR;
+
+    GGML_ASSERT(cs.is_positive || seq[position].type == LLAMA_GRETYPE_CHAR_NOT); // NOLINT
+
+    do {
+        if (seq[position + 1].type == LLAMA_GRETYPE_CHAR_RNG_UPPER) {
+            // inclusive range, e.g. [a-z]
+            cs.ranges.insert(std::make_pair(seq[position].value, seq[position + 1].value));
+            position += 2;
+        } else {
+            // exact char match, e.g. [a] or "a"
+            cs.ranges.insert(std::make_pair(seq[position].value, seq[position].value));
+            position += 1;
+        }
+    } while (seq[position].type == LLAMA_GRETYPE_CHAR_ALT);
+}
+
 // returns true iff chr satisfies the char range at pos (regular or inverse range)
 // asserts that pos is pointing to a char range element
 static std::pair<bool, const llama_grammar_element_pos> llama_grammar_match_char(
@@ -11856,7 +11881,7 @@ static void llama_grammar_advance_stack(
 // be positioned at a character range (see `llama_grammar_advance_stack`), and
 // produces the N possible stacks if the given char is accepted at those
 // positions
-void llama_grammar_accept(
+static void llama_grammar_accept(
         const std::vector<llama_grammar_rule>                           & rules,
         const std::vector<std::vector<const llama_grammar_element_pos>> & stacks,
         const uint32_t                                                    chr,
@@ -11983,12 +12008,12 @@ struct llama_grammar * llama_grammar_init(
     // the C++ is a vector of alternates, each alternate is a sequence (vector) of elements.
     std::vector<llama_grammar_rule> vec_rules;
     vec_rules.reserve(n_rules);
-    for (int i = 0; i < n_rules; i++) {
+    for (size_t i_rule = 0; i_rule < n_rules; i_rule++) {
         llama_grammar_rule rule;
         llama_grammar_sequence current_seq;
-        for (pos = rules[i]; pos->type != LLAMA_GRETYPE_END; pos++) {
+        for (pos = rules[i_rule]; pos->type != LLAMA_GRETYPE_END; pos++) {
             if (pos->type == LLAMA_GRETYPE_ALT) {
-                if (pos != rules[i]) {
+                if (pos != rules[i_rule]) {
                     rule.push_back(current_seq);
                     current_seq.clear();
                 }
@@ -11996,13 +12021,69 @@ struct llama_grammar * llama_grammar_init(
                 current_seq.push_back(*pos);
             }
         }
-        if (!current_seq.empty() || (pos != rules[i] && (pos - 1)->type == LLAMA_GRETYPE_ALT)) {
+        if (!current_seq.empty() || (pos != rules[i_rule] && (pos - 1)->type == LLAMA_GRETYPE_ALT)) {
             rule.push_back(current_seq);
             current_seq.clear();
         }
         vec_rules.push_back(rule);
+    }
 
-        printf("<rule %u> := ", i);
+    std::vector<std::vector<llama_grammar_char_ranges>> alternative_head_sets;
+    std::vector<std::vector<bool>> visited;
+
+    alternative_head_sets.resize(n_rules);
+    visited.resize(n_rules);
+    for (size_t i_rule = 0; i_rule < n_rules; i_rule++) {
+        alternative_head_sets[i_rule].resize(vec_rules[i_rule].size());
+        visited[i_rule].resize(vec_rules[i_rule].size());
+    }
+
+    std::function<void(size_t, size_t)> get_head_charset = [&](size_t rule_id, size_t alternative) {
+        if (rule_id >= n_rules || alternative >= vec_rules[rule_id].size()) {
+            throw std::runtime_error("Invalid rule_id or alternative");
+        }
+        auto & head_charset = alternative_head_sets[rule_id][alternative];
+
+        if (!visited[rule_id][alternative]) {
+            visited[rule_id][alternative] = true;
+
+            auto & seq = vec_rules[rule_id][alternative];
+            
+            if (!seq.empty()) {
+                const auto & elem = seq[0];
+                switch (elem.type) {
+                    case LLAMA_GRETYPE_RULE_REF: {
+                        auto & ref_rule = vec_rules[elem.value];
+                        for (size_t i_alt = 0, n_alt = ref_rule.size(); i_alt < n_alt; ++i_alt) {
+                            get_head_charset(elem.value, i_alt);
+                            const auto & cs = alternative_head_sets[elem.value][i_alt];
+                            head_charset += cs;
+                        }
+                        break;
+                    }
+                    case LLAMA_GRETYPE_CHAR:
+                    case LLAMA_GRETYPE_CHAR_NOT: {
+                        llama_grammar_extract_charset(vec_rules, { rule_id, alternative, 0 }, head_charset);
+                        break;
+                    }
+                    default:
+                        GGML_ASSERT(false);
+                }
+            }
+        }
+        // return head_charset;
+    };
+
+    for (size_t i_rule = 0; i_rule < n_rules; i_rule++) {
+        for (size_t i_alt = 0, n_alt = vec_rules[i_rule].size(); i_alt < n_alt; ++i_alt) {
+            get_head_charset(i_rule, i_alt);
+        }
+    }
+
+    for (size_t i_rule = 0; i_rule < n_rules; i_rule++) {
+        llama_grammar_rule & rule = vec_rules[i_rule];
+
+        printf("<rule %zu> := ", i_rule);
         for (size_t i_seq = 0, n_seq = rule.size(); i_seq < n_seq; ++i_seq) {
             const auto & seq = rule[i_seq];
             if (i_seq > 0) {
@@ -12035,9 +12116,25 @@ struct llama_grammar * llama_grammar_init(
             }
         }
         printf("\n");
-    }
 
-    std::vector<std::vector<std::vector<llama_grammar_element_head_charset>>> head_charsets;
+        printf("  head sets: ");
+        for (size_t i_seq = 0, n_seq = rule.size(); i_seq < n_seq; ++i_seq) {
+            const auto & hs = alternative_head_sets[i_rule][i_seq];
+            if (i_seq > 0) {
+                printf(" | ");
+            }
+            printf("[%s", hs.is_positive ? "" : "^");
+            for (const auto & range : hs.ranges) {
+                if (range.first == range.second) {
+                    printf("%c", range.first);
+                } else {
+                    printf("%c-%c", range.first, range.second);
+                }
+            }
+            printf("]");
+        }
+        printf("\n");
+    }
 
     // loop over alternates of start rule to build initial stacks
     std::vector<std::vector<const llama_grammar_element_pos>> stacks;
@@ -12052,7 +12149,7 @@ struct llama_grammar * llama_grammar_init(
         llama_grammar_advance_stack(vec_rules, stack, stacks);
     }
 
-    return new llama_grammar{ std::move(vec_rules), std::move(head_charsets), std::move(stacks), {} };
+    return new llama_grammar{ std::move(vec_rules), std::move(alternative_head_sets), std::move(stacks), {} };
 }
 
 void llama_grammar_free(struct llama_grammar * grammar) {

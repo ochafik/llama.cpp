@@ -1093,14 +1093,30 @@ struct llama_grammar_element_pos {
     size_t position;
 };
 
-struct llama_grammar_element_head_charset {
-    std::set<uint32_t> charset;
+struct llama_grammar_char_ranges {
+    bool is_positive;
+    std::set<std::pair<uint32_t, uint32_t>> ranges;
+
+    llama_grammar_char_ranges() : is_positive(true) {}
+
+    bool empty() const {
+        return ranges.empty();
+    }
+    void operator+=(const llama_grammar_char_ranges & other) {
+        if (!empty() && !other.empty() && is_positive != other.is_positive) {
+            throw std::runtime_error("Cannot combine positive and negative charsets");
+        }
+
+        for (const auto & range : other.ranges) {
+            ranges.insert(range);
+        }
+    }
 };
 
 struct llama_grammar {
     const std::vector<llama_grammar_rule>   rules;
 
-    std::vector<std::vector<std::vector<llama_grammar_element_head_charset>>> head_charsets;
+    std::vector<std::vector<llama_grammar_char_ranges>> alternative_head_sets;
 
     std::vector<std::vector<const llama_grammar_element_pos>> stacks;
 
