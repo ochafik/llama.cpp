@@ -1077,9 +1077,24 @@ struct llama_partial_utf8 {
     int      n_remain; // num bytes remaining; -1 indicates invalid sequence
 };
 
+
+typedef std::vector<llama_grammar_element> llama_grammar_sequence;
+
+// Each rule can have alternative sequences
+typedef std::vector<llama_grammar_sequence> llama_grammar_rule;
+
+struct llama_grammar_element_pos {
+    // Index of the rule in the grammar
+    size_t rule_id;
+    // Index of the alternative in the rule
+    size_t alternative;
+    // Position in sequence
+    size_t position;
+};
+
 struct llama_grammar {
-    const std::vector<std::vector<llama_grammar_element>>   rules;
-    std::vector<std::vector<const llama_grammar_element *>> stacks;
+    const std::vector<llama_grammar_rule>   rules;
+    std::vector<std::vector<const llama_grammar_element_pos>> stacks;
 
     // buffer for partially generated UTF-8 sequence from accepted tokens
     llama_partial_utf8                                      partial_utf8;
