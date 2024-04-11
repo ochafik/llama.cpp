@@ -1069,6 +1069,7 @@ extern "C" {
 
 #include <vector>
 #include <string>
+#include <set>
 
 struct ggml_tensor;
 
@@ -1092,8 +1093,15 @@ struct llama_grammar_element_pos {
     size_t position;
 };
 
+struct llama_grammar_element_head_charset {
+    std::set<uint32_t> charset;
+};
+
 struct llama_grammar {
     const std::vector<llama_grammar_rule>   rules;
+
+    std::vector<std::vector<std::vector<llama_grammar_element_head_charset>>> head_charsets;
+
     std::vector<std::vector<const llama_grammar_element_pos>> stacks;
 
     // buffer for partially generated UTF-8 sequence from accepted tokens

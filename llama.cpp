@@ -11983,7 +11983,7 @@ struct llama_grammar * llama_grammar_init(
     // the C++ is a vector of alternates, each alternate is a sequence (vector) of elements.
     std::vector<llama_grammar_rule> vec_rules;
     vec_rules.reserve(n_rules);
-    for (size_t i = 0; i < n_rules; i++) {
+    for (int i = 0; i < n_rules; i++) {
         llama_grammar_rule rule;
         llama_grammar_sequence current_seq;
         for (pos = rules[i]; pos->type != LLAMA_GRETYPE_END; pos++) {
@@ -12037,12 +12037,12 @@ struct llama_grammar * llama_grammar_init(
         printf("\n");
     }
 
+    std::vector<std::vector<std::vector<llama_grammar_element_head_charset>>> head_charsets;
+
     // loop over alternates of start rule to build initial stacks
     std::vector<std::vector<const llama_grammar_element_pos>> stacks;
     const auto & start_rule = vec_rules[start_rule_index];
     for (size_t i_alt = 0, n_alt = start_rule.size(); i_alt < n_alt; ++i_alt) {
-        const auto & seq = start_rule[i_alt];
-        
         std::vector<const llama_grammar_element_pos> stack;
         llama_grammar_element_pos pos { start_rule_index, i_alt, 0 };
         if (!llama_grammar_is_end_of_sequence(vec_rules, pos)) {
@@ -12052,7 +12052,7 @@ struct llama_grammar * llama_grammar_init(
         llama_grammar_advance_stack(vec_rules, stack, stacks);
     }
 
-    return new llama_grammar{ std::move(vec_rules), std::move(stacks), {} };
+    return new llama_grammar{ std::move(vec_rules), std::move(head_charsets), std::move(stacks), {} };
 }
 
 void llama_grammar_free(struct llama_grammar * grammar) {
