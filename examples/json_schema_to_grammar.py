@@ -22,13 +22,21 @@ def _build_repetition(item_rule, min_items, max_items, separator_rule=None, item
             result = (f' {separator_rule} ' if separator_rule else ' ').join([item_rule] * min_items)
 
     def opt_repetitions(up_to_n, prefix_with_sep=False):
+        '''
+            - n=4, no sep:             '(a (a (a (a)?)?)?)?'
+            - n=4, sep=',', prefix:    '("," a ("," a ("," a ("," a)?)?)?)?'
+            - n=4, sep=',', no prefix: '(a ("," a ("," a ("," a)?)?)?)?'
+        '''
+
+        content = f'{separator_rule} {item_rule}' if prefix_with_sep and separator_rule else item_rule
         if up_to_n == 0:
             return ''
-
-        res = separator_rule + ' ' + item_rule if separator_rule and prefix_with_sep else item_rule
-        if up_to_n > 1:
-            res += ' ' + opt_repetitions(up_to_n - 1, prefix_with_sep=True)
-        return f'({res})?'
+        elif up_to_n == 1:
+            return f'({content})?'
+        elif separator_rule and not prefix_with_sep:
+            return f'({content} {opt_repetitions(up_to_n - 1, prefix_with_sep=True)})?'
+        else:
+            return (f'({content} ' * up_to_n).rstrip() + (')?' * up_to_n)
 
     if min_items > 0 and max_items != min_items:
         result += ' '
@@ -83,7 +91,7 @@ STRING_FORMAT_RULES = {
 }
 
 DOTALL = '[\\U00000000-\\U0010FFFF]'
-DOT = '[\\U00000000-\\x09\\x0B\\x0C\\x0E-\\U0010FFFF]'
+DOT = '[^\\x0A\\x0D]'
 
 RESERVED_NAMES = set(["root", "dot", *PRIMITIVE_RULES.keys(), *STRING_FORMAT_RULES.keys()])
 

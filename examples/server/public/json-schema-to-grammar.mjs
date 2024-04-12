@@ -24,14 +24,16 @@ function _buildRepetition(itemRule, minItems, maxItems, opts={}) {
   }
 
   const optRepetitions = (upToN, prefixWithSep=false) => {
+    const content = separatorRule !== '' && prefixWithSep ? `${separatorRule} ${itemRule}` : itemRule;
     if (upToN === 0) {
       return '';
+    } else if (upToN === 1) {
+      return `(${content})?`;
+    } else if (separatorRule !== '' && !prefixWithSep) {
+      return `(${content} ${optRepetitions(upToN - 1, true)})?`;
+    } else {
+      return Array.from({ length: upToN }, () => `(${content}`).join(' ').trim() + Array.from({ length: upToN }, () => ')?').join('');
     }
-    let res = separatorRule !== '' && prefixWithSep ? separatorRule + ' ' + itemRule : itemRule;
-    if (upToN > 1) {
-      res += ' ' + optRepetitions(upToN - 1, true);
-    }
-    return `(${res})?`;
   };
 
   if (minItems > 0 && maxItems !== minItems) {
@@ -218,7 +220,7 @@ export class SchemaConverter {
         rule = '[\\U00000000-\\U0010FFFF]';
       } else {
         // Accept any character... except \n and \r line break chars (\x0A and \xOD)
-        rule = '[\\U00000000-\\x09\\x0B\\x0C\\x0E-\\U0010FFFF]';
+        rule = '[^\\x0A\\x0D]';
       }
       return this._addRule('dot', rule);
     };
