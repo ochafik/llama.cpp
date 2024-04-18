@@ -167,8 +167,6 @@ namespace grammar_parser {
             uint32_t content_rule_id = 0;
             if (last_sym_start == out_elements.size() - 1 && out_elements[last_sym_start].type == LLAMA_GRETYPE_RULE_REF) {
                 // The repeated content is already a rule ref, no need to copy it
-                out_elements.push_back({LLAMA_GRETYPE_REPEAT_MIN, min_times});
-                out_elements.push_back({LLAMA_GRETYPE_REPEAT_MAX, max_times < 0 ? std::numeric_limits<uint32_t>::max() : max_times - min_times});
             } else {
                 uint32_t sub_rule_id = generate_symbol_id(state, rule_name);
                 std::vector<llama_grammar_element> sub_rule(out_elements.begin() + last_sym_start, out_elements.end());
@@ -179,6 +177,8 @@ namespace grammar_parser {
                 out_elements.resize(last_sym_start);
                 out_elements.push_back({LLAMA_GRETYPE_RULE_REF, sub_rule_id});
             }
+            out_elements.push_back({LLAMA_GRETYPE_REPEAT_MIN, min_times});
+            out_elements.push_back({LLAMA_GRETYPE_REPEAT_MAX, max_times < 0 ? std::numeric_limits<uint32_t>::max() : max_times});
         };
 
         while (*pos) {
