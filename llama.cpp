@@ -12276,15 +12276,15 @@ struct llama_grammar * llama_grammar_init(
     std::vector<llama_grammar_stack> stacks;
     pos = vec_rules[start_rule_index].data();
 
-    llama_grammar_stack stack {{pos, 0, 0}};
-    // std::vector<const llama_grammar_element> fake {
-    //     {LLAMA_GRETYPE_RULE_REF, static_cast<uint32_t>(start_rule_index)},
-    //     {LLAMA_GRETYPE_END, 0},
-    // };
-    // // llama_grammar_stack stack {{pos, 0, 0}};
-    // llama_grammar_stack stack {
-    //     {fake.data(), 0, 0}
-    // };
+    // llama_grammar_stack stack {{pos, 0, 0}};
+    std::vector<const llama_grammar_element> fake {
+        {LLAMA_GRETYPE_RULE_REF, static_cast<uint32_t>(start_rule_index)},
+        {LLAMA_GRETYPE_END, 0},
+    };
+    // llama_grammar_stack stack {{pos, 0, 0}};
+    llama_grammar_stack stack {
+        {fake.data(), 0, 0}
+    };
     llama_grammar_advance_stack(vec_rules, stack, stacks);
 
     // do {

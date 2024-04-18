@@ -44,8 +44,6 @@ static bool parses(const std::string & grammar_str, const std::string & input) {
         }
     }
 
-    bool completed_grammar = false;
-
     for (const auto & stack : grammar->stacks) {
         if (stack.empty()) {
             llama_grammar_free(grammar);
@@ -91,6 +89,26 @@ static void test_simple_grammar() {
         "ac",
         "bc",
     });
+    // test_grammar(R"""(
+    //     root ::= "a"*
+    // )""", {
+    //     "aa",
+    //     "a",
+    //     ""
+    // }, {
+    //     "b",
+    // });
+    // test_grammar(R"""(
+    //     root ::= "a"+
+    // )""", {
+    //     "aaaa",
+    //     "a",
+    // }, {
+    //     "",
+    //     "b",
+    //     "ba",
+    //     "ab",
+    // });
     // test_grammar(R"""(
     //     root ::= expr
     //     expr ::= term ("+" term)*
