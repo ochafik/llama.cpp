@@ -319,6 +319,10 @@ extern "C" {
         // modifies a preceding LLAMA_GRETYPE_CHAR or
         // LLAMA_GRETYPE_CHAR_RNG_UPPER to add an alternate char to match ([ab], [a-zA])
         LLAMA_GRETYPE_CHAR_ALT       = 6,
+
+        LLAMA_GRETYPE_REPEAT_MIN     = 7,
+
+        LLAMA_GRETYPE_REPEAT_MAX     = 8,
     };
 
     typedef struct llama_grammar_element {
@@ -1079,9 +1083,22 @@ struct llama_partial_utf8 {
     int      n_remain; // num bytes remaining; -1 indicates invalid sequence
 };
 
+struct llama_grammar_stack_element {
+    const llama_grammar_element * elem;
+    size_t required_repetitions;
+    size_t optional_repetitions;
+    bool operator==(const llama_grammar_stack_element & other) const {
+        return elem == other.elem 
+            && required_repetitions == other.required_repetitions 
+            && optional_repetitions == other.optional_repetitions;
+    }
+};
+
+typedef std::vector<llama_grammar_stack_element> llama_grammar_stack;
+
 struct llama_grammar {
     const std::vector<std::vector<llama_grammar_element>>   rules;
-    std::vector<std::vector<const llama_grammar_element *>> stacks;
+    std::vector<llama_grammar_stack> stacks;
 
     // buffer for partially generated UTF-8 sequence from accepted tokens
     llama_partial_utf8                                      partial_utf8;
@@ -1099,9 +1116,9 @@ const std::vector<std::pair<std::string, struct ggml_tensor *>> & llama_internal
 
 void llama_grammar_accept(
         const std::vector<std::vector<llama_grammar_element>>         & rules,
-        const std::vector<std::vector<const llama_grammar_element *>> & stacks,
+        const std::vector<llama_grammar_stack> & stacks,
         const uint32_t                                                  chr,
-        std::vector<std::vector<const llama_grammar_element *>>       & new_stacks);
+        std::vector<llama_grammar_stack>       & new_stacks);
 
 std::pair<std::vector<uint32_t>, llama_partial_utf8> decode_utf8(
         const std::string & src,

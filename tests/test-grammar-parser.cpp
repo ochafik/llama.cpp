@@ -16,6 +16,8 @@ static const char * type_str(llama_gretype type) {
         case LLAMA_GRETYPE_RULE_REF: return "LLAMA_GRETYPE_RULE_REF";
         case LLAMA_GRETYPE_ALT: return "LLAMA_GRETYPE_ALT";
         case LLAMA_GRETYPE_END: return "LLAMA_GRETYPE_END";
+        case LLAMA_GRETYPE_REPEAT_MIN: return "LLAMA_GRETYPE_REPEAT_MIN";
+        case LLAMA_GRETYPE_REPEAT_MAX: return "LLAMA_GRETYPE_REPEAT_MAX";
         default: return "?";
     }
 }
@@ -179,23 +181,14 @@ int main()
     )""", {
         {"a", 1},
         {"root", 0},
-        {"root_2", 2},
-        {"root_star_3", 3},
     }, {
         // root (index 0)
-        {LLAMA_GRETYPE_RULE_REF, /* root_2 */ 2},
+        {LLAMA_GRETYPE_RULE_REF, /* a */ 1},
+        {LLAMA_GRETYPE_REPEAT_MIN, 1},
+        {LLAMA_GRETYPE_REPEAT_MAX, 4294967295},
         {LLAMA_GRETYPE_END, 0},
         // a (index 1)
         {LLAMA_GRETYPE_CHAR, 'a'},
-        {LLAMA_GRETYPE_END, 0},
-        // root_2 (index 2)
-        {LLAMA_GRETYPE_RULE_REF, /* a */ 1},
-        {LLAMA_GRETYPE_RULE_REF, /* root_star_3 */ 3},
-        {LLAMA_GRETYPE_END, 0},
-        // root_star_3 (index 3)
-        {LLAMA_GRETYPE_RULE_REF, /* a */ 1},
-        {LLAMA_GRETYPE_RULE_REF, /* root_star_3 */ 3},
-        {LLAMA_GRETYPE_ALT, 0},
         {LLAMA_GRETYPE_END, 0},
     });
 
@@ -203,24 +196,13 @@ int main()
         root  ::= "a"+
     )""", {
         {"root", 0},
-        {"root_2", 2},
-        {"root_copy_1", 1},
-        {"root_star_3", 3},
+        {"root_1", 1},
     }, {
         // root (index 0)
-        {LLAMA_GRETYPE_RULE_REF, /* root_2 */ 2},
+        {LLAMA_GRETYPE_RULE_REF, /* root_1 */ 1},
         {LLAMA_GRETYPE_END, 0},
-        // root_copy_1 (index 1)
+        // root_1 (index 1)
         {LLAMA_GRETYPE_CHAR, 'a'},
-        {LLAMA_GRETYPE_END, 0},
-        // root_2 (index 2)
-        {LLAMA_GRETYPE_RULE_REF, /* root_copy_1 */ 1},
-        {LLAMA_GRETYPE_RULE_REF, /* root_star_3 */ 3},
-        {LLAMA_GRETYPE_END, 0},
-        // root_star_3 (index 3)
-        {LLAMA_GRETYPE_RULE_REF, /* root_copy_1 */ 1},
-        {LLAMA_GRETYPE_RULE_REF, /* root_star_3 */ 3},
-        {LLAMA_GRETYPE_ALT, 0},
         {LLAMA_GRETYPE_END, 0},
     });
 
@@ -230,21 +212,14 @@ int main()
     )""", {
         {"a", 1},
         {"root", 0},
-        {"root_1_3", 3},
-        {"root_2", 2},
     }, {
         // root (index 0)
-        {LLAMA_GRETYPE_RULE_REF, /* root_2 */ 2},
+        {LLAMA_GRETYPE_RULE_REF, /* a */ 1},
+        {LLAMA_GRETYPE_REPEAT_MIN, 0},
+        {LLAMA_GRETYPE_REPEAT_MAX, 1},
         {LLAMA_GRETYPE_END, 0},
         // a (index 1)
         {LLAMA_GRETYPE_CHAR, 'a'},
-        {LLAMA_GRETYPE_END, 0},
-        // root_2 (index 2)
-        {LLAMA_GRETYPE_RULE_REF, /* root_1_3 */ 3},
-        {LLAMA_GRETYPE_END, 0},
-        // root_1_3 (index 3)
-        {LLAMA_GRETYPE_RULE_REF, /* a */ 1},
-        {LLAMA_GRETYPE_ALT, 0},
         {LLAMA_GRETYPE_END, 0},
     });
 
@@ -252,22 +227,13 @@ int main()
         root  ::= "a"?
     )""", {
         {"root", 0},
-        {"root_1_3", 3},
-        {"root_2", 2},
-        {"root_copy_1", 1},
+        {"root_1", 1},
     }, {
         // root (index 0)
-        {LLAMA_GRETYPE_RULE_REF, /* root_2 */ 2},
+        {LLAMA_GRETYPE_RULE_REF, /* root_1 */ 1},
         {LLAMA_GRETYPE_END, 0},
-        // root_copy_1 (index 1)
+        // root_1 (index 1)
         {LLAMA_GRETYPE_CHAR, 'a'},
-        {LLAMA_GRETYPE_END, 0},
-        // root_2 (index 2)
-        {LLAMA_GRETYPE_RULE_REF, /* root_1_3 */ 3},
-        {LLAMA_GRETYPE_END, 0},
-        // root_1_3 (index 3)
-        {LLAMA_GRETYPE_RULE_REF, /* root_copy_1 */ 1},
-        {LLAMA_GRETYPE_ALT, 0},
         {LLAMA_GRETYPE_END, 0},
     });
 
@@ -277,22 +243,14 @@ int main()
     )""", {
         {"a", 1},
         {"root", 0},
-        {"root_2", 2},
-        {"root_star_3", 3},
     }, {
         // root (index 0)
-        {LLAMA_GRETYPE_RULE_REF, /* root_2 */ 2},
+        {LLAMA_GRETYPE_RULE_REF, /* a */ 1},
+        {LLAMA_GRETYPE_REPEAT_MIN, 0},
+        {LLAMA_GRETYPE_REPEAT_MAX, 4294967295},
         {LLAMA_GRETYPE_END, 0},
         // a (index 1)
         {LLAMA_GRETYPE_CHAR, 'a'},
-        {LLAMA_GRETYPE_END, 0},
-        // root_2 (index 2)
-        {LLAMA_GRETYPE_RULE_REF, /* root_star_3 */ 3},
-        {LLAMA_GRETYPE_END, 0},
-        // root_star_3 (index 3)
-        {LLAMA_GRETYPE_RULE_REF, /* a */ 1},
-        {LLAMA_GRETYPE_RULE_REF, /* root_star_3 */ 3},
-        {LLAMA_GRETYPE_ALT, 0},
         {LLAMA_GRETYPE_END, 0},
     });
 
@@ -300,23 +258,13 @@ int main()
         root  ::= "a"*
     )""", {
         {"root", 0},
-        {"root_2", 2},
-        {"root_copy_1", 1},
-        {"root_star_3", 3},
+        {"root_1", 1},
     }, {
         // root (index 0)
-        {LLAMA_GRETYPE_RULE_REF, /* root_2 */ 2},
+        {LLAMA_GRETYPE_RULE_REF, /* root_1 */ 1},
         {LLAMA_GRETYPE_END, 0},
-        // root_copy_1 (index 1)
+        // root_1 (index 1)
         {LLAMA_GRETYPE_CHAR, 'a'},
-        {LLAMA_GRETYPE_END, 0},
-        // root_2 (index 2)
-        {LLAMA_GRETYPE_RULE_REF, /* root_star_3 */ 3},
-        {LLAMA_GRETYPE_END, 0},
-        // root_star_3 (index 3)
-        {LLAMA_GRETYPE_RULE_REF, /* root_copy_1 */ 1},
-        {LLAMA_GRETYPE_RULE_REF, /* root_star_3 */ 3},
-        {LLAMA_GRETYPE_ALT, 0},
         {LLAMA_GRETYPE_END, 0},
     });
 
@@ -324,18 +272,13 @@ int main()
         root  ::= "a"{2}
     )""", {
         {"root", 0},
-        {"root_2", 2},
-        {"root_copy_1", 1},
+        {"root_1", 1},
     }, {
         // root (index 0)
-        {LLAMA_GRETYPE_RULE_REF, /* root_2 */ 2},
+        {LLAMA_GRETYPE_RULE_REF, /* root_1 */ 1},
         {LLAMA_GRETYPE_END, 0},
-        // root_copy_1 (index 1)
+        // root_1 (index 1)
         {LLAMA_GRETYPE_CHAR, 'a'},
-        {LLAMA_GRETYPE_END, 0},
-        // root_2 (index 2)
-        {LLAMA_GRETYPE_RULE_REF, /* root_copy_1 */ 1},
-        {LLAMA_GRETYPE_RULE_REF, /* root_copy_1 */ 1},
         {LLAMA_GRETYPE_END, 0},
     });
 
@@ -343,25 +286,13 @@ int main()
         root  ::= "a"{2,}
     )""", {
         {"root", 0},
-        {"root_2", 2},
-        {"root_copy_1", 1},
-        {"root_star_3", 3},
+        {"root_1", 1},
     }, {
         // root (index 0)
-        {LLAMA_GRETYPE_RULE_REF, /* root_2 */ 2},
+        {LLAMA_GRETYPE_RULE_REF, /* root_1 */ 1},
         {LLAMA_GRETYPE_END, 0},
-        // root_copy_1 (index 1)
+        // root_1 (index 1)
         {LLAMA_GRETYPE_CHAR, 'a'},
-        {LLAMA_GRETYPE_END, 0},
-        // root_2 (index 2)
-        {LLAMA_GRETYPE_RULE_REF, /* root_copy_1 */ 1},
-        {LLAMA_GRETYPE_RULE_REF, /* root_copy_1 */ 1},
-        {LLAMA_GRETYPE_RULE_REF, /* root_star_3 */ 3},
-        {LLAMA_GRETYPE_END, 0},
-        // root_star_3 (index 3)
-        {LLAMA_GRETYPE_RULE_REF, /* root_copy_1 */ 1},
-        {LLAMA_GRETYPE_RULE_REF, /* root_star_3 */ 3},
-        {LLAMA_GRETYPE_ALT, 0},
         {LLAMA_GRETYPE_END, 0},
     });
 
@@ -369,20 +300,13 @@ int main()
         root  ::= "a"{ 4}
     )""", {
         {"root", 0},
-        {"root_2", 2},
-        {"root_copy_1", 1},
+        {"root_1", 1},
     }, {
         // root (index 0)
-        {LLAMA_GRETYPE_RULE_REF, /* root_2 */ 2},
+        {LLAMA_GRETYPE_RULE_REF, /* root_1 */ 1},
         {LLAMA_GRETYPE_END, 0},
-        // root_copy_1 (index 1)
+        // root_1 (index 1)
         {LLAMA_GRETYPE_CHAR, 'a'},
-        {LLAMA_GRETYPE_END, 0},
-        // root_2 (index 2)
-        {LLAMA_GRETYPE_RULE_REF, /* root_copy_1 */ 1},
-        {LLAMA_GRETYPE_RULE_REF, /* root_copy_1 */ 1},
-        {LLAMA_GRETYPE_RULE_REF, /* root_copy_1 */ 1},
-        {LLAMA_GRETYPE_RULE_REF, /* root_copy_1 */ 1},
         {LLAMA_GRETYPE_END, 0},
     });
 
@@ -390,30 +314,13 @@ int main()
         root  ::= "a"{2,4}
     )""", {
         {"root", 0},
-        {"root_1_3", 3},
-        {"root_2", 2},
-        {"root_2_4", 4},
-        {"root_copy_1", 1},
+        {"root_1", 1},
     }, {
         // root (index 0)
-        {LLAMA_GRETYPE_RULE_REF, /* root_2 */ 2},
+        {LLAMA_GRETYPE_RULE_REF, /* root_1 */ 1},
         {LLAMA_GRETYPE_END, 0},
-        // root_copy_1 (index 1)
+        // root_1 (index 1)
         {LLAMA_GRETYPE_CHAR, 'a'},
-        {LLAMA_GRETYPE_END, 0},
-        // root_2 (index 2)
-        {LLAMA_GRETYPE_RULE_REF, /* root_copy_1 */ 1},
-        {LLAMA_GRETYPE_RULE_REF, /* root_copy_1 */ 1},
-        {LLAMA_GRETYPE_RULE_REF, /* root_2_4 */ 4},
-        {LLAMA_GRETYPE_END, 0},
-        // root_1_3 (index 3)
-        {LLAMA_GRETYPE_RULE_REF, /* root_copy_1 */ 1},
-        {LLAMA_GRETYPE_ALT, 0},
-        {LLAMA_GRETYPE_END, 0},
-        // root_2_4 (index 4)
-        {LLAMA_GRETYPE_RULE_REF, /* root_copy_1 */ 1},
-        {LLAMA_GRETYPE_RULE_REF, /* root_1_3 */ 3},
-        {LLAMA_GRETYPE_ALT, 0},
         {LLAMA_GRETYPE_END, 0},
     });
 
@@ -423,20 +330,16 @@ int main()
         term  ::= [0-9]+
     )""", {
         {"expr", 2},
-        {"expr_6", 6},
-        {"expr_7", 7},
-        {"expr_star_8", 8},
+        {"expr_4", 4},
         {"root", 0},
         {"root_1", 1},
-        {"root_4", 4},
-        {"root_star_5", 5},
         {"term", 3},
-        {"term_10", 10},
-        {"term_copy_9", 9},
-        {"term_star_11", 11},
+        {"term_5", 5},
     }, {
         // root (index 0)
-        {LLAMA_GRETYPE_RULE_REF, /* root_4 */ 4},
+        {LLAMA_GRETYPE_RULE_REF, /* root_1 */ 1},
+        {LLAMA_GRETYPE_REPEAT_MIN, 1},
+        {LLAMA_GRETYPE_REPEAT_MAX, 4294967295},
         {LLAMA_GRETYPE_END, 0},
         // root_1 (index 1)
         {LLAMA_GRETYPE_RULE_REF, /* expr */ 2},
@@ -446,47 +349,23 @@ int main()
         {LLAMA_GRETYPE_END, 0},
         // expr (index 2)
         {LLAMA_GRETYPE_RULE_REF, /* term */ 3},
-        {LLAMA_GRETYPE_RULE_REF, /* expr_7 */ 7},
+        {LLAMA_GRETYPE_RULE_REF, /* expr_4 */ 4},
+        {LLAMA_GRETYPE_REPEAT_MIN, 0},
+        {LLAMA_GRETYPE_REPEAT_MAX, 4294967295},
         {LLAMA_GRETYPE_END, 0},
         // term (index 3)
-        {LLAMA_GRETYPE_RULE_REF, /* term_10 */ 10},
+        {LLAMA_GRETYPE_RULE_REF, /* term_5 */ 5},
         {LLAMA_GRETYPE_END, 0},
-        // root_4 (index 4)
-        {LLAMA_GRETYPE_RULE_REF, /* root_1 */ 1},
-        {LLAMA_GRETYPE_RULE_REF, /* root_star_5 */ 5},
-        {LLAMA_GRETYPE_END, 0},
-        // root_star_5 (index 5)
-        {LLAMA_GRETYPE_RULE_REF, /* root_1 */ 1},
-        {LLAMA_GRETYPE_RULE_REF, /* root_star_5 */ 5},
-        {LLAMA_GRETYPE_ALT, 0},
-        {LLAMA_GRETYPE_END, 0},
-        // expr_6 (index 6)
+        // expr_4 (index 4)
         {LLAMA_GRETYPE_CHAR, '-'},
         {LLAMA_GRETYPE_CHAR_ALT, '+'},
         {LLAMA_GRETYPE_CHAR_ALT, '*'},
         {LLAMA_GRETYPE_CHAR_ALT, '/'},
         {LLAMA_GRETYPE_RULE_REF, /* term */ 3},
         {LLAMA_GRETYPE_END, 0},
-        // expr_7 (index 7)
-        {LLAMA_GRETYPE_RULE_REF, /* expr_star_8 */ 8},
-        {LLAMA_GRETYPE_END, 0},
-        // expr_star_8 (index 8)
-        {LLAMA_GRETYPE_RULE_REF, /* expr_6 */ 6},
-        {LLAMA_GRETYPE_RULE_REF, /* expr_star_8 */ 8},
-        {LLAMA_GRETYPE_ALT, 0},
-        {LLAMA_GRETYPE_END, 0},
-        // term_copy_9 (index 9)
+        // term_5 (index 5)
         {LLAMA_GRETYPE_CHAR, '0'},
         {LLAMA_GRETYPE_CHAR_RNG_UPPER, '9'},
-        {LLAMA_GRETYPE_END, 0},
-        // term_10 (index 10)
-        {LLAMA_GRETYPE_RULE_REF, /* term_copy_9 */ 9},
-        {LLAMA_GRETYPE_RULE_REF, /* term_star_11 */ 11},
-        {LLAMA_GRETYPE_END, 0},
-        // term_star_11 (index 11)
-        {LLAMA_GRETYPE_RULE_REF, /* term_copy_9 */ 9},
-        {LLAMA_GRETYPE_RULE_REF, /* term_star_11 */ 11},
-        {LLAMA_GRETYPE_ALT, 0},
         {LLAMA_GRETYPE_END, 0},
     });
 
@@ -499,29 +378,21 @@ int main()
         ws    ::= [ \t\n]*
     )""", {
         {"expr", 2},
-        {"expr_7", 7},
-        {"expr_8", 8},
-        {"expr_star_9", 9},
-        {"ident", 10},
-        {"ident_13", 13},
-        {"ident_copy_12", 12},
-        {"ident_star_14", 14},
-        {"num", 11},
-        {"num_16", 16},
-        {"num_copy_15", 15},
-        {"num_star_17", 17},
+        {"expr_5", 5},
+        {"ident", 6},
+        {"ident_8", 8},
+        {"num", 7},
+        {"num_9", 9},
         {"root", 0},
         {"root_1", 1},
-        {"root_5", 5},
-        {"root_star_6", 6},
         {"term", 4},
         {"ws", 3},
-        {"ws_19", 19},
-        {"ws_copy_18", 18},
-        {"ws_star_20", 20},
+        {"ws_10", 10},
     }, {
         // root (index 0)
-        {LLAMA_GRETYPE_RULE_REF, /* root_5 */ 5},
+        {LLAMA_GRETYPE_RULE_REF, /* root_1 */ 1},
+        {LLAMA_GRETYPE_REPEAT_MIN, 1},
+        {LLAMA_GRETYPE_REPEAT_MAX, 4294967295},
         {LLAMA_GRETYPE_END, 0},
         // root_1 (index 1)
         {LLAMA_GRETYPE_RULE_REF, /* expr */ 2},
@@ -532,15 +403,17 @@ int main()
         {LLAMA_GRETYPE_END, 0},
         // expr (index 2)
         {LLAMA_GRETYPE_RULE_REF, /* term */ 4},
-        {LLAMA_GRETYPE_RULE_REF, /* expr_8 */ 8},
+        {LLAMA_GRETYPE_RULE_REF, /* expr_5 */ 5},
+        {LLAMA_GRETYPE_REPEAT_MIN, 0},
+        {LLAMA_GRETYPE_REPEAT_MAX, 4294967295},
         {LLAMA_GRETYPE_END, 0},
         // ws (index 3)
-        {LLAMA_GRETYPE_RULE_REF, /* ws_19 */ 19},
+        {LLAMA_GRETYPE_RULE_REF, /* ws_10 */ 10},
         {LLAMA_GRETYPE_END, 0},
         // term (index 4)
-        {LLAMA_GRETYPE_RULE_REF, /* ident */ 10},
+        {LLAMA_GRETYPE_RULE_REF, /* ident */ 6},
         {LLAMA_GRETYPE_ALT, 0},
-        {LLAMA_GRETYPE_RULE_REF, /* num */ 11},
+        {LLAMA_GRETYPE_RULE_REF, /* num */ 7},
         {LLAMA_GRETYPE_ALT, 0},
         {LLAMA_GRETYPE_CHAR, '('},
         {LLAMA_GRETYPE_RULE_REF, /* ws */ 3},
@@ -548,83 +421,40 @@ int main()
         {LLAMA_GRETYPE_CHAR, ')'},
         {LLAMA_GRETYPE_RULE_REF, /* ws */ 3},
         {LLAMA_GRETYPE_END, 0},
-        // root_5 (index 5)
-        {LLAMA_GRETYPE_RULE_REF, /* root_1 */ 1},
-        {LLAMA_GRETYPE_RULE_REF, /* root_star_6 */ 6},
-        {LLAMA_GRETYPE_END, 0},
-        // root_star_6 (index 6)
-        {LLAMA_GRETYPE_RULE_REF, /* root_1 */ 1},
-        {LLAMA_GRETYPE_RULE_REF, /* root_star_6 */ 6},
-        {LLAMA_GRETYPE_ALT, 0},
-        {LLAMA_GRETYPE_END, 0},
-        // expr_7 (index 7)
+        // expr_5 (index 5)
         {LLAMA_GRETYPE_CHAR, '-'},
         {LLAMA_GRETYPE_CHAR_ALT, '+'},
         {LLAMA_GRETYPE_CHAR_ALT, '*'},
         {LLAMA_GRETYPE_CHAR_ALT, '/'},
         {LLAMA_GRETYPE_RULE_REF, /* term */ 4},
         {LLAMA_GRETYPE_END, 0},
-        // expr_8 (index 8)
-        {LLAMA_GRETYPE_RULE_REF, /* expr_star_9 */ 9},
-        {LLAMA_GRETYPE_END, 0},
-        // expr_star_9 (index 9)
-        {LLAMA_GRETYPE_RULE_REF, /* expr_7 */ 7},
-        {LLAMA_GRETYPE_RULE_REF, /* expr_star_9 */ 9},
-        {LLAMA_GRETYPE_ALT, 0},
-        {LLAMA_GRETYPE_END, 0},
-        // ident (index 10)
+        // ident (index 6)
         {LLAMA_GRETYPE_CHAR, 'a'},
         {LLAMA_GRETYPE_CHAR_RNG_UPPER, 'z'},
-        {LLAMA_GRETYPE_RULE_REF, /* ident_13 */ 13},
+        {LLAMA_GRETYPE_RULE_REF, /* ident_8 */ 8},
         {LLAMA_GRETYPE_RULE_REF, /* ws */ 3},
         {LLAMA_GRETYPE_END, 0},
-        // num (index 11)
-        {LLAMA_GRETYPE_RULE_REF, /* num_16 */ 16},
+        // num (index 7)
+        {LLAMA_GRETYPE_RULE_REF, /* num_9 */ 9},
         {LLAMA_GRETYPE_RULE_REF, /* ws */ 3},
         {LLAMA_GRETYPE_END, 0},
-        // ident_copy_12 (index 12)
+        // ident_8 (index 8)
         {LLAMA_GRETYPE_CHAR, 'a'},
         {LLAMA_GRETYPE_CHAR_RNG_UPPER, 'z'},
         {LLAMA_GRETYPE_CHAR_ALT, '0'},
         {LLAMA_GRETYPE_CHAR_RNG_UPPER, '9'},
         {LLAMA_GRETYPE_CHAR_ALT, '_'},
         {LLAMA_GRETYPE_END, 0},
-        // ident_13 (index 13)
-        {LLAMA_GRETYPE_RULE_REF, /* ident_star_14 */ 14},
-        {LLAMA_GRETYPE_END, 0},
-        // ident_star_14 (index 14)
-        {LLAMA_GRETYPE_RULE_REF, /* ident_copy_12 */ 12},
-        {LLAMA_GRETYPE_RULE_REF, /* ident_star_14 */ 14},
-        {LLAMA_GRETYPE_ALT, 0},
-        {LLAMA_GRETYPE_END, 0},
-        // num_copy_15 (index 15)
+        // num_9 (index 9)
         {LLAMA_GRETYPE_CHAR, '0'},
         {LLAMA_GRETYPE_CHAR_RNG_UPPER, '9'},
         {LLAMA_GRETYPE_END, 0},
-        // num_16 (index 16)
-        {LLAMA_GRETYPE_RULE_REF, /* num_copy_15 */ 15},
-        {LLAMA_GRETYPE_RULE_REF, /* num_star_17 */ 17},
-        {LLAMA_GRETYPE_END, 0},
-        // num_star_17 (index 17)
-        {LLAMA_GRETYPE_RULE_REF, /* num_copy_15 */ 15},
-        {LLAMA_GRETYPE_RULE_REF, /* num_star_17 */ 17},
-        {LLAMA_GRETYPE_ALT, 0},
-        {LLAMA_GRETYPE_END, 0},
-        // ws_copy_18 (index 18)
+        // ws_10 (index 10)
         {LLAMA_GRETYPE_CHAR, ' '},
         {LLAMA_GRETYPE_CHAR_ALT, '\t'},
         {LLAMA_GRETYPE_CHAR_ALT, '\n'},
         {LLAMA_GRETYPE_END, 0},
-        // ws_19 (index 19)
-        {LLAMA_GRETYPE_RULE_REF, /* ws_star_20 */ 20},
-        {LLAMA_GRETYPE_END, 0},
-        // ws_star_20 (index 20)
-        {LLAMA_GRETYPE_RULE_REF, /* ws_copy_18 */ 18},
-        {LLAMA_GRETYPE_RULE_REF, /* ws_star_20 */ 20},
-        {LLAMA_GRETYPE_ALT, 0},
-        {LLAMA_GRETYPE_END, 0},
     });
-
 
     return 0;
 }

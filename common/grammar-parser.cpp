@@ -153,84 +153,32 @@ namespace grammar_parser {
         size_t last_sym_start = out_elements.size();
         const char * pos = src;
 
-        auto handle_repetitions = [&](int min_times, int max_times) {
+        auto handle_repetitions = [&](uint32_t min_times, int max_times) {
 
             if (last_sym_start == out_elements.size()) {
                 throw std::runtime_error(std::string("expecting preceding item to */+/?/{ at ") + pos);
             }
 
-            // apply transformation to previous symbol (last_sym_start to end) according to
-            // the following rewrite rules:
-            // S*     --> S{0,}
-            // S+     --> S{1,}
-            // S?     --> S{0,1}
-            // S{m,n} --> S'     ::= Scopy Scopy Scopy... (m times) S(n-m)
-            //            Scopy  ::= S
-            //            S(x)   ::= Scopy S(x-1) |
-            //            S(x-1) ::= Scopy S(x-2) |
-            //            S(1)   ::= Scopy |
-            // S{m,} -->  S'     ::= Scopy Scopy Scopy (m times) Sstar
-            //            Scopy  ::= S
-            //            Sstar  ::= Scopy Sstar |
-            // And if S is a reference to a rule, then we skip the S_copy indirection
+            // S*     --> S' repeat_min 0 repeat_max infinite
+            // S+     --> S' repeat_min 1 repeat_max infinite
+            // S?     --> S' repeat_min 0 repeat_max 1
+            // S{m,n} --> S' repeat_min m repeat_max (n-m)
 
             uint32_t content_rule_id = 0;
             if (last_sym_start == out_elements.size() - 1 && out_elements[last_sym_start].type == LLAMA_GRETYPE_RULE_REF) {
                 // The repeated content is already a rule ref, no need to copy it
-                content_rule_id = out_elements[last_sym_start].value;
+                out_elements.push_back({LLAMA_GRETYPE_REPEAT_MIN, min_times});
+                out_elements.push_back({LLAMA_GRETYPE_REPEAT_MAX, max_times < 0 ? std::numeric_limits<uint32_t>::max() : max_times - min_times});
             } else {
-                content_rule_id = generate_symbol_id(state, rule_name + "_copy");
-                // add preceding symbol to generated copy rule
-                std::vector<llama_grammar_element> copy_rule(out_elements.begin() + last_sym_start, out_elements.end());
-                copy_rule.push_back({LLAMA_GRETYPE_END, 0});
-                add_rule(state, content_rule_id, copy_rule);
-            }
+                uint32_t sub_rule_id = generate_symbol_id(state, rule_name);
+                std::vector<llama_grammar_element> sub_rule(out_elements.begin() + last_sym_start, out_elements.end());
+                sub_rule.push_back({LLAMA_GRETYPE_END, 0});
+                add_rule(state, sub_rule_id, sub_rule);
 
-            uint32_t sub_rule_id = generate_symbol_id(state, rule_name);
-            std::vector<llama_grammar_element> sub_rule;
-            for (int i = 0; i < min_times; i++) {
-                sub_rule.push_back({LLAMA_GRETYPE_RULE_REF, content_rule_id});
+                // in original rule, replace previous symbol with reference to generated rule followed by repetition min & max
+                out_elements.resize(last_sym_start);
+                out_elements.push_back({LLAMA_GRETYPE_RULE_REF, sub_rule_id});
             }
-            if (max_times < 0) {
-                uint32_t star_rule_id = generate_symbol_id(state, rule_name + "_star");
-                add_rule(state, star_rule_id, {
-                    {LLAMA_GRETYPE_RULE_REF, content_rule_id},
-                    {LLAMA_GRETYPE_RULE_REF, star_rule_id},
-                    {LLAMA_GRETYPE_ALT, 0},
-                    {LLAMA_GRETYPE_END, 0}
-                });
-                sub_rule.push_back({LLAMA_GRETYPE_RULE_REF, star_rule_id});
-            } else {
-                uint32_t last_rec_rule_id = 0;
-                auto n_opt = max_times - min_times;
-                for (int i = 0; i < n_opt; i++) {
-                    uint32_t rec_rule_id = generate_symbol_id(state, rule_name + "_" + std::to_string(i + 1));
-                    if (i == 0) {
-                        add_rule(state, rec_rule_id, {
-                            {LLAMA_GRETYPE_RULE_REF, content_rule_id},
-                            {LLAMA_GRETYPE_ALT, 0},
-                            {LLAMA_GRETYPE_END, 0}
-                        });
-                    } else {
-                        add_rule(state, rec_rule_id, {
-                            {LLAMA_GRETYPE_RULE_REF, content_rule_id},
-                            {LLAMA_GRETYPE_RULE_REF, last_rec_rule_id},
-                            {LLAMA_GRETYPE_ALT, 0},
-                            {LLAMA_GRETYPE_END, 0}
-                        });
-                    }
-                    last_rec_rule_id = rec_rule_id;
-                }
-                if (n_opt > 0) {
-                    sub_rule.push_back({LLAMA_GRETYPE_RULE_REF, last_rec_rule_id});
-                }
-            }
-            sub_rule.push_back({LLAMA_GRETYPE_END, 0});
-            add_rule(state, sub_rule_id, sub_rule);
-
-            // in original rule, replace previous symbol with reference to generated rule
-            out_elements.resize(last_sym_start);
-            out_elements.push_back({LLAMA_GRETYPE_RULE_REF, sub_rule_id});
         };
 
         while (*pos) {
@@ -433,6 +381,8 @@ namespace grammar_parser {
                 case LLAMA_GRETYPE_CHAR_NOT:       fprintf(file, "CHAR_NOT");       break;
                 case LLAMA_GRETYPE_CHAR_RNG_UPPER: fprintf(file, "CHAR_RNG_UPPER"); break;
                 case LLAMA_GRETYPE_CHAR_ALT:       fprintf(file, "CHAR_ALT");       break;
+                case LLAMA_GRETYPE_REPEAT_MIN:     fprintf(file, "REPEAT_MIN");     break;
+                case LLAMA_GRETYPE_REPEAT_MAX:     fprintf(file, "REPEAT_MAX");     break;
             }
             switch (elem.type) {
                 case LLAMA_GRETYPE_END:
@@ -444,6 +394,8 @@ namespace grammar_parser {
                 case LLAMA_GRETYPE_CHAR_NOT:
                 case LLAMA_GRETYPE_CHAR_RNG_UPPER:
                 case LLAMA_GRETYPE_CHAR_ALT:
+                case LLAMA_GRETYPE_REPEAT_MIN:
+                case LLAMA_GRETYPE_REPEAT_MAX:
                     fprintf(file, "(\"");
                     print_grammar_char(file, elem.value);
                     fprintf(file, "\") ");
@@ -483,6 +435,12 @@ namespace grammar_parser {
                 case LLAMA_GRETYPE_CHAR_NOT:
                     fprintf(file, "[^");
                     print_grammar_char(file, elem.value);
+                    break;
+                case LLAMA_GRETYPE_REPEAT_MIN:
+                    fprintf(file, "{%u,", elem.value);
+                    break;
+                case LLAMA_GRETYPE_REPEAT_MAX:
+                    fprintf(file, "%u} ", elem.value);
                     break;
                 case LLAMA_GRETYPE_CHAR_RNG_UPPER:
                     if (i == 0 || !is_char_element(rule[i - 1])) {
