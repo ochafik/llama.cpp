@@ -284,15 +284,46 @@ namespace grammar_parser {
                     throw std::runtime_error(std::string("expecting ')' at ") + pos);
                 }
                 pos = parse_space(pos + 1, is_nested);
-            } else if (*pos == '*') {
+            } else if (*pos == '*' || *pos == '+' || *pos == '?') { // repetition operator
+                if (last_sym_start == out_elements.size()) {
+                    throw std::runtime_error(std::string("expecting preceding item to */+/? at ") + pos);
+                }
+                // apply transformation to previous symbol (last_sym_start to end) according to
+                // rewrite rules:
+                // S* --> S' ::= S S' |
+                // S+ --> S' ::= S S' | S
+                // S? --> S' ::= S |
+                uint32_t sub_rule_id = generate_symbol_id(state, rule_name);
+                std::vector<llama_grammar_element> sub_rule;
+                // add preceding symbol to generated rule
+                sub_rule.insert(
+                    sub_rule.end(), out_elements.begin() + last_sym_start, out_elements.end());
+                if (*pos == '*' || *pos == '+') {
+                    // cause generated rule to recurse
+                    sub_rule.push_back({LLAMA_GRETYPE_RULE_REF, sub_rule_id});
+                }
+                // mark start of alternate def
+                sub_rule.push_back({LLAMA_GRETYPE_ALT, 0});
+                if (*pos == '+') {
+                    // add preceding symbol as alternate only for '+' (otherwise empty)
+                    sub_rule.insert(
+                        sub_rule.end(), out_elements.begin() + last_sym_start, out_elements.end());
+                }
+                sub_rule.push_back({LLAMA_GRETYPE_END, 0});
+                add_rule(state, sub_rule_id, sub_rule);
+                // in original rule, replace previous symbol with reference to generated rule
+                out_elements.resize(last_sym_start);
+                out_elements.push_back({LLAMA_GRETYPE_RULE_REF, sub_rule_id});
                 pos = parse_space(pos + 1, is_nested);
-                handle_repetitions(0, -1);
-            } else if (*pos == '+') {
-                pos = parse_space(pos + 1, is_nested);
-                handle_repetitions(1, -1);
-            } else if (*pos == '?') {
-                pos = parse_space(pos + 1, is_nested);
-                handle_repetitions(0, 1);
+            // } else if (*pos == '*') {
+            //     pos = parse_space(pos + 1, is_nested);
+            //     handle_repetitions(0, -1);
+            // } else if (*pos == '+') {
+            //     pos = parse_space(pos + 1, is_nested);
+            //     handle_repetitions(1, -1);
+            // } else if (*pos == '?') {
+            //     pos = parse_space(pos + 1, is_nested);
+            //     handle_repetitions(0, 1);
             } else if (*pos == '{') {
                 pos = parse_space(pos + 1, is_nested);
 
