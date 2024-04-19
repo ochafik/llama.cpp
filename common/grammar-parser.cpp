@@ -164,73 +164,51 @@ namespace grammar_parser {
             // S*     --> S{0,}
             // S+     --> S{1,}
             // S?     --> S{0,1}
-            // S{m,n} --> S'     ::= Scopy Scopy Scopy... (m times) S(n-m)
-            //            Scopy  ::= S
-            //            S(x)   ::= Scopy S(x-1) |
-            //            S(x-1) ::= Scopy S(x-2) |
-            //            S(1)   ::= Scopy |
-            // S{m,} -->  S'     ::= Scopy Scopy Scopy (m times) Sstar
-            //            Scopy  ::= S
-            //            Sstar  ::= Scopy Sstar |
-            // And if S is a reference to a rule, then we skip the S_copy indirection
+            // S{m,n} --> S S S (m times) S'(n-m)
+            //            S'(x)   ::= S S'(x-1) |
+            //            S'(1)   ::= S |
+            // S{m,} -->  S S S (m times) S'
+            //            S'     ::= S S' |
 
-            uint32_t content_rule_id = 0;
-            if (last_sym_start == out_elements.size() - 1 && out_elements[last_sym_start].type == LLAMA_GRETYPE_RULE_REF) {
-                // The repeated content is already a rule ref, no need to copy it
-                content_rule_id = out_elements[last_sym_start].value;
+            std::vector<llama_grammar_element> previous_elements(out_elements.begin() + last_sym_start, out_elements.end());
+            if (min_times == 0) {
+                out_elements.resize(last_sym_start);
             } else {
-                content_rule_id = generate_symbol_id(state, rule_name + "_copy");
-                // add preceding symbol to generated copy rule
-                std::vector<llama_grammar_element> copy_rule(out_elements.begin() + last_sym_start, out_elements.end());
-                copy_rule.push_back({LLAMA_GRETYPE_END, 0});
-                add_rule(state, content_rule_id, copy_rule);
+                // Repeat the previous elements (min_times - 1) times
+                for (int i = 1; i < min_times; i++) {
+                    out_elements.insert(out_elements.end(), previous_elements.begin(), previous_elements.end());
+                }
             }
 
-            uint32_t sub_rule_id = generate_symbol_id(state, rule_name);
-            std::vector<llama_grammar_element> sub_rule;
-            for (int i = 0; i < min_times; i++) {
-                sub_rule.push_back({LLAMA_GRETYPE_RULE_REF, content_rule_id});
-            }
             if (max_times < 0) {
                 uint32_t star_rule_id = generate_symbol_id(state, rule_name + "_star");
-                add_rule(state, star_rule_id, {
-                    {LLAMA_GRETYPE_RULE_REF, content_rule_id},
-                    {LLAMA_GRETYPE_RULE_REF, star_rule_id},
-                    {LLAMA_GRETYPE_ALT, 0},
-                    {LLAMA_GRETYPE_END, 0}
-                });
-                sub_rule.push_back({LLAMA_GRETYPE_RULE_REF, star_rule_id});
+
+                std::vector<llama_grammar_element> star_rule(previous_elements);
+                star_rule.push_back({LLAMA_GRETYPE_RULE_REF, star_rule_id});
+                star_rule.push_back({LLAMA_GRETYPE_ALT, 0});
+                star_rule.push_back({LLAMA_GRETYPE_END, 0});
+                add_rule(state, star_rule_id, star_rule);
+
+                out_elements.push_back({LLAMA_GRETYPE_RULE_REF, star_rule_id});
             } else {
                 uint32_t last_rec_rule_id = 0;
                 auto n_opt = max_times - min_times;
                 for (int i = 0; i < n_opt; i++) {
                     uint32_t rec_rule_id = generate_symbol_id(state, rule_name + "_" + std::to_string(i + 1));
-                    if (i == 0) {
-                        add_rule(state, rec_rule_id, {
-                            {LLAMA_GRETYPE_RULE_REF, content_rule_id},
-                            {LLAMA_GRETYPE_ALT, 0},
-                            {LLAMA_GRETYPE_END, 0}
-                        });
-                    } else {
-                        add_rule(state, rec_rule_id, {
-                            {LLAMA_GRETYPE_RULE_REF, content_rule_id},
-                            {LLAMA_GRETYPE_RULE_REF, last_rec_rule_id},
-                            {LLAMA_GRETYPE_ALT, 0},
-                            {LLAMA_GRETYPE_END, 0}
-                        });
+
+                    std::vector<llama_grammar_element> rec_rule(previous_elements);
+                    if (i > 0) {
+                        rec_rule.push_back({LLAMA_GRETYPE_RULE_REF, last_rec_rule_id});
                     }
+                    rec_rule.push_back({LLAMA_GRETYPE_ALT, 0});
+                    rec_rule.push_back({LLAMA_GRETYPE_END, 0});
+                    add_rule(state, rec_rule_id, rec_rule);
                     last_rec_rule_id = rec_rule_id;
                 }
                 if (n_opt > 0) {
-                    sub_rule.push_back({LLAMA_GRETYPE_RULE_REF, last_rec_rule_id});
+                    out_elements.push_back({LLAMA_GRETYPE_RULE_REF, last_rec_rule_id});
                 }
-            }
-            sub_rule.push_back({LLAMA_GRETYPE_END, 0});
-            add_rule(state, sub_rule_id, sub_rule);
-
-            // in original rule, replace previous symbol with reference to generated rule
-            out_elements.resize(last_sym_start);
-            out_elements.push_back({LLAMA_GRETYPE_RULE_REF, sub_rule_id});
+            }        
         };
 
         while (*pos) {
@@ -284,46 +262,46 @@ namespace grammar_parser {
                     throw std::runtime_error(std::string("expecting ')' at ") + pos);
                 }
                 pos = parse_space(pos + 1, is_nested);
-            } else if (*pos == '*' || *pos == '+' || *pos == '?') { // repetition operator
-                if (last_sym_start == out_elements.size()) {
-                    throw std::runtime_error(std::string("expecting preceding item to */+/? at ") + pos);
-                }
-                // apply transformation to previous symbol (last_sym_start to end) according to
-                // rewrite rules:
-                // S* --> S' ::= S S' |
-                // S+ --> S' ::= S S' | S
-                // S? --> S' ::= S |
-                uint32_t sub_rule_id = generate_symbol_id(state, rule_name);
-                std::vector<llama_grammar_element> sub_rule;
-                // add preceding symbol to generated rule
-                sub_rule.insert(
-                    sub_rule.end(), out_elements.begin() + last_sym_start, out_elements.end());
-                if (*pos == '*' || *pos == '+') {
-                    // cause generated rule to recurse
-                    sub_rule.push_back({LLAMA_GRETYPE_RULE_REF, sub_rule_id});
-                }
-                // mark start of alternate def
-                sub_rule.push_back({LLAMA_GRETYPE_ALT, 0});
-                if (*pos == '+') {
-                    // add preceding symbol as alternate only for '+' (otherwise empty)
-                    sub_rule.insert(
-                        sub_rule.end(), out_elements.begin() + last_sym_start, out_elements.end());
-                }
-                sub_rule.push_back({LLAMA_GRETYPE_END, 0});
-                add_rule(state, sub_rule_id, sub_rule);
-                // in original rule, replace previous symbol with reference to generated rule
-                out_elements.resize(last_sym_start);
-                out_elements.push_back({LLAMA_GRETYPE_RULE_REF, sub_rule_id});
+            // } else if (*pos == '*' || *pos == '+' || *pos == '?') { // repetition operator
+            //     if (last_sym_start == out_elements.size()) {
+            //         throw std::runtime_error(std::string("expecting preceding item to */+/? at ") + pos);
+            //     }
+            //     // apply transformation to previous symbol (last_sym_start to end) according to
+            //     // rewrite rules:
+            //     // S* --> S' ::= S S' |
+            //     // S+ --> S' ::= S S' | S
+            //     // S? --> S' ::= S |
+            //     uint32_t sub_rule_id = generate_symbol_id(state, rule_name);
+            //     std::vector<llama_grammar_element> sub_rule;
+            //     // add preceding symbol to generated rule
+            //     sub_rule.insert(
+            //         sub_rule.end(), out_elements.begin() + last_sym_start, out_elements.end());
+            //     if (*pos == '*' || *pos == '+') {
+            //         // cause generated rule to recurse
+            //         sub_rule.push_back({LLAMA_GRETYPE_RULE_REF, sub_rule_id});
+            //     }
+            //     // mark start of alternate def
+            //     sub_rule.push_back({LLAMA_GRETYPE_ALT, 0});
+            //     if (*pos == '+') {
+            //         // add preceding symbol as alternate only for '+' (otherwise empty)
+            //         sub_rule.insert(
+            //             sub_rule.end(), out_elements.begin() + last_sym_start, out_elements.end());
+            //     }
+            //     sub_rule.push_back({LLAMA_GRETYPE_END, 0});
+            //     add_rule(state, sub_rule_id, sub_rule);
+            //     // in original rule, replace previous symbol with reference to generated rule
+            //     out_elements.resize(last_sym_start);
+            //     out_elements.push_back({LLAMA_GRETYPE_RULE_REF, sub_rule_id});
+            //     pos = parse_space(pos + 1, is_nested);
+            } else if (*pos == '*') {
                 pos = parse_space(pos + 1, is_nested);
-            // } else if (*pos == '*') {
-            //     pos = parse_space(pos + 1, is_nested);
-            //     handle_repetitions(0, -1);
-            // } else if (*pos == '+') {
-            //     pos = parse_space(pos + 1, is_nested);
-            //     handle_repetitions(1, -1);
-            // } else if (*pos == '?') {
-            //     pos = parse_space(pos + 1, is_nested);
-            //     handle_repetitions(0, 1);
+                handle_repetitions(0, -1);
+            } else if (*pos == '+') {
+                pos = parse_space(pos + 1, is_nested);
+                handle_repetitions(1, -1);
+            } else if (*pos == '?') {
+                pos = parse_space(pos + 1, is_nested);
+                handle_repetitions(0, 1);
             } else if (*pos == '{') {
                 pos = parse_space(pos + 1, is_nested);
 
