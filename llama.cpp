@@ -12844,6 +12844,11 @@ static void llama_grammar_reject_candidates_for_stack(
         }
     }
 
+    if (next_candidates.empty()) {
+        // fprintf(stderr, ".");
+        return;
+    }
+
     const auto * stack_pos_after = llama_grammar_match_char(stack_pos, 0).second;
 
     // update top of stack to next element, if any
