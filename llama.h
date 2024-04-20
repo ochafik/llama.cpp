@@ -1091,7 +1091,7 @@ typedef std::set<llama_grammar_unique_stack_id> llama_grammar_stacks;
 struct llama_grammar {
 
     // TODO: links between these two structures to half memory usage
-    mutable std::map<std::vector<const llama_grammar_element * >, llama_grammar_unique_stack_id> unique_stack_ids;
+    // mutable std::map<std::vector<const llama_grammar_element * >, llama_grammar_unique_stack_id> unique_stack_ids;
     mutable std::vector<std::vector<const llama_grammar_element * >>                             unique_stacks;
 
     mutable std::map<llama_grammar_unique_stack_id, std::map<llama_token, std::vector<llama_grammar_unique_stack_id>>>  transitions;
@@ -1109,13 +1109,20 @@ struct llama_grammar {
     void init(struct llama_context * ctx) const;
 
     llama_grammar_unique_stack_id get_id(const std::vector<const llama_grammar_element * > & stack) const {
-        auto it = unique_stack_ids.find(stack);
-        if (it != unique_stack_ids.end()) {
-        return it->second;
+        auto it = std::find(unique_stacks.begin(), unique_stacks.end(), stack);
+        if (it != unique_stacks.end()) {
+            return it - unique_stacks.begin();
         }
         llama_grammar_unique_stack_id id = unique_stacks.size();
         unique_stacks.emplace_back(stack);
-        unique_stack_ids[stack] = id;
+
+        // auto it = unique_stack_ids.find(stack);
+        // if (it != unique_stack_ids.end()) {
+        // return it->second;
+        // }
+        // llama_grammar_unique_stack_id id = unique_stacks.size();
+        // unique_stacks.emplace_back(stack);
+        // unique_stack_ids[stack] = id;
         return id;
     }
 

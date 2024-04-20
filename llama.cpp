@@ -12693,6 +12693,8 @@ const std::vector<llama_grammar_unique_stack_id> & llama_grammar::get_transition
         return it->second;
     }
 
+    // fprintf(stderr, "(%d -> %d)\n", from_node, edge);
+
     // std::map<llama_token, std::pair<std::vector<uint32_t>, llama_partial_utf8>> tokens_decoded;
     const auto & decoded = tokens_decoded.at(edge);
     const auto * code_points = decoded.first.data();
@@ -13514,6 +13516,8 @@ void llama_grammar_accept_token(struct llama_context * ctx, struct llama_grammar
     }
     grammar->stacks = tmp_new_stacks;
     grammar->partial_utf8 = grammar->tokens_decoded.at(token).second;
+
+    // fprintf(stderr, "Stack size: %zu\n", grammar->stacks.size());
 
     ctx->t_sample_us += ggml_time_us() - t_start_sample_us;
 }
