@@ -1098,6 +1098,7 @@ struct llama_grammar {
 
     mutable llama_token eos;
     mutable std::map<llama_token, std::pair<std::vector<uint32_t>, llama_partial_utf8>> tokens_decoded;
+    mutable std::map<llama_token, std::string> tokens_pieces;
 
     std::vector<std::vector<llama_grammar_element>>         rules;
     std::set<llama_grammar_unique_stack_id>                 stacks;
