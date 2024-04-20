@@ -1088,45 +1088,49 @@ struct llama_partial_utf8 {
 typedef size_t llama_grammar_unique_stack_id;
 typedef std::set<llama_grammar_unique_stack_id> llama_grammar_stacks;
 
+struct llama_grammar_stack {
+    typedef std::vector<const llama_grammar_element * > stack_t;
+
+    stack_t stack;
+    mutable std::map<llama_token, std::vector<stack_t>>  transitions;
+
+    bool has_transition(const struct llama_grammar * grammar, llama_token edge) const;
+    const std::vector<stack_t> & get_transitions(const llama_grammar * grammar, llama_token edge) const;
+};
+
 struct llama_grammar {
 
     // TODO: links between these two structures to half memory usage
     // mutable std::map<std::vector<const llama_grammar_element * >, llama_grammar_unique_stack_id> unique_stack_ids;
-    mutable std::vector<std::vector<const llama_grammar_element * >>                             unique_stacks;
+    // mutable std::vector<std::vector<const llama_grammar_element * >>                             unique_stacks;
 
-    mutable std::map<llama_grammar_unique_stack_id, std::map<llama_token, std::vector<llama_grammar_unique_stack_id>>>  transitions;
+    // mutable std::map<llama_grammar_unique_stack_id, std::map<llama_token, std::vector<llama_grammar_unique_stack_id>>>  transitions;
 
     mutable llama_token eos;
     mutable std::map<llama_token, std::pair<std::vector<uint32_t>, llama_partial_utf8>> tokens_decoded;
     mutable std::map<llama_token, std::string> tokens_pieces;
 
     std::vector<std::vector<llama_grammar_element>>         rules;
-    std::set<llama_grammar_unique_stack_id>                 stacks;
+
+    std::vector<llama_grammar_stack> stacks;
 
     // buffer for partially generated UTF-8 sequence from accepted tokens
     llama_partial_utf8                                      partial_utf8;
     
     void init(struct llama_context * ctx) const;
 
-    llama_grammar_unique_stack_id get_id(const std::vector<const llama_grammar_element * > & stack) const {
-        auto it = std::find(unique_stacks.begin(), unique_stacks.end(), stack);
-        if (it != unique_stacks.end()) {
-            return it - unique_stacks.begin();
+    bool has_transition(struct llama_context * ctx, llama_token edge) const {
+        init(ctx);
+
+        for (const auto & stack : stacks) {
+            if (stack.has_transition(this, edge)) {
+                return true;
+            }
         }
-        llama_grammar_unique_stack_id id = unique_stacks.size();
-        unique_stacks.emplace_back(stack);
-
-        // auto it = unique_stack_ids.find(stack);
-        // if (it != unique_stack_ids.end()) {
-        // return it->second;
-        // }
-        // llama_grammar_unique_stack_id id = unique_stacks.size();
-        // unique_stacks.emplace_back(stack);
-        // unique_stack_ids[stack] = id;
-        return id;
+        return false;
     }
-
-    const std::vector<llama_grammar_unique_stack_id> & get_transitions(struct llama_context * ctx, llama_grammar_unique_stack_id from_node, llama_token edge) const;
+    
+    void transition_all_stacks(struct llama_context * ctx, llama_token edge);
 };
 
 struct llama_grammar_candidate {

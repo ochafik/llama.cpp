@@ -37,9 +37,12 @@ number ::= [0-9]+)""";
     const auto & code_points = decoded.first;
 
     std::vector<std::vector<const llama_grammar_element *>> stacks;
-    for (auto stack_id : grammar->stacks) {
-        stacks.push_back(grammar->unique_stacks[stack_id]);
+    for (auto & stack : grammar->stacks) {
+        stacks.push_back(stack.stack);
     }
+    // for (auto stack_id : grammar->stacks) {
+    //     stacks.push_back(grammar->unique_stacks[stack_id]);
+    // }
     // std::vector<std::vector<const llama_grammar_element *>> new_stacks;
     for (auto it = code_points.begin(), end = code_points.end() - 1; it != end; ++it) {
         auto prev_stacks = stacks;
