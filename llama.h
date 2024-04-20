@@ -1071,20 +1071,54 @@ extern "C" {
 
 #include <vector>
 #include <string>
+#include <set>
+#include <map>
 
 struct ggml_tensor;
 
 struct llama_partial_utf8 {
     uint32_t value;    // bit value so far (unshifted)
     int      n_remain; // num bytes remaining; -1 indicates invalid sequence
+
+    bool operator<(const llama_partial_utf8 & other) const {
+        return value < other.value;
+    }
 };
 
+typedef size_t llama_grammar_unique_stack_id;
+typedef std::set<llama_grammar_unique_stack_id> llama_grammar_stacks;
+
 struct llama_grammar {
-    const std::vector<std::vector<llama_grammar_element>>   rules;
-    std::vector<std::vector<const llama_grammar_element *>> stacks;
+
+    // TODO: links between these two structures to half memory usage
+    mutable std::map<std::vector<const llama_grammar_element * >, llama_grammar_unique_stack_id> unique_stack_ids;
+    mutable std::vector<std::vector<const llama_grammar_element * >>                             unique_stacks;
+
+    mutable std::map<llama_grammar_unique_stack_id, std::map<llama_token, std::vector<llama_grammar_unique_stack_id>>>  transitions;
+
+    mutable llama_token eos;
+    mutable std::map<llama_token, std::pair<std::vector<uint32_t>, llama_partial_utf8>> tokens_decoded;
+
+    std::vector<std::vector<llama_grammar_element>>         rules;
+    std::set<llama_grammar_unique_stack_id>                 stacks;
 
     // buffer for partially generated UTF-8 sequence from accepted tokens
     llama_partial_utf8                                      partial_utf8;
+    
+    void init(struct llama_context * ctx) const;
+
+    llama_grammar_unique_stack_id get_id(const std::vector<const llama_grammar_element * > & stack) const {
+        auto it = unique_stack_ids.find(stack);
+        if (it != unique_stack_ids.end()) {
+        return it->second;
+        }
+        llama_grammar_unique_stack_id id = unique_stacks.size();
+        unique_stacks.emplace_back(stack);
+        unique_stack_ids[stack] = id;
+        return id;
+    }
+
+    const std::vector<llama_grammar_unique_stack_id> & get_transitions(struct llama_context * ctx, llama_grammar_unique_stack_id from_node, llama_token edge) const;
 };
 
 struct llama_grammar_candidate {
@@ -1098,7 +1132,7 @@ const std::vector<std::pair<std::string, struct ggml_tensor *>> & llama_internal
 );
 
 void llama_grammar_accept(
-        const std::vector<std::vector<llama_grammar_element>>         & rules,
+        const llama_grammar                                           * grammar,
         const std::vector<std::vector<const llama_grammar_element *>> & stacks,
         const uint32_t                                                  chr,
         std::vector<std::vector<const llama_grammar_element *>>       & new_stacks);
