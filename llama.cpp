@@ -12778,33 +12778,35 @@ void llama_grammar_accept(
     }
 }
 
-static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates(
+static void llama_grammar_reject_candidates(
         const llama_grammar * grammar,
         const std::vector<std::vector<llama_grammar_element>>         & rules,
         const llama_grammar_stack_set & stacks,
-        const std::vector<llama_grammar_candidate>                    & candidates);
+        const std::vector<llama_grammar_candidate>                    & candidates,
+        const std::function<void(const llama_grammar_candidate &)>    & callback);
 
-static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates_for_stack(
+static void llama_grammar_reject_candidates_for_stack(
         const llama_grammar * grammar,
         const std::vector<std::vector<llama_grammar_element>> & rules,
         const std::vector<const llama_grammar_element *>      & stack,
-        const std::vector<llama_grammar_candidate>            & candidates) {
+        const std::vector<llama_grammar_candidate>            & candidates,
+        const std::function<void(const llama_grammar_candidate &)>    & callback) {
 
-    std::vector<llama_grammar_candidate> rejects;
-    rejects.reserve(candidates.size());
+    // std::vector<llama_grammar_candidate> rejects;
+    // rejects.reserve(candidates.size());
 
     if (stack.empty()) {
         for (const auto & tok : candidates) {
             if (*tok.code_points != 0 || tok.partial_utf8.n_remain != 0) {
-                rejects.push_back(tok);
+                callback(tok);
             }
         }
-        return rejects;
+        return;
     }
 
     const llama_grammar_element * stack_pos = stack.back();
 
-    auto & head = llama_grammar_get_head(grammar, stack_pos);
+    // auto & head = llama_grammar_get_head(grammar, stack_pos);
 
     std::vector<llama_grammar_candidate> next_candidates;
     next_candidates.reserve(candidates.size());
@@ -12815,13 +12817,13 @@ static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates_for_
             // that cannot satisfy this position in grammar
             if (tok.partial_utf8.n_remain != 0 &&
                     !llama_grammar_match_partial_char(stack_pos, tok.partial_utf8)) {
-                rejects.push_back(tok);
+                callback(tok);
             }
-        } else if (head.find(*tok.code_points) != head.end()) {
-        // } else if (llama_grammar_match_char(stack_pos, *tok.code_points).first) {
+        // } else if (head.find(*tok.code_points) != head.end()) {
+        } else if (llama_grammar_match_char(stack_pos, *tok.code_points).first) {
             next_candidates.push_back({ tok.index, tok.code_points + 1, tok.partial_utf8 });
         } else {
-            rejects.push_back(tok);
+            callback(tok);
         }
     }
 
@@ -12840,24 +12842,22 @@ static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates_for_
         // }
     });
 
-    auto next_rejects = llama_grammar_reject_candidates(grammar, rules, next_stacks, next_candidates);
-    for (const auto & tok : next_rejects) {
-        rejects.push_back({ tok.index, tok.code_points - 1, tok.partial_utf8 });
-    }
-
-    return rejects;
+    llama_grammar_reject_candidates(grammar, rules, next_stacks, next_candidates, [&](const llama_grammar_candidate & tok) {
+        callback({ tok.index, tok.code_points - 1, tok.partial_utf8 });
+    });
 }
 
 
-static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates(
+static void llama_grammar_reject_candidates(
         const llama_grammar * grammar,
         const std::vector<std::vector<llama_grammar_element>>         & rules,
         const llama_grammar_stack_set & stacks,
-        const std::vector<llama_grammar_candidate>                    & candidates) {
+        const std::vector<llama_grammar_candidate>                    & candidates,
+        const std::function<void(const llama_grammar_candidate &)>    & callback) {
     GGML_ASSERT(!stacks.empty()); // REVIEW
 
     if (candidates.empty()) {
-        return std::vector<llama_grammar_candidate>();
+        return;
     }
 
     // fprintf(stderr, "# %lu stacks\n", stacks.size());
@@ -12868,28 +12868,55 @@ static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates(
     // }
     // fprintf(stderr, "\n");
 
-    std::vector<std::vector<const llama_grammar_element *>> stacks_vec(stacks.begin(), stacks.end());
-    std::sort(stacks_vec.begin(), stacks_vec.end(), [&](const std::vector<const llama_grammar_element *> & a, const std::vector<const llama_grammar_element *> & b) {
-        if (a.empty()) return false;//true;
-        if (b.empty()) return true;//false;
+    // std::vector<std::vector<const llama_grammar_element *>> stacks_vec(stacks.begin(), stacks.end());
+    // std::sort(stacks_vec.begin(), stacks_vec.end(), [&](const std::vector<const llama_grammar_element *> & a, const std::vector<const llama_grammar_element *> & b) {
+    //     if (a.empty()) return false;//true;
+    //     if (b.empty()) return true;//false;
 
-        auto & ha = llama_grammar_get_head(grammar, a.back());
-        auto & hb = llama_grammar_get_head(grammar, b.back());
+    //     auto & ha = llama_grammar_get_head(grammar, a.back());
+    //     auto & hb = llama_grammar_get_head(grammar, b.back());
 
-        return ha.size() < hb.size();
-        // return a.size() < b.size();
-    });
-    auto rejects = llama_grammar_reject_candidates_for_stack(grammar, rules, stacks_vec.front(), candidates);
-    for (size_t i = 1, size = stacks_vec.size(); i < size; ++i) {
-        rejects = llama_grammar_reject_candidates_for_stack(grammar, rules, stacks_vec[i], rejects);
-    }
-    // auto it = stacks.begin();
-    // auto rejects = llama_grammar_reject_candidates_for_stack(grammar, rules, *it, candidates);
-
-    // for (size_t i = 1, size = stacks.size(); i < size; ++i) {
-    //     rejects = llama_grammar_reject_candidates_for_stack(grammar, rules, *(++it), rejects);
+    //     return ha.size() < hb.size();
+    //     // return a.size() < b.size();
+    // });
+    // auto rejects = llama_grammar_reject_candidates_for_stack(grammar, rules, stacks_vec.front(), candidates);
+    // for (size_t i = 1, size = stacks_vec.size(); i < size; ++i) {
+    //     rejects = llama_grammar_reject_candidates_for_stack(grammar, rules, stacks_vec[i], rejects);
     // }
-    return rejects;
+
+
+    auto stack_count = stacks.size();
+
+    std::vector<llama_grammar_candidate> rejects;
+    if (stack_count > 1) {
+        rejects.reserve(candidates.size());
+    }
+
+    auto it = stacks.begin();
+    llama_grammar_reject_candidates_for_stack(grammar, rules, *it, candidates, [&](const llama_grammar_candidate & tok) {
+        if (stack_count == 1) {
+            callback(tok);
+        } else {
+            rejects.push_back(tok);
+        }
+    });
+
+    if (stack_count == 1) {
+        return;
+    }
+
+    std::vector<llama_grammar_candidate> new_candidates(rejects);
+    for (size_t i = 1; i < stack_count; ++i) {
+        rejects.clear();
+        llama_grammar_reject_candidates_for_stack(grammar, rules, *(++it), new_candidates, [&](const llama_grammar_candidate & tok) {
+            if (i == stack_count - 1) {
+                callback(tok);
+            } else {
+                rejects.push_back(tok);
+            }
+        });
+        new_candidates = rejects;
+    }
 }
 
 //
@@ -13460,11 +13487,14 @@ void llama_sample_grammar(struct llama_context * ctx, llama_token_data_array * c
             candidates_grammar.push_back({ i, candidates_decoded.back().first.data(), candidates_decoded.back().second });
         }
     }
+    
+    // for (auto & rule : grammar->rules) {
+    //     __builtin_prefetch(rule.data(), 0, 3);
+    // }
 
-    const auto rejects = llama_grammar_reject_candidates(grammar, grammar->rules, grammar->stacks, candidates_grammar);
-    for (const auto & reject : rejects) {
+    llama_grammar_reject_candidates(grammar, grammar->rules, grammar->stacks, candidates_grammar, [&](const llama_grammar_candidate & reject) {
         candidates->data[reject.index].logit = -INFINITY;
-    }
+    });
 
     ctx->t_sample_us += ggml_time_us() - t_start_sample_us;
 }
