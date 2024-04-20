@@ -12597,6 +12597,16 @@ static void llama_grammar_collect_head(
     // }
 }
 
+static std::unordered_set<uint32_t> & llama_grammar_get_head(const llama_grammar * grammar, const llama_grammar_element * pos) {
+    auto head_it = grammar->heads.find(pos);
+    if (head_it == grammar->heads.end()) {
+        auto & head = grammar->heads[pos];
+        llama_grammar_collect_head(pos, head);
+        return head;
+    }
+    return head_it->second;
+}
+
 // returns true iff chr satisfies the char range at pos (regular or inverse range)
 // asserts that pos is pointing to a char range element
 static std::pair<bool, const llama_grammar_element *> llama_grammar_match_char(
@@ -12794,15 +12804,7 @@ static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates_for_
 
     const llama_grammar_element * stack_pos = stack.back();
 
-    auto head_it = grammar->heads.find(stack_pos);
-    if (head_it == grammar->heads.end()) {
-        auto & head = grammar->heads[stack_pos];
-        llama_grammar_collect_head(stack_pos, head);
-        head_it = grammar->heads.find(stack_pos);
-    // } else {
-    //     fprintf(stderr, ".");
-    }
-    auto & head = head_it->second;
+    auto & head = llama_grammar_get_head(grammar, stack_pos);
 
     std::vector<llama_grammar_candidate> next_candidates;
     next_candidates.reserve(candidates.size());
@@ -12866,12 +12868,27 @@ static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates(
     // }
     // fprintf(stderr, "\n");
 
-    auto it = stacks.begin();
-    auto rejects = llama_grammar_reject_candidates_for_stack(grammar, rules, *it, candidates);
+    std::vector<std::vector<const llama_grammar_element *>> stacks_vec(stacks.begin(), stacks.end());
+    std::sort(stacks_vec.begin(), stacks_vec.end(), [&](const std::vector<const llama_grammar_element *> & a, const std::vector<const llama_grammar_element *> & b) {
+        if (a.empty()) return false;//true;
+        if (b.empty()) return true;//false;
 
-    for (size_t i = 1, size = stacks.size(); i < size; ++i) {
-        rejects = llama_grammar_reject_candidates_for_stack(grammar, rules, *(++it), rejects);
+        auto & ha = llama_grammar_get_head(grammar, a.back());
+        auto & hb = llama_grammar_get_head(grammar, b.back());
+
+        return ha.size() < hb.size();
+        // return a.size() < b.size();
+    });
+    auto rejects = llama_grammar_reject_candidates_for_stack(grammar, rules, stacks_vec.front(), candidates);
+    for (size_t i = 1, size = stacks_vec.size(); i < size; ++i) {
+        rejects = llama_grammar_reject_candidates_for_stack(grammar, rules, stacks_vec[i], rejects);
     }
+    // auto it = stacks.begin();
+    // auto rejects = llama_grammar_reject_candidates_for_stack(grammar, rules, *it, candidates);
+
+    // for (size_t i = 1, size = stacks.size(); i < size; ++i) {
+    //     rejects = llama_grammar_reject_candidates_for_stack(grammar, rules, *(++it), rejects);
+    // }
     return rejects;
 }
 
