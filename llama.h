@@ -1112,6 +1112,9 @@ struct llama_grammar {
     llama_partial_utf8                                      partial_utf8;
 
     // mutable std::unordered_map<const llama_grammar_element *, std::unordered_set<uint32_t>> heads;
+
+    mutable std::vector<std::string>                                token_pieces;
+    mutable std::vector<std::pair<std::vector<uint32_t>, llama_partial_utf8>> token_codepoints;
 };
 
 struct llama_grammar_candidate {

@@ -13487,21 +13487,39 @@ void llama_sample_grammar(struct llama_context * ctx, llama_token_data_array * c
 
     const llama_token eos = llama_token_eos(&ctx->model);
 
+    if (grammar->token_codepoints.empty()) {
+        auto n_vocab = llama_n_vocab(llama_get_model(ctx));
+        grammar->token_codepoints.resize(n_vocab);
+        grammar->token_pieces.resize(n_vocab);
+        for (llama_token id = 0; id < n_vocab; ++id) {
+            const std::string piece = llama_token_to_piece(ctx, id);
+            grammar->token_pieces[id] = piece;
+            grammar->token_codepoints[id] = decode_utf8(piece, {0, 0});
+        }
+    }
+
     std::vector<std::pair<std::vector<uint32_t>, llama_partial_utf8>> candidates_decoded;
-    candidates_decoded.reserve(candidates->size);
+    // candidates_decoded.reserve(candidates->size);
     std::vector<llama_grammar_candidate>                              candidates_grammar;
     candidates_grammar.reserve(candidates->size);
 
     for (size_t i = 0; i < candidates->size; ++i) {
         const llama_token id    = candidates->data[i].id;
-        const std::string piece = llama_token_to_piece(ctx, id);
+        const auto & piece      = grammar->token_pieces[id];
+        // const std::string piece = llama_token_to_piece(ctx, id);
         if (id == eos) {
             if (!allow_eos) {
                 candidates->data[i].logit = -INFINITY;
             }
         } else if (piece.empty() || piece[0] == 0) {
             candidates->data[i].logit = -INFINITY;
+        } else if (grammar->partial_utf8.n_remain == 0){
+            const auto & decoded = grammar->token_codepoints[id];
+            candidates_grammar.push_back({ i, decoded.first.data(), decoded.second });
         } else {
+            // if (grammar->partial_utf8.n_remain != 0) {
+            //     fprintf(stderr, ".");
+            // }
             candidates_decoded.push_back(decode_utf8(piece, grammar->partial_utf8));
             candidates_grammar.push_back({ i, candidates_decoded.back().first.data(), candidates_decoded.back().second });
         }
