@@ -1082,8 +1082,8 @@ struct llama_partial_utf8 {
     int      n_remain; // num bytes remaining; -1 indicates invalid sequence
 };
 
-// typedef const std::vector<std::vector<const llama_grammar_element *>> llama_grammar_stack_set;
-typedef std::unordered_set<std::vector<const llama_grammar_element *>> llama_grammar_stack_set;
+typedef std::vector<std::vector<const llama_grammar_element *>> llama_grammar_stack_set;
+// typedef std::unordered_set<std::vector<const llama_grammar_element *>> llama_grammar_stack_set;
 
 // Hash function for std::vector<const llama_grammar_element *>:
 namespace std {
@@ -1098,6 +1098,11 @@ namespace std {
     };
 }
 
+// COmparison operator for std::vector<const llama_grammar_element *>:
+static bool operator<(const std::vector<const llama_grammar_element *> & a, const std::vector<const llama_grammar_element *> & b) {
+    return std::lexicographical_compare(a.begin(), a.end(), b.begin(), b.end());
+}
+
 struct llama_grammar {
     
     const std::vector<std::vector<llama_grammar_element>>   rules;
@@ -1106,7 +1111,7 @@ struct llama_grammar {
     // buffer for partially generated UTF-8 sequence from accepted tokens
     llama_partial_utf8                                      partial_utf8;
 
-    mutable std::unordered_map<const llama_grammar_element *, std::unordered_set<uint32_t>> heads;
+    // mutable std::unordered_map<const llama_grammar_element *, std::unordered_set<uint32_t>> heads;
 };
 
 struct llama_grammar_candidate {

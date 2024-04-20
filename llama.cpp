@@ -12489,123 +12489,134 @@ static bool llama_grammar_is_end_of_sequence(const llama_grammar_element * pos) 
     }
 }
 
-static void llama_grammar_collect_head(
-        const llama_grammar_element * pos,
-        std::unordered_set<uint32_t>       & head_set) {
-
-    bool is_positive_char = pos->type == LLAMA_GRETYPE_CHAR;
-
-    // uint32_t min_codepoint = 0;
-    // uint32_t max_codepoint = 0x0010FFFFu;
-    GGML_ASSERT(is_positive_char || pos->type == LLAMA_GRETYPE_CHAR_NOT); // NOLINT
-
-    // uint32_t prev_codepoint = min_codepoint;
-
-    auto add_range = [&](uint32_t low, uint32_t high) {
-        for (uint32_t i = low; i <= high; ++i) {
-            head_set.insert(i);
-        }
-        // prev_codepoint = high;
-    };
-
-    do {
-        if (pos[1].type == LLAMA_GRETYPE_CHAR_RNG_UPPER) {
-            // inclusive range, e.g. [a-z]
-            if (is_positive_char) {
-                add_range(pos->value, pos[1].value);
-                // allowed_ranges.insert({pos->value, pos[1].value});
-            } else {
-                throw std::runtime_error("not implemented");
-                // if (pos->value > prev_codepoint) {
-                //     add_range(prev_codepoint, pos->value - 1);
-                // }
-                // if (pos[1].value < max_codepoint) {
-                //     add_range(pos[1].value + 1, max_codepoint);
-                // }
-            }
-            pos += 2;
-        } else {
-            // exact char match, e.g. [a] or "a"
-            // allowed_ranges.insert({pos->value, pos->value});
-            add_range(pos->value, pos->value);
-            pos += 1;
-        }
-    } while (pos->type == LLAMA_GRETYPE_CHAR_ALT);
-
-    // if (!is_positive_char) {
-    //     if (prev_codepoint < max_codepoint) {
-    //         allowed_ranges.insert({prev_codepoint + 1, max_codepoint});
-    //     }
+static void llama_grammar_stacks_insert(llama_grammar_stack_set & stacks, const std::vector<const llama_grammar_element *> & stack) {
+    // if (std::find(stacks.begin(), stacks.end(), stack) == stacks.end()) {
+    //     // stacks.insert(stack);
+    //     stacks.push_back(stack);
     // }
-
-    // do {
-    //     if (pos[1].type == LLAMA_GRETYPE_CHAR_RNG_UPPER) {
-    //         // inclusive range, e.g. [a-z]
-    //         found = found || (pos->value <= chr && chr <= pos[1].value);
-    //         pos += 2;
-    //     } else {
-    //         // exact char match, e.g. [a] or "a"
-    //         found = found || pos->value == chr;
-    //         pos += 1;
-    //     }
-    // } while (pos->type == LLAMA_GRETYPE_CHAR_ALT);
-
-    
-    // auto has_empty_stack = false;
-    // std::set<std::pair<uint32_t, uint32_t>> allowed_ranges;
-    // uint32_t min_codepoint = 0;
-    // uint32_t max_codepoint = 0x0010FFFFu;
-    
-    // for (const auto & stack : stacks) {
-    //     if (stack.empty()) {
-    //         has_empty_stack = true;
-    //         continue;
-    //     } else {
-    //         auto pos = stack.back();
-    //         bool is_positive_char = pos->type == LLAMA_GRETYPE_CHAR;
-    //         uint32_t prev_codepoint = min_codepoint;
-
-    //         GGML_ASSERT(is_positive_char || pos->type == LLAMA_GRETYPE_CHAR_NOT); // NOLINT
-
-    //         do {
-    //             if (pos[1].type == LLAMA_GRETYPE_CHAR_RNG_UPPER) {
-    //                 // inclusive range, e.g. [a-z]
-    //                 if (is_positive_char) {
-    //                     allowed_ranges.insert({pos->value, pos[1].value});
-    //                 } else {
-    //                     if (pos->value > prev_codepoint) {
-    //                         allowed_ranges.insert({prev_codepoint, pos->value - 1});
-    //                     }
-    //                     if (pos[1].value < max_codepoint) {
-    //                         allowed_ranges.insert({pos[1].value + 1, max_codepoint});
-    //                     }
-    //                 }
-    //                 pos += 2;
-    //             } else {
-    //                 // exact char match, e.g. [a] or "a"
-    //                 allowed_ranges.insert({pos->value, pos->value});
-    //                 pos += 1;
-    //             }
-    //         } while (pos->type == LLAMA_GRETYPE_CHAR_ALT);
-
-    //         if (!is_positive_char) {
-    //             if (prev_codepoint < max_codepoint) {
-    //                 allowed_ranges.insert({prev_codepoint + 1, max_codepoint});
-    //             }
-    //         }
-    //     }
-    // }
-}
-
-static std::unordered_set<uint32_t> & llama_grammar_get_head(const llama_grammar * grammar, const llama_grammar_element * pos) {
-    auto head_it = grammar->heads.find(pos);
-    if (head_it == grammar->heads.end()) {
-        auto & head = grammar->heads[pos];
-        llama_grammar_collect_head(pos, head);
-        return head;
+    auto it = std::lower_bound(stacks.begin(), stacks.end(), stack);
+    if (it == stacks.end() || *it != stack) {
+        stacks.insert(it, stack);
     }
-    return head_it->second;
 }
+
+// static void llama_grammar_collect_head(
+//         const llama_grammar_element * pos,
+//         std::unordered_set<uint32_t>       & head_set) {
+
+//     bool is_positive_char = pos->type == LLAMA_GRETYPE_CHAR;
+
+//     // uint32_t min_codepoint = 0;
+//     // uint32_t max_codepoint = 0x0010FFFFu;
+//     GGML_ASSERT(is_positive_char || pos->type == LLAMA_GRETYPE_CHAR_NOT); // NOLINT
+
+//     // uint32_t prev_codepoint = min_codepoint;
+
+//     auto add_range = [&](uint32_t low, uint32_t high) {
+//         for (uint32_t i = low; i <= high; ++i) {
+//             head_set.insert(i);
+//         }
+//         // prev_codepoint = high;
+//     };
+
+//     do {
+//         if (pos[1].type == LLAMA_GRETYPE_CHAR_RNG_UPPER) {
+//             // inclusive range, e.g. [a-z]
+//             if (is_positive_char) {
+//                 add_range(pos->value, pos[1].value);
+//                 // allowed_ranges.insert({pos->value, pos[1].value});
+//             } else {
+//                 throw std::runtime_error("not implemented");
+//                 // if (pos->value > prev_codepoint) {
+//                 //     add_range(prev_codepoint, pos->value - 1);
+//                 // }
+//                 // if (pos[1].value < max_codepoint) {
+//                 //     add_range(pos[1].value + 1, max_codepoint);
+//                 // }
+//             }
+//             pos += 2;
+//         } else {
+//             // exact char match, e.g. [a] or "a"
+//             // allowed_ranges.insert({pos->value, pos->value});
+//             add_range(pos->value, pos->value);
+//             pos += 1;
+//         }
+//     } while (pos->type == LLAMA_GRETYPE_CHAR_ALT);
+
+//     // if (!is_positive_char) {
+//     //     if (prev_codepoint < max_codepoint) {
+//     //         allowed_ranges.insert({prev_codepoint + 1, max_codepoint});
+//     //     }
+//     // }
+
+//     // do {
+//     //     if (pos[1].type == LLAMA_GRETYPE_CHAR_RNG_UPPER) {
+//     //         // inclusive range, e.g. [a-z]
+//     //         found = found || (pos->value <= chr && chr <= pos[1].value);
+//     //         pos += 2;
+//     //     } else {
+//     //         // exact char match, e.g. [a] or "a"
+//     //         found = found || pos->value == chr;
+//     //         pos += 1;
+//     //     }
+//     // } while (pos->type == LLAMA_GRETYPE_CHAR_ALT);
+
+    
+//     // auto has_empty_stack = false;
+//     // std::set<std::pair<uint32_t, uint32_t>> allowed_ranges;
+//     // uint32_t min_codepoint = 0;
+//     // uint32_t max_codepoint = 0x0010FFFFu;
+    
+//     // for (const auto & stack : stacks) {
+//     //     if (stack.empty()) {
+//     //         has_empty_stack = true;
+//     //         continue;
+//     //     } else {
+//     //         auto pos = stack.back();
+//     //         bool is_positive_char = pos->type == LLAMA_GRETYPE_CHAR;
+//     //         uint32_t prev_codepoint = min_codepoint;
+
+//     //         GGML_ASSERT(is_positive_char || pos->type == LLAMA_GRETYPE_CHAR_NOT); // NOLINT
+
+//     //         do {
+//     //             if (pos[1].type == LLAMA_GRETYPE_CHAR_RNG_UPPER) {
+//     //                 // inclusive range, e.g. [a-z]
+//     //                 if (is_positive_char) {
+//     //                     allowed_ranges.insert({pos->value, pos[1].value});
+//     //                 } else {
+//     //                     if (pos->value > prev_codepoint) {
+//     //                         allowed_ranges.insert({prev_codepoint, pos->value - 1});
+//     //                     }
+//     //                     if (pos[1].value < max_codepoint) {
+//     //                         allowed_ranges.insert({pos[1].value + 1, max_codepoint});
+//     //                     }
+//     //                 }
+//     //                 pos += 2;
+//     //             } else {
+//     //                 // exact char match, e.g. [a] or "a"
+//     //                 allowed_ranges.insert({pos->value, pos->value});
+//     //                 pos += 1;
+//     //             }
+//     //         } while (pos->type == LLAMA_GRETYPE_CHAR_ALT);
+
+//     //         if (!is_positive_char) {
+//     //             if (prev_codepoint < max_codepoint) {
+//     //                 allowed_ranges.insert({prev_codepoint + 1, max_codepoint});
+//     //             }
+//     //         }
+//     //     }
+//     // }
+// }
+
+// static std::unordered_set<uint32_t> & llama_grammar_get_head(const llama_grammar * grammar, const llama_grammar_element * pos) {
+//     auto head_it = grammar->heads.find(pos);
+//     if (head_it == grammar->heads.end()) {
+//         auto & head = grammar->heads[pos];
+//         llama_grammar_collect_head(pos, head);
+//         return head;
+//     }
+//     return head_it->second;
+// }
 
 // returns true iff chr satisfies the char range at pos (regular or inverse range)
 // asserts that pos is pointing to a char range element
@@ -12835,11 +12846,8 @@ static void llama_grammar_reject_candidates_for_stack(
         stack_after.push_back(stack_pos_after);
     }
     llama_grammar_stack_set next_stacks;
-    next_stacks.reserve(10);
     llama_grammar_advance_stack(rules, stack_after, [&](const std::vector<const llama_grammar_element *> & stack) {
-        // if (std::find(next_stacks.begin(), next_stacks.end(), stack) == next_stacks.end()) {
-        next_stacks.insert(stack);
-        // }
+        llama_grammar_stacks_insert(next_stacks, stack);
     });
 
     llama_grammar_reject_candidates(grammar, rules, next_stacks, next_candidates, [&](const llama_grammar_candidate & tok) {
@@ -12948,9 +12956,7 @@ struct llama_grammar * llama_grammar_init(
             stack.push_back(pos);
         }
         llama_grammar_advance_stack(vec_rules, stack, [&](const std::vector<const llama_grammar_element *> & stack) {
-        //    if (std::find(stacks.begin(), stacks.end(), stack) == stacks.end()) {
-            stacks.insert(stack);
-        //    }
+            llama_grammar_stacks_insert(stacks, stack);
         });
         while (!llama_grammar_is_end_of_sequence(pos)) {
             // scan to end of alternate def
@@ -12964,7 +12970,7 @@ struct llama_grammar * llama_grammar_init(
         }
     } while (true);
 
-    return new llama_grammar{ std::move(vec_rules), std::move(stacks), {}, {} };
+    return new llama_grammar{ std::move(vec_rules), std::move(stacks), {} };//, {} };
 }
 
 void llama_grammar_free(struct llama_grammar * grammar) {
@@ -13689,10 +13695,7 @@ void llama_grammar_accept_token(struct llama_context * ctx, struct llama_grammar
     for (auto it = code_points.begin(), end = code_points.end() - 1; it != end; ++it) {
         grammar->stacks.clear();
         llama_grammar_accept(grammar->rules, prev_stacks, *it, [&](const std::vector<const llama_grammar_element *> & stack) {
-            grammar->stacks.insert(stack);
-        //    if (std::find(tmp_new_stacks.begin(), tmp_new_stacks.end(), stack) == tmp_new_stacks.end()) {
-        //        tmp_new_stacks.push_back(stack);
-        //    }
+            llama_grammar_stacks_insert(grammar->stacks, stack);
         });
         prev_stacks = grammar->stacks;
         // grammar->stacks = tmp_new_stacks;
