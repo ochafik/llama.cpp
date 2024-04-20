@@ -1071,6 +1071,8 @@ extern "C" {
 
 #include <vector>
 #include <string>
+#include <functional>
+#include <unordered_set>
 
 struct ggml_tensor;
 
@@ -1079,9 +1081,25 @@ struct llama_partial_utf8 {
     int      n_remain; // num bytes remaining; -1 indicates invalid sequence
 };
 
+// typedef const std::vector<std::vector<const llama_grammar_element *>> llama_grammar_stack_set;
+typedef std::unordered_set<std::vector<const llama_grammar_element *>> llama_grammar_stack_set;
+
+// Hash function for std::vector<const llama_grammar_element *>:
+namespace std {
+    template<> struct hash<std::vector<const llama_grammar_element *>> {
+        size_t operator()(const std::vector<const llama_grammar_element *> & v) const {
+            size_t h = 0;
+            for (const auto & e : v) {
+                h ^= std::hash<const llama_grammar_element *>()(e);
+            }
+            return h;
+        }
+    };
+}
+
 struct llama_grammar {
     const std::vector<std::vector<llama_grammar_element>>   rules;
-    std::vector<std::vector<const llama_grammar_element *>> stacks;
+    llama_grammar_stack_set stacks;
 
     // buffer for partially generated UTF-8 sequence from accepted tokens
     llama_partial_utf8                                      partial_utf8;
@@ -1099,9 +1117,10 @@ const std::vector<std::pair<std::string, struct ggml_tensor *>> & llama_internal
 
 void llama_grammar_accept(
         const std::vector<std::vector<llama_grammar_element>>         & rules,
-        const std::vector<std::vector<const llama_grammar_element *>> & stacks,
+        const llama_grammar_stack_set & stacks,
         const uint32_t                                                  chr,
-        std::vector<std::vector<const llama_grammar_element *>>       & new_stacks);
+        const std::function<void(const std::vector<const llama_grammar_element *> &)> & callback);
+        // std::vector<std::vector<const llama_grammar_element *>>       & new_stacks);
 
 std::pair<std::vector<uint32_t>, llama_partial_utf8> decode_utf8(
         const std::string & src,
