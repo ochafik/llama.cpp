@@ -1073,6 +1073,7 @@ extern "C" {
 #include <string>
 #include <functional>
 #include <unordered_set>
+#include <unordered_map>
 
 struct ggml_tensor;
 
@@ -1098,11 +1099,14 @@ namespace std {
 }
 
 struct llama_grammar {
+    
     const std::vector<std::vector<llama_grammar_element>>   rules;
     llama_grammar_stack_set stacks;
 
     // buffer for partially generated UTF-8 sequence from accepted tokens
     llama_partial_utf8                                      partial_utf8;
+
+    mutable std::unordered_map<const llama_grammar_element *, std::unordered_set<uint32_t>> heads;
 };
 
 struct llama_grammar_candidate {

@@ -12489,6 +12489,114 @@ static bool llama_grammar_is_end_of_sequence(const llama_grammar_element * pos) 
     }
 }
 
+static void llama_grammar_collect_head(
+        const llama_grammar_element * pos,
+        std::unordered_set<uint32_t>       & head_set) {
+
+    bool is_positive_char = pos->type == LLAMA_GRETYPE_CHAR;
+
+    // uint32_t min_codepoint = 0;
+    // uint32_t max_codepoint = 0x0010FFFFu;
+    GGML_ASSERT(is_positive_char || pos->type == LLAMA_GRETYPE_CHAR_NOT); // NOLINT
+
+    // uint32_t prev_codepoint = min_codepoint;
+
+    auto add_range = [&](uint32_t low, uint32_t high) {
+        for (uint32_t i = low; i <= high; ++i) {
+            head_set.insert(i);
+        }
+        // prev_codepoint = high;
+    };
+
+    do {
+        if (pos[1].type == LLAMA_GRETYPE_CHAR_RNG_UPPER) {
+            // inclusive range, e.g. [a-z]
+            if (is_positive_char) {
+                add_range(pos->value, pos[1].value);
+                // allowed_ranges.insert({pos->value, pos[1].value});
+            } else {
+                throw std::runtime_error("not implemented");
+                // if (pos->value > prev_codepoint) {
+                //     add_range(prev_codepoint, pos->value - 1);
+                // }
+                // if (pos[1].value < max_codepoint) {
+                //     add_range(pos[1].value + 1, max_codepoint);
+                // }
+            }
+            pos += 2;
+        } else {
+            // exact char match, e.g. [a] or "a"
+            // allowed_ranges.insert({pos->value, pos->value});
+            add_range(pos->value, pos->value);
+            pos += 1;
+        }
+    } while (pos->type == LLAMA_GRETYPE_CHAR_ALT);
+
+    // if (!is_positive_char) {
+    //     if (prev_codepoint < max_codepoint) {
+    //         allowed_ranges.insert({prev_codepoint + 1, max_codepoint});
+    //     }
+    // }
+
+    // do {
+    //     if (pos[1].type == LLAMA_GRETYPE_CHAR_RNG_UPPER) {
+    //         // inclusive range, e.g. [a-z]
+    //         found = found || (pos->value <= chr && chr <= pos[1].value);
+    //         pos += 2;
+    //     } else {
+    //         // exact char match, e.g. [a] or "a"
+    //         found = found || pos->value == chr;
+    //         pos += 1;
+    //     }
+    // } while (pos->type == LLAMA_GRETYPE_CHAR_ALT);
+
+    
+    // auto has_empty_stack = false;
+    // std::set<std::pair<uint32_t, uint32_t>> allowed_ranges;
+    // uint32_t min_codepoint = 0;
+    // uint32_t max_codepoint = 0x0010FFFFu;
+    
+    // for (const auto & stack : stacks) {
+    //     if (stack.empty()) {
+    //         has_empty_stack = true;
+    //         continue;
+    //     } else {
+    //         auto pos = stack.back();
+    //         bool is_positive_char = pos->type == LLAMA_GRETYPE_CHAR;
+    //         uint32_t prev_codepoint = min_codepoint;
+
+    //         GGML_ASSERT(is_positive_char || pos->type == LLAMA_GRETYPE_CHAR_NOT); // NOLINT
+
+    //         do {
+    //             if (pos[1].type == LLAMA_GRETYPE_CHAR_RNG_UPPER) {
+    //                 // inclusive range, e.g. [a-z]
+    //                 if (is_positive_char) {
+    //                     allowed_ranges.insert({pos->value, pos[1].value});
+    //                 } else {
+    //                     if (pos->value > prev_codepoint) {
+    //                         allowed_ranges.insert({prev_codepoint, pos->value - 1});
+    //                     }
+    //                     if (pos[1].value < max_codepoint) {
+    //                         allowed_ranges.insert({pos[1].value + 1, max_codepoint});
+    //                     }
+    //                 }
+    //                 pos += 2;
+    //             } else {
+    //                 // exact char match, e.g. [a] or "a"
+    //                 allowed_ranges.insert({pos->value, pos->value});
+    //                 pos += 1;
+    //             }
+    //         } while (pos->type == LLAMA_GRETYPE_CHAR_ALT);
+
+    //         if (!is_positive_char) {
+    //             if (prev_codepoint < max_codepoint) {
+    //                 allowed_ranges.insert({prev_codepoint + 1, max_codepoint});
+    //             }
+    //         }
+    //     }
+    // }
+}
+
 // returns true iff chr satisfies the char range at pos (regular or inverse range)
 // asserts that pos is pointing to a char range element
 static std::pair<bool, const llama_grammar_element *> llama_grammar_match_char(
@@ -12661,11 +12769,13 @@ void llama_grammar_accept(
 }
 
 static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates(
+        const llama_grammar * grammar,
         const std::vector<std::vector<llama_grammar_element>>         & rules,
         const llama_grammar_stack_set & stacks,
         const std::vector<llama_grammar_candidate>                    & candidates);
 
 static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates_for_stack(
+        const llama_grammar * grammar,
         const std::vector<std::vector<llama_grammar_element>> & rules,
         const std::vector<const llama_grammar_element *>      & stack,
         const std::vector<llama_grammar_candidate>            & candidates) {
@@ -12684,6 +12794,16 @@ static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates_for_
 
     const llama_grammar_element * stack_pos = stack.back();
 
+    auto head_it = grammar->heads.find(stack_pos);
+    if (head_it == grammar->heads.end()) {
+        auto & head = grammar->heads[stack_pos];
+        llama_grammar_collect_head(stack_pos, head);
+        head_it = grammar->heads.find(stack_pos);
+    // } else {
+    //     fprintf(stderr, ".");
+    }
+    auto & head = head_it->second;
+
     std::vector<llama_grammar_candidate> next_candidates;
     next_candidates.reserve(candidates.size());
 
@@ -12695,7 +12815,8 @@ static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates_for_
                     !llama_grammar_match_partial_char(stack_pos, tok.partial_utf8)) {
                 rejects.push_back(tok);
             }
-        } else if (llama_grammar_match_char(stack_pos, *tok.code_points).first) {
+        } else if (head.find(*tok.code_points) != head.end()) {
+        // } else if (llama_grammar_match_char(stack_pos, *tok.code_points).first) {
             next_candidates.push_back({ tok.index, tok.code_points + 1, tok.partial_utf8 });
         } else {
             rejects.push_back(tok);
@@ -12710,13 +12831,14 @@ static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates_for_
         stack_after.push_back(stack_pos_after);
     }
     llama_grammar_stack_set next_stacks;
+    next_stacks.reserve(10);
     llama_grammar_advance_stack(rules, stack_after, [&](const std::vector<const llama_grammar_element *> & stack) {
         // if (std::find(next_stacks.begin(), next_stacks.end(), stack) == next_stacks.end()) {
         next_stacks.insert(stack);
         // }
     });
 
-    auto next_rejects = llama_grammar_reject_candidates(rules, next_stacks, next_candidates);
+    auto next_rejects = llama_grammar_reject_candidates(grammar, rules, next_stacks, next_candidates);
     for (const auto & tok : next_rejects) {
         rejects.push_back({ tok.index, tok.code_points - 1, tok.partial_utf8 });
     }
@@ -12724,7 +12846,9 @@ static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates_for_
     return rejects;
 }
 
+
 static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates(
+        const llama_grammar * grammar,
         const std::vector<std::vector<llama_grammar_element>>         & rules,
         const llama_grammar_stack_set & stacks,
         const std::vector<llama_grammar_candidate>                    & candidates) {
@@ -12734,11 +12858,19 @@ static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates(
         return std::vector<llama_grammar_candidate>();
     }
 
+    // fprintf(stderr, "# %lu stacks\n", stacks.size());
+    // for (const auto & stack : stacks) {
+    //     if (!stack.empty()) {
+    //         fprintf(stderr, "{%d, %d}, ", stack.back()->type, stack.back()->value);
+    //     }
+    // }
+    // fprintf(stderr, "\n");
+
     auto it = stacks.begin();
-    auto rejects = llama_grammar_reject_candidates_for_stack(rules, *it, candidates);
+    auto rejects = llama_grammar_reject_candidates_for_stack(grammar, rules, *it, candidates);
 
     for (size_t i = 1, size = stacks.size(); i < size; ++i) {
-        rejects = llama_grammar_reject_candidates_for_stack(rules, *(++it), rejects);
+        rejects = llama_grammar_reject_candidates_for_stack(grammar, rules, *(++it), rejects);
     }
     return rejects;
 }
@@ -12788,7 +12920,7 @@ struct llama_grammar * llama_grammar_init(
         }
     } while (true);
 
-    return new llama_grammar{ std::move(vec_rules), std::move(stacks), {} };
+    return new llama_grammar{ std::move(vec_rules), std::move(stacks), {}, {} };
 }
 
 void llama_grammar_free(struct llama_grammar * grammar) {
@@ -13312,7 +13444,7 @@ void llama_sample_grammar(struct llama_context * ctx, llama_token_data_array * c
         }
     }
 
-    const auto rejects = llama_grammar_reject_candidates(grammar->rules, grammar->stacks, candidates_grammar);
+    const auto rejects = llama_grammar_reject_candidates(grammar, grammar->rules, grammar->stacks, candidates_grammar);
     for (const auto & reject : rejects) {
         candidates->data[reject.index].logit = -INFINITY;
     }
