@@ -1090,6 +1090,7 @@ struct llama_grammar {
 struct llama_grammar_candidate {
     size_t               index;
     const uint32_t     * code_points;
+    std::string          piece;
     llama_partial_utf8   partial_utf8;
 };
 
