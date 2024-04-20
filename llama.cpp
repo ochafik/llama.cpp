@@ -12656,26 +12656,25 @@ void llama_grammar_accept(
     }
 }
 
-static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates(
+static void llama_grammar_reject_candidates(
         const std::vector<std::vector<llama_grammar_element>>         & rules,
         const std::vector<std::vector<const llama_grammar_element *>> & stacks,
-        const std::vector<llama_grammar_candidate>                    & candidates);
+        const std::vector<llama_grammar_candidate>                    & candidates,
+        const std::function<void(const llama_grammar_candidate &)>    & callback);
 
-static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates_for_stack(
+static void llama_grammar_reject_candidates_for_stack(
         const std::vector<std::vector<llama_grammar_element>> & rules,
         const std::vector<const llama_grammar_element *>      & stack,
-        const std::vector<llama_grammar_candidate>            & candidates) {
-
-    std::vector<llama_grammar_candidate> rejects;
-    rejects.reserve(candidates.size());
+        const std::vector<llama_grammar_candidate>            & candidates,
+        const std::function<void(const llama_grammar_candidate &)> & callback) {
 
     if (stack.empty()) {
         for (const auto & tok : candidates) {
             if (*tok.code_points != 0 || tok.partial_utf8.n_remain != 0) {
-                rejects.push_back(tok);
+                callback(tok);
             }
         }
-        return rejects;
+        return;
     }
 
     const llama_grammar_element * stack_pos = stack.back();
@@ -12689,12 +12688,12 @@ static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates_for_
             // that cannot satisfy this position in grammar
             if (tok.partial_utf8.n_remain != 0 &&
                     !llama_grammar_match_partial_char(stack_pos, tok.partial_utf8)) {
-                rejects.push_back(tok);
+                callback(tok);
             }
         } else if (llama_grammar_match_char(stack_pos, *tok.code_points).first) {
             next_candidates.push_back({ tok.index, tok.code_points + 1, tok.partial_utf8 });
         } else {
-            rejects.push_back(tok);
+            callback(tok);
         }
     }
 
@@ -12708,30 +12707,45 @@ static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates_for_
     std::vector<std::vector<const llama_grammar_element *>> next_stacks;
     llama_grammar_advance_stack(rules, stack_after, next_stacks);
 
-    auto next_rejects = llama_grammar_reject_candidates(rules, next_stacks, next_candidates);
-    for (const auto & tok : next_rejects) {
-        rejects.push_back({ tok.index, tok.code_points - 1, tok.partial_utf8 });
-    }
-
-    return rejects;
+    llama_grammar_reject_candidates(rules, next_stacks, next_candidates, [&](const llama_grammar_candidate & tok) {
+        callback({ tok.index, tok.code_points - 1, tok.partial_utf8 });
+    });
 }
 
-static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates(
+static void llama_grammar_reject_candidates(
         const std::vector<std::vector<llama_grammar_element>>         & rules,
         const std::vector<std::vector<const llama_grammar_element *>> & stacks,
-        const std::vector<llama_grammar_candidate>                    & candidates) {
+        const std::vector<llama_grammar_candidate>                    & candidates,
+        const std::function<void(const llama_grammar_candidate &)>          & callback) {
     GGML_ASSERT(!stacks.empty()); // REVIEW
 
     if (candidates.empty()) {
-        return std::vector<llama_grammar_candidate>();
+        // return std::vector<llama_grammar_candidate>();
+        return;
     }
 
-    auto rejects = llama_grammar_reject_candidates_for_stack(rules, stacks.front(), candidates);
+    const int last_i = stacks.size() - 1;
+    // TODO: inline the _For_Stack function here: early exits are good, but each of the recursive calls computes the next stacks again!
+    std::function<void(int, const std::vector<llama_grammar_candidate> &)> trickle = [&](int i, const std::vector<llama_grammar_candidate> & cands) {
+        llama_grammar_reject_candidates_for_stack(rules, stacks[i], cands, [&](const llama_grammar_candidate & reject) {
+            if (i == last_i) {
+                callback(reject);
+            } else {
+                trickle(i + 1, {reject});
+            }
+        });    
+    };
+    trickle(0, candidates);
+    // std::vector<llama_grammar_candidate> rejects;
+    // llama_grammar_reject_candidates_for_stack(rules, stacks.front(), candidates, [&](const llama_grammar_candidate & reject) {
+    //     rejects.push_back(reject);
+    // });
 
-    for (size_t i = 1, size = stacks.size(); i < size; ++i) {
-        rejects = llama_grammar_reject_candidates_for_stack(rules, stacks[i], rejects);
-    }
-    return rejects;
+    // for (size_t i = 1, size = stacks.size(); i < size; ++i) {
+    //     old_rejects = rejects;
+    //     llama_grammar_reject_candidates_for_stack(rules, stacks[i], old_rejects, rejects);
+    // }
+    // return rejects;
 }
 
 //
@@ -13298,10 +13312,9 @@ void llama_sample_grammar(struct llama_context * ctx, llama_token_data_array * c
         }
     }
 
-    const auto rejects = llama_grammar_reject_candidates(grammar->rules, grammar->stacks, candidates_grammar);
-    for (const auto & reject : rejects) {
+    llama_grammar_reject_candidates(grammar->rules, grammar->stacks, candidates_grammar, [&](const llama_grammar_candidate & reject) {
         candidates->data[reject.index].logit = -INFINITY;
-    }
+    });
 
     ctx->t_sample_us += ggml_time_us() - t_start_sample_us;
 }
