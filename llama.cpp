@@ -12696,11 +12696,12 @@ static bool llama_grammar_match_partial_char(
 
 // transforms a grammar pushdown stack into N possible stacks, all ending
 // at a character range (terminal element)
+// template <class Callback>
 static void llama_grammar_advance_stack(
         const std::vector<std::vector<llama_grammar_element>>   & rules,
         const std::vector<const llama_grammar_element *>        & stack,
+        // const Callback & callback) {
         const std::function<void(const std::vector<const llama_grammar_element *> &)> & callback) {
-        // llama_grammar_stack_set & new_stacks) {
 
     if (stack.empty()) {
         callback(stack);
@@ -12761,12 +12762,13 @@ static void llama_grammar_advance_stack(
 // be positioned at a character range (see `llama_grammar_advance_stack`), and
 // produces the N possible stacks if the given char is accepted at those
 // positions
+// template <class Callback>
 void llama_grammar_accept(
         const std::vector<std::vector<llama_grammar_element>>         & rules,
         const llama_grammar_stack_set & stacks,
         const uint32_t                                                  chr,
+        // const Callback & callback) {
         const std::function<void(const std::vector<const llama_grammar_element *> &)> & callback) {
-        // llama_grammar_stack_set       & new_stacks) {
 
     // new_stacks.clear();
 
@@ -12789,18 +12791,22 @@ void llama_grammar_accept(
     }
 }
 
+// template <class Callback>
 static void llama_grammar_reject_candidates(
         const llama_grammar * grammar,
         const std::vector<std::vector<llama_grammar_element>>         & rules,
         const llama_grammar_stack_set & stacks,
         const std::vector<llama_grammar_candidate>                    & candidates,
+        // const Callback & callback);
         const std::function<void(const llama_grammar_candidate &)>    & callback);
 
+// template <class Callback>
 static void llama_grammar_reject_candidates_for_stack(
         const llama_grammar * grammar,
         const std::vector<std::vector<llama_grammar_element>> & rules,
         const std::vector<const llama_grammar_element *>      & stack,
         const std::vector<llama_grammar_candidate>            & candidates,
+        // const Callback & callback) {
         const std::function<void(const llama_grammar_candidate &)>    & callback) {
 
     // std::vector<llama_grammar_candidate> rejects;
@@ -12820,7 +12826,7 @@ static void llama_grammar_reject_candidates_for_stack(
     // auto & head = llama_grammar_get_head(grammar, stack_pos);
 
     std::vector<llama_grammar_candidate> next_candidates;
-    next_candidates.reserve(candidates.size());
+    // next_candidates.reserve(candidates.size());
 
     for (const auto & tok : candidates) {
         if (*tok.code_points == 0) {
@@ -12856,11 +12862,13 @@ static void llama_grammar_reject_candidates_for_stack(
 }
 
 
+// template <class Callback>
 static void llama_grammar_reject_candidates(
         const llama_grammar * grammar,
         const std::vector<std::vector<llama_grammar_element>>         & rules,
         const llama_grammar_stack_set & stacks,
         const std::vector<llama_grammar_candidate>                    & candidates,
+        // const Callback & callback) {
         const std::function<void(const llama_grammar_candidate &)>    & callback) {
     GGML_ASSERT(!stacks.empty()); // REVIEW
 
