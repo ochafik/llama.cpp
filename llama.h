@@ -1085,6 +1085,9 @@ struct llama_grammar {
 
     // buffer for partially generated UTF-8 sequence from accepted tokens
     llama_partial_utf8                                      partial_utf8;
+
+    mutable std::vector<std::string>                                token_pieces;
+    mutable std::vector<std::pair<std::vector<uint32_t>, llama_partial_utf8>> token_codepoints;
 };
 
 struct llama_grammar_candidate {
