@@ -1071,6 +1071,8 @@ extern "C" {
 
 #include <vector>
 #include <string>
+#include <functional>
+#include <numeric>
 
 struct ggml_tensor;
 
@@ -1079,9 +1081,53 @@ struct llama_partial_utf8 {
     int      n_remain; // num bytes remaining; -1 indicates invalid sequence
 };
 
+class llama_grammar_stack : public std::enable_shared_from_this<llama_grammar_stack> {
+    std::shared_ptr<const llama_grammar_stack> parent_;
+    const llama_grammar_element * head_;
+
+public:
+    llama_grammar_stack(const std::shared_ptr<const llama_grammar_stack> & parent = nullptr, const llama_grammar_element * head = nullptr)
+        : parent_(parent), head_(head) {}
+
+    const llama_grammar_element * back() const {
+        GGML_ASSERT(!empty());
+        return head_;
+    }
+
+    std::shared_ptr<const llama_grammar_stack> copy(const std::function<const llama_grammar_element *(const llama_grammar_element *)> & mapper) const {
+        if (empty()) {
+            return shared_from_this();
+        }
+        return parent_->copy(mapper)->push_back(mapper(head_));
+    }
+
+    static std::shared_ptr<const llama_grammar_stack> make_empty() {
+        static auto instance = std::make_shared<llama_grammar_stack>();
+        return instance;
+    }
+
+    std::shared_ptr<const llama_grammar_stack> push_back(const llama_grammar_element * element) const {
+        return std::make_shared<llama_grammar_stack>(shared_from_this(), element);
+    }
+
+    std::shared_ptr<const llama_grammar_stack> pop_back() const {
+        return parent_;
+    }
+
+    bool empty() const {
+        // GGML_ASSERT(!head || !parent_);
+        return !head_ && !parent_;
+    }
+
+    bool operator==(const llama_grammar_stack & other) const {
+        // TODO: make these lazy singletons within a context.
+        return head_ == other.head_ && *parent_ == *other.parent_;
+    }
+};
+
 struct llama_grammar {
-    const std::vector<std::vector<llama_grammar_element>>   rules;
-    std::vector<std::vector<const llama_grammar_element *>> stacks;
+    std::vector<std::vector<llama_grammar_element>>   rules;
+    std::vector<std::shared_ptr<const llama_grammar_stack>> stacks;
 
     // buffer for partially generated UTF-8 sequence from accepted tokens
     llama_partial_utf8                                      partial_utf8;
@@ -1090,6 +1136,35 @@ struct llama_grammar {
     mutable std::vector<std::string>                        token_pieces;
     mutable std::vector<std::pair<std::vector<uint32_t>,
                                   llama_partial_utf8>>      token_codepoints;
+
+    // llama_grammar(const std::vector<std::vector<llama_grammar_element>> && rules) : rules(std::move(rules)) {}
+    llama_grammar() {}
+
+    llama_grammar(const llama_grammar & other) :
+        rules(other.rules),
+        partial_utf8(other.partial_utf8),
+        token_pieces(other.token_pieces),
+        token_codepoints(other.token_codepoints) {
+
+        std::unordered_map<const llama_grammar_element *, const llama_grammar_element *> element_map;
+        element_map.reserve(std::accumulate(
+            rules.begin(), rules.end(), 0,
+            [](size_t acc, const std::vector<llama_grammar_element> & rule) {
+                return acc + rule.size();
+            }));
+        for (size_t ir = 0; ir < rules.size(); ir++) {
+            for (size_t ie = 0; ie < rules[ir].size(); ie++) {
+                element_map[&other.rules[ir][ie]] = &rules[ir][ie];
+            }
+        }
+        auto mapper = [&](const llama_grammar_element * pos) {
+            return element_map.at(pos);
+        };
+        for (const auto & stack : other.stacks) {
+            GGML_ASSERT(stack);
+            stacks.push_back(stack->copy(mapper));
+        }
+    }
 };
 
 struct llama_grammar_candidate {
@@ -1104,9 +1179,9 @@ const std::vector<std::pair<std::string, struct ggml_tensor *>> & llama_internal
 
 void llama_grammar_accept(
         const std::vector<std::vector<llama_grammar_element>>         & rules,
-        const std::vector<std::vector<const llama_grammar_element *>> & stacks,
+        const std::vector<std::shared_ptr<const llama_grammar_stack>> & stacks,
         const uint32_t                                                  chr,
-        std::vector<std::vector<const llama_grammar_element *>>       & new_stacks);
+        std::vector<std::shared_ptr<const llama_grammar_stack>>       & new_stacks);
 
 std::pair<std::vector<uint32_t>, llama_partial_utf8> decode_utf8(
         const std::string & src,
