@@ -12779,7 +12779,7 @@ struct llama_grammar * llama_grammar_init(
         }
     } while (true);
 
-    return new llama_grammar{ std::move(vec_rules), std::move(stacks), {} };
+    return new llama_grammar{ std::move(vec_rules), std::move(stacks), {}, {}, {} };
 }
 
 void llama_grammar_free(struct llama_grammar * grammar) {
@@ -13316,7 +13316,7 @@ void llama_sample_grammar(struct llama_context * ctx, llama_token_data_array * c
         } else if (piece.empty() || piece[0] == 0) {
             candidates->data[i].logit = -INFINITY;
         } else if (grammar->partial_utf8.n_remain == 0){
-            const auto & decoded = grammar->token_codepoints[id];
+            const auto & decoded = grammar->token_codepoints.at(id);
             candidates_grammar.push_back({ i, decoded.first.data(), decoded.second });
         } else {
             candidates_decoded.push_back(decode_utf8(piece, grammar->partial_utf8));
@@ -13511,7 +13511,7 @@ void llama_grammar_accept_token(struct llama_context * ctx, struct llama_grammar
         GGML_ASSERT(false);
     }
 
-    const auto & piece = grammar->token_pieces[token];
+    const auto & piece = grammar->token_pieces.at(token);
 
     // Note terminating 0 in decoded string
     const auto   decoded     = grammar->partial_utf8.n_remain == 0
