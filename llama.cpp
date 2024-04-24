@@ -12816,7 +12816,7 @@ void llama_grammar_free(struct llama_grammar * grammar) {
 }
 
 struct llama_grammar * llama_grammar_copy(const struct llama_grammar * grammar) {
-    llama_grammar * result = new llama_grammar{ grammar->rules, grammar->stacks, grammar->partial_utf8, grammar->token_pieces, grammar->token_codepoints };
+    llama_grammar * result = new llama_grammar{ grammar->rules, grammar->stacks, grammar->partial_utf8, grammar->token_pieces, grammar->token_codepoints_without_partial_utf8_prefix };
 
     std::unordered_map<const llama_grammar_element *, const llama_grammar_element *> element_map;
     element_map.reserve(std::accumulate(
@@ -13315,14 +13315,14 @@ void llama_sample_grammar(struct llama_context * ctx, llama_token_data_array * c
         }
     }
 
-    if (grammar->token_codepoints.empty()) {
+    if (grammar->token_codepoints_without_partial_utf8_prefix.empty()) {
         auto n_vocab = llama_n_vocab(llama_get_model(ctx));
-        grammar->token_codepoints.resize(n_vocab);
+        grammar->token_codepoints_without_partial_utf8_prefix.resize(n_vocab);
         grammar->token_pieces.resize(n_vocab);
         for (llama_token id = 0; id < n_vocab; ++id) {
             const std::string piece = llama_token_to_piece(ctx, id, false);
             grammar->token_pieces[id] = piece;
-            grammar->token_codepoints[id] = decode_utf8(piece, {0, 0});
+            grammar->token_codepoints_without_partial_utf8_prefix[id] = decode_utf8(piece, {0, 0});
         }
     }
 
@@ -13343,7 +13343,7 @@ void llama_sample_grammar(struct llama_context * ctx, llama_token_data_array * c
         } else if (piece.empty() || piece[0] == 0) {
             candidates->data[i].logit = -INFINITY;
         } else if (grammar->partial_utf8.n_remain == 0){
-            const auto & decoded = grammar->token_codepoints.at(id);
+            const auto & decoded = grammar->token_codepoints_without_partial_utf8_prefix.at(id);
             candidates_grammar.push_back({ i, decoded.first.data(), decoded.second });
         } else {
             candidates_decoded.push_back(decode_utf8(piece, grammar->partial_utf8));
@@ -13542,7 +13542,7 @@ void llama_grammar_accept_token(struct llama_context * ctx, struct llama_grammar
 
     // Note terminating 0 in decoded string
     const auto   decoded     = grammar->partial_utf8.n_remain == 0
-        ? grammar->token_codepoints[token]
+        ? grammar->token_codepoints_without_partial_utf8_prefix[token]
         : decode_utf8(piece, grammar->partial_utf8);
     const auto & code_points = decoded.first;
     std::vector<std::vector<const llama_grammar_element *>> tmp_new_stacks;
