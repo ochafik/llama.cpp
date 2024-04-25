@@ -1,10 +1,13 @@
 #include "grammar-parser.h"
+
 #include <cstdint>
 #include <cwchar>
-#include <string>
-#include <utility>
-#include <stdexcept>
 #include <exception>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <unordered_set>
+#include <utility>
 
 namespace grammar_parser {
     // NOTE: assumes valid utf8 (but checks for overrun)
@@ -120,6 +123,16 @@ namespace grammar_parser {
             return decode_utf8(src);
         }
         throw std::runtime_error("unexpected end of input");
+    }
+
+    template <class Callback>
+    void foreach_alt(const llama_grammar_element * rule_start, Callback callback) {
+        callback(rule_start);
+        for (const llama_grammar_element * alt = rule_start + 1; alt->type != LLAMA_GRETYPE_END; alt++) {
+            if (alt->type == LLAMA_GRETYPE_ALT) {
+                callback(alt + 1);
+            }
+        }
     }
 
     const char * parse_alternates(
@@ -294,6 +307,50 @@ namespace grammar_parser {
                     }
                 }
             }
+
+            // // Detect left recursion.
+            // std::unordered_set<const llama_grammar_element *> tested_rules;
+            // std::function<void(const std::vector<llama_grammar_element> &, std::vector<llama_grammar_element *> &)> detect_left_recursion =
+            //     [&](const std::vector<llama_grammar_element> & rule, std::vector<llama_grammar_element *> & stack) {
+            //         auto elem = rule.data();
+
+            //         if (tested_rules.find(elem) != tested_rules.end()) {
+            //             return;
+            //         }
+
+            //         if (std::find(stack.begin(), stack.end(), elem) != stack.end()) {
+            //             std::vector<std::string> rule_names(state.rules.size());
+            //             for (const auto & kv : state.symbol_ids) {
+            //                 rule_names[kv.second] = kv.first;
+            //             }
+            //             std::ostringstream out;
+            //             out << "Left recursion detected: ";
+            //             for (size_t i = 0; i < stack.size(); i++) {
+            //                 if (i > 0) {
+            //                     out << " -> ";
+            //                 }
+            //                 GGML_ASSERT(stack[i]->type == LLAMA_GRETYPE_RULE_REF);
+            //                 out << rule_names[stack[i]->value];
+            //             }
+            //             throw std::runtime_error(out.str());
+            //         }
+
+            //         stack.push_back(const_cast<llama_grammar_element *>(elem));
+            //         foreach_alt(elem, [&](const llama_grammar_element * alt) {
+            //             if (alt->type == LLAMA_GRETYPE_RULE_REF) {
+            //                 detect_left_recursion(state.rules[alt->value], stack);
+            //             }
+            //         });
+            //         stack.pop_back();
+
+            //         tested_rules.insert(elem);
+            //     };
+            // std::vector<llama_grammar_element *> stack;
+            // for (const auto & rule : state.rules) {
+            //     detect_left_recursion(rule, stack);
+            //     GGML_ASSERT(stack.empty());
+            // }
+
             return state;
         } catch (const std::exception & err) {
             fprintf(stderr, "%s: error parsing grammar: %s\n", __func__, err.what());
