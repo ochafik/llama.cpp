@@ -307,6 +307,8 @@ In order to build llama.cpp you have three different options.
       make
       ```
 
+      **Note**: for `Debug` build, just use `make clean && make LLAMA_DEBUG=1`
+
   - On Windows:
 
     1. Download the latest fortran version of [w64devkit](https://github.com/skeeto/w64devkit/releases).
@@ -321,9 +323,23 @@ In order to build llama.cpp you have three different options.
 - Using `CMake`:
 
     ```bash
-    cmake -B build # Note: add -DCMAKE_BUILD_TYPE=Debug here for debug builds
+    cmake -B build
     cmake --build build
     ```
+
+    **Note**: for `Debug` builds, there are two cases:
+
+    - General case (esp. for default Makefile or Ninja generation):
+
+      ```
+      cmake -B build -DCMAKE_BUILD_TYPE=Debug       && cmake --build build
+      ```
+
+    - Special case with a multi-config generator `-G` param (Visual Studio, XCode...):
+
+      ```bash
+      cmake -B build -G "Visual Studio 17 2022" ... && cmake --build build --config Debug
+      ```
 
 - Using `Zig` (version 0.11 or later):
 
