@@ -232,7 +232,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             "maximum": 300
         })""",
         R"""(
-            root ::= ([1] ([5-9] | [2-9] [0-9]) | [1-2] [0-9]{2} | [3] "00") space
+            root ::= ([1] ([5-9]) | [2-9] [0-9] | [1-2] [0-9]{2} | [3] "00") space
             space ::= " "?
         )"""
     });
@@ -607,7 +607,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             "maxItems": 5
         })""",
         R"""(
-            item ::= ([1] ([2] ([2-9] | [3-9] [0-9])) | [2] "0" [0-7]) space
+            item ::= ([1] ([2] ([2-9]) | [3-9] [0-9]) | [2] "0" [0-7]) space
             root ::= "[" space item ("," space item){2,4} "]" space
             space ::= " "?
         )"""
