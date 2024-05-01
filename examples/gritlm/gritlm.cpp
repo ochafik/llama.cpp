@@ -156,17 +156,13 @@ int main(int argc, char * argv[]) {
     if (!gpt_params_parse(argc, argv, params)) {
         return 1;
     }
-
-    llama_model_params mparams = llama_model_params_from_gpt_params(params);
-    llama_context_params cparams = llama_context_params_from_gpt_params(params);
+    params.embedding = true;
 
     llama_backend_init();
 
-    llama_model * mdl = llama_load_model_from_file(params.model.c_str(), mparams);
-
-    // create new context - set to embedding mode
-    cparams.embeddings = true;
-    llama_context * ctx = llama_new_context_with_model(mdl, cparams);
+    llama_model * mdl = nullptr;
+    llama_context * ctx = nullptr;
+    std::tie(mdl, ctx) = llama_init_from_gpt_params( params );
 
     // ### Embedding/Representation ###
     // samples taken from: https://github.com/ContextualAI/gritlm#basic
