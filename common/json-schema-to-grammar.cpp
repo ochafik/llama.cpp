@@ -794,7 +794,7 @@ public:
             return add_rule(rule_name, _add_primitive("object", PRIMITIVE_RULES.at("object")));
         } else {
             if (!schema_type.is_string() || PRIMITIVE_RULES.find(schema_type.get<std::string>()) == PRIMITIVE_RULES.end()) {
-                _errors.push_back("Unrecognized schema: " + schema.dump());
+                _errors.push_back("Unrecognized schema: " + schema.dump(2));
                 return "";
             }
             // TODO: support minimum, maximum, exclusiveMinimum, exclusiveMaximum at least for zero
@@ -833,7 +833,13 @@ json tool_call_schema(const json & tools, const json & response_schema, bool all
     SchemaConverter converter([](const std::string &) { return json::object(); }, /* dotall= */ false);
     json tool_alts = json::array();
     for (const auto & tool : tools) {
+        if (!tool.is_object() || tool["type"] != "function"|| !tool.contains("function")) {
+            throw std::runtime_error("Invalid tool: " + tool.dump());
+        }
         const auto & function = tool["function"];
+        if (!function.contains("name") || !function.contains("description") || !function.contains("parameters")) {
+            throw std::runtime_error("Invalid function: " + function.dump());
+        }
         const std::string & name = function["name"];
         const std::string & description = function["description"];
         auto parameters_copy = function["parameters"];
@@ -863,28 +869,29 @@ json tool_call_schema(const json & tools, const json & response_schema, bool all
             // {# "original_goal", {"title", "Original Goal", "type", "string"},
             {"thought_about_next_step_only", {
                 // # "title": "Thought about how the next step brings us closer to achieving the original goal"},
-                {"title", "Thought about next step"},
+                {"description", "Thought about next step"},
                 {"type", "string"},
             }},
             {"next_step", {
-                {"title", "Next Step: either a result or one or more tool calls to achieve the original goal"},
+                {"description", "Next Step: either a result or one or more tool calls to achieve the original goal"},
+                // {"oneOf", tool_calls},
                 {"oneOf", json::array({
-                    json {
+                    {
                         {"properties", {
                             {"tool_calls", {
                                 {"prefixItems", allow_parallel_calls ? tool_call_schema : json::array({tool_call_schema})},
                             }}
                         }},
-                        {{"required", json::array({"tool_calls"})}},
+                        {"required", json::array({"tool_calls"})},
                     },
-                    json {
-                        {"title", "Result (achieving original goal)"},
+                    {
+                        {"description", "Result (achieving original goal)"},
                         {"properties", json {
                             {"result", response_schema_copy.is_null() ? json {{"type", "string"}} : response_schema_copy},
                             // {"result", json {{"type", "string"}}},
                         }},
                         {"required", json::array({"result"})},
-                    },
+                    }
                 })},
             }},
         }},

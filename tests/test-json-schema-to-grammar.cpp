@@ -2,12 +2,57 @@
 #undef NDEBUG
 #endif
 
+#define LLAMA_API_INTERNAL
+
 #include <fstream>
 #include <sstream>
 #include <regex>
+#include <memory>
 
 #include "json-schema-to-grammar.h"
+#include "llama.h"
 #include "grammar-parser.h"
+#include "unicode.h"
+
+static llama_grammar* build_grammar(const std::string & grammar_str) {
+    auto parsed_grammar = grammar_parser::parse(grammar_str.c_str());
+
+    // Ensure we parsed correctly
+    assert(!parsed_grammar.rules.empty());
+
+    // Ensure we have a root node
+    assert(!(parsed_grammar.symbol_ids.find("root") == parsed_grammar.symbol_ids.end()));
+
+    std::vector<const llama_grammar_element*> grammar_rules(parsed_grammar.c_rules());
+    llama_grammar* grammar = llama_grammar_init(
+        grammar_rules.data(), grammar_rules.size(), parsed_grammar.symbol_ids.at("root"));
+
+    return grammar;
+}
+
+static bool match_string(const std::string & input, llama_grammar* grammar) {
+    auto decoded = decode_utf8(input, {});
+
+    const auto & code_points = decoded.first;
+
+    for (auto it = code_points.begin(), end = code_points.end() - 1; it != end; ++it) {
+        auto prev_stacks = grammar->stacks;
+        llama_grammar_accept(grammar->rules, prev_stacks, *it, grammar->stacks);
+        if (grammar->stacks.empty()) {
+            // no stacks means that the grammar failed to match at this point
+            return false;
+        }
+    }
+
+    for (const auto & stack : grammar->stacks) {
+        if (stack.empty()) {
+            // An empty stack means that the grammar has been completed
+            return true;
+        }
+    }
+
+    return false;
+}
 
 static std::string trim(const std::string & source) {
     std::string s(source);
@@ -25,23 +70,82 @@ struct TestCase {
     TestCaseStatus expected_status;
     std::string name;
     std::string schema;
+    std::string tools;
     std::string expected_grammar;
+    std::vector<std::string> matching_strings;
+    std::vector<std::string> rejected_strings;
 
+    nlohmann::ordered_json get_schema() const {
+        auto s = nlohmann::ordered_json::parse(schema);
+        auto t = nlohmann::ordered_json::parse(tools);
+        assert(s.is_object());
+        assert(t.is_array());
+        if (t.empty()) {
+            return s;
+        } else {
+            return tool_call_schema(t, s);
+        }
+    }
+    
     void _print_failure_header() const {
-        fprintf(stderr, "#\n# Test '%s' failed.\n#\n%s\n", name.c_str(), schema.c_str());
+        fprintf(stderr, "#\n# Test '%s' failed.\n#\n# SCHEMA: %s\n# TOOLS: %s\n", name.c_str(), schema.c_str(), tools.c_str());
     }
     void verify(const std::string & actual_grammar) const {
+        if (expected_grammar.empty()) return;
         if (trim(actual_grammar) != trim(expected_grammar)) {
-        _print_failure_header();
-        fprintf(stderr, "# EXPECTED:\n%s\n# ACTUAL:\n%s\n", expected_grammar.c_str(), actual_grammar.c_str());
-        assert(false);
+            _print_failure_header();
+            fprintf(stderr, "# EXPECTED:\n%s\n# ACTUAL:\n%s\n", expected_grammar.c_str(), actual_grammar.c_str());
+            assert(false);
         }
     }
     void verify_expectation_parseable() const {
+        if (expected_grammar.empty()) return;
         try {
             auto state = grammar_parser::parse(expected_grammar.c_str());
-            if (state.symbol_ids.find("root") == state.symbol_ids.end()) {
+            if (state.rules.empty() || state.symbol_ids.find("root") == state.symbol_ids.end()) {
                 throw std::runtime_error("Grammar failed to parse:\n" + expected_grammar);
+            }
+
+            if (!matching_strings.empty() || !rejected_strings.empty()) {
+                auto match_string = [&](const std::string & input) {
+                    auto state = grammar_parser::parse(expected_grammar.c_str());
+                    std::vector<const llama_grammar_element*> grammar_rules(state.c_rules());
+                    std::unique_ptr<llama_grammar> grammar(llama_grammar_init(
+                        grammar_rules.data(), grammar_rules.size(), state.symbol_ids.at("root")));
+
+                    auto decoded = decode_utf8(input, {});
+                    const auto & code_points = decoded.first;
+
+                    for (auto it = code_points.begin(), end = code_points.end() - 1; it != end; ++it) {
+                        auto prev_stacks = grammar->stacks;
+                        llama_grammar_accept(grammar->rules, prev_stacks, *it, grammar->stacks);
+                        if (grammar->stacks.empty()) {
+                            return false;
+                        }
+                    }
+                    for (const auto & stack : grammar->stacks) {
+                        if (stack.empty()) {
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+                for (const auto & s : matching_strings) {
+                    if (!match_string(s)) {
+                        _print_failure_header();
+                        fprintf(stderr, "# GRAMMAR: %s\n", expected_grammar.c_str());
+                        fprintf(stderr, "# FAILED TO MATCH: %s\n", s.c_str());
+                        assert(false);
+                    }
+                }
+                for (const auto & s : rejected_strings) {
+                    if (match_string(s)) {
+                        _print_failure_header();
+                        fprintf(stderr, "# GRAMMAR: %s\n", expected_grammar.c_str());
+                        fprintf(stderr, "# FAILED TO REJECT: %s\n", s.c_str());
+                        assert(false);
+                    }
+                }
             }
         } catch (const std::runtime_error & ex) {
             _print_failure_header();
@@ -80,12 +184,84 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
     };
 
     test({
+        SUCCESS,
+        "string w/ min length 1",
+        R"""({
+            "type": "string",
+            "minLength": 1
+        })""",
+        R"""([
+            {
+                "type": "function",
+                "function": {
+                    "name": "foo",
+                    "description": "Does stuff Jaaaa",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "first": {"type": "number"},
+                            "second": {"type": "string"}
+                        },
+                        "required": ["first"],
+                        "additionalProperties": false
+                    }
+                }
+            }
+        ])""",
+        "a",
+        // R"""(
+        //     char ::= [^"\\] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
+        //     root ::= "\"" char+ "\"" space
+        //     space ::= " "?
+        // )""",
+        {
+            R"""({
+                "thought_about_next_step_only": "I need to pass this test",
+                "next_step": {"tool_call": {"name": "foo", "arguments": {"first": 123}}}
+            })""",
+            R"""({
+                "thought_about_next_step_only": "I need to pass this test",
+                "next_step": {"tool_call": {"name": "foo", "arguments": {"first": 123, "second": "ok"}}}
+            })""",
+            R"""({
+                "thought_about_next_step_only": "I need to pass this test",
+                "next_step": {"tool_call": {"name": "foo", "arguments": {"first": 123, "third": "wat"}}}
+            })""",
+            R"""({
+                "thought_about_next_step_only": "I need to pass this test",
+                "result": "ok"
+            })""",
+        },
+        {
+            R"""({
+                "thought_about_next_step_only": "I have a bad feeling",
+                "next_step": {"tool_call": {"name": "foo", "arguments": {"first": "ok"}}}
+            })""",
+            R"""({
+                "thought_about_next_step_only": "I have a bad feeling",
+                "next_step": {"tool_call": {"name": "foo", "arguments": {"second": "ok"}}}
+            })""",
+            R"""({
+                "thought_about_next_step_only": "I have a bad feeling",
+                "next_step": {"tool_call": {"name": "cos", "arguments": {"x": 0.0}}}
+            })""",
+            R"""({
+                "thought_about_next_step_only": "I have a bad feeling",
+                "result": ""
+            })""",
+        },
+    });
+
+    test({
         FAILURE,
         "unknown type",
         R"""({
             "type": "kaboom"
         })""",
-        ""
+        "[]",
+        "",
+        {},
+        {},
     });
 
     test({
@@ -94,13 +270,17 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
         R"""({
             "type": 123
         })""",
-        ""
+        "[]",
+        "",
+        {},
+        {},
     });
 
     test({
         SUCCESS,
         "empty schema (object)",
         "{}",
+        "[]",
         R"""(
             array ::= "[" space ( value ("," space value)* )? "]" space
             boolean ::= ("true" | "false") space
@@ -114,7 +294,9 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             space ::= " "?
             string ::= "\"" char* "\"" space
             value ::= object | array | string | number | boolean | null
-        )"""
+        )""",
+        {"{}", "{\"haha\": null}"},
+        {"[]", "\"\"", "false"},
     });
 
     test({
@@ -128,6 +310,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
                 { "format": "date-time" }
             ]
         })""",
+        "[]",
         R"""(
             date ::= [0-9] [0-9] [0-9] [0-9] "-" ( "0" [1-9] | "1" [0-2] ) "-" ( "0" [1-9] | [1-2] [0-9] | "3" [0-1] )
             date-string ::= "\"" date "\"" space
@@ -141,7 +324,9 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             tuple-2 ::= time-string
             tuple-3 ::= date-time-string
             uuid ::= "\"" [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F] "-" [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F] "-" [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F] "-" [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F] "-" [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F] "\"" space
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -150,11 +335,14 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
         R"""({
             "type": "string"
         })""",
+        "[]",
         R"""(
             char ::= [^"\\] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
             root ::= "\"" char* "\"" space
             space ::= " "?
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -164,11 +352,14 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             "type": "string",
             "minLength": 1
         })""",
+        "[]",
         R"""(
             char ::= [^"\\] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
             root ::= "\"" char+ "\"" space
             space ::= " "?
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -178,11 +369,14 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             "type": "string",
             "minLength": 3
         })""",
+        "[]",
         R"""(
             char ::= [^"\\] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
             root ::= "\"" char char char (char)* "\"" space
             space ::= " "?
-        )"""
+        )""",
+        {"\"aaa\"", "\"1234...\""},
+        {"\"\"", "\"aa\""},
     });
 
     test({
@@ -192,11 +386,14 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             "type": "string",
             "maxLength": 3
         })""",
+        "[]",
         R"""(
             char ::= [^"\\] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
             root ::= "\"" (char (char (char)?)?)? "\"" space
             space ::= " "?
-        )"""
+        )""",
+        {"\"\"", "\"aaa\""},
+        {"\"aaaa\""},
     });
 
     test({
@@ -207,11 +404,14 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             "minLength": 1,
             "maxLength": 4
         })""",
+        "[]",
         R"""(
             char ::= [^"\\] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
             root ::= "\"" char (char (char (char)?)?)? "\"" space
             space ::= " "?
-        )"""
+        )""",
+        {"\"a\"", "\"aaaa\""},
+        {"\"\"", "\"aaaaa\""},
     });
 
     test({
@@ -220,10 +420,13 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
         R"""({
             "type": "boolean"
         })""",
+        "[]",
         R"""(
             root ::= ("true" | "false") space
             space ::= " "?
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -232,11 +435,14 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
         R"""({
             "type": "integer"
         })""",
+        "[]",
         R"""(
             integral-part ::= [0-9] | [1-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9])?)?)?)?)?)?)?)?)?)?)?)?)?)?)?
             root ::= ("-"? integral-part) space
             space ::= " "?
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -245,10 +451,13 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
         R"""({
             "const": "foo"
         })""",
+        "[]",
         R"""(
             root ::= "\"foo\""
             space ::= " "?
-        )"""
+        )""",
+        {"\"foo\""},
+        {"\"\"", "\"bar\"", "null"},
     });
 
     test({
@@ -257,10 +466,13 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
         R"""({
             "const": 123
         })""",
+        "[]",
         R"""(
             root ::= "123"
             space ::= " "?
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -269,10 +481,13 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
         R"""({
             "enum": ["red", "amber", "green", null, 42, ["foo"]]
         })""",
+        "[]",
         R"""(
             root ::= "\"red\"" | "\"amber\"" | "\"green\"" | "null" | "42" | "[\"foo\"]"
             space ::= " "?
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -281,12 +496,15 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
         R"""({
             "prefixItems": [{ "type": "string" }]
         })""",
+        "[]",
         R"""(
             char ::= [^"\\] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
             root ::= "[" space string "]" space
             space ::= " "?
             string ::= "\"" char* "\"" space
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -295,6 +513,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
         R"""({
             "prefixItems": [{ "type": "string" }, { "type": "number" }]
         })""",
+        "[]",
         R"""(
             char ::= [^"\\] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
             decimal-part ::= [0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9])?)?)?)?)?)?)?)?)?)?)?)?)?)?)?
@@ -303,7 +522,9 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             root ::= "[" space string "," space number "]" space
             space ::= " "?
             string ::= "\"" char* "\"" space
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -312,12 +533,15 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
         R"""({
             "type": "number"
         })""",
+        "[]",
         R"""(
             decimal-part ::= [0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9])?)?)?)?)?)?)?)?)?)?)?)?)?)?)?
             integral-part ::= [0-9] | [1-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9])?)?)?)?)?)?)?)?)?)?)?)?)?)?)?
             root ::= ("-"? integral-part) ("." decimal-part)? ([eE] [-+]? integral-part)? space
             space ::= " "?
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -329,11 +553,14 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             },
             "minItems": 2
         })""",
+        "[]",
         R"""(
             boolean ::= ("true" | "false") space
             root ::= "[" space boolean "," space boolean ("," space boolean)* "]" space
             space ::= " "?
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -345,11 +572,14 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             },
             "maxItems": 1
         })""",
+        "[]",
         R"""(
             boolean ::= ("true" | "false") space
             root ::= "[" space (boolean)? "]" space
             space ::= " "?
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -361,11 +591,14 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             },
             "maxItems": 2
         })""",
+        "[]",
         R"""(
             boolean ::= ("true" | "false") space
             root ::= "[" space (boolean ("," space boolean)?)? "]" space
             space ::= " "?
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -378,6 +611,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             "minItems": 3,
             "maxItems": 5
         })""",
+        "[]",
         R"""(
             decimal-part ::= [0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9])?)?)?)?)?)?)?)?)?)?)?)?)?)?)?
             integer ::= ("-"? integral-part) space
@@ -386,7 +620,9 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             number ::= ("-"? integral-part) ("." decimal-part)? ([eE] [-+]? integral-part)? space
             root ::= "[" space item "," space item "," space item ("," space item ("," space item)?)? "]" space
             space ::= " "?
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -396,10 +632,13 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             "type": "string",
             "pattern": "^abc?d*efg+(hij)?kl$"
         })""",
+        "[]",
         R"""(
             root ::= "\"" "ab" "c"? "d"* "ef" "g"+ ("hij")? "kl" "\"" space
             space ::= " "?
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -409,10 +648,13 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             "type": "string",
             "pattern": "^\\[\\]\\{\\}\\(\\)\\|\\+\\*\\?$"
         })""",
+        "[]",
         R"""(
             root ::= "\"" "[]{}()|+*?" "\"" space
             space ::= " "?
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -422,10 +664,13 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             "type": "string",
             "pattern": "^\"$"
         })""",
+        "[]",
         R"""(
             root ::= "\"" "\"" "\"" space
             space ::= " "?
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -435,12 +680,15 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             "type": "string",
             "pattern": "^(\\([0-9]{1,3}\\))?[0-9]{3}-[0-9]{4} a{3,5}nd...$"
         })""",
+        "[]",
         R"""(
             dot ::= [^\x0A\x0D]
             root ::= "\"" ("(" root-1 (root-1 (root-1)?)? ")")? root-1 root-1 root-1 "-" root-1 root-1 root-1 root-1 " " "aaa" ("a" ("a")?)? "nd" dot dot dot "\"" space
             root-1 ::= [0-9]
             space ::= " "?
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -461,6 +709,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             "additionalProperties": false,
             "definitions": {}
         })""",
+        "[]",
         R"""(
             a-kv ::= "\"a\"" space ":" space string
             b-kv ::= "\"b\"" space ":" space string
@@ -469,7 +718,9 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             root ::= "{" space b-kv "," space c-kv "," space a-kv "}" space
             space ::= " "?
             string ::= "\"" char* "\"" space
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -483,13 +734,16 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             },
             "additionalProperties": false
         })""",
+        "[]",
         R"""(
             a-kv ::= "\"a\"" space ":" space string
             char ::= [^"\\] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
             root ::= "{" space  (a-kv )? "}" space
             space ::= " "?
             string ::= "\"" char* "\"" space
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -503,6 +757,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             },
             "additionalProperties": false
         })""",
+        "[]",
         R"""(
             a-kv ::= "\"a\"" space ":" space string
             a-rest ::= ( "," space b-kv )? b-rest
@@ -513,7 +768,9 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             root ::= "{" space  (a-kv a-rest | b-kv b-rest | c-kv )? "}" space
             space ::= " "?
             string ::= "\"" char* "\"" space
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -529,6 +786,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             "required": ["a", "b"],
             "additionalProperties": false
         })""",
+        "[]",
         R"""(
             a-kv ::= "\"a\"" space ":" space string
             b-kv ::= "\"b\"" space ":" space string
@@ -539,7 +797,9 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             root ::= "{" space b-kv "," space a-kv ( "," space ( d-kv d-rest | c-kv ) )? "}" space
             space ::= " "?
             string ::= "\"" char* "\"" space
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -549,6 +809,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             "type": "object",
             "additionalProperties": {"type": "array", "items": {"type": "number"}}
         })""",
+        "[]",
         R"""(
             additional-kv ::= string ":" space additional-value
             additional-kvs ::= additional-kv ( "," space additional-kv )*
@@ -560,7 +821,9 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             root ::= "{" space  (additional-kvs )? "}" space
             space ::= " "?
             string ::= "\"" char* "\"" space
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -570,6 +833,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             "type": "object",
             "additionalProperties": true
         })""",
+        "[]",
         R"""(
             array ::= "[" space ( value ("," space value)* )? "]" space
             boolean ::= ("true" | "false") space
@@ -583,7 +847,9 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             space ::= " "?
             string ::= "\"" char* "\"" space
             value ::= object | array | string | number | boolean | null
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -592,6 +858,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
         R"""({
             "type": "object"
         })""",
+        "[]",
         R"""(
             array ::= "[" space ( value ("," space value)* )? "]" space
             boolean ::= ("true" | "false") space
@@ -605,7 +872,9 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             space ::= " "?
             string ::= "\"" char* "\"" space
             value ::= object | array | string | number | boolean | null
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -615,10 +884,13 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             "type": "object",
             "additionalProperties": false
         })""",
+        "[]",
         R"""(
             root ::= "{" space  "}" space
             space ::= " "?
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -632,6 +904,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             "required": ["a"],
             "additionalProperties": {"type": "string"}
         })""",
+        "[]",
         R"""(
             a-kv ::= "\"a\"" space ":" space number
             additional-kv ::= string ":" space string
@@ -643,7 +916,9 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             root ::= "{" space a-kv ( "," space ( additional-kvs ) )? "}" space
             space ::= " "?
             string ::= "\"" char* "\"" space
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -656,6 +931,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             },
             "additionalProperties": {"type": "number"}
         })""",
+        "[]",
         R"""(
             a-kv ::= "\"a\"" space ":" space number
             a-rest ::= additional-kvs
@@ -668,7 +944,9 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             root ::= "{" space  (a-kv a-rest | additional-kvs )? "}" space
             space ::= " "?
             string ::= "\"" char* "\"" space
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -683,6 +961,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             "required": ["a"],
             "additionalProperties": {"type": "number"}
         })""",
+        "[]",
         R"""(
             a-kv ::= "\"a\"" space ":" space number
             additional-kv ::= string ":" space number
@@ -696,7 +975,9 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             root ::= "{" space a-kv ( "," space ( b-kv b-rest | additional-kvs ) )? "}" space
             space ::= " "?
             string ::= "\"" char* "\"" space
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -719,6 +1000,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
                 }
             }
         })""",
+        "[]",
         R"""(
             char ::= [^"\\] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
             foo ::= "{" space foo-a-kv "}" space
@@ -726,7 +1008,9 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             root ::= foo
             space ::= " "?
             string ::= "\"" char* "\"" space
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -747,6 +1031,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             },
             "type": "object"
         })""",
+        "[]",
         R"""(
             alternative-0 ::= foo
             alternative-1 ::= bar
@@ -759,7 +1044,9 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             number ::= ("-"? integral-part) ("." decimal-part)? ([eE] [-+]? integral-part)? space
             root ::= alternative-0 | alternative-1
             space ::= " "?
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -792,6 +1079,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             },
             "type": "object"
         })""",
+        "[]",
         R"""(
             a-kv ::= "\"a\"" space ":" space number
             b-kv ::= "\"b\"" space ":" space number
@@ -803,7 +1091,9 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             number ::= ("-"? integral-part) ("." decimal-part)? ([eE] [-+]? integral-part)? space
             root ::= "{" space a-kv "," space b-kv ( "," space ( d-kv d-rest | c-kv ) )? "}" space
             space ::= " "?
-        )"""
+        )""",
+        {},
+        {},
     });
 
     test({
@@ -840,6 +1130,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             "additionalProperties": false,
             "definitions": {}
         })""",
+        "[]",
         R"""(
             decimal-part ::= [0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9])?)?)?)?)?)?)?)?)?)?)?)?)?)?)?
             integral-part ::= [0-9] | [1-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9] ([0-9])?)?)?)?)?)?)?)?)?)?)?)?)?)?)?
@@ -851,7 +1142,9 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             number-number-root-kv ::= "\"root\"" space ":" space number
             root ::= "{" space number-kv "}" space
             space ::= " "?
-        )"""
+        )""",
+        {},
+        {},
     });
 }
 
@@ -861,7 +1154,7 @@ int main() {
 
     test_all("C++", [](const TestCase & tc) {
         try {
-            tc.verify(json_schema_to_grammar(nlohmann::ordered_json::parse(tc.schema)));
+            tc.verify(json_schema_to_grammar(tc.get_schema()));
             tc.verify_status(SUCCESS);
         } catch (const std::runtime_error & ex) {
             fprintf(stderr, "Error: %s\n", ex.what());
@@ -871,7 +1164,7 @@ int main() {
 
     if (getenv("LLAMA_PYTHON_AVAILABLE") || (std::system("python --version") == 0)) {
         test_all("Python", [](const TestCase & tc) {
-            write("test-json-schema-input.tmp", tc.schema);
+            write("test-json-schema-input.tmp", tc.get_schema().dump(2));
             tc.verify_status(std::system(
                 "python ./examples/json_schema_to_grammar.py test-json-schema-input.tmp > test-grammar-output.tmp") == 0 ? SUCCESS : FAILURE);
             tc.verify(read("test-grammar-output.tmp"));
@@ -882,7 +1175,7 @@ int main() {
 
     if (getenv("LLAMA_NODE_AVAILABLE") || (std::system("node --version") == 0)) {
         test_all("JavaScript", [](const TestCase & tc) {
-            write("test-json-schema-input.tmp", tc.schema);
+            write("test-json-schema-input.tmp", tc.get_schema().dump(2));
             tc.verify_status(std::system(
                 "node ./tests/run-json-schema-to-grammar.mjs test-json-schema-input.tmp > test-grammar-output.tmp") == 0 ? SUCCESS : FAILURE);
             tc.verify(read("test-grammar-output.tmp"));
