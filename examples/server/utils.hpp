@@ -142,8 +142,8 @@ inline std::string format_chat(const struct llama_model * model, const std::stri
         alloc_size += extra_system_message.size();
 
         llama_chat_message msg { "system", extra_system_message.c_str() };
-        chat.insert(chat.begin(), msg);
-        // chat.push_back(msg);
+        // chat.insert(chat.begin(), msg);
+        chat.push_back(msg);
     }
 
     const char * ptr_tmpl = tmpl.empty() ? nullptr : tmpl.c_str();
@@ -389,29 +389,36 @@ static json oaicompat_completion_params_parse(
         std::string response_type = json_value(response_format, "type", std::string());
         if (response_type == "json_object") {
             llama_params["json_schema"] = json_value(response_format, "schema", json::object());
-            extra_system_message = (std::stringstream()
-                << "You are a helpful assistant that answers in JSON. Here's the json schema you must adhere to:\n<schema>\n"
-                << llama_params["json_schema"].dump().c_str() 
-                << "\n</schema>"
-            ).str();
         } else if (!response_type.empty() && response_type != "text") {
             throw std::runtime_error("response_format type must be one of \"text\" or \"json_object\", but got: " + response_type);
         }
-    } else if (body.contains("tools") && body["tools"].is_array()) {
-        const auto & tools = body["tools"];
-        llama_params["grammar"] = tool_call_grammar(tools);
+    }
+    
+    if (body.contains("tools") && body["tools"].is_array()) {
+        llama_params["json_schema"] = tool_call_schema(body["tools"], llama_params.contains("json_schema") ? llama_params["json_schema"] : nullptr);
+        // const auto & tools = body["tools"];
+        // llama_params["grammar"] = tool_call_grammar(tools);
 
+        // extra_system_message = (std::stringstream()
+        //     << "You are a function calling AI model. You are provided with function signatures within <tools></tools> XML tags. "
+        //     << "You may call one or more functions to assist with the user query. "
+        //     << "Don't make assumptions about what values to plug into functions. "
+        //     << "Here are the available tools: <tools>"
+        //     << tools.dump().c_str()
+        //     << "</tools>\n"
+        //     << "For each function call return a json object with function name and arguments within <tool_call></tool_call> XML tags as follows:"
+        //     << "<tool_call>"
+        //     << "{\"arguments\": <args-dict>, \"name\": <function-name>}"
+        //     << "</tool_call>\n"
+        //     << "Think before calling any tools!\n"
+        // ).str();
+    }
+
+    if (llama_params.contains("json_schema") && !llama_params["json_schema"].is_null()) {
         extra_system_message = (std::stringstream()
-            << "You are a function calling AI model. You are provided with function signatures within <tools></tools> XML tags. "
-            << "You may call one or more functions to assist with the user query. "
-            << "Don't make assumptions about what values to plug into functions. "
-            << "Here are the available tools: <tools>"
-            << tools.dump().c_str()
-            << "</tools>\n"
-            << "For each function call return a json object with function name and arguments within <tool_call></tool_call> XML tags as follows:"
-            << "<tool_call>"
-            << "{\"arguments\": <args-dict>, \"name\": <function-name>}"
-            << "</tool_call>"
+            << "You are a helpful assistant that answers in JSON. Here's the json schema you must adhere to:\n<schema>\n"
+            << llama_params["json_schema"].dump().c_str() 
+            << "\n</schema>"
         ).str();
     }
 

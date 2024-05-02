@@ -829,6 +829,70 @@ std::string json_schema_to_grammar(const json & schema) {
     return converter.format_grammar();
 }
 
+json tool_call_schema(const json & tools, const json & response_schema, bool allow_parallel_calls) {
+    SchemaConverter converter([](const std::string &) { return json::object(); }, /* dotall= */ false);
+    json tool_alts = json::array();
+    for (const auto & tool : tools) {
+        const auto & function = tool["function"];
+        const std::string & name = function["name"];
+        const std::string & description = function["description"];
+        auto parameters_copy = function["parameters"];
+        converter.resolve_refs(parameters_copy, name);
+        tool_alts.push_back(json {
+            {"type", "object"},
+            {"description", description},
+            {"properties", json {
+                {"name", json {{"const", name}}},
+                {"arguments", parameters_copy},
+            }},
+            {"required", json::array({"name", "arguments"})},
+        });
+    }
+    json tool_call_schema {
+        {"anyOf", tool_alts},
+    };
+
+    auto response_schema_copy = response_schema;
+    if (!response_schema_copy.is_null()) {
+        converter.resolve_refs(response_schema_copy, "response");
+    }
+
+    return {
+        {"type", "object"},
+        {"properties", {
+            // {# "original_goal", {"title", "Original Goal", "type", "string"},
+            {"thought_about_next_step_only", {
+                // # "title": "Thought about how the next step brings us closer to achieving the original goal"},
+                {"title", "Thought about next step"},
+                {"type", "string"},
+            }},
+            {"next_step", {
+                {"title", "Next Step: either a result or one or more tool calls to achieve the original goal"},
+                {"oneOf", json::array({
+                    json {
+                        {"properties", {
+                            {"tool_calls", {
+                                {"prefixItems", allow_parallel_calls ? tool_call_schema : json::array({tool_call_schema})},
+                            }}
+                        }},
+                        {{"required", json::array({"tool_calls"})}},
+                    },
+                    json {
+                        {"title", "Result (achieving original goal)"},
+                        {"properties", json {
+                            {"result", response_schema_copy.is_null() ? json {{"type", "string"}} : response_schema_copy},
+                            // {"result", json {{"type", "string"}}},
+                        }},
+                        {"required", json::array({"result"})},
+                    },
+                })},
+            }},
+        }},
+        {"required", json::array({"original_goal", "thought_about_next_step_only", "next_step"})},
+    };
+}
+
+
 std::string tool_call_grammar(const json & tools, bool allow_parallel_calls) {
     SchemaConverter converter([](const std::string &) { return json::object(); }, /* dotall= */ false);
     
