@@ -288,6 +288,7 @@ extern "C" {
         bool embeddings;  // if true, extract embeddings (together with logits)
         bool offload_kqv; // whether to offload the KQV ops (including the KV cache) to GPU
         bool flash_attn;  // whether to use flash attention
+        bool grammars;    // whether grammar-constrained generation support is enabled
 
         // Abort callback
         // if it returns true, execution of llama_decode() will be aborted

@@ -2799,6 +2799,8 @@ static void server_params_parse(int argc, char ** argv, server_params & sparams,
             sparams.slots_endpoint = false;
         } else if (arg == "--metrics") {
             sparams.metrics_endpoint = true;
+        } else if (arg == "--disable-grammars") {
+            params.grammars = false;
         } else if (arg == "--slot-save-path") {
             if (++i >= argc) {
                 invalid_param = true;

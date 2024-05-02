@@ -13614,6 +13614,9 @@ void llama_sample_repetition_penalties(
 
 void llama_sample_grammar(struct llama_context * ctx, llama_token_data_array * candidates, const struct llama_grammar * grammar) {
     GGML_ASSERT(ctx);
+    if (ctx->token_pieces.empty()) {
+        throw std::runtime_error("Grammar constrained support was disabled");
+    }
     const int64_t t_start_sample_us = ggml_time_us();
 
     bool allow_eog = false;
@@ -15260,6 +15263,7 @@ struct llama_context_params llama_context_default_params() {
         /*.embeddings                  =*/ false,
         /*.offload_kqv                 =*/ true,
         /*.flash_attn                  =*/ false,
+        /*.grammars                    =*/ true,
         /*.abort_callback              =*/ nullptr,
         /*.abort_callback_data         =*/ nullptr,
     };
@@ -15731,7 +15735,7 @@ struct llama_context * llama_new_context_with_model(
     }
 
     // cache tokens & their decoded codepoints (for common case where there's no partial utf8 prefix bytes) for grammar-constrained sampling.
-    {
+    if (params.grammars) {
         auto n_vocab = llama_n_vocab(llama_get_model(ctx));
         ctx->token_codepoints_without_partial_utf8_prefix.resize(n_vocab);
         ctx->token_pieces.resize(n_vocab);
