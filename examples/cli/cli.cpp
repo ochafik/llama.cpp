@@ -25,58 +25,47 @@ int main(int argc, char ** argv) {
         };
         std::map<std::string, Command> commands;
 
-        auto get_name = [](const char * symbol) {
-            std::string str(symbol);
-            if (str == "main") {
-                str = "run";
-            }
-            for (char & c : str)
-                if (c == '_')
-                    c = '-';
-            return str;
-        };
-
-        #define REGISTER_COMMAND(name, is_core, description) \
-            int name ## _main(int argc, char ** argv); \
-            commands[get_name(#name)] = {is_core, description, name ## _main};
+        #define REGISTER_COMMAND(name, symbol, is_core, description) \
+            int symbol ## _main(int argc, char ** argv); \
+            commands[name] = {is_core, description, symbol ## _main};
 
         // Core commands
-        REGISTER_COMMAND(main, true, "Run a model in chat mode");
-        REGISTER_COMMAND(server, true, "Serves a model on http://localhost:8080 (web interface + OpenAI-compatible endpoint)");
-        REGISTER_COMMAND(embedding, true, "Embedding mode");
-        REGISTER_COMMAND(llava_cli, true, "");
-        REGISTER_COMMAND(quantize, true, "");
         commands["commands"] = {true, "List all available commands", nullptr};
+        REGISTER_COMMAND("embed",          embedding, true, "Embedding mode");
+        REGISTER_COMMAND("llava",          llava_cli, true, "");
+        REGISTER_COMMAND("quantize",       quantize, true, "");
+        REGISTER_COMMAND("run",            main, true, "Run a model in chat mode");
+        REGISTER_COMMAND("serve",          server, true, "Serves a model on http://localhost:8080 (web interface + OpenAI-compatible endpoint)");
+        REGISTER_COMMAND("bench",          llama_bench, true, "");
 
         // Other commands
-        REGISTER_COMMAND(tokenize, false, "");
-        REGISTER_COMMAND(finetune, false, "");
-        REGISTER_COMMAND(train_text_from_scratch, false, "");
-        REGISTER_COMMAND(speculative, false, "");
-        REGISTER_COMMAND(perplexity, false, "");
-        REGISTER_COMMAND(lookahead, false, "");
-        REGISTER_COMMAND(lookup, false, "");
-        REGISTER_COMMAND(lookup_create, false, "");
-        REGISTER_COMMAND(lookup_merge, false, "");
-        REGISTER_COMMAND(lookup_stats, false, "");
-        REGISTER_COMMAND(imatrix, false, "");
-        REGISTER_COMMAND(baby_llama, false, "");
-        REGISTER_COMMAND(batched_bench, false, "");
-        REGISTER_COMMAND(batched, false, "");
-        REGISTER_COMMAND(beam_search, false, "");
-        REGISTER_COMMAND(benchmark, false, "");
-        REGISTER_COMMAND(convert_llama2c_to_ggml, false, "");
-        REGISTER_COMMAND(eval_callback, false, "");
-        REGISTER_COMMAND(export_lora, false, "");
-        REGISTER_COMMAND(gbnf_validator, false, "");
-        REGISTER_COMMAND(gguf_split, false, "");
-        REGISTER_COMMAND(gritlm, false, "");
-        REGISTER_COMMAND(infill, false, "");
-        REGISTER_COMMAND(llama_bench, false, "");
-        REGISTER_COMMAND(parallel, false, "");
-        REGISTER_COMMAND(passkey, false, "");
-        REGISTER_COMMAND(quantize_stats, false, "");
-        REGISTER_COMMAND(retrieval, false, "");
+        REGISTER_COMMAND("baby",           baby_llama, false, "");
+        REGISTER_COMMAND("batched",        batched, false, "");
+        REGISTER_COMMAND("beam-search",    beam_search, false, "");
+        REGISTER_COMMAND("bench-batched",  batched_bench, false, "");
+        REGISTER_COMMAND("bench-matmult",  benchmark, false, "");
+        REGISTER_COMMAND("convert-llama2c",convert_llama2c_to_ggml, false, "");
+        REGISTER_COMMAND("eval_callback",  eval_callback, false, "");
+        REGISTER_COMMAND("export_lora",    export_lora, false, "");
+        REGISTER_COMMAND("finetune",       finetune, false, "");
+        REGISTER_COMMAND("gbnf-validate",  gbnf_validator, false, "");
+        REGISTER_COMMAND("gguf-split",     gguf_split, false, "");
+        REGISTER_COMMAND("gritlm",         gritlm, false, "");
+        REGISTER_COMMAND("imatrix",        imatrix, false, "");
+        REGISTER_COMMAND("infill",         infill, false, "");
+        REGISTER_COMMAND("lookahead",      lookahead, false, "");
+        REGISTER_COMMAND("lookup",         lookup, false, "");
+        REGISTER_COMMAND("lookup-create",  lookup_create, false, "");
+        REGISTER_COMMAND("lookup-merge",   lookup_merge, false, "");
+        REGISTER_COMMAND("lookup-stats",   lookup_stats, false, "");
+        REGISTER_COMMAND("parallel",       parallel, false, "");
+        REGISTER_COMMAND("passkey",        passkey, false, "");
+        REGISTER_COMMAND("perplexity",     perplexity, false, "");
+        REGISTER_COMMAND("quantize-stats", quantize_stats, false, "");
+        REGISTER_COMMAND("retrieval",      retrieval, false, "");
+        REGISTER_COMMAND("speculate",      speculative, false, "");
+        REGISTER_COMMAND("tokenize",       tokenize, false, "");
+        REGISTER_COMMAND("train",          train_text_from_scratch, false, "");
 
         auto print_commands = [&](bool core_only) {
             std::string program_name(argv[0]);
