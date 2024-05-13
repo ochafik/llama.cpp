@@ -31,6 +31,10 @@
 #pragma warning(disable: 4244 4267) // possible loss of data
 #endif
 
+#ifndef MAIN_MAIN_FUNCTION
+#define MAIN_MAIN_FUNCTION main
+#endif
+
 static llama_context           ** g_ctx;
 static llama_model             ** g_model;
 static gpt_params               * g_params;
@@ -117,7 +121,7 @@ static void llama_log_callback_logTee(ggml_log_level level, const char * text, v
     LOG_TEE("%s", text);
 }
 
-int main(int argc, char ** argv) {
+int MAIN_MAIN_FUNCTION(int argc, char ** argv) {
     gpt_params params;
     g_params = &params;
 

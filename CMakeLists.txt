@@ -51,6 +51,7 @@ option(LLAMA_STATIC                     "llama: static link libraries"          
 option(LLAMA_NATIVE                     "llama: enable -march=native flag"                      ON)
 option(LLAMA_LTO                        "llama: enable link time optimization"                  OFF)
 option(LLAMA_CCACHE                     "llama: use ccache if available"                        ON)
+option(LLAMA_CLI                        "llama: build CLI example"                              OFF)
 
 # debug
 option(LLAMA_ALL_WARNINGS               "llama: enable all compiler warnings"                   ON)
@@ -1310,6 +1311,9 @@ if (LLAMA_BUILD_TESTS AND NOT CMAKE_JS_VERSION)
 endif ()
 
 if (LLAMA_BUILD_EXAMPLES)
+    if (LLAMA_CLI)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DMAIN_MAIN_FUNCTION=main_main -DSERVER_MAIN_FUNCTION=server_main")
+    endif()
     add_subdirectory(examples)
     add_subdirectory(pocs)
 endif()

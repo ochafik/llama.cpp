@@ -32,6 +32,10 @@
 #include <signal.h>
 #include <memory>
 
+#ifndef SERVER_MAIN_FUNCTION
+#define SERVER_MAIN_FUNCTION main
+#endif
+
 using json = nlohmann::ordered_json;
 
 bool server_verbose = false;
@@ -2901,7 +2905,7 @@ inline void signal_handler(int signal) {
     shutdown_handler(signal);
 }
 
-int main(int argc, char ** argv) {
+int SERVER_MAIN_FUNCTION(int argc, char ** argv) {
 #if SERVER_VERBOSE != 1
     log_disable();
 #endif
