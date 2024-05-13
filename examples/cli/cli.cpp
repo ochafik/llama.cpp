@@ -62,9 +62,9 @@ int main(int argc, char ** argv) {
         REGISTER_COMMAND("infill",         infill, false, "Demo of infill mode with Code Llama models", "");
         REGISTER_COMMAND("lookahead",      lookahead, false, "Demo of lookahead decoding technique", "");
         REGISTER_COMMAND("lookup",         lookup, false, "Demo of Prompt Lookup Decoding", "");
-        REGISTER_COMMAND("lookup-create",  lookup_create, false, "", "");
-        REGISTER_COMMAND("lookup-merge",   lookup_merge, false, "", "");
-        REGISTER_COMMAND("lookup-stats",   lookup_stats, false, "", "");
+        REGISTER_COMMAND("lookup-create",  lookup_create, false, "For use w/ lookup command (doc needed)", "");
+        REGISTER_COMMAND("lookup-merge",   lookup_merge, false, "For use w/ lookup command (doc needed)", "");
+        REGISTER_COMMAND("lookup-stats",   lookup_stats, false, "For use w/ lookup command (doc needed)", "");
         REGISTER_COMMAND("parallel",       parallel, false, "Simplified simulation of serving incoming requests in parallel", "");
         REGISTER_COMMAND("passkey",        passkey, false, "Tests a model's abiltiy to find a needle 'passkey' in a haystack", "https://github.com/ggerganov/llama.cpp/pull/3856");
         REGISTER_COMMAND("perplexity",     perplexity, false, "Calculates the so-called perplexity value of a language model over a given text corpus.", "");
@@ -86,32 +86,30 @@ int main(int argc, char ** argv) {
             fprintf(stderr, "Usage: %s <command> <command args>\n\n", program_name.c_str());
 
             auto print_command = [&](const std::string & name, const Command & command) {
-                fprintf(stderr, "  %s:\n    %s\n    See %s\n", name.c_str(), command.description.c_str(), command.url.c_str());
+                fprintf(stderr, "  %s:\n    %s\n    See %s\n\n", name.c_str(), command.description.c_str(), command.url.c_str());
             };
 
-            fprintf(stderr, "Core commands:\n");
+            fprintf(stderr, "Core commands:\n\n");
             for (const auto & pair : commands) {
                 if (pair.second.is_core) {
                     print_command(pair.first, pair.second);
                 }
             }
-            fprintf(stderr, "\n");
 
             if (!core_only) {
-                fprintf(stderr, "Other commands:\n");
+                fprintf(stderr, "Other commands:\n\n");
                 for (const auto & pair : commands) {
                     if (!pair.second.is_core) {
                         print_command(pair.first, pair.second);
                     }
                 }
-                fprintf(stderr, "\n");
             }
 
-            fprintf(stderr, "Examples:\n");
+            fprintf(stderr, "Examples:\n\n");
             fprintf(stderr, "  - Run a model in chat mode:\n");
-            fprintf(stderr, "    %s run -mu https://......gguf -clm\n", program_name.c_str());
+            fprintf(stderr, "    %s run -mu https://......gguf -clm\n\n", program_name.c_str());
             fprintf(stderr, "  - Serves a model on http://localhost:8080 (web interface + OpenAI-compatible endpoint)\n");
-            fprintf(stderr, "    %s serve -mu https://......gguf\n", program_name.c_str());
+            fprintf(stderr, "    %s serve -mu https://......gguf\n\n", program_name.c_str());
             fprintf(stderr, "  - Embedding mode\n");
             fprintf(stderr, "    %s embedding -mu https://......gguf\n", program_name.c_str());
             fprintf(stderr, "\n");
