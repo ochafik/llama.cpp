@@ -68,7 +68,7 @@ static void print_usage(int /*argc*/, char ** argv, struct benchmark_params_stru
     fprintf(stderr, "\n");
 }
 
-int main(int argc, char ** argv)  {
+int MAIN_ENTRY_POINT(int argc, char ** argv)  {
     struct benchmark_params_struct benchmark_params;
 
     bool invalid_param = false;

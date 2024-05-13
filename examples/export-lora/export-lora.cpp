@@ -449,7 +449,7 @@ static void export_lora(struct export_lora_params * params) {
     }
 }
 
-int main(int argc, char ** argv) {
+int MAIN_ENTRY_POINT(int argc, char ** argv) {
     struct export_lora_params params = get_default_export_lora_params();
 
     if (!export_lora_params_parse(argc, argv, &params)) {

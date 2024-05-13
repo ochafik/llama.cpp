@@ -28,7 +28,7 @@ static std::vector<int> parse_list(char * p) {
     return ret;
 }
 
-int main(int argc, char ** argv) {
+int MAIN_ENTRY_POINT(int argc, char ** argv) {
     gpt_params params;
 
     if (argc == 1 || argv[1][0] == '-') {

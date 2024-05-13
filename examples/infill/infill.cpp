@@ -101,7 +101,7 @@ static void sigint_handler(int signo) {
 }
 #endif
 
-int main(int argc, char ** argv) {
+int MAIN_ENTRY_POINT(int argc, char ** argv) {
     gpt_params params;
     llama_sampling_params & sparams = params.sparams;
     g_params = &params;

@@ -1,6 +1,5 @@
 set(TARGET llama-cpp)
 add_executable(${TARGET} cli.cpp)
-install(TARGETS ${TARGET} RUNTIME)
 target_link_libraries(${TARGET} PRIVATE
     main
     server
@@ -18,5 +17,22 @@ target_link_libraries(${TARGET} PRIVATE
     lookup-merge
     lookup-stats
     imatrix
+    baby-llama
+    batched-bench
+    batched
+    beam-search
+    benchmark
+    convert-llama2c-to-ggml
+    eval-callback
+    export-lora
+    gbnf-validator
+    gguf-split
+    gritlm
+    infill
+    llama-bench
+    parallel
+    passkey
+    quantize-stats
+    retrieval
 )
 target_compile_features(${TARGET} PRIVATE cxx_std_11)

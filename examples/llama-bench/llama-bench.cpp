@@ -1254,7 +1254,7 @@ static void llama_null_log_callback(enum ggml_log_level level, const char * text
     (void) user_data;
 }
 
-int main(int argc, char ** argv) {
+int MAIN_ENTRY_POINT(int argc, char ** argv) {
     // try to set locale for unicode characters in markdown
     setlocale(LC_CTYPE, ".UTF-8");
 

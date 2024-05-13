@@ -1,5 +1,4 @@
 set(TARGET retrieval)
-add_executable(${TARGET} retrieval.cpp)
-install(TARGETS ${TARGET} RUNTIME)
+add_example(${TARGET} retrieval.cpp)
 target_link_libraries(${TARGET} PRIVATE common llama ${CMAKE_THREAD_LIBS_INIT})
 target_compile_features(${TARGET} PRIVATE cxx_std_11)

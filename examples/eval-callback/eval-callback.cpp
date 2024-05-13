@@ -139,7 +139,7 @@ static bool run(llama_context * ctx, const gpt_params & params) {
     return true;
 }
 
-int main(int argc, char ** argv) {
+int MAIN_ENTRY_POINT(int argc, char ** argv) {
 
     callback_data cb_data;
 

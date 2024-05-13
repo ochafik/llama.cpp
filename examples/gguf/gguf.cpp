@@ -227,7 +227,7 @@ static bool gguf_ex_read_1(const std::string & fname, bool check_data) {
     return true;
 }
 
-int main(int argc, char ** argv) {
+int MAIN_ENTRY_POINT(int argc, char ** argv) {
     if (argc < 3) {
         printf("usage: %s data.gguf r|w [n]\n", argv[0]);
         printf("r: read data.gguf file\n");

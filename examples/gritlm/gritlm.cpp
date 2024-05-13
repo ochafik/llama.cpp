@@ -151,7 +151,7 @@ static std::string gritlm_instruction(const std::string & instruction) {
     return !instruction.empty() ? "<|user|>\n" + instruction + "\n<|embed|>\n" : "<|embed|>\n";
 }
 
-int main(int argc, char * argv[]) {
+int MAIN_ENTRY_POINT(int argc, char * argv[]) {
     gpt_params params;
     if (!gpt_params_parse(argc, argv, params)) {
         return 1;

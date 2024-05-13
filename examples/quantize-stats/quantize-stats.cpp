@@ -222,7 +222,7 @@ static void test_roundtrip_on_layer(
     }
 }
 
-int main(int argc, char ** argv) {
+int MAIN_ENTRY_POINT(int argc, char ** argv) {
     ggml_time_init();
 
     quantize_stats_params params;

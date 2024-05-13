@@ -82,7 +82,7 @@ static void beam_search_callback(void * callback_data_ptr, llama_beams_state bea
 #endif
 }
 
-int main(int argc, char ** argv)
+int MAIN_ENTRY_POINT(int argc, char ** argv)
 {
     gpt_params params;
     //params.n_gpu_layers = 200;

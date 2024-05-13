@@ -870,7 +870,7 @@ static std::string basename(const std::string &path) {
     return path.substr(pos + 1);
 }
 
-int main(int argc, char ** argv) {
+int MAIN_ENTRY_POINT(int argc, char ** argv) {
     struct train_params params = get_default_train_params();
     if (!params_parse(argc, argv, &params)) {
         return 1;

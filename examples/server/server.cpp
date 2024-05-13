@@ -32,10 +32,6 @@
 #include <signal.h>
 #include <memory>
 
-#ifndef SERVER_MAIN_FUNCTION
-#define SERVER_MAIN_FUNCTION main
-#endif
-
 using json = nlohmann::ordered_json;
 
 bool server_verbose = false;

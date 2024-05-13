@@ -74,7 +74,7 @@ static size_t split_str_to_n_bytes(std::string str) {
     return n_bytes;
 }
 
-static void split_params_parse_ex(int argc, const char ** argv, split_params & params) {
+static void split_params_parse_ex(int argc, char ** argv, split_params & params) {
     std::string arg;
     const std::string arg_prefix = "--";
     bool invalid_param = false;
@@ -160,7 +160,7 @@ static void split_params_parse_ex(int argc, const char ** argv, split_params & p
     params.output = argv[arg_idx++];
 }
 
-static bool split_params_parse(int argc, const char ** argv, split_params & params) {
+static bool split_params_parse(int argc, char ** argv, split_params & params) {
     bool result = true;
     try {
         split_params_parse_ex(argc, argv, params);
@@ -547,7 +547,7 @@ static void gguf_merge(const split_params & split_params) {
             __func__, split_params.output.c_str(), n_split, total_tensors);
 }
 
-int main(int argc, const char ** argv) {
+int MAIN_ENTRY_POINT(int argc, char ** argv) {
     split_params params;
     split_params_parse(argc, argv, params);
 

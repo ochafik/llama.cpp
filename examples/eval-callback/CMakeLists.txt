@@ -1,6 +1,5 @@
 set(TARGET eval-callback)
-add_executable(${TARGET} eval-callback.cpp)
-install(TARGETS ${TARGET} RUNTIME)
+add_example(${TARGET} eval-callback.cpp)
 target_link_libraries(${TARGET} PRIVATE common llama ${CMAKE_THREAD_LIBS_INIT})
 target_compile_features(${TARGET} PRIVATE cxx_std_11)
 

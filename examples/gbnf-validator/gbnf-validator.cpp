@@ -4,6 +4,7 @@
 #include "ggml.h"
 #include "llama.h"
 #include "unicode.h"
+#include "common.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -53,7 +54,7 @@ static void print_error_message(const std::string & input_str, size_t error_pos,
     }
 }
 
-int main(int argc, char** argv) {
+int MAIN_ENTRY_POINT(int argc, char** argv) {
     if (argc != 3) {
         fprintf(stdout, "Usage: %s <grammar_filename> <input_filename>\n", argv[0]);
         return 1;

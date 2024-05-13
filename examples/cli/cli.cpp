@@ -18,6 +18,23 @@ int lookup_create_main(int argc, char ** argv);
 int lookup_merge_main(int argc, char ** argv);
 int lookup_stats_main(int argc, char ** argv);
 int imatrix_main(int argc, char ** argv);
+int baby_llama_main(int argc, char ** argv);
+int batched_bench_main(int argc, char ** argv);
+int batched_main(int argc, char ** argv);
+int beam_search_main(int argc, char ** argv);
+int benchmark_main(int argc, char ** argv);
+int convert_llama2c_to_ggml_main(int argc, char ** argv);
+int eval_callback_main(int argc, char ** argv);
+int export_lora_main(int argc, char ** argv);
+int gbnf_validator_main(int argc, char ** argv);
+int gguf_split_main(int argc, char ** argv);
+int gritlm_main(int argc, char ** argv);
+int infill_main(int argc, char ** argv);
+int llama_bench_main(int argc, char ** argv);
+int parallel_main(int argc, char ** argv);
+int passkey_main(int argc, char ** argv);
+int quantize_stats_main(int argc, char ** argv);
+int retrieval_main(int argc, char ** argv);
 
 int main(int argc, char ** argv) {
     struct Command {
@@ -41,6 +58,23 @@ int main(int argc, char ** argv) {
         {"lookup-merge", {"", lookup_merge_main}},
         {"lookup-stats", {"", lookup_stats_main}},
         {"imatrix", {"", imatrix_main}},
+        {"baby-llama", {"", baby_llama_main}},
+        {"batched-bench", {"", batched_bench_main}},
+        {"batched", {"", batched_main}},
+        {"beam-search", {"", beam_search_main}},
+        {"benchmark", {"", benchmark_main}},
+        {"convert-llama2c-to-ggml", {"", convert_llama2c_to_ggml_main}},
+        {"eval-callback", {"", eval_callback_main}},
+        {"export-lora", {"", export_lora_main}},
+        {"gbnf-validator", {"", gbnf_validator_main}},
+        {"gguf-split", {"", gguf_split_main}},
+        {"gritlm", {"", gritlm_main}},
+        {"infill", {"", infill_main}},
+        {"llama-bench", {"", llama_bench_main}},
+        {"parallel", {"", parallel_main}},
+        {"passkey", {"", passkey_main}},
+        {"quantize-stats", {"", quantize_stats_main}},
+        {"retrieval", {"", retrieval_main}},
     };
     if (argc == 1) {
         fprintf(stderr, "[%s]\n", argv[0]);

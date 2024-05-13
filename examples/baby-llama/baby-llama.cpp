@@ -1433,7 +1433,7 @@ static struct ggml_tensor * cross_entropy_loss(
                                 ggml_new_f32(ctx, eps)))))));
 }
 
-int main(int argc, char ** argv) {
+int MAIN_ENTRY_POINT(int argc, char ** argv) {
     if (argc < 1) {
         fprintf(stderr, "usage: %s\n", argv[0]);
 

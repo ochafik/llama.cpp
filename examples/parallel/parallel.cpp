@@ -95,7 +95,7 @@ static std::vector<std::string> split_string(const std::string& input, char deli
     return tokens;
 }
 
-int main(int argc, char ** argv) {
+int MAIN_ENTRY_POINT(int argc, char ** argv) {
     srand(1234);
 
     gpt_params params;
