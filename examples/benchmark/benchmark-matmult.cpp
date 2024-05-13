@@ -272,4 +272,5 @@ int MAIN_ENTRY_POINT(int argc, char ** argv)  {
     printf("\n");
     printf("Average%78.2f\n",gflops_sum/((double)benchmark_params.n_iterations));
     printf("=====================================================================================\n");
+    return 0;
 }
