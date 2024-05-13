@@ -1,5 +1,5 @@
 set(TARGET lcpp)
 add_executable(${TARGET} lcpp.cpp)
 install(TARGETS ${TARGET} RUNTIME)
-target_link_libraries(${TARGET} PRIVATE mainlib serverlib)
+target_link_libraries(${TARGET} PRIVATE main server)
 target_compile_features(${TARGET} PRIVATE cxx_std_11)

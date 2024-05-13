@@ -1,4 +1,4 @@
-set(TARGET serverlib)
+set(TARGET server)
 option(LLAMA_SERVER_VERBOSE "Build verbose logging option for Server" ON)
 option(LLAMA_SERVER_SSL "Build SSL support for the server" OFF)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
@@ -23,7 +23,7 @@ foreach(asset ${PUBLIC_ASSETS})
         COMMAND "${CMAKE_COMMAND}" "-DINPUT=${input}" "-DOUTPUT=${output}" -P "${PROJECT_SOURCE_DIR}/scripts/xxd.cmake"
     )
 endforeach()
-add_library(${TARGET} ${TARGET_SRCS})
+add_example(${TARGET} ${TARGET_SRCS})
 target_compile_definitions(${TARGET} PRIVATE
     SERVER_VERBOSE=$<BOOL:${LLAMA_SERVER_VERBOSE}>
 )
@@ -37,10 +37,3 @@ if (WIN32)
     TARGET_LINK_LIBRARIES(${TARGET} PRIVATE ws2_32)
 endif()
 target_compile_features(${TARGET} PRIVATE cxx_std_11)
-
-if (NOT LLAMA_CLI)
-    set(TARGET server)
-    add_executable(${TARGET})
-    install(TARGETS ${TARGET} RUNTIME)
-    target_link_libraries(${TARGET} PRIVATE serverlib)
-endif()

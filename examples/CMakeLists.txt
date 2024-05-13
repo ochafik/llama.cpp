@@ -2,6 +2,18 @@
 
 find_package(Threads REQUIRED)
 
+function(add_example TARGET)
+    list(SUBLIST ARGV 1 -1 SUB_ARGV)
+    if (LLAMA_CLI)
+        add_library(${TARGET} ${SUB_ARGV})
+        target_compile_definitions(${TARGET} PRIVATE MAIN_ENTRY_POINT=${TARGET}_main)
+    else()
+        add_executable(${TARGET} ${SUB_ARGV})
+        install(TARGETS ${TARGET} RUNTIME)
+        target_compile_definitions(${TARGET} PRIVATE MAIN_ENTRY_POINT=main)
+    endif()
+endfunction()
+
 # third-party
 
 # ...

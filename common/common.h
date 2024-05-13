@@ -33,6 +33,10 @@
 
 #define DEFAULT_MODEL_PATH "models/7B/ggml-model-f16.gguf"
 
+#ifndef MAIN_ENTRY_POINT
+#define MAIN_ENTRY_POINT main
+#endif
+
 // build info
 extern int LLAMA_BUILD_NUMBER;
 extern char const *LLAMA_COMMIT;

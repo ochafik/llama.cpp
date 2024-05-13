@@ -2905,7 +2905,8 @@ inline void signal_handler(int signal) {
     shutdown_handler(signal);
 }
 
-int SERVER_MAIN_FUNCTION(int argc, char ** argv) {
+int MAIN_ENTRY_POINT(int argc, char ** argv);
+int MAIN_ENTRY_POINT(int argc, char ** argv) {
 #if SERVER_VERBOSE != 1
     log_disable();
 #endif

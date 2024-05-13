@@ -1,8 +1,8 @@
 #include <stdio.h>
 #include <string>
 
-int SERVER_MAIN_FUNCTION(int argc, char ** argv);
-int MAIN_MAIN_FUNCTION(int argc, char ** argv);
+int main_main(int argc, char ** argv);
+int server_main(int argc, char ** argv);
 
 int main(int argc, char ** argv) {
     if (argc == 1) {
@@ -20,9 +20,9 @@ int main(int argc, char ** argv) {
     }
     std::string command = argv[1];
     if (command == "serve") {
-        return SERVER_MAIN_FUNCTION(argc - 1, argv + 1);
+        return server_main(argc - 1, argv + 1);
     } else if (command == "run") {
-        return MAIN_MAIN_FUNCTION(argc - 1, argv + 1);
+        return main_main(argc - 1, argv + 1);
     } else {
         fprintf(stderr, "Unknown command: %s\n", argv[1]);
         return 1;
