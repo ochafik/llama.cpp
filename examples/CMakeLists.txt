@@ -13,6 +13,7 @@ function(add_example TARGET)
         set(MAIN_ENTRY_POINT main)
     endif()
     target_compile_definitions(${TARGET} PRIVATE MAIN_ENTRY_POINT=${MAIN_ENTRY_POINT})
+    target_compile_features(${TARGET} PRIVATE cxx_std_11)
 endfunction()
 
 # third-party
