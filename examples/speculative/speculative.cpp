@@ -24,7 +24,7 @@ struct seq_draft {
     struct llama_sampling_context * ctx_sampling;
 };
 
-int main(int argc, char ** argv) {
+int MAIN_ENTRY_POINT(int argc, char ** argv) {
     gpt_params params;
 
     if (gpt_params_parse(argc, argv, params) == false) {

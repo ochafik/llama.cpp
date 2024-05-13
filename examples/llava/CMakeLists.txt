@@ -31,7 +31,6 @@ if(TARGET BUILD_INFO)
 endif()
 
 set(TARGET llava-cli)
-add_executable(llava-cli llava-cli.cpp)
-install(TARGETS llava-cli RUNTIME)
+add_example(llava-cli llava-cli.cpp)
 target_link_libraries(llava-cli PRIVATE common llava ${CMAKE_THREAD_LIBS_INIT})
 target_compile_features(llava PRIVATE cxx_std_11)

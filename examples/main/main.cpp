@@ -117,7 +117,6 @@ static void llama_log_callback_logTee(ggml_log_level level, const char * text, v
     LOG_TEE("%s", text);
 }
 
-int MAIN_ENTRY_POINT(int argc, char ** argv);
 int MAIN_ENTRY_POINT(int argc, char ** argv) {
     gpt_params params;
     g_params = &params;

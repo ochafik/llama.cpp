@@ -59,7 +59,7 @@ static void batch_decode(llama_context * ctx, llama_batch & batch, float * outpu
     }
 }
 
-int main(int argc, char ** argv) {
+int MAIN_ENTRY_POINT(int argc, char ** argv) {
     gpt_params params;
 
     if (!gpt_params_parse(argc, argv, params)) {

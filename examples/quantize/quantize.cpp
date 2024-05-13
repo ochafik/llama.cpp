@@ -231,7 +231,7 @@ static ggml_type parse_ggml_type(const char * arg) {
     return result;
 }
 
-int main(int argc, char ** argv) {
+int MAIN_ENTRY_POINT(int argc, char ** argv) {
     if (argc < 3) {
         usage(argv[0]);
     }

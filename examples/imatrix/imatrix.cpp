@@ -532,7 +532,7 @@ static bool compute_imatrix(llama_context * ctx, const gpt_params & params, bool
     return true;
 }
 
-int main(int argc, char ** argv) {
+int MAIN_ENTRY_POINT(int argc, char ** argv) {
 
     StatParams sparams;
     std::string prev_result_file;

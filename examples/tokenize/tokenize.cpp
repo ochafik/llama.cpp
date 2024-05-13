@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-int main(int argc, char ** argv) {
+int MAIN_ENTRY_POINT(int argc, char ** argv) {
     if (argc < 3 || argv[1][0] == '-') {
         printf("usage: %s MODEL_PATH PROMPT [--ids]\n" , argv[0]);
         return 1;

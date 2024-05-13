@@ -12,7 +12,7 @@
 #include <vector>
 #include <unordered_map>
 
-int main(int argc, char ** argv){
+int MAIN_ENTRY_POINT(int argc, char ** argv){
     gpt_params params;
 
     if (!gpt_params_parse(argc, argv, params)) {

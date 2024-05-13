@@ -35,6 +35,8 @@
 
 #ifndef MAIN_ENTRY_POINT
 #define MAIN_ENTRY_POINT main
+#else
+int MAIN_ENTRY_POINT(int argc, char ** argv);
 #endif
 
 // build info

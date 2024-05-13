@@ -16,7 +16,7 @@ static void print_usage() {
     fprintf(stderr, "Usage: lookup-merge [--help] lookup_part_1.bin lookup_part_2.bin ... lookup_merged.bin\n");
 }
 
-int main(int argc, char ** argv){
+int MAIN_ENTRY_POINT(int argc, char ** argv){
     if (argc < 3) {
         print_usage();
         exit(1);

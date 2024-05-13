@@ -1462,7 +1462,7 @@ static int64_t get_parameter_count(struct my_llama_lora* lora) {
     return nx;
 }
 
-int main(int argc, char ** argv) {
+int MAIN_ENTRY_POINT(int argc, char ** argv) {
     struct train_params params = get_default_train_params();
 
     if (!train_params_parse(argc, argv, &params)) {
