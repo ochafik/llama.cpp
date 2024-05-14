@@ -642,6 +642,9 @@ public:
                 | "<tool_call" [^>] prefix
                 |
 
+    
+    prefix ::= ([^<] | "<" ([^t] | "t" ([^o] | "o" ([^o]" | "o" ([^l] | "l" ([^_] | ...)))))) prefix
+
 */
 
     std::string not_literal(const std::string & literal) {
