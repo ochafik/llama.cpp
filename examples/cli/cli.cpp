@@ -73,7 +73,7 @@ int main(int argc, char ** argv) {
         REGISTER_COMMAND("speculate",      speculative, false, "Demo of speculative decoding and tree-based speculative decoding techniques", "");
         REGISTER_COMMAND("tokenize",       tokenize, false, "Tokenizes a prompt", "");
         REGISTER_COMMAND("train",          train_text_from_scratch, false, "Train a text model from scratch", "");
-        REGISTER_COMMAND("train-baby",     baby_llama, false, "Example of training a baby llama model", "https://github.com/ggerganov/llama.cpp/pull/1360");
+        // REGISTER_COMMAND("train-baby",     baby_llama, false, "Example of training a baby llama model", "https://github.com/ggerganov/llama.cpp/pull/1360");
 
         auto print_commands = [&](bool core_only) {
             std::string program_name(argv[0]);

@@ -17,7 +17,7 @@ target_link_libraries(${TARGET} PRIVATE
     lookup-merge
     lookup-stats
     imatrix
-    baby-llama
+    # baby-llama
     batched-bench
     batched
     beam-search
