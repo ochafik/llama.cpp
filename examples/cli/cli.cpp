@@ -107,8 +107,8 @@ int main(int argc, char ** argv) {
             }
 
             fprintf(stderr, "Examples:\n\n");
-            fprintf(stderr, "  - Run a model in chat mode:\n");
-            fprintf(stderr, "    %s run -clm -hfr microsoft/Phi-3-mini-4k-instruct-gguf -hff Phi-3-mini-4k-instruct-q4.gguf\n\n", program_name.c_str());
+            fprintf(stderr, "  - Run a model in ChatML mode:\n");
+            fprintf(stderr, "    %s run -cml -hfr microsoft/Phi-3-mini-4k-instruct-gguf -hff Phi-3-mini-4k-instruct-q4.gguf\n\n", program_name.c_str());
             fprintf(stderr, "  - Serves a model on http://localhost:8080 (web interface + OpenAI-compatible endpoint)\n");
             fprintf(stderr, "    %s serve    -hfr microsoft/Phi-3-mini-4k-instruct-gguf -hff Phi-3-mini-4k-instruct-q4.gguf\n\n", program_name.c_str());
             fprintf(stderr, "  - Embedding mode\n");
