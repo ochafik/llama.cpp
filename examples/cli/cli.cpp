@@ -107,11 +107,11 @@ int main(int argc, char ** argv) {
 
             fprintf(stderr, "Examples:\n\n");
             fprintf(stderr, "  - Run a model in chat mode:\n");
-            fprintf(stderr, "    %s run -mu https://......gguf -clm\n\n", program_name.c_str());
+            fprintf(stderr, "    %s run -clm -hfr microsoft/Phi-3-mini-4k-instruct-gguf -hff Phi-3-mini-4k-instruct-q4.gguf\n\n", program_name.c_str());
             fprintf(stderr, "  - Serves a model on http://localhost:8080 (web interface + OpenAI-compatible endpoint)\n");
-            fprintf(stderr, "    %s serve -mu https://......gguf\n\n", program_name.c_str());
+            fprintf(stderr, "    %s serve    -hfr microsoft/Phi-3-mini-4k-instruct-gguf -hff Phi-3-mini-4k-instruct-q4.gguf\n\n", program_name.c_str());
             fprintf(stderr, "  - Embedding mode\n");
-            fprintf(stderr, "    %s embedding -mu https://......gguf\n", program_name.c_str());
+            fprintf(stderr, "    %s embed    -hfr microsoft/Phi-3-mini-4k-instruct-gguf -hff Phi-3-mini-4k-instruct-q4.gguf\n", program_name.c_str());
             fprintf(stderr, "\n");
         };
         if (argc == 1) {
