@@ -41,6 +41,7 @@ int main(int argc, char ** argv) {
 
         REGISTER_COMMAND("embed",          embedding, true, "Embedding mode", "");
         REGISTER_COMMAND("llava",          llava_cli, true, "Performs generation with LLaVA (Large Language-and-Vision Assistant)", "");
+        REGISTER_COMMAND("gguf",           gguf, true, "Read / write a GGUF file", "");
         REGISTER_COMMAND("quantize",       quantize, true, "Quantizes a model", "");
         REGISTER_COMMAND("run",            main, true, "Run a model in chat mode", "");
         REGISTER_COMMAND("serve",          server, true, "Serves a model on http://localhost:8080 (Web interface + OpenAI-compatible endpoint)", "");

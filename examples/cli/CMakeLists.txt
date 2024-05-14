@@ -1,38 +1,39 @@
 set(TARGET llama-cpp)
 add_executable(${TARGET} cli.cpp)
 target_link_libraries(${TARGET} PRIVATE
-    main
-    server
+    # baby-llama
+    batched
+    batched-bench
+    beam-search
+    benchmark
+    convert-llama2c-to-ggml
     embedding
-    llava-cli
-    quantize
-    tokenize
+    eval-callback
+    export-lora
     finetune
-    train-text-from-scratch
-    speculative
-    perplexity
+    gbnf-validator
+    gguf
+    gguf-split
+    gritlm
+    imatrix
+    infill
+    llama-bench
+    llava-cli
     lookahead
     lookup
     lookup-create
     lookup-merge
     lookup-stats
-    imatrix
-    # baby-llama
-    batched-bench
-    batched
-    beam-search
-    benchmark
-    convert-llama2c-to-ggml
-    eval-callback
-    export-lora
-    gbnf-validator
-    gguf-split
-    gritlm
-    infill
-    llama-bench
+    main
     parallel
     passkey
+    perplexity
+    quantize
     quantize-stats
     retrieval
+    server
+    speculative
+    tokenize
+    train-text-from-scratch
 )
 target_compile_features(${TARGET} PRIVATE cxx_std_11)

@@ -44,4 +44,5 @@ int MAIN_ENTRY_POINT(int argc, char ** argv){
 
     fprintf(stderr, "lookup-merge: saving file %s\n", args.back().c_str());
     llama_ngram_cache_save(ngram_cache_merged, args.back());
+    return 0;
 }

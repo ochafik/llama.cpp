@@ -1,3 +1,4 @@
+#include "common.h"
 #include "ggml.h"
 
 #include <cstdio>
