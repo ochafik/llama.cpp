@@ -112,6 +112,7 @@ int main(int argc, char ** argv) {
             fprintf(stderr, "  - Serves a model on http://localhost:8080 (web interface + OpenAI-compatible endpoint)\n");
             fprintf(stderr, "    %s serve     -hfr microsoft/Phi-3-mini-4k-instruct-gguf -hff Phi-3-mini-4k-instruct-q4.gguf\n\n", program_name.c_str());
             fprintf(stderr, "  - Embed some text or serve embeddings\n");
+            // https://github.com/ggerganov/llama.cpp/issues/2402
             fprintf(stderr, "    %s embed     -hfr nomic-ai/nomic-embed-text-v1.5-GGUF -hff nomic-embed-text-v1.5.Q4_K_M.gguf --rope-freq-scale 0.75 -c 0 -p Hello\n", program_name.c_str());
             fprintf(stderr, "    %s serve -fa -hfr nomic-ai/nomic-embed-text-v1.5-GGUF -hff nomic-embed-text-v1.5.Q4_K_M.gguf --rope-freq-scale 0.75 -c 0 --embeddings\n", program_name.c_str());
             fprintf(stderr, "\n");
