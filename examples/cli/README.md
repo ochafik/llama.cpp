@@ -2,6 +2,20 @@
 
 This example federates just about every other example into a command line.
 
+Install w/ Homebrew (on Mac & Intel Linux):
+
+```bash
+brew install ochafik/llama.cpp/llama-cpp
+```
+
+Download a model & start chatting right away:
+
+```bash
+llama-cpp run -cml \
+    -hfr microsoft/Phi-3-mini-4k-instruct-gguf \
+    -hff Phi-3-mini-4k-instruct-q4.gguf 
+```
+
 ## Building
 
 Build from scratch with `-DLLAMA_CLI=1`:
