@@ -2635,23 +2635,27 @@ GGML_CALL int64_t ggml_nrows(const struct ggml_tensor * tensor) {
     return tensor->ne[1]*tensor->ne[2]*tensor->ne[3];
 }
 
-GGML_CALL size_t ggml_nbytes(const struct ggml_tensor * tensor) {
+static size_t ggml_nbytes_impl(enum ggml_type type, const int64_t * ne, const size_t * nb) {
     size_t nbytes;
-    size_t blck_size = ggml_blck_size(tensor->type);
+    size_t blck_size = ggml_blck_size(type);
     if (blck_size == 1) {
-        nbytes = ggml_type_size(tensor->type);
+        nbytes = ggml_type_size(type);
         for (int i = 0; i < GGML_MAX_DIMS; ++i) {
-            nbytes += (tensor->ne[i] - 1)*tensor->nb[i];
+            nbytes += (ne[i] - 1)*nb[i];
         }
     }
     else {
-        nbytes = tensor->ne[0]*tensor->nb[0]/blck_size;
+        nbytes = ne[0]*nb[0]/blck_size;
         for (int i = 1; i < GGML_MAX_DIMS; ++i) {
-            nbytes += (tensor->ne[i] - 1)*tensor->nb[i];
+            nbytes += (ne[i] - 1)*nb[i];
         }
     }
 
     return nbytes;
+}
+
+GGML_CALL size_t ggml_nbytes(const struct ggml_tensor * tensor) {
+    return ggml_nbytes_impl(tensor->type, tensor->ne, tensor->nb);
 }
 
 size_t ggml_nbytes_pad(const struct ggml_tensor * tensor) {
@@ -3152,6 +3156,14 @@ static struct ggml_object * ggml_new_object(struct ggml_context * ctx, enum ggml
     return obj_new;
 }
 
+static void ggml_fill_nb(enum ggml_type type, const int64_t * ne, size_t * nb) {
+    nb[0] = ggml_type_size(type);
+    nb[1] = nb[0]*(ne[0]/ggml_blck_size(type));
+    for (int i = 2; i < GGML_MAX_DIMS; i++) {
+        nb[i] = nb[i - 1]*ne[i - 1];
+    }
+}
+
 static struct ggml_tensor * ggml_new_tensor_impl(
         struct ggml_context * ctx,
         enum   ggml_type      type,
@@ -3246,11 +3258,7 @@ static struct ggml_tensor * ggml_new_tensor_impl(
         result->ne[i] = ne[i];
     }
 
-    result->nb[0] = ggml_type_size(type);
-    result->nb[1] = result->nb[0]*(result->ne[0]/ggml_blck_size(type));
-    for (int i = 2; i < GGML_MAX_DIMS; i++) {
-        result->nb[i] = result->nb[i - 1]*result->ne[i - 1];
-    }
+    ggml_fill_nb(result->type, result->ne, result->nb);
 
     ctx->n_objects++;
 
@@ -22737,6 +22745,20 @@ void gguf_set_tensor_type(struct gguf_context * ctx, const char * name, enum ggm
     }
 
     ctx->infos[idx].type = type;
+}
+
+size_t gguf_get_tensor_nbytes(const struct gguf_context * ctx, const char * name) {
+    const int idx = gguf_find_tensor(ctx, name);
+    if (idx < 0) {
+        GGML_ASSERT(false && "tensor not found");
+    }
+
+    struct gguf_tensor_info * info = &ctx->infos[idx];
+
+    size_t  nb[GGML_MAX_DIMS];
+    ggml_fill_nb(info->type, info->ne, nb);
+
+    return ggml_nbytes_impl(info->type, info->ne, nb);
 }
 
 void gguf_set_tensor_data(struct gguf_context * ctx, const char * name, const void * data, size_t size) {

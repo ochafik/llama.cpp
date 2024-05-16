@@ -2325,6 +2325,7 @@ extern "C" {
     GGML_API int            gguf_get_n_tensors    (const struct gguf_context * ctx);
     GGML_API int            gguf_find_tensor      (const struct gguf_context * ctx, const char * name);
     GGML_API size_t         gguf_get_tensor_offset(const struct gguf_context * ctx, int i);
+    GGML_API size_t         gguf_get_tensor_nbytes(const struct gguf_context * ctx, const char * name);
     GGML_API char *         gguf_get_tensor_name  (const struct gguf_context * ctx, int i);
     GGML_API enum ggml_type gguf_get_tensor_type  (const struct gguf_context * ctx, int i);
 
