@@ -3059,7 +3059,11 @@ struct llama_model_loader {
 
         ggml_tensor * tensor;
 
-        llama_tensor_weight(const llama_file * file, uint16_t idx, const char * name, const struct gguf_context * gguf_ctx, ggml_tensor * tensor) : idx(idx), tensor(tensor) {
+        llama_tensor_weight(const llama_file * file, uint16_t idx, const char * name, const struct gguf_context * gguf_ctx, ggml_tensor * tensor, bool load_weights) : idx(idx), tensor(tensor) {
+            if (!load_weights) {
+                offs = 0;
+                return;
+            }
             const int tensor_idx = gguf_find_tensor(gguf_ctx, name);
             offs = gguf_get_data_offset(gguf_ctx) + gguf_get_tensor_offset(gguf_ctx, tensor_idx);
 
@@ -3078,7 +3082,7 @@ struct llama_model_loader {
     std::string arch_name;
     LLM_KV      llm_kv    = LLM_KV(LLM_ARCH_UNKNOWN);
 
-    llama_model_loader(const std::string & fname, bool use_mmap, bool check_tensors, const struct llama_model_kv_override * param_overrides_p) {
+    llama_model_loader(const std::string & fname, bool use_mmap, bool check_tensors, const struct llama_model_kv_override * param_overrides_p, bool load_weights = true) {
         int trace = 0;
         if (getenv("LLAMA_TRACE")) {
             trace = atoi(getenv("LLAMA_TRACE"));
@@ -3111,7 +3115,7 @@ struct llama_model_loader {
         // For subsidiary files, `meta` tensor data offset must not be used,
         // so we build a unified tensors index for weights.
         for (ggml_tensor * cur = ggml_get_first_tensor(ctx); cur; cur = ggml_get_next_tensor(ctx, cur)) {
-            weights.emplace_back(files.back().get(), 0, cur->name, meta, cur);
+            weights.emplace_back(files.back().get(), 0, cur->name, meta, cur, load_weights);
         }
         uint16_t n_split = 0;
         get_key(llm_kv(LLM_KV_SPLIT_COUNT), n_split, false);
@@ -3151,7 +3155,7 @@ struct llama_model_loader {
 
                 // Save tensors data offset info of the shard.
                 for (ggml_tensor * cur = ggml_get_first_tensor(ctx); cur; cur = ggml_get_next_tensor(ctx, cur)) {
-                    weights.emplace_back(files.back().get(), idx, cur->name, ctx_gguf, cur);
+                    weights.emplace_back(files.back().get(), idx, cur->name, ctx_gguf, cur, load_weights);
                 }
 
                 gguf_free(ctx_gguf);
@@ -14757,7 +14761,7 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
         auto v = (std::vector<llama_model_kv_override>*)params->kv_overrides;
         kv_overrides = v->data();
     }
-    llama_model_loader ml(fname_inp, use_mmap, /*check_tensors*/ true, kv_overrides);
+    llama_model_loader ml(fname_inp, use_mmap, /*check_tensors*/ true, kv_overrides, /* load_weights= */ !params->skeleton);
     ml.init_mappings(false); // no prefetching
 
     llama_model model;
@@ -15051,7 +15055,9 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
             }
             tensor->data = read_data.data();
         }
-        ml.load_data_for(tensor);
+        if (!params->skeleton) {
+            ml.load_data_for(tensor);
+        }
 
         LLAMA_LOG_INFO("[%4d/%4d] %36s - [%s], type = %6s, ",
                ++idx, ml.n_tensors,
@@ -15146,11 +15152,8 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
         gguf_set_tensor_data(ctx_outs[cur_split], name.c_str(), new_data, new_size);
 
         // write tensor data + padding
-        if (params->skeleton) {
-            fout.seekp(new_size, std::ios::cur);
-        } else {
-            fout.write((const char *) new_data, new_size);
-        }
+        fout.write((const char *) new_data, new_size);
+
         zeros(fout, GGML_PAD(new_size, align) - new_size);
     }
     close_ofstream();

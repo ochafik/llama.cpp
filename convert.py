@@ -16,6 +16,7 @@ import pickle
 import re
 import signal
 import struct
+import subprocess
 import sys
 import textwrap
 import time
@@ -1276,6 +1277,7 @@ class OutputFile:
         concurrency: int = DEFAULT_CONCURRENCY, endianess: gguf.GGUFEndian = gguf.GGUFEndian.LITTLE,
         pad_vocab: bool = False,
         metadata: Metadata = None,
+        omit_tensor_data: bool = False,
     ) -> None:
         check_vocab_size(params, vocab, pad_vocab=pad_vocab)
 
@@ -1298,7 +1300,8 @@ class OutputFile:
         of.write_tensor_info()
 
         # tensor data
-        of.write_tensor_data(ftype, model, concurrency)
+        if not omit_tensor_data:
+            of.write_tensor_data(ftype, model, concurrency)
 
         of.close()
 
@@ -1596,6 +1599,7 @@ def main(args_in: list[str] | None = None) -> None:
     parser.add_argument("--verbose",      action="store_true",    help="increase output verbosity")
     parser.add_argument("--metadata",     type=Path,              help="Specify the path for a metadata file")
     parser.add_argument("--get-outfile",  action="store_true",    help="get calculated default outfile name")
+    parser.add_argument("--quant",        type=str,               help="quantize on the fly (EXPERIMENTAL)")
 
     args = parser.parse_args(args_in)
 
@@ -1711,8 +1715,33 @@ def main(args_in: list[str] | None = None) -> None:
     # - For each tensor:
     #   - Write converted tensor to temp.gguf
     #   - Call ./quantize temp.gguf --single-tensor <tensor-name> out.gguf
-    OutputFile.write_all(outfile, ftype, params, model, vocab, special_vocab,
-                         concurrency=args.concurrency, endianess=endianess, pad_vocab=args.pad_vocab, metadata=metadata)
+    if args.quant:
+
+        logger.info(f"Creating empty file (w/ all KVs and empty tensors w/ the right shapes)")
+        empty_outfile = Path("temp-empty-f32.gguf")
+        OutputFile.write_all(empty_outfile, ftype, params, model, vocab, special_vocab,
+                             concurrency=args.concurrency, endianess=endianess, pad_vocab=args.pad_vocab, metadata=metadata,
+                             omit_tensor_data=True)
+        
+        logger.info(f"Creating skeleton file (w/ all KVs and empty quantized tensors w/ the right shapes, size and types)")
+        subprocess.check_call(["./quantize", "--skeleton", empty_outfile.as_posix(), outfile.as_posix(), args.quant])
+
+        for (name, lazy_tensor) in model.items():
+            logger.info(f"Quantizing tensor {name}")
+
+            temp_single_outfile = Path(f"temp-single.gguf")
+            of = OutputFile(temp_single_outfile, endianess=endianess)
+            of.add_tensor_info(name, lazy_tensor)
+            of.write_meta()
+            of.write_tensor_info()
+            of.write_tensor_data(ftype, {name: lazy_tensor}, args.concurrency)
+            of.close()
+
+            subprocess.check_call(["./quantize", "--single-tensor", name, temp_single_outfile.as_posix(), outfile.as_posix(), args.quant])
+        
+    else:
+        OutputFile.write_all(outfile, ftype, params, model, vocab, special_vocab,
+                             concurrency=args.concurrency, endianess=endianess, pad_vocab=args.pad_vocab, metadata=metadata)
     logger.info(f"Wrote {outfile}")
 
 

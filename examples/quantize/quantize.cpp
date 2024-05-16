@@ -244,7 +244,18 @@ int main(int argc, char ** argv) {
     std::vector<llama_model_kv_override> kv_overrides;
 
     for (; arg_idx < argc && strncmp(argv[arg_idx], "--", 2) == 0; arg_idx++) {
-        if (strcmp(argv[arg_idx], "--leave-output-tensor") == 0) {
+        fprintf(stderr, "%s: arg: %s\n", __func__, argv[arg_idx]);
+        if (strcmp(argv[arg_idx], "--single-tensor") == 0) {
+            fprintf(stderr, "%s: single tensor mode!\n", __func__);
+            if (arg_idx < argc-1) {
+                params.single_tensor = argv[++arg_idx];
+            } else {
+                usage(argv[0]);
+            }
+        } else if (strcmp(argv[arg_idx], "--skeleton") == 0) {
+            params.skeleton = true;
+            fprintf(stderr, "%s: skeleton mode!\n", __func__);
+        } else if (strcmp(argv[arg_idx], "--leave-output-tensor") == 0) {
             params.quantize_output_tensor = false;
         } else if (strcmp(argv[arg_idx], "--output-tensor-type") == 0) {
             if (arg_idx < argc-1) {
