@@ -316,6 +316,8 @@ extern "C" {
         bool only_copy;                      // only copy tensors - ftype, allow_requantize and quantize_output_tensor are ignored
         bool pure;                           // quantize all tensors to the default type
         bool keep_split;                     // quantize to the same number of shards
+        bool skeleton;                       // only write the model KVs and empty tensors of the right shapes and types.
+        const char * single_tensor;          // write a single quantized tensor to a file previously created with the skeleton option.
         void * imatrix;                      // pointer to importance matrix data
         void * kv_overrides;                 // pointer to vector containing overrides
     } llama_model_quantize_params;
