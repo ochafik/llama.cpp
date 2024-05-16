@@ -1310,14 +1310,10 @@ struct llama_mmap {
     llama_mmap(struct llama_file * file, size_t prefetch = (size_t) -1 /* -1 = max value */, bool numa = false, bool writable = false) {
         size = file->size;
         int fd = fileno(file->fp);
-        int prot;
-        int flags;
+        int prot = PROT_READ;
+        int flags = MAP_SHARED;
         if (writable) {
-            prot = PROT_READ | PROT_WRITE;
-            flags = MAP_PRIVATE;
-        } else {
-            prot = PROT_READ;
-            flags = MAP_SHARED;
+            prot |= PROT_WRITE;
         }
         // prefetch/readahead impairs performance on NUMA systems
         if (numa)  { prefetch = 0; }
@@ -3053,6 +3049,7 @@ struct llama_model_loader {
 
     bool use_mmap = false;
     bool check_tensors;
+    bool writable = false;
 
     llama_files files;
     llama_ftype ftype;
@@ -3090,7 +3087,7 @@ struct llama_model_loader {
     std::string arch_name;
     LLM_KV      llm_kv    = LLM_KV(LLM_ARCH_UNKNOWN);
 
-    llama_model_loader(const std::string & fname, bool use_mmap, bool check_tensors, const struct llama_model_kv_override * param_overrides_p, bool load_weights = true) {
+    llama_model_loader(const std::string & fname, bool use_mmap, bool check_tensors, const struct llama_model_kv_override * param_overrides_p, bool load_weights = true, bool writable = false) : writable(writable) {
         int trace = 0;
         if (getenv("LLAMA_TRACE")) {
             trace = atoi(getenv("LLAMA_TRACE"));
@@ -3116,7 +3113,7 @@ struct llama_model_loader {
         get_key(llm_kv(LLM_KV_GENERAL_ARCHITECTURE), arch_name, false);
         llm_kv = LLM_KV(llm_arch_from_string(arch_name));
 
-        files.emplace_back(new llama_file(fname.c_str(), "rb"));
+        files.emplace_back(new llama_file(fname.c_str(), writable ? "wb" : "rb"));
         contexts.emplace_back(ctx);
 
         // Save tensors data offset of the main file.
@@ -3499,7 +3496,7 @@ struct llama_model_loader {
         }
     }
 
-    void init_mappings(bool prefetch = true, llama_mlocks * mlock_mmaps = nullptr, bool writable = false) {
+    void init_mappings(bool prefetch = true, llama_mlocks * mlock_mmaps = nullptr) {
         if (use_mmap) {
             mappings.reserve(files.size());
             mmaps_used.reserve(files.size());
@@ -14856,8 +14853,8 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
         llama_model_loader inp_ml(fname_inp, /* use_mmap= */ true, /*check_tensors*/ false, /* kv_overrides= */ nullptr);
         inp_ml.init_mappings(/* prefetch= */ false);
 
-        llama_model_loader out_ml(fname_out, /* use_mmap= */ true, /*check_tensors*/ false, /* kv_overrides= */ nullptr);
-        out_ml.init_mappings(/* prefetch= */ false, /** mlock_maps= */ nullptr, /* writable= */ true);
+        llama_model_loader out_ml(fname_out, /* use_mmap= */ true, /*check_tensors*/ false, /* kv_overrides= */ nullptr, /* load_weights= */ true, /* writable= */ true);
+        out_ml.init_mappings(/* prefetch= */ false, /** mlock_maps= */ nullptr);
 
         auto load_tensor = [&](llama_model_loader & ml, const char * name) -> struct ggml_tensor * {
             auto weight = ml.get_weight(name);
