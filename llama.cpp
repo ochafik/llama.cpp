@@ -1307,10 +1307,18 @@ struct llama_mmap {
     // list of mapped fragments (first_offset, last_offset)
     std::vector<std::pair<size_t, size_t>> mapped_fragments;
 
-    llama_mmap(struct llama_file * file, size_t prefetch = (size_t) -1 /* -1 = max value */, bool numa = false) {
+    llama_mmap(struct llama_file * file, size_t prefetch = (size_t) -1 /* -1 = max value */, bool numa = false, bool writable = false) {
         size = file->size;
         int fd = fileno(file->fp);
-        int flags = MAP_SHARED;
+        int prot;
+        int flags;
+        if (writable) {
+            prot = PROT_READ | PROT_WRITE;
+            flags = MAP_PRIVATE;
+        } else {
+            prot = PROT_READ;
+            flags = MAP_SHARED;
+        }
         // prefetch/readahead impairs performance on NUMA systems
         if (numa)  { prefetch = 0; }
 #ifdef __linux__
@@ -1321,7 +1329,7 @@ struct llama_mmap {
         }
         if (prefetch) { flags |= MAP_POPULATE; }
 #endif
-        addr = mmap(NULL, file->size, PROT_READ, flags, fd, 0);
+        addr = mmap(NULL, file->size, prot, flags, fd, 0);
         if (addr == MAP_FAILED) { // NOLINT
             throw std::runtime_error(format("mmap failed: %s", strerror(errno)));
         }
@@ -3491,12 +3499,12 @@ struct llama_model_loader {
         }
     }
 
-    void init_mappings(bool prefetch = true, llama_mlocks * mlock_mmaps = nullptr) {
+    void init_mappings(bool prefetch = true, llama_mlocks * mlock_mmaps = nullptr, bool writable = false) {
         if (use_mmap) {
             mappings.reserve(files.size());
             mmaps_used.reserve(files.size());
             for (const auto & file : files) {
-                std::unique_ptr<llama_mmap> mapping(new llama_mmap(file.get(), prefetch ? -1 : 0, ggml_is_numa()));
+                std::unique_ptr<llama_mmap> mapping(new llama_mmap(file.get(), prefetch ? -1 : 0, ggml_is_numa(), writable));
                 mmaps_used.emplace_back(mapping->size, 0);
                 if (mlock_mmaps) {
                     std::unique_ptr<llama_mlock> mlock_mmap(new llama_mlock());
@@ -14846,13 +14854,28 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
 
     if (params->single_tensor) {
         llama_model_loader inp_ml(fname_inp, /* use_mmap= */ true, /*check_tensors*/ false, /* kv_overrides= */ nullptr);
-        inp_ml.init_mappings(false); // no prefetching
+        inp_ml.init_mappings(/* prefetch= */ false);
 
         llama_model_loader out_ml(fname_out, /* use_mmap= */ true, /*check_tensors*/ false, /* kv_overrides= */ nullptr);
-        out_ml.init_mappings(false); // no prefetching
+        out_ml.init_mappings(/* prefetch= */ false, /** mlock_maps= */ nullptr, /* writable= */ true);
 
-        struct ggml_tensor * inp_tensor = inp_ml.get_tensor_meta(params->single_tensor);
-        struct ggml_tensor * out_tensor = out_ml.get_tensor_meta(params->single_tensor);
+        auto load_tensor = [&](llama_model_loader & ml, const char * name) -> struct ggml_tensor * {
+            auto weight = ml.get_weight(name);
+            if (!weight) {
+                return nullptr;
+            }
+            struct ggml_tensor * tensor = weight->tensor;
+            const auto & mapping = ml.mappings.at(weight->idx);
+            uint8_t * data = (uint8_t *) mapping->addr + weight->offs;
+
+            size_t n_size = ggml_nbytes(tensor);
+            tensor->data = data;
+
+            return tensor;
+        };
+
+        struct ggml_tensor * inp_tensor = load_tensor(inp_ml, params->single_tensor);
+        struct ggml_tensor * out_tensor = load_tensor(out_ml, params->single_tensor);
         if (!inp_tensor) throw std::runtime_error(format("tensor %s not found in input %s", params->single_tensor, fname_inp.c_str()));
         if (!out_tensor) throw std::runtime_error(format("tensor %s not found in output %s (built from skeleton)", params->single_tensor, fname_out.c_str()));
 

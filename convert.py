@@ -1730,12 +1730,8 @@ def main(args_in: list[str] | None = None) -> None:
             logger.info(f"Quantizing tensor {name}")
 
             temp_single_outfile = Path(f"temp-single.gguf")
-            of = OutputFile(temp_single_outfile, endianess=endianess)
-            of.add_tensor_info(name, lazy_tensor)
-            of.write_meta()
-            of.write_tensor_info()
-            of.write_tensor_data(ftype, {name: lazy_tensor}, args.concurrency)
-            of.close()
+            OutputFile.write_all(temp_single_outfile, ftype, params, {name: lazy_tensor}, vocab, special_vocab,
+                                 concurrency=args.concurrency, endianess=endianess, pad_vocab=args.pad_vocab, metadata=metadata)
 
             subprocess.check_call(["./quantize", "--single-tensor", name, temp_single_outfile.as_posix(), outfile.as_posix(), args.quant])
         
