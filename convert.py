@@ -1713,8 +1713,8 @@ def main(args_in: list[str] | None = None) -> None:
     # - write empty-f32.gguf
     # - call ./quantize empty-f32.gguf --skeleton out.gguf
     # - For each tensor:
-    #   - Write converted tensor to temp.gguf
-    #   - Call ./quantize temp.gguf --single-tensor <tensor-name> out.gguf
+    #   - Write converted tensor to single-temp.gguf
+    #   - Call ./quantize single-temp.gguf --single-tensor <tensor-name> out.gguf
     if args.quant:
 
         logger.info(f"Creating empty file (w/ all KVs and empty tensors w/ the right shapes)")
@@ -1729,7 +1729,7 @@ def main(args_in: list[str] | None = None) -> None:
         for (name, lazy_tensor) in model.items():
             logger.info(f"Quantizing tensor {name}")
 
-            temp_single_outfile = Path(f"temp-single.gguf")
+            temp_single_outfile = Path(f"temp-single-f32.gguf")
             OutputFile.write_all(temp_single_outfile, ftype, params, {name: lazy_tensor}, vocab, special_vocab,
                                  concurrency=args.concurrency, endianess=endianess, pad_vocab=args.pad_vocab, metadata=metadata)
 
