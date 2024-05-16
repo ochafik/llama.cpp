@@ -14856,25 +14856,13 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
         llama_model_loader out_ml(fname_out, /* use_mmap= */ true, /*check_tensors*/ false, /* kv_overrides= */ nullptr, /* load_weights= */ true, /* writable= */ true);
         out_ml.init_mappings(/* prefetch= */ false, /** mlock_maps= */ nullptr);
 
-        auto load_tensor = [&](llama_model_loader & ml, const char * name) -> struct ggml_tensor * {
-            auto weight = ml.get_weight(name);
-            if (!weight) {
-                return nullptr;
-            }
-            struct ggml_tensor * tensor = weight->tensor;
-            const auto & mapping = ml.mappings.at(weight->idx);
-            uint8_t * data = (uint8_t *) mapping->addr + weight->offs;
-
-            size_t n_size = ggml_nbytes(tensor);
-            tensor->data = data;
-
-            return tensor;
-        };
-
-        struct ggml_tensor * inp_tensor = load_tensor(inp_ml, params->single_tensor);
-        struct ggml_tensor * out_tensor = load_tensor(out_ml, params->single_tensor);
+        struct ggml_tensor * inp_tensor = inp_ml.get_tensor_meta(params->single_tensor);
         if (!inp_tensor) throw std::runtime_error(format("tensor %s not found in input %s", params->single_tensor, fname_inp.c_str()));
+        inp_ml.load_data_for(inp_tensor);
+
+        struct ggml_tensor * out_tensor = out_ml.get_tensor_meta(params->single_tensor);
         if (!out_tensor) throw std::runtime_error(format("tensor %s not found in output %s (built from skeleton)", params->single_tensor, fname_out.c_str()));
+        out_ml.load_data_for(out_tensor);
 
         const llama_imatrix_data * imatrix_data = params->imatrix ? static_cast<const llama_imatrix_data*>(params->imatrix) : nullptr;
 
