@@ -1705,6 +1705,12 @@ def main(args_in: list[str] | None = None) -> None:
     params.ftype = ftype
     logger.info(f"Writing {outfile}, format {ftype}")
 
+    # TODO[fast-quant]:
+    # - write empty-f32.gguf
+    # - call ./quantize empty-f32.gguf --skeleton out.gguf
+    # - For each tensor:
+    #   - Write converted tensor to temp.gguf
+    #   - Call ./quantize temp.gguf --single-tensor <tensor-name> out.gguf
     OutputFile.write_all(outfile, ftype, params, model, vocab, special_vocab,
                          concurrency=args.concurrency, endianess=endianess, pad_vocab=args.pad_vocab, metadata=metadata)
     logger.info(f"Wrote {outfile}")
