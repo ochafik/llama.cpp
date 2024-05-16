@@ -3113,7 +3113,7 @@ struct llama_model_loader {
         get_key(llm_kv(LLM_KV_GENERAL_ARCHITECTURE), arch_name, false);
         llm_kv = LLM_KV(llm_arch_from_string(arch_name));
 
-        files.emplace_back(new llama_file(fname.c_str(), writable ? "wb" : "rb"));
+        files.emplace_back(new llama_file(fname.c_str(), writable ? "r+b" : "rb"));
         contexts.emplace_back(ctx);
 
         // Save tensors data offset of the main file.
