@@ -14744,6 +14744,14 @@ static size_t llama_tensor_quantize_internal(enum ggml_type new_type, const floa
 
 typedef std::unordered_map<std::string, std::vector<float>> llama_imatrix_data;
 
+// const llama_model_quantize_params * params
+void llama_model_quantize_tensor(
+    const char * name,
+    ggml_type data_type, const void * data,
+    void * imatrix,
+    ggml_type out_type, void * out,
+    size_t out_size);
+
 static void llama_model_quantize_internal(const std::string & fname_inp, const std::string & fname_out, const llama_model_quantize_params * params) {
 
     int nthread = params->nthread;
