@@ -322,6 +322,15 @@ extern "C" {
         void * kv_overrides;                 // pointer to vector containing overrides
     } llama_model_quantize_params;
 
+    struct llama_quantization_data * llama_model_quantization_create(size_t nthread, const char * arch);
+    void llama_model_quantization_destroy(struct llama_quantization_data * data);
+    size_t llama_model_quantize_tensor(
+        struct llama_quantization_data * qd,
+        llama_ftype ftype,
+        struct ggml_tensor * tensor,
+        enum ggml_type new_type,
+        void * new_data);
+
     // grammar types
     struct llama_grammar;
 
