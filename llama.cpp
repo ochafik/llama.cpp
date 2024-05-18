@@ -1317,14 +1317,14 @@ struct llama_mmap {
         }
         // prefetch/readahead impairs performance on NUMA systems
         if (numa)  { prefetch = 0; }
-#ifdef __linux__
-        // advise the kernel to read the file sequentially (increases readahead)
-        if (posix_fadvise(fd, 0, 0, POSIX_FADV_SEQUENTIAL)) {
-            LLAMA_LOG_WARN("warning: posix_fadvise(.., POSIX_FADV_SEQUENTIAL) failed: %s\n",
-                    strerror(errno));
-        }
-        if (prefetch) { flags |= MAP_POPULATE; }
-#endif
+// #ifdef __linux__
+//         // advise the kernel to read the file sequentially (increases readahead)
+//         if (posix_fadvise(fd, 0, 0, POSIX_FADV_SEQUENTIAL)) {
+//             LLAMA_LOG_WARN("warning: posix_fadvise(.., POSIX_FADV_SEQUENTIAL) failed: %s\n",
+//                     strerror(errno));
+//         }
+//         if (prefetch) { flags |= MAP_POPULATE; }
+// #endif
         addr = mmap(NULL, file->size, prot, flags, fd, 0);
         if (addr == MAP_FAILED) { // NOLINT
             throw std::runtime_error(format("mmap failed: %s", strerror(errno)));
@@ -14755,11 +14755,11 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
 
     // mmap consistently increases speed Linux, and also increases speed on Windows with
     // hot cache. It may cause a slowdown on macOS, possibly related to free memory.
-#if defined(__linux__) || defined(_WIN32)
-    constexpr bool use_mmap = true;
-#else
+// #if defined(__linux__) || defined(_WIN32)
+//     constexpr bool use_mmap = true;
+// #else
     constexpr bool use_mmap = false;
-#endif
+// #endif
 
     llama_model_kv_override * kv_overrides = nullptr;
     if (params->kv_overrides) {
