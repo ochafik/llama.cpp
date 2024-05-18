@@ -1740,6 +1740,46 @@ def main(args_in: list[str] | None = None) -> None:
                              concurrency=args.concurrency, endianess=endianess, pad_vocab=args.pad_vocab, metadata=metadata)
     logger.info(f"Wrote {outfile}")
 
+def load_llama_lib():
+    import cffi
+
+    API = 'llama.h'
+    CC = os.environ.get('CC', 'gcc')
+    CPPFLAGS = [
+        '-I.',
+        '-D_Nullable=',
+        '-D__asm(x)=',
+        '-D__attribute__(x)=',
+        '-D_Static_assert(x, m)=',
+        # '-D__fp16=uint16_t',  # pycparser doesn't support __fp16
+        # '-D__restrict=',
+        # '-D__DARWIN_ALIAS_STARTING(x)=',
+        # '-D__DARWIN_ALIAS(x)=',
+        # '-D__printflike(x, y)=',
+        # '-Dva_list=int',
+    ] + [x for x in os.environ.get('CPPFLAGS', '').split(' ') if x != '']
+
+    header = subprocess.check_output([CC, '-U__GNUC__', '-E', *CPPFLAGS, API], text=True)
+    header = 'typedef int va_list;\n' + header
+
+    # Replace constant size expressions w/ their value (compile & run a mini exe for each, because why not).
+    # First, extract anything *inside* square brackets and anything that looks like a sizeof call.
+    for expr in set(re.findall(f'(?<=\\[)[^\\]]+(?=])|sizeof\\s*\\([^()]+\\)', header)):
+        if re.match(r'^(\d+|\s*)$', expr): continue # skip constants and empty bracket contents
+        subprocess.run([CC, "-o", "eval_size_expr", *CPPFLAGS, "-x", "c", "-"], text=True, check=True,
+                    input=f'''#include <stdio.h>
+                              #include "{API}"
+                              int main() {{ printf("%lu", (size_t)({expr})); }}''')
+        header = header.replace(expr, subprocess.check_output(["./eval_size_expr"], text=True))
+
+    ffi = cffi.FFI()
+    ffi.cdef(header, override=True)
+    llama = ffi.dlopen('build/libllama.dylib')
+    assert llama is not None
+    return llama
+
 
 if __name__ == '__main__':
+    # llama = load_llama_lib()
+    # print('GGML_FTYPE_MOSTLY_BF16', llama.GGML_FTYPE_MOSTLY_BF16)
     main()
