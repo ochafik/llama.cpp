@@ -73,6 +73,7 @@ struct llama_sampling_context {
     // mirostat sampler state
     float mirostat_mu;
 
+    std::mutex      grammar_mutex;
     llama_grammar * grammar;
 
     // internal

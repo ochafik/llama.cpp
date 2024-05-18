@@ -1,6 +1,8 @@
 #define LLAMA_API_INTERNAL
 #include "sampling.h"
 #include <random>
+#include <future>
+#include <mutex>
 
 struct llama_sampling_context * llama_sampling_init(const struct llama_sampling_params & params) {
     struct llama_sampling_context * result = new llama_sampling_context();
@@ -235,6 +237,8 @@ static llama_token llama_sampling_sample_impl(
     }
 
     if (ctx_sampling->grammar != NULL && !is_resampling) {
+        std::unique_lock<std::mutex> lock(ctx_sampling->grammar_mutex);
+
         // Create an array with a single token data element for the sampled id
         llama_token_data single_token_data = {id, logits[id], 0.0f};
         llama_token_data_array single_token_data_array = { &single_token_data, 1, false };
@@ -364,6 +368,9 @@ void llama_sampling_accept(
     ctx_sampling->prev.push_back(id);
 
     if (ctx_sampling->grammar != NULL && apply_grammar) {
-        llama_grammar_accept_token(ctx_main, ctx_sampling->grammar, id);
+        std::async(std::launch::async, [&]() {
+            std::unique_lock<std::mutex> lock(ctx_sampling->grammar_mutex);
+            llama_grammar_accept_token(ctx_main, ctx_sampling->grammar, id);
+        });
     }
 }
