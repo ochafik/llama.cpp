@@ -13059,9 +13059,11 @@ static bool llama_grammar_match_partial_char(
 static void llama_grammar_advance_stack(
         const std::vector<std::vector<llama_grammar_element>>   & rules,
         const std::vector<const llama_grammar_element *>        & stack,
+        std::mutex                                              & new_stacks_mutex,
         std::vector<std::vector<const llama_grammar_element *>> & new_stacks) {
 
     if (stack.empty()) {
+        std::unique_lock<std::mutex> lock(new_stacks_mutex);
         if (std::find(new_stacks.begin(), new_stacks.end(), stack) == new_stacks.end()) {
             new_stacks.emplace_back(stack);
         }
@@ -13085,7 +13087,7 @@ static void llama_grammar_advance_stack(
                     // if alternate is nonempty, add to stack
                     new_stack.push_back(subpos);
                 }
-                llama_grammar_advance_stack(rules, new_stack, new_stacks);
+                llama_grammar_advance_stack(rules, new_stack, new_stacks_mutex, new_stacks);
                 while (!llama_grammar_is_end_of_sequence(subpos)) {
                     // scan to end of alternate def
                     subpos++;
@@ -13101,9 +13103,12 @@ static void llama_grammar_advance_stack(
         }
         case LLAMA_GRETYPE_CHAR:
         case LLAMA_GRETYPE_CHAR_NOT:
-            if (std::find(new_stacks.begin(), new_stacks.end(), stack) == new_stacks.end()) {
-                // only add the stack if it's not a duplicate of one we already have
-                new_stacks.emplace_back(stack);
+            {
+                std::unique_lock<std::mutex> lock(new_stacks_mutex);
+                if (std::find(new_stacks.begin(), new_stacks.end(), stack) == new_stacks.end()) {
+                    // only add the stack if it's not a duplicate of one we already have
+                    new_stacks.emplace_back(stack);
+                }
             }
             break;
         default:
@@ -13126,23 +13131,45 @@ void llama_grammar_accept(
 
     new_stacks.clear();
 
+    // int nthread = 10;
+    std::vector<std::thread> workers;
+    // workers.reserve(nthread);
+    std::mutex new_stacks_mutex;
+    
     for (const auto & stack : stacks) {
-        if (stack.empty()) {
-            continue;
-        }
+        auto batch = [&]() {
+    // int batch_size = stacks.size() / nthread;
+    // for (int i = 0, n = stacks.size(); i < n; i += batch_size) {
+    //     auto batch = [i, n, batch_size, &stacks, chr, &rules, &new_stacks_mutex, &new_stacks]() {
+    //         for (int j = i, m = std::min(i + batch_size, n); j < m; j++) {
+    //             const auto & stack = stacks[j];
+                if (stack.empty()) {
+                    // continue;
+                    return;
+                }
 
-        auto match = llama_grammar_match_char(stack.back(), chr);
-        if (match.first) {
-            const llama_grammar_element * pos = match.second;
+                auto match = llama_grammar_match_char(stack.back(), chr);
+                if (match.first) {
+                    const llama_grammar_element * pos = match.second;
 
-            // update top of stack to next element, if any
-            std::vector<const llama_grammar_element *> new_stack(stack.begin(), stack.end() - 1);
-            if (!llama_grammar_is_end_of_sequence(pos)) {
-                new_stack.push_back(pos);
-            }
-            llama_grammar_advance_stack(rules, new_stack, new_stacks);
-        }
+                    // update top of stack to next element, if any
+                    std::vector<const llama_grammar_element *> new_stack(stack.begin(), stack.end() - 1);
+                    if (!llama_grammar_is_end_of_sequence(pos)) {
+                        new_stack.push_back(pos);
+                    }
+                    llama_grammar_advance_stack(rules, new_stack, new_stacks_mutex, new_stacks);
+                }
+        };
+        workers.emplace_back(batch);
     }
+    //         }
+    //     };
+    //     batch();
+    //     // workers.emplace_back(batch);
+    // }
+
+    for (auto & w : workers) { w.join(); }
+    workers.clear();
 }
 
 static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates(
@@ -13195,7 +13222,8 @@ static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates_for_
         stack_after.push_back(stack_pos_after);
     }
     std::vector<std::vector<const llama_grammar_element *>> next_stacks;
-    llama_grammar_advance_stack(rules, stack_after, next_stacks);
+    std::mutex new_stacks_mutex;
+    llama_grammar_advance_stack(rules, stack_after, new_stacks_mutex, next_stacks);
 
     auto next_rejects = llama_grammar_reject_candidates(rules, next_stacks, next_candidates);
     for (const auto & tok : next_rejects) {
@@ -13309,6 +13337,7 @@ struct llama_grammar * llama_grammar_init(
 
     // loop over alternates of start rule to build initial stacks
     std::vector<std::vector<const llama_grammar_element *>> stacks;
+    std::mutex stacks_mutex;
     pos = vec_rules[start_rule_index].data();
     do {
         std::vector<const llama_grammar_element *> stack;
@@ -13316,7 +13345,7 @@ struct llama_grammar * llama_grammar_init(
             // if alternate is nonempty, add to stack
             stack.push_back(pos);
         }
-        llama_grammar_advance_stack(vec_rules, stack, stacks);
+        llama_grammar_advance_stack(vec_rules, stack, stacks_mutex, stacks);
         while (!llama_grammar_is_end_of_sequence(pos)) {
             // scan to end of alternate def
             pos++;
