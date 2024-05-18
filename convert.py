@@ -13,6 +13,7 @@ import math
 import mmap
 import os
 import pickle
+import platform
 import re
 import signal
 import struct
@@ -1742,35 +1743,42 @@ def main(args_in: list[str] | None = None) -> None:
 
 def load_llama_lib():
     import cffi
-
-    API = 'llama.h'
+    
+    LLAMALIB = os.environ.get('LLAMALIB', 
+                              # Test if mac
+                                'build/' + (
+                                platform.system() == 'Darwin' and 'libllama.dylib' or
+                                platform.system() == 'Windows' and 'llama.dll' or
+                                    'libllama.so'))
+    API = os.environ.get('API', 'llama.h')
     CC = os.environ.get('CC', 'gcc')
-    CPPFLAGS = [
-        '-I.',
+    C_INCLUDE_DIR = os.environ.get('C_INCLUDE_DIR', '../../../llama.cpp')
+    CPPFLAGS = [x for x in os.environ.get('CPPFLAGS', '').split(' ') if x != '']
+
+    try: header = subprocess.check_output([
+        CC,
+        '-I', C_INCLUDE_DIR,
+        '-U__GNUC__',
         '-D_Nullable=',
         '-D__asm(x)=',
         '-D__attribute__(x)=',
         '-D_Static_assert(x, m)=',
-        # '-D__fp16=uint16_t',  # pycparser doesn't support __fp16
-        # '-D__restrict=',
-        # '-D__DARWIN_ALIAS_STARTING(x)=',
-        # '-D__DARWIN_ALIAS(x)=',
-        # '-D__printflike(x, y)=',
-        # '-Dva_list=int',
-    ] + [x for x in os.environ.get('CPPFLAGS', '').split(' ') if x != '']
+        *CPPFLAGS,
+        '-E',
+        API,
+    ], text=True)
+    except subprocess.CalledProcessError as e: print(f'{e.stderr}\n{e}', file=sys.stderr); raise
 
-    header = subprocess.check_output([CC, '-U__GNUC__', '-E', *CPPFLAGS, API], text=True)
-    header = 'typedef int va_list;\n' + header
-
-    # Replace constant size expressions w/ their value (compile & run a mini exe for each, because why not).
-    # First, extract anything *inside* square brackets and anything that looks like a sizeof call.
-    for expr in set(re.findall(f'(?<=\\[)[^\\]]+(?=])|sizeof\\s*\\([^()]+\\)', header)):
-        if re.match(r'^(\d+|\s*)$', expr): continue # skip constants and empty bracket contents
-        subprocess.run([CC, "-o", "eval_size_expr", *CPPFLAGS, "-x", "c", "-"], text=True, check=True,
-                    input=f'''#include <stdio.h>
-                              #include "{API}"
-                              int main() {{ printf("%lu", (size_t)({expr})); }}''')
+    # Replace constant sizeof expressions w/ their value (compile & run a mini exe for each, because why not).
+    for expr in set(re.findall(f'sizeof\\s*\\([^()]+\\)', header)):
+        subprocess.run(
+            [CC, "-o", "eval_size_expr", '-I', C_INCLUDE_DIR, *CPPFLAGS, "-x", "c", "-"],
+            text=True, check=True,
+            input=f'''#include <stdio.h>
+                      #include "{API}"
+                      int main() {{ printf("%lu", (size_t)({expr})); }}''')
         header = header.replace(expr, subprocess.check_output(["./eval_size_expr"], text=True))
+        Path("eval_size_expr").unlink()
 
     ffi = cffi.FFI()
     ffi.cdef(header, override=True)
