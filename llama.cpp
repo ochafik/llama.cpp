@@ -13243,6 +13243,47 @@ static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates(
         return std::vector<llama_grammar_candidate>();
     }
 
+    if (stacks.size() > 1000) {
+        std::vector<std::vector<llama_grammar_candidate>> rejectss(stacks.size());
+        std::vector<std::thread> workers;
+        workers.reserve(stacks.size());
+        for (size_t i = 0, size = stacks.size(); i < size; ++i) {
+            workers.emplace_back([i, &rejectss, &rules, &stacks, &candidates]() {
+                rejectss[i] = llama_grammar_reject_candidates_for_stack(rules, stacks[i], candidates);
+            });
+        }
+
+        for (auto & w : workers) { w.join(); }
+        workers.clear();
+
+        std::vector<llama_grammar_candidate> merged;
+        merged.reserve(candidates.size() * rejectss.size());
+        for (const auto & rejects : rejectss) {
+            merged.insert(merged.end(), rejects.begin(), rejects.end());
+        }
+        std::sort(merged.begin(), merged.end(), [](const llama_grammar_candidate & a, const llama_grammar_candidate & b) {
+            return a.index < b.index;
+        });
+        // fprintf(stderr, "candidates.size() = %lu, merged.size() = %lu\n", candidates.size(), merged.size());
+
+        std::vector<llama_grammar_candidate> result;
+        size_t last_index_count = 0;
+        size_t last_index = 0;
+        for (const auto & reject : merged) {
+            if (last_index_count > 0 && reject.index == last_index) {
+                last_index_count++;
+            } else {
+                last_index = reject.index;
+                last_index_count = 1;
+            }
+
+            if (last_index_count == rejectss.size()) {
+                result.push_back(reject);
+            }
+        }
+        return result;
+    }
+
     auto rejects = llama_grammar_reject_candidates_for_stack(rules, stacks.front(), candidates);
 
     for (size_t i = 1, size = stacks.size(); i < size; ++i) {
