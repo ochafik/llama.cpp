@@ -1,8 +1,6 @@
 #define LLAMA_API_INTERNAL
 #include "sampling.h"
 #include <random>
-#include <unordered_set>
-#include <vector>
 
 struct llama_sampling_context * llama_sampling_init(const struct llama_sampling_params & params) {
     struct llama_sampling_context * result = new llama_sampling_context();

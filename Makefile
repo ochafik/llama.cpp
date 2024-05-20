@@ -657,6 +657,10 @@ include scripts/get-flags.mk
 CUDA_CXXFLAGS := $(BASE_CXXFLAGS) $(GF_CXXFLAGS) -Wno-pedantic
 endif
 
+ifdef LLAMA_SKIP_EMPTY_REJECTS
+override CPPFLAGS := $(CPPFLAGS) -DLLAMA_SKIP_EMPTY_REJECTS
+endif
+
 ifdef LLAMA_CURL
 override CXXFLAGS := $(CXXFLAGS) -DLLAMA_USE_CURL
 override LDFLAGS  := $(LDFLAGS) -lcurl
