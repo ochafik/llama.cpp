@@ -13299,7 +13299,7 @@ struct llama_grammar * llama_grammar_init(
         for (pos = rules[i]; pos->type != LLAMA_GRETYPE_END; pos++) {
             vec_rules[i].push_back(*pos);
         }
-        vec_rules[i].push_back({LLAMA_GRETYPE_END, 0, {}});
+        vec_rules[i].push_back({LLAMA_GRETYPE_END, 0});
     }
 
     // Check for left recursion

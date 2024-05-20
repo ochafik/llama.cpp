@@ -8,7 +8,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdbool.h>
-#include <vector>
 
 #ifdef LLAMA_SHARED
 #    if defined(_WIN32) && !defined(__MINGW32__)
@@ -353,7 +352,6 @@ extern "C" {
     typedef struct llama_grammar_element {
         enum llama_gretype type;
         uint32_t           value; // Unicode code point or rule ID
-        mutable std::vector<llama_token> token_candidates;
     } llama_grammar_element;
 
     // performance timing information
