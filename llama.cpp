@@ -13119,6 +13119,27 @@ static void llama_grammar_advance_stack(
     }
 }
 
+template <class Container, class Runner>
+void parallel_do(Container container, Runner runner) {
+    std::vector<std::thread> workers;
+    size_t nthread = 2;//std::thread::hardware_concurrency() / 2;
+    // fprintf(stderr, "nthread: %ld\n", nthread);
+    size_t batch_size = container.size() / nthread + (container.size() % nthread != 0);
+
+    workers.reserve(nthread);
+    for (size_t i = 0, n = container.size(); i < n; i += batch_size) {
+        workers.emplace_back([&](size_t i) {
+            // auto m = std::min(i + batch_size, n);
+            // assert(j < m);
+            // assert(m <= n);
+            for (size_t j = i, m = std::min(i + batch_size, n); j < m; j++) {
+                runner(container[j], j);
+            }
+        }, i);
+    }
+    for (auto & w : workers) { w.join(); }
+}
+
 // takes a set of possible pushdown stacks on a grammar, which are required to
 // be positioned at a character range (see `llama_grammar_advance_stack`), and
 // produces the N possible stacks if the given char is accepted at those
@@ -13130,46 +13151,26 @@ void llama_grammar_accept(
         std::vector<std::vector<const llama_grammar_element *>>       & new_stacks) {
 
     new_stacks.clear();
-
-    // int nthread = 10;
-    std::vector<std::thread> workers;
-    // workers.reserve(nthread);
     std::mutex new_stacks_mutex;
-    
-    for (const auto & stack : stacks) {
-        auto batch = [&]() {
-    // int batch_size = stacks.size() / nthread;
-    // for (int i = 0, n = stacks.size(); i < n; i += batch_size) {
-    //     auto batch = [i, n, batch_size, &stacks, chr, &rules, &new_stacks_mutex, &new_stacks]() {
-    //         for (int j = i, m = std::min(i + batch_size, n); j < m; j++) {
-    //             const auto & stack = stacks[j];
-                if (stack.empty()) {
-                    // continue;
-                    return;
-                }
 
-                auto match = llama_grammar_match_char(stack.back(), chr);
-                if (match.first) {
-                    const llama_grammar_element * pos = match.second;
+    parallel_do(stacks, [&](const std::vector<const llama_grammar_element *> & stack, size_t i) {
+        if (stack.empty()) {
+            return;
+        }
 
-                    // update top of stack to next element, if any
-                    std::vector<const llama_grammar_element *> new_stack(stack.begin(), stack.end() - 1);
-                    if (!llama_grammar_is_end_of_sequence(pos)) {
-                        new_stack.push_back(pos);
-                    }
-                    llama_grammar_advance_stack(rules, new_stack, new_stacks_mutex, new_stacks);
-                }
-        };
-        workers.emplace_back(batch);
-    }
-    //         }
-    //     };
-    //     batch();
-    //     // workers.emplace_back(batch);
-    // }
+        auto match = llama_grammar_match_char(stack.back(), chr);
+        if (match.first) {
+            const llama_grammar_element * pos = match.second;
 
-    for (auto & w : workers) { w.join(); }
-    workers.clear();
+            // update top of stack to next element, if any
+            std::vector<const llama_grammar_element *> new_stack(stack.begin(), stack.end() - 1);
+            if (!llama_grammar_is_end_of_sequence(pos)) {
+                new_stack.push_back(pos);
+            }
+
+            llama_grammar_advance_stack(rules, new_stack, new_stacks_mutex, new_stacks);
+        }
+    });
 }
 
 static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates(
@@ -13183,9 +13184,10 @@ static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates_for_
         const std::vector<llama_grammar_candidate>            & candidates) {
 
     std::vector<llama_grammar_candidate> rejects;
-    rejects.reserve(candidates.size());
+    // rejects.reserve(candidates.size());
 
     if (stack.empty()) {
+        rejects.reserve(candidates.size());
         for (const auto & tok : candidates) {
             if (*tok.code_points != 0 || tok.partial_utf8.n_remain != 0) {
                 rejects.push_back(tok);
@@ -13197,37 +13199,74 @@ static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates_for_
     const llama_grammar_element * stack_pos = stack.back();
 
     std::vector<llama_grammar_candidate> next_candidates;
-    next_candidates.reserve(candidates.size());
+    // next_candidates.reserve(candidates.size());
 
-    for (const auto & tok : candidates) {
+    enum Status {
+        Skip,
+        Rejected,
+        Accepted,
+    };
+    std::vector<Status> statuses(candidates.size());
+
+    std::atomic_size_t reject_count(0), accept_count(0);
+
+    parallel_do(candidates, [&](const llama_grammar_candidate & tok, size_t i) {
         if (*tok.code_points == 0) {
             // reached end of full codepoints in token, reject iff it ended in a partial sequence
             // that cannot satisfy this position in grammar
             if (tok.partial_utf8.n_remain != 0 &&
                     !llama_grammar_match_partial_char(stack_pos, tok.partial_utf8)) {
-                rejects.push_back(tok);
+                statuses[i] = Rejected;
+                ++reject_count;
+            } else {
+                statuses[i] = Skip;
             }
         } else if (llama_grammar_match_char(stack_pos, *tok.code_points).first) {
-            next_candidates.push_back({ tok.index, tok.code_points + 1, tok.partial_utf8 });
+            statuses[i] = Accepted;
+            ++accept_count;
         } else {
+            statuses[i] = Rejected;
+            ++reject_count;
+        }
+    });
+    size_t reject_count_ = reject_count.load();
+    size_t accept_count_ = accept_count.load();
+    if (reject_count_) {
+        rejects.reserve(reject_count_);//.load());
+    }
+    if (accept_count_) {
+        next_candidates.reserve(accept_count_);//.load());
+    }
+
+    for (size_t i = 0, size = candidates.size(); i < size; ++i) {
+        const auto & tok = candidates[i];
+        if (statuses[i] == Rejected) {
             rejects.push_back(tok);
+        } else if (statuses[i] == Accepted) {
+            next_candidates.push_back({ tok.index, tok.code_points + 1, tok.partial_utf8 });
         }
     }
 
-    const auto * stack_pos_after = llama_grammar_match_char(stack_pos, 0).second;
+    if (!next_candidates.empty()) {
 
-    // update top of stack to next element, if any
-    std::vector<const llama_grammar_element *> stack_after(stack.begin(), stack.end() - 1);
-    if (!llama_grammar_is_end_of_sequence(stack_pos_after)) {
-        stack_after.push_back(stack_pos_after);
-    }
-    std::vector<std::vector<const llama_grammar_element *>> next_stacks;
-    std::mutex new_stacks_mutex;
-    llama_grammar_advance_stack(rules, stack_after, new_stacks_mutex, next_stacks);
+        const auto * stack_pos_after = llama_grammar_match_char(stack_pos, 0).second;
 
-    auto next_rejects = llama_grammar_reject_candidates(rules, next_stacks, next_candidates);
-    for (const auto & tok : next_rejects) {
-        rejects.push_back({ tok.index, tok.code_points - 1, tok.partial_utf8 });
+        // update top of stack to next element, if any
+        std::vector<const llama_grammar_element *> stack_after(stack.begin(), stack.end() - 1);
+        if (!llama_grammar_is_end_of_sequence(stack_pos_after)) {
+            stack_after.push_back(stack_pos_after);
+        }
+        std::vector<std::vector<const llama_grammar_element *>> next_stacks;
+        std::mutex new_stacks_mutex;
+        llama_grammar_advance_stack(rules, stack_after, new_stacks_mutex, next_stacks);
+
+        auto next_rejects = llama_grammar_reject_candidates(rules, next_stacks, next_candidates);
+        if (!next_rejects.empty()) {
+            rejects.reserve(rejects.size() + next_rejects.size());
+            for (const auto & tok : next_rejects) {
+                rejects.push_back({ tok.index, tok.code_points - 1, tok.partial_utf8 });
+            }
+        }
     }
 
     return rejects;
@@ -13245,16 +13284,9 @@ static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates(
 
     if (stacks.size() > 1000) {
         std::vector<std::vector<llama_grammar_candidate>> rejectss(stacks.size());
-        std::vector<std::thread> workers;
-        workers.reserve(stacks.size());
-        for (size_t i = 0, size = stacks.size(); i < size; ++i) {
-            workers.emplace_back([i, &rejectss, &rules, &stacks, &candidates]() {
-                rejectss[i] = llama_grammar_reject_candidates_for_stack(rules, stacks[i], candidates);
-            });
-        }
-
-        for (auto & w : workers) { w.join(); }
-        workers.clear();
+        parallel_do(stacks, [&](const std::vector<const llama_grammar_element *> & stack, size_t i) {
+            rejectss[i] = llama_grammar_reject_candidates_for_stack(rules, stack, candidates);
+        });
 
         std::vector<llama_grammar_candidate> merged;
         merged.reserve(candidates.size() * rejectss.size());
