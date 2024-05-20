@@ -247,7 +247,6 @@ static llama_token llama_sampling_sample_impl(
 
         // If the token is not valid according to the grammar, perform resampling
         if (!is_valid) {
-            // fprintf(stderr, ".");
             LOG("Resampling because token %d: '%s' does not meet grammar rules\n", id, llama_token_to_piece(ctx_main, id).c_str());
 
             // Restore logits from the copy
