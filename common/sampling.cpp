@@ -188,10 +188,10 @@ static llama_token llama_sampling_sample_impl(
     const float   mirostat_eta    = params.mirostat_eta;
 
     std::vector<float> original_logits;
-    auto cur_p = llama_sampling_prepare(ctx_sampling, ctx_main, ctx_cfg, idx, !is_resampling, &original_logits);
-    if (!is_resampling) {
-        GGML_ASSERT(!original_logits.empty());
-    }
+    auto cur_p = llama_sampling_prepare(ctx_sampling, ctx_main, ctx_cfg, idx, /* apply_grammar= */ is_resampling, &original_logits);
+    // if (!is_resampling) {
+    //     GGML_ASSERT(!original_logits.empty());
+    // }
     llama_token id = 0;
     // Get a pointer to the logits
     float * logits = llama_get_logits_ith(ctx_main, idx);
@@ -247,12 +247,13 @@ static llama_token llama_sampling_sample_impl(
 
         // If the token is not valid according to the grammar, perform resampling
         if (!is_valid) {
+            fprintf(stderr, ".");
             LOG("Resampling because token %d: '%s' does not meet grammar rules\n", id, llama_token_to_piece(ctx_main, id).c_str());
 
             // Restore logits from the copy
             std::copy(original_logits.begin(), original_logits.end(), logits);
 
-            return llama_sampling_sample_impl(ctx_sampling, ctx_main, ctx_cfg, idx, true);  // Pass true for is_resampling
+            return llama_sampling_sample_impl(ctx_sampling, ctx_main, ctx_cfg, idx, /* is_resampling= */ true);
         }
     }
 
@@ -342,7 +343,7 @@ llama_token llama_sampling_sample(
                   struct llama_context * ctx_cfg,
                   const int idx) {
     // Call the implementation function with is_resampling set to false by default
-    return llama_sampling_sample_impl(ctx_sampling, ctx_main, ctx_cfg, idx, false);
+    return llama_sampling_sample_impl(ctx_sampling, ctx_main, ctx_cfg, idx, /* is_resampling= */ false);
 }
 
 llama_token_data_array llama_sampling_prepare(
