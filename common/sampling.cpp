@@ -264,10 +264,6 @@ static llama_token llama_sampling_sample_impl(
     return id;
 }
 
-std::pair<bool, const llama_grammar_element *> llama_grammar_match_char(
-    const llama_grammar_element * pos,
-    const uint32_t                chr);
-
 static llama_token_data_array llama_sampling_prepare_impl(
                   struct llama_sampling_context * ctx_sampling,
                   struct llama_context * ctx_main,
@@ -321,8 +317,7 @@ static llama_token_data_array llama_sampling_prepare_impl(
     const auto& penalty_tokens = params.use_penalty_prompt_tokens ? params.penalty_prompt_tokens : prev;
     const int penalty_tokens_used_size = std::min((int)penalty_tokens.size(), penalty_last_n);
     if (penalty_tokens_used_size) {
-        const llama_token nl_token = llama_token_nl(llama_get_model(ctx_main));
-        const float nl_logit = logits[nl_token];
+        const float nl_logit = logits[llama_token_nl(llama_get_model(ctx_main))];
 
         llama_sample_repetition_penalties(ctx_main, &cur_p,
                 penalty_tokens.data() + penalty_tokens.size() - penalty_tokens_used_size,
@@ -330,7 +325,7 @@ static llama_token_data_array llama_sampling_prepare_impl(
 
         if (!penalize_nl) {
             for (size_t idx = 0; idx < cur_p.size; idx++) {
-                if (cur_p.data[idx].id == nl_token) {
+                if (cur_p.data[idx].id == llama_token_nl(llama_get_model(ctx_main))) {
                     cur_p.data[idx].logit = nl_logit;
                     break;
                 }
