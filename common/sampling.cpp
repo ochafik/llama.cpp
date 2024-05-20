@@ -179,7 +179,7 @@ static llama_token llama_sampling_sample_impl(
                   struct llama_context * ctx_main,
                   struct llama_context * ctx_cfg,
                   const int idx,
-                  bool is_resampling) {  // Add a parameter to indicate if we are resampling
+                  bool is_resampling) {
     const llama_sampling_params & params = ctx_sampling->params;
 
     const float   temp            = params.temp;
