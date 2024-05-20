@@ -13221,7 +13221,7 @@ static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates(
 
     auto rejects = llama_grammar_reject_candidates_for_stack(rules, stacks.front(), candidates);
 
-    for (size_t i = 1, size = stacks.size(); i < size; ++i) {
+    for (size_t i = 1, size = stacks.size(); i < size && !rejects.empty(); ++i) {
         rejects = llama_grammar_reject_candidates_for_stack(rules, stacks[i], rejects);
     }
     return rejects;
