@@ -292,7 +292,8 @@ static llama_token_data_array llama_sampling_prepare_impl(
     // Get a pointer to the logits
     float * logits = llama_get_logits_ith(ctx_main, idx);
 
-    if (ctx_sampling->grammar != NULL && !apply_grammar && original_logits != NULL) {
+    if (ctx_sampling->grammar != NULL && !apply_grammar) {
+        GGML_ASSERT(original_logits != NULL);
         // Only make a copy of the original logits if we are not applying grammar checks, not sure if I actually have to do this.
         // TODO: if idx >= 0 then use ctx->output_ids.size() as upper bound?
         *original_logits = {logits, logits + llama_n_vocab(llama_get_model(ctx_main))};
