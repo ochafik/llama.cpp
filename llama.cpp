@@ -12980,7 +12980,11 @@ static bool llama_grammar_is_end_of_sequence(const llama_grammar_element * pos) 
 
 // returns true iff chr satisfies the char range at pos (regular or inverse range)
 // asserts that pos is pointing to a char range element
-static std::pair<bool, const llama_grammar_element *> llama_grammar_match_char(
+std::pair<bool, const llama_grammar_element *> llama_grammar_match_char(
+    const llama_grammar_element * pos,
+    const uint32_t                chr);
+
+std::pair<bool, const llama_grammar_element *> llama_grammar_match_char(
         const llama_grammar_element * pos,
         const uint32_t                chr) {
 
@@ -13291,7 +13295,7 @@ struct llama_grammar * llama_grammar_init(
         for (pos = rules[i]; pos->type != LLAMA_GRETYPE_END; pos++) {
             vec_rules[i].push_back(*pos);
         }
-        vec_rules[i].push_back({LLAMA_GRETYPE_END, 0});
+        vec_rules[i].push_back({LLAMA_GRETYPE_END, 0, {}});
     }
 
     // Check for left recursion
@@ -13858,6 +13862,7 @@ void llama_sample_grammar(struct llama_context * ctx, llama_token_data_array * c
     for (const auto & reject : rejects) {
         candidates->data[reject.index].logit = -INFINITY;
     }
+    // fprintf(stderr, "Rejects: %zu / %zu\n", rejects.size(), candidates_grammar.size());
 
     ctx->t_sample_us += ggml_time_us() - t_start_sample_us;
 }

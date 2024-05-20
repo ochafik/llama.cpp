@@ -1,6 +1,8 @@
 #define LLAMA_API_INTERNAL
 #include "sampling.h"
 #include <random>
+#include <unordered_set>
+#include <vector>
 
 struct llama_sampling_context * llama_sampling_init(const struct llama_sampling_params & params) {
     struct llama_sampling_context * result = new llama_sampling_context();
@@ -247,7 +249,7 @@ static llama_token llama_sampling_sample_impl(
 
         // If the token is not valid according to the grammar, perform resampling
         if (!is_valid) {
-            fprintf(stderr, ".");
+            // fprintf(stderr, ".");
             LOG("Resampling because token %d: '%s' does not meet grammar rules\n", id, llama_token_to_piece(ctx_main, id).c_str());
 
             // Restore logits from the copy
@@ -261,6 +263,10 @@ static llama_token llama_sampling_sample_impl(
 
     return id;
 }
+
+std::pair<bool, const llama_grammar_element *> llama_grammar_match_char(
+    const llama_grammar_element * pos,
+    const uint32_t                chr);
 
 static llama_token_data_array llama_sampling_prepare_impl(
                   struct llama_sampling_context * ctx_sampling,
@@ -286,8 +292,9 @@ static llama_token_data_array llama_sampling_prepare_impl(
     // Get a pointer to the logits
     float * logits = llama_get_logits_ith(ctx_main, idx);
 
-    if (!apply_grammar && original_logits != NULL) {
+    if (ctx_sampling->grammar != NULL && !apply_grammar && original_logits != NULL) {
         // Only make a copy of the original logits if we are not applying grammar checks, not sure if I actually have to do this.
+        // TODO: if idx >= 0 then use ctx->output_ids.size() as upper bound?
         *original_logits = {logits, logits + llama_n_vocab(llama_get_model(ctx_main))};
     }
 
@@ -303,8 +310,46 @@ static llama_token_data_array llama_sampling_prepare_impl(
 
     cur.clear();
 
-    for (llama_token token_id = 0; token_id < n_vocab; token_id++) {
-        cur.emplace_back(llama_token_data{token_id, logits[token_id], 0.0f});
+    if (apply_grammar && ctx_sampling->grammar != NULL) {
+        bool allow_eog = false;
+        for (const auto & stack : ctx_sampling->grammar->stacks) {
+            if (stack.empty()) {
+                allow_eog = true;
+                break;
+            }
+        }
+        const int n_vocab = llama_n_vocab(llama_get_model(ctx_main));
+
+        std::vector<bool> token_candidates(n_vocab, false);
+        for (const auto & stack : ctx_sampling->grammar->stacks) {
+            if (stack.empty()) {
+                continue;
+            }
+            const llama_grammar_element * pos = stack.back();
+            if (pos->token_candidates.empty()) {
+                // fprintf(stderr, "^");
+                for (llama_token id = 0; id < n_vocab; id++) {
+                    const std::string piece = llama_token_to_piece(ctx_main, id, false);
+                    if ((piece.empty() && allow_eog) || 
+                        (!piece.empty() && llama_grammar_match_char(pos, piece[0]).first)) {
+                        pos->token_candidates.push_back(id);
+                    }
+                }
+            }
+            for (auto id : pos->token_candidates) {
+                if (token_candidates[id]) {
+                    continue;
+                }
+                token_candidates[id] = true;
+                cur.emplace_back(llama_token_data {id, logits[id], 0.0f});
+            }
+        }
+        // fprintf(stderr, "Grammar-stubbed candidates: %zu / %zu\n", cur.size(), n_vocab);
+    } else 
+    {
+        for (llama_token token_id = 0; token_id < n_vocab; token_id++) {
+            cur.emplace_back(llama_token_data{token_id, logits[token_id], 0.0f});
+        }
     }
 
     llama_token_data_array cur_p = { cur.data(), cur.size(), false };
@@ -313,7 +358,8 @@ static llama_token_data_array llama_sampling_prepare_impl(
     const auto& penalty_tokens = params.use_penalty_prompt_tokens ? params.penalty_prompt_tokens : prev;
     const int penalty_tokens_used_size = std::min((int)penalty_tokens.size(), penalty_last_n);
     if (penalty_tokens_used_size) {
-        const float nl_logit = logits[llama_token_nl(llama_get_model(ctx_main))];
+        const llama_token nl_token = llama_token_nl(llama_get_model(ctx_main));
+        const float nl_logit = logits[nl_token];
 
         llama_sample_repetition_penalties(ctx_main, &cur_p,
                 penalty_tokens.data() + penalty_tokens.size() - penalty_tokens_used_size,
@@ -321,7 +367,7 @@ static llama_token_data_array llama_sampling_prepare_impl(
 
         if (!penalize_nl) {
             for (size_t idx = 0; idx < cur_p.size; idx++) {
-                if (cur_p.data[idx].id == llama_token_nl(llama_get_model(ctx_main))) {
+                if (cur_p.data[idx].id == nl_token) {
                     cur_p.data[idx].logit = nl_logit;
                     break;
                 }
