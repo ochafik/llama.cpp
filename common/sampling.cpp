@@ -323,6 +323,18 @@ static llama_token_data_array llama_sampling_prepare_impl(
         std::vector<bool> token_candidates(n_vocab, false);
         for (const auto & stack : ctx_sampling->grammar->stacks) {
             if (stack.empty()) {
+                if (allow_eog) {
+                    for (llama_token id = 0; id < n_vocab; id++) {
+                        const std::string piece = llama_token_to_piece(ctx_main, id, false);
+                        if (piece.empty()) {
+                            if (!token_candidates[id]) {
+                                token_candidates[id] = true;
+                                cur.emplace_back(llama_token_data {id, logits[id], 0.0f});
+                            }
+                            break;
+                        }
+                    }
+                }
                 continue;
             }
             const llama_grammar_element * pos = stack.back();
