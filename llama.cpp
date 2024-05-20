@@ -13264,7 +13264,7 @@ static std::vector<llama_grammar_candidate> llama_grammar_reject_candidates(
         std::sort(merged.begin(), merged.end(), [](const llama_grammar_candidate & a, const llama_grammar_candidate & b) {
             return a.index < b.index;
         });
-        // fprintf(stderr, "candidates.size() = %lu, merged.size() = %lu\n", candidates.size(), merged.size());
+        // fprintf(stderr, "stacks.size() = %lu, candidates.size() = %lu, merged.size() = %lu\n", stacks.size(), candidates.size(), merged.size());
 
         std::vector<llama_grammar_candidate> result;
         size_t last_index_count = 0;
