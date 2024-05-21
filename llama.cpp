@@ -1624,21 +1624,6 @@ struct llama_mlock {
 };
 using llama_mlocks = std::vector<std::unique_ptr<llama_mlock>>;
 
-static std::string llama_token_to_piece(const struct llama_context * ctx, llama_token token, bool special) {
-    std::vector<char> result(8, 0);
-    const int n_tokens = llama_token_to_piece(llama_get_model(ctx), token, result.data(), result.size(), special);
-    if (n_tokens < 0) {
-        result.resize(-n_tokens);
-        int check = llama_token_to_piece(llama_get_model(ctx), token, result.data(), result.size(), special);
-        GGML_ASSERT(check == -n_tokens);
-    }
-    else {
-        result.resize(n_tokens);
-    }
-
-    return std::string(result.data(), result.size());
-}
-
 static ggml_backend_buffer_type_t llama_default_buffer_type_cpu(bool host_buffer) {
     ggml_backend_buffer_type_t buft = nullptr;
 
@@ -2163,7 +2148,28 @@ struct llama_model {
 };
 
 struct llama_context {
-    llama_context(const llama_model & model) : model(model), t_start_us(model.t_start_us), t_load_us(model.t_load_us) {}
+    llama_context(const llama_model & model) : model(model), t_start_us(model.t_start_us), t_load_us(model.t_load_us) {
+
+        auto n_vocab = llama_n_vocab(&model);
+        token_codepoints_without_partial_utf8_prefix.resize(n_vocab);
+        token_pieces.resize(n_vocab);
+        for (llama_token id = 0; id < n_vocab; ++id) {
+            char result[8] { 0 };
+            const int n_tokens = llama_token_to_piece(&model, id, result, sizeof(result), /* special= */ true);
+            if (n_tokens < 0) {
+                std::vector<char> result(-n_tokens, 0);
+                int check = llama_token_to_piece(&model, id, result.data(), result.size(), /* special= */ true);
+                GGML_ASSERT(check == -n_tokens);
+                token_pieces[id] = std::string(result.data(), result.size());
+            }
+            else {
+                token_pieces[id] = std::string(result, n_tokens);
+            }
+
+            token_codepoints_without_partial_utf8_prefix[id] = decode_utf8(token_pieces[id], {0, 0});
+        }
+    }
+    
     ~llama_context() {
         ggml_backend_sched_free(sched);
 
@@ -2250,11 +2256,26 @@ struct llama_context {
     struct llama_control_vector cvec;
 
     // caching token pieces & their decoded codepoints.
-    std::mutex                 token_cache_mutex;
+    // std::mutex                 token_cache_mutex;
     std::vector<std::string>   token_pieces;
     std::vector<std::pair<std::vector<uint32_t>, llama_partial_utf8>>
                                token_codepoints_without_partial_utf8_prefix;
+
 };
+
+static bool llama_is_control_token(const llama_vocab & vocab, llama_token id) {
+    GGML_ASSERT(vocab.type != LLAMA_VOCAB_TYPE_NONE);
+    return vocab.id_to_token[id].type == LLAMA_TOKEN_TYPE_CONTROL;
+}
+
+static const std::string & llama_token_to_piece(const struct llama_context * ctx, llama_token token, bool special) {
+    if (!special && llama_is_control_token(ctx->model.vocab, token)) {
+        static std::string empty;
+        return empty;
+    }
+    
+    return ctx->token_pieces[token];
+}
 
 static ggml_backend_buffer_type_t llama_default_buffer_type_offload(const llama_model & model, int gpu) {
     ggml_backend_buffer_type_t buft = nullptr;
@@ -11748,11 +11769,6 @@ static bool llama_is_unknown_token(const llama_vocab & vocab, llama_token id) {
     return vocab.id_to_token[id].type == LLAMA_TOKEN_TYPE_UNKNOWN;
 }
 
-static bool llama_is_control_token(const llama_vocab & vocab, llama_token id) {
-    GGML_ASSERT(vocab.type != LLAMA_VOCAB_TYPE_NONE);
-    return vocab.id_to_token[id].type == LLAMA_TOKEN_TYPE_CONTROL;
-}
-
 static bool llama_is_byte_token(const llama_vocab & vocab, llama_token id) {
     GGML_ASSERT(vocab.type != LLAMA_VOCAB_TYPE_NONE);
     return vocab.id_to_token[id].type == LLAMA_TOKEN_TYPE_BYTE;
@@ -13565,21 +13581,6 @@ void llama_sample_grammar(struct llama_context * ctx, llama_token_data_array * c
         }
     }
 
-    {
-        // cache tokens & their decoded codepoints (for common case where there's no partial utf8 prefix bytes) for grammar-constrained sampling.
-        std::unique_lock<std::mutex> lock(ctx->token_cache_mutex);
-        if (ctx->token_pieces.empty()) {
-            auto n_vocab = llama_n_vocab(llama_get_model(ctx));
-            ctx->token_codepoints_without_partial_utf8_prefix.resize(n_vocab);
-            ctx->token_pieces.resize(n_vocab);
-            for (llama_token id = 0; id < n_vocab; ++id) {
-                const std::string piece = llama_token_to_piece(ctx, id, false);
-                ctx->token_pieces[id] = piece;
-                ctx->token_codepoints_without_partial_utf8_prefix[id] = decode_utf8(piece, {0, 0});
-            }
-        }
-    }
-
     // Store decoded codepoints when they are not cached (happens when there's a partial utf8 string prefix).
     std::vector<std::pair<std::vector<uint32_t>, llama_partial_utf8>> candidates_decoded;
     if (grammar->partial_utf8.n_remain > 0) {
@@ -13590,7 +13591,7 @@ void llama_sample_grammar(struct llama_context * ctx, llama_token_data_array * c
 
     for (size_t i = 0; i < candidates->size; ++i) {
         const llama_token id    = candidates->data[i].id;
-        const auto & piece      = ctx->token_pieces[id];
+        const auto & piece      = llama_token_to_piece(ctx, id, /* special= */ false);
         if (llama_token_is_eog(&ctx->model, id)) {
             if (!allow_eog) {
                 candidates->data[i].logit = -INFINITY;
@@ -13792,7 +13793,7 @@ void llama_grammar_accept_token(struct llama_context * ctx, struct llama_grammar
         GGML_ASSERT(false);
     }
 
-    const auto & piece = ctx->token_pieces.at(token);
+    const auto & piece = llama_token_to_piece(ctx, token, /* special= */ false);
 
     // Note terminating 0 in decoded string
     const auto   decoded     = grammar->partial_utf8.n_remain == 0
