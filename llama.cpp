@@ -1,6 +1,7 @@
 #define LLAMA_API_INTERNAL
 #include "llama.h"
 
+#include "json.hpp"
 #include "unicode.h"
 
 #include "ggml.h"
@@ -91,6 +92,8 @@
 #include <thread>
 #include <type_traits>
 #include <unordered_map>
+
+using json = nlohmann::ordered_json;
 
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267) // possible loss of data
@@ -17535,18 +17538,53 @@ static std::string trim(const std::string & str) {
     return str.substr(start, end - start);
 }
 
+static std::string flatten_content(const json & message) {
+    std::stringstream ss;
+    auto has_content = !message["content"].is_null();
+    auto has_tool_calls = message.contains("tool_calls");
+    auto needs_newline = false;
+    if (has_content) {
+        ss << message["content"];
+        needs_newline = true;
+    }
+    if (has_tool_calls) {
+        for (const auto & tool_call : message["tool_calls"]) {
+            if (needs_newline) {
+                ss << "\n";
+            }
+            GGML_ASSERT(tool_call.contains("function"));
+            ss << "<tool_call>{\"name\": \"" << tool_call["function"]["name"] << "\", \"arguments\": " << tool_call["arguments"].dump() << "}</tool_call>";
+            needs_newline = true;
+        }
+    }
+    return ss.str();
+}
+
 // Simple version of "llama_apply_chat_template" that only works with strings
 // This function uses heuristic checks to determine commonly used template. It is not a jinja parser.
+// static int32_t llama_chat_apply_template_internal(
+//     const std::string & tmpl,
+//     const std::vector<const llama_chat_message *> & chat,
+//     std::string & dest, bool add_ass) {
 static int32_t llama_chat_apply_template_internal(
     const std::string & tmpl,
-    const std::vector<const llama_chat_message *> & chat,
+    const json        & messages,
     std::string & dest, bool add_ass) {
+
+    GGML_ASSERT(messages.is_array());
     // Taken from the research: https://github.com/ggerganov/llama.cpp/issues/5527
     std::stringstream ss;
+
     if (tmpl == "chatml" || tmpl.find("<|im_start|>") != std::string::npos) {
         // chatml template
-        for (auto message : chat) {
-            ss << "<|im_start|>" << message->role << "\n" << message->content << "<|im_end|>\n";
+        for (const auto & message : messages) {
+            const auto & role = message["role"];
+            const auto content = flatten_content(message);
+            ss << "<|im_start|>" << role;
+            if (message.contains("name")) {
+                ss << " (" << message["name"] << ")";
+            }
+            ss << "\n" << content << "<|im_end|>\n";
         }
         if (add_ass) {
             ss << "<|im_start|>assistant\n";
@@ -17564,9 +17602,10 @@ static int32_t llama_chat_apply_template_internal(
         // construct the prompt
         bool is_inside_turn = true; // skip BOS at the beginning
         ss << "[INST] ";
-        for (auto message : chat) {
-            std::string content = strip_message ? trim(message->content) : message->content;
-            std::string role(message->role);
+        for (const auto & message : messages) {
+            const auto & role = message["role"];
+            auto content = flatten_content(message);
+            if (strip_message) content = trim(content);
             if (!is_inside_turn) {
                 is_inside_turn = true;
                 ss << (add_bos_inside_history ? "<s>[INST] " : "[INST] ");
@@ -17580,6 +17619,8 @@ static int32_t llama_chat_apply_template_internal(
                 }
             } else if (role == "user") {
                 ss << content << " [/INST]";
+            } else if (role == "tool") {
+                ss << "[TOOL_RESULT]" << content << "[/TOOL_RESULT]";
             } else {
                 ss << (space_around_response ? " " : "") << content << (space_around_response ? " " : "") << "</s>";
                 is_inside_turn = false;
@@ -17588,17 +17629,21 @@ static int32_t llama_chat_apply_template_internal(
         // llama2 templates seem to not care about "add_generation_prompt"
     } else if (tmpl == "zephyr" || tmpl.find("<|user|>") != std::string::npos) {
         // zephyr template
-        for (auto message : chat) {
-            ss << "<|" << message->role << "|>" << "\n" << message->content << "<|endoftext|>\n";
+        for (const auto & message : messages) {
+            const auto & role = message["role"];
+            const auto content = flatten_content(message);
+            ss << "<|" << role << "|>" << "\n" << content << "<|endoftext|>\n";
         }
         if (add_ass) {
             ss << "<|assistant|>\n";
         }
     } else if (tmpl == "monarch" || tmpl.find("bos_token + message['role']") != std::string::npos) {
         // mlabonne/AlphaMonarch-7B template (the <s> is included inside history)
-        for (auto message : chat) {
-            std::string bos = (message == chat.front()) ? "" : "<s>"; // skip BOS for first message
-            ss << bos << message->role << "\n" << message->content << "</s>\n";
+        for (const auto & message : messages) {
+            const auto & role = message["role"];
+            const auto content = flatten_content(message);
+            std::string bos = (&message == &messages.front()) ? "" : "<s>"; // skip BOS for first message
+            ss << bos << role << "\n" << content << "</s>\n";
         }
         if (add_ass) {
             ss << "<s>assistant\n";
@@ -17606,21 +17651,22 @@ static int32_t llama_chat_apply_template_internal(
     } else if (tmpl == "gemma" || tmpl.find("<start_of_turn>") != std::string::npos) {
         // google/gemma-7b-it
         std::string system_prompt = "";
-        for (auto message : chat) {
-            std::string role(message->role);
+        for (const auto & message : messages) {
+            std::string role = message["role"];
+            const auto content = flatten_content(message);
             if (role == "system") {
                 // there is no system message for gemma, but we will merge it with user prompt, so nothing is broken
-                system_prompt = trim(message->content);
+                system_prompt = trim(content);
                 continue;
             }
             // in gemma, "assistant" is "model"
-            role = role == "assistant" ? "model" : message->role;
+            role = role == "assistant" ? "model" : role;
             ss << "<start_of_turn>" << role << "\n";
             if (!system_prompt.empty() && role != "model") {
                 ss << system_prompt << "\n\n";
                 system_prompt = "";
             }
-            ss << trim(message->content) << "<end_of_turn>\n";
+            ss << trim(content) << "<end_of_turn>\n";
         }
         if (add_ass) {
             ss << "<start_of_turn>model\n";
@@ -17628,11 +17674,12 @@ static int32_t llama_chat_apply_template_internal(
     } else if (tmpl == "orion" || tmpl.find("'\\n\\nAssistant: ' + eos_token") != std::string::npos) {
         // OrionStarAI/Orion-14B-Chat
         std::string system_prompt = "";
-        for (auto message : chat) {
-            std::string role(message->role);
+        for (const auto & message : messages) {
+            const auto & role = message["role"];
+            const auto content = flatten_content(message);
             if (role == "system") {
                 // there is no system message support, we will merge it with user prompt
-                system_prompt = message->content;
+                system_prompt = content;
                 continue;
             } else if (role == "user") {
                 ss << "Human: ";
@@ -17640,20 +17687,21 @@ static int32_t llama_chat_apply_template_internal(
                     ss << system_prompt << "\n\n";
                     system_prompt = "";
                 }
-                ss << message->content << "\n\nAssistant: </s>";
+                ss << content << "\n\nAssistant: </s>";
             } else {
-                ss << message->content << "</s>";
+                ss << content << "</s>";
             }
         }
     } else if (tmpl == "openchat" || tmpl.find("GPT4 Correct ") != std::string::npos) {
         // openchat/openchat-3.5-0106,
-        for (auto message : chat) {
-            std::string role(message->role);
+        for (const auto & message : messages) {
+            std::string role = message["role"];
+            const auto content = flatten_content(message);
             if (role == "system") {
-                ss << message->content << "<|end_of_turn|>";
+                ss << content << "<|end_of_turn|>";
             } else {
                 role[0] = toupper(role[0]);
-                ss << "GPT4 Correct " << role << ": " << message->content << "<|end_of_turn|>";
+                ss << "GPT4 Correct " << role << ": " << content << "<|end_of_turn|>";
             }
         }
         if (add_ass) {
@@ -17661,19 +17709,20 @@ static int32_t llama_chat_apply_template_internal(
         }
     } else if (tmpl == "vicuna" || tmpl == "vicuna-orca" || (tmpl.find("USER: ") != std::string::npos && tmpl.find("ASSISTANT: ") != std::string::npos)) {
         // eachadea/vicuna-13b-1.1 (and Orca variant)
-        for (auto message : chat) {
-            std::string role(message->role);
+        for (const auto & message : messages) {
+            const auto & role = message["role"];
+            const auto content = flatten_content(message);
             if (role == "system") {
                 // Orca-Vicuna variant uses a system prefix
                 if (tmpl == "vicuna-orca" || tmpl.find("SYSTEM: ") != std::string::npos) {
-                    ss << "SYSTEM: " << message->content << "\n";
+                    ss << "SYSTEM: " << content << "\n";
                 } else {
-                    ss << message->content << "\n\n";
+                    ss << content << "\n\n";
                 }
             } else if (role == "user") {
-                ss << "USER: " << message->content << "\n";
+                ss << "USER: " << content << "\n";
             } else if (role == "assistant") {
-                ss << "ASSISTANT: " << message->content << "</s>\n";
+                ss << "ASSISTANT: " << content << "</s>\n";
             }
         }
         if (add_ass) {
@@ -17681,14 +17730,15 @@ static int32_t llama_chat_apply_template_internal(
         }
     } else if (tmpl == "deepseek" || (tmpl.find("### Instruction:") != std::string::npos && tmpl.find("<|EOT|>") != std::string::npos)) {
         // deepseek-ai/deepseek-coder-33b-instruct
-        for (auto message : chat) {
-            std::string role(message->role);
+        for (const auto & message : messages) {
+            const auto & role = message["role"];
+            const auto content = flatten_content(message);
             if (role == "system") {
-                ss << message->content;
+                ss << content;
             } else if (role == "user") {
-                ss << "### Instruction:\n" << message->content << "\n";
+                ss << "### Instruction:\n" << content << "\n";
             } else if (role == "assistant") {
-                ss << "### Response:\n" << message->content << "\n<|EOT|>\n";
+                ss << "### Response:\n" << content << "\n<|EOT|>\n";
             }
         }
         if (add_ass) {
@@ -17696,14 +17746,15 @@ static int32_t llama_chat_apply_template_internal(
         }
     } else if (tmpl == "command-r" || (tmpl.find("<|START_OF_TURN_TOKEN|>") != std::string::npos && tmpl.find("<|USER_TOKEN|>") != std::string::npos)) {
         // CohereForAI/c4ai-command-r-plus
-        for (auto message : chat) {
-            std::string role(message->role);
+        for (const auto & message : messages) {
+            const auto & role = message["role"];
+            const auto content = flatten_content(message);
             if (role == "system") {
-                ss << "<|START_OF_TURN_TOKEN|><|SYSTEM_TOKEN|>" << trim(message->content) << "<|END_OF_TURN_TOKEN|>";
+                ss << "<|START_OF_TURN_TOKEN|><|SYSTEM_TOKEN|>" << trim(content) << "<|END_OF_TURN_TOKEN|>";
             } else if (role == "user") {
-                ss << "<|START_OF_TURN_TOKEN|><|USER_TOKEN|>" << trim(message->content) << "<|END_OF_TURN_TOKEN|>";
+                ss << "<|START_OF_TURN_TOKEN|><|USER_TOKEN|>" << trim(content) << "<|END_OF_TURN_TOKEN|>";
             } else if (role == "assistant") {
-                ss << "<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>" << trim(message->content) << "<|END_OF_TURN_TOKEN|>";
+                ss << "<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>" << trim(content) << "<|END_OF_TURN_TOKEN|>";
             }
         }
         if (add_ass) {
@@ -17711,18 +17762,20 @@ static int32_t llama_chat_apply_template_internal(
         }
     } else if (tmpl == "llama3" || (tmpl.find("<|start_header_id|>") != std::string::npos && tmpl.find("<|end_header_id|>") != std::string::npos)) {
         // Llama 3
-        for (auto message : chat) {
-            std::string role(message->role);
-            ss << "<|start_header_id|>" << role << "<|end_header_id|>\n\n" << trim(message->content) << "<|eot_id|>";
+        for (const auto & message : messages) {
+            const auto & role = message["role"];
+            const auto content = flatten_content(message);
+            ss << "<|start_header_id|>" << role << "<|end_header_id|>\n\n" << trim(content) << "<|eot_id|>";
         }
         if (add_ass) {
             ss << "<|start_header_id|>assistant<|end_header_id|>\n\n";
         }
     } else if (tmpl == "phi3" || (tmpl.find("<|assistant|>") != std::string::npos && tmpl.find("<|end|>") != std::string::npos )) {
         // Phi 3
-        for (auto message : chat) {
-            std::string role(message->role);
-            ss << "<|" << role << "|>\n" << trim(message->content) << "<|end|>\n";
+        for (const auto & message : messages) {
+            const auto & role = message["role"];
+            const auto content = flatten_content(message);
+            ss << "<|" << role << "|>\n" << trim(message) << "<|end|>\n";
         }
         if (add_ass) {
             ss << "<|assistant|>\n";
@@ -17738,8 +17791,7 @@ static int32_t llama_chat_apply_template_internal(
 LLAMA_API int32_t llama_chat_apply_template(
                 const struct llama_model * model,
                               const char * tmpl,
-         const struct llama_chat_message * chat,
-                                  size_t   n_msg,
+                              const char * chat,
                                     bool   add_ass,
                                     char * buf,
                                  int32_t   length) {
@@ -17759,14 +17811,8 @@ LLAMA_API int32_t llama_chat_apply_template(
     }
 
     // format the chat to string
-    std::vector<const llama_chat_message *> chat_vec;
-    chat_vec.resize(n_msg);
-    for (size_t i = 0; i < n_msg; i++) {
-        chat_vec[i] = &chat[i];
-    }
-
     std::string formatted_chat;
-    int32_t res = llama_chat_apply_template_internal(curr_tmpl, chat_vec, formatted_chat, add_ass);
+    int32_t res = llama_chat_apply_template_internal(curr_tmpl, json::parse(chat), formatted_chat, add_ass);
     if (res < 0) {
         return res;
     }

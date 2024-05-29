@@ -702,9 +702,9 @@ struct server_context {
     }
 
     bool validate_model_chat_template() const {
-        llama_chat_message chat[] = {{"user", "test"}};
+        const char * chat = R"""([{"role": "user", "content": "test"}])""";
 
-        const int res = llama_chat_apply_template(model, nullptr, chat, 1, true, nullptr, 0);
+        const int res = llama_chat_apply_template(model, nullptr, chat, true, nullptr, 0);
 
         return res > 0;
     }

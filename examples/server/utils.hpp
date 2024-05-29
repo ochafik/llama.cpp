@@ -120,45 +120,35 @@ static inline void server_log(const char * level, const char * function, int lin
 
 // Check if the template supplied via "--chat-template" is supported or not. Returns true if it's valid
 inline bool verify_custom_template(const std::string & tmpl) {
-    llama_chat_message chat[] = {{"user", "test"}};
-    int res = llama_chat_apply_template(nullptr, tmpl.c_str(), chat, 1, true, nullptr, 0);
+    const char * chat = R"""([{"role": "user", "content": "test"}])""";
+
+    int res = llama_chat_apply_template(nullptr, tmpl.c_str(), chat, true, nullptr, 0);
     return res >= 0;
 }
 
 // Format given chat. If tmpl is empty, we take the template from model metadata
-inline std::string format_chat(const struct llama_model * model, const std::string & tmpl, const std::vector<json> & messages, const std::string & extra_system_message) {
-    size_t alloc_size = 0;
-    // vector holding all allocated string to be passed to llama_chat_apply_template
-    std::vector<std::string> str(messages.size() * 2);
-    std::vector<llama_chat_message> chat(messages.size());
-
-    for (size_t i = 0; i < messages.size(); ++i) {
-        const auto & curr_msg = messages[i];
-        str[i*2 + 0]    = json_value(curr_msg, "role",    std::string(""));
-        str[i*2 + 1]    = json_value(curr_msg, "content", std::string(""));
-        alloc_size     += str[i*2 + 1].length();
-        chat[i].role    = str[i*2 + 0].c_str();
-        chat[i].content = str[i*2 + 1].c_str();
-    }
-
+inline std::string format_chat(const struct llama_model * model, const std::string & tmpl, const json & messages, const std::string & extra_system_message) {
     if (!extra_system_message.empty()) {
-        alloc_size += extra_system_message.size();
+        json messages_copy(messages);
+        messages_copy.insert(messages_copy.begin(), json{{"role", "system"}, {"content", extra_system_message}});
+        // messages_copy.push_back(json{{"role", "system"}, {"content", extra_system_message}});
 
-        llama_chat_message msg { "system", extra_system_message.c_str() };
-        chat.insert(chat.begin(), msg);
-        // chat.push_back(msg);
+        return format_chat(model, tmpl, messages_copy, "");
     }
+
+    size_t alloc_size = messages.dump().size() * 2;
 
     const char * ptr_tmpl = tmpl.empty() ? nullptr : tmpl.c_str();
     std::vector<char> buf(alloc_size * 2);
 
     // run the first time to get the total output length
-    int32_t res = llama_chat_apply_template(model, ptr_tmpl, chat.data(), chat.size(), true, buf.data(), buf.size());
+    std::string chat = messages.dump();
+    int32_t res = llama_chat_apply_template(model, ptr_tmpl, chat.c_str(), true, buf.data(), buf.size());
 
     // if it turns out that our buffer is too small, we resize it
     if ((size_t) res > buf.size()) {
         buf.resize(res);
-        res = llama_chat_apply_template(model, ptr_tmpl, chat.data(), chat.size(), true, buf.data(), buf.size());
+        res = llama_chat_apply_template(model, ptr_tmpl, chat.c_str(), true, buf.data(), buf.size());
     }
 
     const std::string formatted_chat(buf.data(), res);
@@ -396,6 +386,7 @@ static json oaicompat_completion_params_parse(
     }
 
     // Handle "response_format" field
+
     if (body.contains("response_format")) {
         json response_format      = json_value(body, "response_format", json::object());
         std::string response_type = json_value(response_format, "type", std::string());
@@ -409,7 +400,8 @@ static json oaicompat_completion_params_parse(
         } else if (!response_type.empty() && response_type != "text") {
             throw std::runtime_error("response_format type must be one of \"text\" or \"json_object\", but got: " + response_type);
         }
-    } else if (body.contains("tools") && body["tools"].is_array()) {
+    }
+    if (body.contains("tools") && body["tools"].is_array()) {
         const auto & tools = body["tools"];
         bool built_grammar = false;
         bool allow_parallel_calls = false;
@@ -434,22 +426,26 @@ static json oaicompat_completion_params_parse(
         // TODO: pass a template file.
         extra_system_message = (std::stringstream()
             << "You are a function calling AI model. You are provided with function signatures within <tools></tools> XML tags. "
-            << "You may call one or more functions to assist with the user query. "
+            // << "You may call one or more functions to assist with the user query. "
+            << "Call one or more functions to assist with the user query, every time this is possible. Don't make assumptions about what values to plug into functions. "
             // << "Don't make assumptions about what values to plug into functions. "
             << "Here are the available tools: <tools>"
             << tools.dump(2).c_str()
             << "</tools>\n"
             // << "To call a tool give a json object with function name and arguments within <tool_call></tool_call> XML tags as follows:"
-            << "For each function call return a json object with function name and arguments within <tool_call></tool_call> XML tags as follows:"
+            << "For each function call return a json object with function name and arguments within <tool_call>...</tool_call> XML tags as follows:"
             << "<tool_call>"
             << "{\"name\": <function-name>, \"arguments\": <args-dict>}"
             << "</tool_call>"
             << "Don't explain which tools you're going to call, just call them."
         ).str();
+
+        fprintf(stderr, "# GRAMMAR:\n%s\n", llama_params["grammar"].get<std::string>().c_str());
     }
 
     // Apply chat template to the list of messages
     llama_params["prompt"] = format_chat(model, chat_template, body["messages"], extra_system_message);
+    fprintf(stderr, "# PROMPT:\n%s\n", llama_params["prompt"].get<std::string>().c_str());
 
     // Handle "stop" field
     if (body.contains("stop") && body["stop"].is_string()) {
@@ -508,6 +504,7 @@ static json format_final_response_oaicompat(const json & request, json result, c
     json tool_calls;
     json message_content;
     if (request.contains("tools")) {
+        fprintf(stderr, "# CONTENT:\n%s\n", content.c_str());
         std::regex pattern("<tool_call>(.*?)</tool_call>");
         std::sregex_iterator iter(content.begin(), content.end(), pattern);
         std::sregex_iterator end;
