@@ -2,9 +2,10 @@
 
 Have any LLM use local (sandboxed) tools, with a simple CLI.
 
+<!-- --model ~/AI/Models/mixtral-8x7b-instruct-v0.1.Q4_K_M.gguf \ -->
 ```bash
 python -m examples.agent \
-    --model ~/AI/Models/mixtral-8x7b-instruct-v0.1.Q4_K_M.gguf \
+    --model models/Meta-Llama-3-8B-Instruct-Q4_K_M.gguf \
     --tools examples/agent/tools/example_math_tools.py \
     --goal "What is the sum of 2535 squared and 32222000403 then multiplied by one and a half. What's a third of the result?" \
     --greedy
@@ -151,7 +152,7 @@ If you'd like to debug each binary separately (rather than have an agent spawing
 # C++ server
 make -j server
 ./server \
-    --model mixtral.gguf \
+    --model models/Meta-Llama-3-8B-Instruct-Q4_K_M.gguf \
     --metrics \
     -ctk q4_0 \
     -ctv f16 \
@@ -162,14 +163,17 @@ make -j server
 python -m examples.openai \
     --port 8080 \
     --endpoint http://localhost:8081 \
-    --template-hf-model-id-fallback mistralai/Mixtral-8x7B-Instruct-v0.1
+    --template-hf-model-id-fallback meta-llama/Meta-Llama-3-8B \
+    --model models/Meta-Llama-3-8B-Instruct-Q4_K_M.gguf
+    # mistralai/Mixtral-8x7B-Instruct-v0.1
 
 # Or have the OpenAI compatibility layer spawn the C++ server under the hood:
 #   python -m examples.openai --model mixtral.gguf
 
 # Agent itself:
 python -m examples.agent \
-    --endpoint http://localhost:8080 \
+    --endpoint https://api.openai.com/ \
+    --auth "Bearer $OPENAI_API_KEY" \
     --tools examples/agent/tools/example_summaries.py \
     --format PyramidalSummary \
     --goal "Create a pyramidal summary of Mankind's recent advancements"
