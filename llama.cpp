@@ -17589,6 +17589,30 @@ static int32_t llama_chat_apply_template_internal(
         if (add_ass) {
             ss << "<|im_start|>assistant\n";
         }
+    } else if (tmpl == "functionary_2" || tmpl.find("<|recipient|>all") != std::string::npos) {
+       for (const auto & message : messages) {
+            const auto & role = message["role"];
+            const auto & content = message["content"];
+            if (role == "user" || role == "system") {
+                ss << "<|from|>" << role << "\n<|recipient|>all\n<|content|>" << content << "\n";
+            } else if (role == "tool") {
+                ss << "<|from|>" << message["name"] << "\n<|recipient|>all\n<|content|>" << content << "\n";
+            } else {
+                bool contain_content = false;
+                if (!content.is_null()) {
+                    ss << "<|from|>assistant\n<|recipient|>all\n<|content|>" << content;
+                    contain_content = true;
+                }
+                if (message.contains("tool_calls") && !message["tool_calls"].is_null()) {
+                    for (const auto & tool_call : message["tool_calls"]) {
+                        ss << "<|from|>assistant\n<|recipient|>" << tool_call["function"]["name"] << "\n<|content|>" << tool_call["function"]["arguments"] << "\n";
+                    }
+                }
+                if (!contain_content) {
+                    ss << "<|stop|>\n";
+                }
+            }
+       }
     } else if (tmpl == "llama2" || tmpl.find("[INST]") != std::string::npos) {
         // llama2 template and its variants
         // [variant] support system message
