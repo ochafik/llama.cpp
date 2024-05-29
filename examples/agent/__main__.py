@@ -1,6 +1,6 @@
 import typer
 
-from examples.agent.agent import main
+from examples.agent.agent2 import main
 
 if __name__ == "__main__":
     typer.run(main)
