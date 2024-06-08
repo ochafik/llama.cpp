@@ -1278,27 +1278,28 @@ endif()
 
 # llama
 
-add_library(llama
+add_library(llama-lib
             llama.cpp
             llama.h
             unicode.h
             unicode.cpp
             unicode-data.cpp
             )
+set_target_properties(llama-lib PROPERTIES OUTPUT_NAME llama)
 
-target_include_directories(llama PUBLIC .)
-target_compile_features   (llama PUBLIC cxx_std_11) # don't bump
+target_include_directories(llama-lib PUBLIC .)
+target_compile_features   (llama-lib PUBLIC cxx_std_11) # don't bump
 
-target_link_libraries(llama PRIVATE
+target_link_libraries(llama-lib PRIVATE
     ggml
     ${LLAMA_EXTRA_LIBS}
     )
 
 if (BUILD_SHARED_LIBS)
-    set_target_properties(llama PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    target_compile_definitions(llama PRIVATE LLAMA_SHARED LLAMA_BUILD)
+    set_target_properties(llama-lib PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_compile_definitions(llama-lib PRIVATE LLAMA_SHARED LLAMA_BUILD)
     if (LLAMA_METAL)
-        set_target_properties(llama PROPERTIES RESOURCE "${CMAKE_CURRENT_SOURCE_DIR}/ggml-metal.metal")
+        set_target_properties(llama-lib PROPERTIES RESOURCE "${CMAKE_CURRENT_SOURCE_DIR}/ggml-metal.metal")
     endif()
 endif()
 
@@ -1346,8 +1347,8 @@ set(GGML_PUBLIC_HEADERS "ggml.h" "ggml-alloc.h" "ggml-backend.h"
 set_target_properties(ggml PROPERTIES PUBLIC_HEADER "${GGML_PUBLIC_HEADERS}")
 install(TARGETS ggml PUBLIC_HEADER)
 
-set_target_properties(llama PROPERTIES PUBLIC_HEADER ${CMAKE_CURRENT_SOURCE_DIR}/llama.h)
-install(TARGETS llama LIBRARY PUBLIC_HEADER)
+set_target_properties(llama-lib PROPERTIES PUBLIC_HEADER ${CMAKE_CURRENT_SOURCE_DIR}/llama.h)
+install(TARGETS llama-lib LIBRARY PUBLIC_HEADER)
 
 install(
     FILES convert-hf-to-gguf.py
