@@ -731,7 +731,7 @@ private:
         std::string rule = "\"{\" space ";
         if (!prop_kv_rule_names.empty()) {
             rule += " (";
-            
+
             std::function<std::string(const std::vector<std::string> &, bool)> get_recursive_refs = [&](const std::vector<std::string> & ks, bool first_is_optional) {
                 std::string res;
                 if (ks.empty()) {
