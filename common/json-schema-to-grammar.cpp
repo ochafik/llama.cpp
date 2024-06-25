@@ -730,8 +730,6 @@ private:
 
         std::string rule = "\"{\" space ";
         if (!prop_kv_rule_names.empty()) {
-            rule += " (";
-
             std::function<std::string(const std::vector<std::string> &, bool)> get_recursive_refs = [&](const std::vector<std::string> & ks, bool first_is_optional) {
                 std::string res;
                 if (ks.empty()) {
@@ -739,14 +737,15 @@ private:
                 }
                 std::string k = ks[0];
                 std::string kv_rule_name = prop_kv_rule_names[k];
-                std::string comma_ref = "( \",\" space " + kv_rule_name + " )";
+                std::string comma_ref = "\",\" space " + kv_rule_name;
                 if (first_is_optional) {
-                    res = comma_ref;
                     if (required.find(k) == required.end()) {
-                        res += (k == "*" ? "*" : "?");
+                        res = "( " + comma_ref + (k == "*" ? " )*" : " )?");
+                    } else {
+                        res = comma_ref;
                     }
                 } else {
-                    res = kv_rule_name + (k == "*" ? " " + comma_ref + "*" : "");
+                    res = kv_rule_name + (k == "*" ? " ( " + comma_ref + " )*" : "");
                 }
                 if (ks.size() > 1) {
                     res += " " + _add_rule(
@@ -757,20 +756,20 @@ private:
                 return res;
             };
 
+            std::vector<std::string> alternatives;
             auto has_required = false;
             for (size_t i = 0; i < prop_names.size(); i++) {
-                if (i > 0) {
-                    rule += " | ";
-                }
-                rule += get_recursive_refs(std::vector<std::string>(prop_names.begin() + i, prop_names.end()), false);
+                alternatives.push_back(get_recursive_refs(std::vector<std::string>(prop_names.begin() + i, prop_names.end()), false));
                 if (required.find(prop_names[i]) != required.end()) {
                     has_required = true;
                     break;
                 }
             }
-            rule += " )";
-            if (!has_required) {
-                rule += "?";
+            auto alts = join(alternatives.begin(), alternatives.end(), " | ");
+            if (alternatives.size() > 1 || !has_required) {
+                rule += "( " + alts + (has_required ? " )" : " )?");
+            } else {
+                rule += alts;
             }
         }
 

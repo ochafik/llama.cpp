@@ -709,18 +709,17 @@ class SchemaConverter:
         rule = '"{" space '
 
         if prop_kv_rule_names:
-            rule += ' ('
-
             def get_recursive_refs(ks, first_is_optional):
                 [k, *rest] = ks
                 kv_rule_name = prop_kv_rule_names[k]
-                comma_ref = f'( "," space {kv_rule_name} )'
+                comma_ref = f'"," space {kv_rule_name}'
                 if first_is_optional:
-                    res = comma_ref
                     if k not in required:
-                        res += ('*' if k == '*' else '?')
+                        res = '( ' + comma_ref + (' )*' if k == '*' else ' )?')
+                    else:
+                        res = comma_ref
                 else:
-                    res = kv_rule_name + (' ' + comma_ref + "*" if k == '*' else '')
+                    res = kv_rule_name + (' ( ' + comma_ref + " )*" if k == '*' else '')
                 if len(rest) > 0:
                     res += ' ' + self._add_rule(
                         f'{name}{"-" if name else ""}{k}-rest',
@@ -728,18 +727,19 @@ class SchemaConverter:
                     )
                 return res
 
+            alternatives = []
             has_required = False
             for i, k in enumerate(prop_names):
-                if i > 0:
-                    rule += ' | '
-                rule += get_recursive_refs(prop_names[i:], first_is_optional=False)
+                alternatives.append(get_recursive_refs(prop_names[i:], first_is_optional=False))
                 if k in required:
                     has_required = True
                     break
 
-            rule += ' )'
-            if not has_required:
-                rule += '?'
+            alts = ' | '.join(alternatives)
+            if len(alternatives) > 1 or not has_required:
+                rule += '( ' + alts + (' )' if has_required else ' )?')
+            else:
+                rule += alts
 
         rule += ' "}" space'
 

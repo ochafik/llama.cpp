@@ -772,21 +772,20 @@ export class SchemaConverter {
     let rule = '"{" space ';
 
     if (propNames.length > 0) {
-      rule += ' (';
-
       const getRecursiveRefs = (ks, firstIsOptional) => {
         const [k, ...rest] = ks;
         const kvRuleName = propKvRuleNames[k];
         let res;
-        const commaRef = `( "," space ${kvRuleName} )`;
+        const commaRef = `"," space ${kvRuleName}`;
         if (firstIsOptional) {
           // res = commaRef + (k === '*' ? '*' : '?');
-          res = commaRef;
           if (!required.has(k)) {
-            res += k === '*' ? '*' : '?';
+            res = `( ${commaRef} )${k === '*' ? '*' : '?'}`;
+          } else {
+            res = commaRef;
           }
         } else {
-          res = kvRuleName + (k === '*' ? ' ' + commaRef + '*' : '');
+          res = kvRuleName + (k === '*' ? ' ( ' + commaRef + ' )*' : '');
         }
         if (rest.length > 0) {
           res += ' ' + this._addRule(
@@ -798,20 +797,20 @@ export class SchemaConverter {
       };
 
       let hasRequired = false;
+      const alternatives = [];
       for (let i = 0; i < propNames.length; i++) {
-        if (i > 0) {
-          rule += ' | ';
-        }
-        rule += getRecursiveRefs(propNames.slice(i), false);
+        alternatives.push(getRecursiveRefs(propNames.slice(i), false));
         if (required.has(propNames[i])) {
           hasRequired = true;
           break;
         }
       }
 
-      rule += ' )';
-      if (!hasRequired) {
-        rule += '?';
+      const alts = alternatives.join(' | ');
+      if (alternatives.length > 1 || !hasRequired) {
+        rule += `( ${alts} )${hasRequired ? '' : '?'}`;
+      } else {
+        rule += alts;
       }
     }
 
