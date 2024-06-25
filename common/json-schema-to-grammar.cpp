@@ -473,10 +473,9 @@ private:
         const std::string & name,
         const json & additional_properties)
     {
-        std::vector<std::string> required_props;
-        std::vector<std::string> optional_props;
-        std::unordered_map<std::string, std::string> prop_kv_rule_names;
         std::vector<std::string> prop_names;
+        prop_names.reserve(properties.size() + 1);
+        std::unordered_map<std::string, std::string> prop_kv_rule_names;
         for (const auto & kv : properties) {
             const auto &prop_name = kv.first;
             const auto &prop_schema = kv.second;
@@ -486,11 +485,6 @@ private:
                 name + (name.empty() ? "" : "-") + prop_name + "-kv",
                 format_literal(json(prop_name).dump()) + " space \":\" space " + prop_rule_name
             );
-            if (required.find(prop_name) != required.end()) {
-                required_props.push_back(prop_name);
-            } else {
-                optional_props.push_back(prop_name);
-            }
             prop_names.push_back(prop_name);
         }
         if (!(additional_properties.is_boolean() && !additional_properties.get<bool>())) {
@@ -504,23 +498,13 @@ private:
                 : _add_rule(sub_name + "-k", _not_strings(prop_names));
             std::string kv_rule = _add_rule(sub_name + "-kv", key_rule + " \":\" space " + value_rule);
             prop_kv_rule_names["*"] = kv_rule;
-            optional_props.push_back("*");
+            prop_names.push_back("*");
         }
 
         std::string rule = "\"{\" space ";
-        for (size_t i = 0; i < required_props.size(); i++) {
-            if (i > 0) {
-                rule += " \",\" space ";
-            }
-            rule += prop_kv_rule_names[required_props[i]];
-        }
-
-        if (!optional_props.empty()) {
+        if (!prop_kv_rule_names.empty()) {
             rule += " (";
-            if (!required_props.empty()) {
-                rule += " \",\" space ( ";
-            }
-
+            
             std::function<std::string(const std::vector<std::string> &, bool)> get_recursive_refs = [&](const std::vector<std::string> & ks, bool first_is_optional) {
                 std::string res;
                 if (ks.empty()) {
@@ -530,7 +514,10 @@ private:
                 std::string kv_rule_name = prop_kv_rule_names[k];
                 std::string comma_ref = "( \",\" space " + kv_rule_name + " )";
                 if (first_is_optional) {
-                    res = comma_ref + (k == "*" ? "*" : "?");
+                    res = comma_ref;
+                    if (required.find(k) == required.end()) {
+                        res += (k == "*" ? "*" : "?");
+                    }
                 } else {
                     res = kv_rule_name + (k == "*" ? " " + comma_ref + "*" : "");
                 }
@@ -543,16 +530,21 @@ private:
                 return res;
             };
 
-            for (size_t i = 0; i < optional_props.size(); i++) {
+            auto has_required = false;
+            for (size_t i = 0; i < prop_names.size(); i++) {
                 if (i > 0) {
                     rule += " | ";
                 }
-                rule += get_recursive_refs(std::vector<std::string>(optional_props.begin() + i, optional_props.end()), false);
+                rule += get_recursive_refs(std::vector<std::string>(prop_names.begin() + i, prop_names.end()), false);
+                if (required.find(prop_names[i]) != required.end()) {
+                    has_required = true;
+                    break;
+                }
             }
-            if (!required_props.empty()) {
-                rule += " )";
+            rule += " )";
+            if (!has_required) {
+                rule += "?";
             }
-            rule += " )?";
         }
 
         rule += " \"}\" space";
