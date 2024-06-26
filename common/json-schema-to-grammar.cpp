@@ -703,6 +703,7 @@ private:
         std::vector<std::string> prop_names;
         prop_names.reserve(properties.size() + 1);
         std::unordered_map<std::string, std::string> prop_kv_rule_names;
+        std::vector<std::string> prop_names;
         for (const auto & kv : properties) {
             const auto &prop_name = kv.first;
             const auto &prop_schema = kv.second;
@@ -884,7 +885,9 @@ public:
         } else if (schema_type.is_array()) {
             std::vector<json> schema_types;
             for (const auto & t : schema_type) {
-                schema_types.push_back({{"type", t}});
+                json schema_copy(schema);
+                schema_copy["type"] = t;
+                schema_types.push_back(schema_copy);
             }
             return _add_rule(rule_name, _generate_union_rule(name, schema_types));
         } else if (schema.contains("const")) {
