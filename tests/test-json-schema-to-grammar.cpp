@@ -346,6 +346,47 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
 
     test({
         SUCCESS,
+        "nested $refs (https://github.com/ggerganov/llama.cpp/issues/8073)",
+        R"""({
+            "type": "array",
+            "minItems": 15,
+            "maxItems": 15,
+            "items": { "$ref": "#/$defs/TALK" },
+
+            "$defs": {
+                "characters": { "enum": ["Biff", "Alice"] },
+                "emotes": { "enum": ["EXCLAMATION", "CONFUSION", "CHEERFUL", "LOVE", "ANGRY"] },
+                "TALK": {
+                    "type": "object",
+                    "required": [ "character", "emote", "dialog" ],
+                    "properties": {
+                        "character": { "$ref": "#/$defs/characters" },
+                        "emote": { "$ref": "#/$defs/emotes" },
+                        "dialog": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                        }
+                    }
+                }
+            }
+        })""",
+        R"""(
+            char ::= [^"\\\x7F\x00-\x1F] | [\\] (["\\bfnrt] | "u" [0-9a-fA-F]{4})
+            item ::= "{" space item-character-kv "," space item-emote-kv "," space item-dialog-kv "}" space
+            item-character ::= "\"Biff\"" | "\"Alice\""
+            item-character-kv ::= "\"character\"" space ":" space item-character
+            item-dialog ::= "\"" char{1,200} "\"" space
+            item-dialog-kv ::= "\"dialog\"" space ":" space item-dialog
+            item-emote ::= "\"EXCLAMATION\"" | "\"CONFUSION\"" | "\"CHEERFUL\"" | "\"LOVE\"" | "\"ANGRY\""
+            item-emote-kv ::= "\"emote\"" space ":" space item-emote
+            root ::= "[" space item ("," space item){14,14} "]" space
+            space ::= | " " | "\n" [ \t]{0,20}
+        )""",
+    });
+
+    test({
+        SUCCESS,
         "exotic formats",
         R"""({
             "items": [

@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <iostream>
 
 using json = nlohmann::ordered_json;
 
@@ -392,10 +393,27 @@ private:
     std::function<json(const std::string &)> _fetch_json;
     bool _dotall;
     std::map<std::string, std::string> _rules;
-    std::unordered_map<std::string, json> _refs;
     std::unordered_set<std::string> _refs_being_resolved;
     std::vector<std::string> _errors;
     std::vector<std::string> _warnings;
+    std::unordered_map<std::string, json> _external_refs;
+    std::vector<json> _ref_context;
+
+    struct with_context {
+        SchemaConverter * _this;
+        const json * _target;
+        with_context(SchemaConverter * _this, const json * target) : _this(_this), _target(target) {
+            if (target) {
+                _this->_ref_context.push_back(*target);
+            }
+        }
+        ~with_context() {
+            if (_target) {
+                GGML_ASSERT(_this->_ref_context.back() == *_target);  // should not have been modified
+                _this->_ref_context.pop_back();
+            }
+        }
+    };
 
     std::string _add_rule(const std::string & name, const std::string & rule) {
         std::string esc_name = regex_replace(name, INVALID_RULE_CHARS_RE, "-");
@@ -683,17 +701,6 @@ private:
         return out.str();
     }
 
-    std::string _resolve_ref(const std::string & ref) {
-        std::string ref_name = ref.substr(ref.find_last_of('/') + 1);
-        if (_rules.find(ref_name) == _rules.end() && _refs_being_resolved.find(ref) == _refs_being_resolved.end()) {
-            _refs_being_resolved.insert(ref);
-            json resolved = _refs[ref];
-            ref_name = visit(resolved, ref_name);
-            _refs_being_resolved.erase(ref);
-        }
-        return ref_name;
-    }
-
     std::string _build_object_rule(
         const std::vector<std::pair<std::string, json>> & properties,
         const std::unordered_set<std::string> & required,
@@ -815,69 +822,50 @@ public:
         _rules["space"] = SPACE_RULE;
     }
 
-    void resolve_refs(json & schema, const std::string & url) {
-        /*
-        * Resolves all $ref fields in the given schema, fetching any remote schemas,
-        * replacing each $ref with absolute reference URL and populates _refs with the
-        * respective referenced (sub)schema dictionaries.
-        */
-        std::function<void(json &)> visit_refs = [&](json & n) {
-            if (n.is_array()) {
-                for (auto & x : n) {
-                    visit_refs(x);
-                }
-            } else if (n.is_object()) {
-                if (n.contains("$ref")) {
-                    std::string ref = n["$ref"];
-                    if (_refs.find(ref) == _refs.end()) {
-                        json target;
-                        if (ref.find("https://") == 0) {
-                            std::string base_url = ref.substr(0, ref.find('#'));
-                            auto it = _refs.find(base_url);
-                            if (it != _refs.end()) {
-                                target = it->second;
-                            } else {
-                                // Fetch the referenced schema and resolve its refs
-                                auto referenced = _fetch_json(ref);
-                                resolve_refs(referenced, base_url);
-                                _refs[base_url] = referenced;
-                            }
-                            if (ref.find('#') == std::string::npos || ref.substr(ref.find('#') + 1).empty()) {
-                                return;
-                            }
-                        } else if (ref.find("#/") == 0) {
-                            target = schema;
-                            n["$ref"] = url + ref;
-                            ref = url + ref;
-                        } else {
-                            _errors.push_back("Unsupported ref: " + ref);
-                            return;
-                        }
-                        std::string pointer = ref.substr(ref.find('#') + 1);
-                        std::vector<std::string> tokens = split(pointer, "/");
-                        for (size_t i = 1; i < tokens.size(); ++i) {
-                            std::string sel = tokens[i];
-                            if (target.is_null() || !target.contains(sel)) {
-                                _errors.push_back("Error resolving ref " + ref + ": " + sel + " not in " + target.dump());
-                                return;
-                            }
-                            target = target[sel];
-                        }
-                        _refs[ref] = target;
-                    }
-                } else {
-                    for (auto & kv : n.items()) {
-                        visit_refs(kv.value());
-                    }
-                }
-            }
-        };
-
-        visit_refs(schema);
-    }
+    // const std::unordered_map<std::string, json> & get_refs() const {
+    //     return _refs;
+    // }
 
     std::string _generate_constant_rule(const json & value) {
         return format_literal(value.dump());
+    }
+
+    std::pair<json, bool> _resolve_ref(const std::string & ref) {
+        auto parts = split(ref, "#");
+        if (parts.size() != 2) {
+            _errors.push_back("Unsupported ref: " + ref);
+            return {json(), false};
+        }
+        const auto & url = parts[0];
+        json target;
+        bool is_local = url.empty();
+        if (is_local) {
+            if (_ref_context.empty()) {
+                _errors.push_back("Error resolving ref " + ref + ": no context");
+                return {json(), false};
+            }
+            target = _ref_context.back();
+        } else {
+            auto it = _external_refs.find(url);
+            if (it != _external_refs.end()) {
+                target = it->second;
+            } else {
+                // Fetch the referenced schema and resolve its refs
+                auto referenced = _fetch_json(url);
+                // resolve_refs(referenced, url);
+                _external_refs[url] = referenced;
+            }
+        }
+        std::vector<std::string> tokens = split(parts[1], "/");
+        for (size_t i = 1; i < tokens.size(); ++i) {
+            std::string sel = tokens[i];
+            if (target.is_null() || !target.contains(sel)) {
+                _errors.push_back("Error resolving ref " + ref + ": " + sel + " not in " + target.dump());
+                return json();
+            }
+            target = target[sel];
+        }
+        return {target, is_local};
     }
 
     std::string visit(const json & schema, const std::string & name) {
@@ -885,8 +873,19 @@ public:
         std::string schema_format = schema.contains("format") ? schema["format"].get<std::string>() : "";
         std::string rule_name = is_reserved_name(name) ? name + "-" : name.empty() ? "root" : name;
 
-        if (schema.contains("$ref")) {
-            return _add_rule(rule_name, _resolve_ref(schema["$ref"]));
+        with_context wc(this, _ref_context.empty() ? &schema : nullptr);
+
+        if (schema.contains("$ref") && schema["$ref"].is_string()) {
+            const auto & ref = schema["$ref"].get<std::string>();
+            auto pair = _resolve_ref(ref);
+            auto target = pair.first;
+            auto is_local = pair.second;
+            if (target.is_null()) {
+                return "";
+            }
+            std::cout << target.dump(4) << std::endl;
+            with_context wc(this, is_local ? nullptr : &target);
+            return visit(target, name);
         } else if (schema.contains("oneOf") || schema.contains("anyOf")) {
             std::vector<json> alt_schemas = schema.contains("oneOf") ? schema["oneOf"].get<std::vector<json>>() : schema["anyOf"].get<std::vector<json>>();
             return _add_rule(rule_name, _generate_union_rule(name, alt_schemas));
@@ -932,8 +931,9 @@ public:
             std::vector<std::pair<std::string, json>> properties;
             std::string hybrid_name = name;
             std::function<void(const json &, bool)> add_component = [&](const json & comp_schema, bool is_required) {
-                if (comp_schema.contains("$ref")) {
-                    add_component(_refs[comp_schema["$ref"]], is_required);
+                if (comp_schema.contains("$ref") && comp_schema["$ref"].is_string()) {
+                    auto target = _resolve_ref(schema["$ref"].get<std::string>());
+                    add_component(target, is_required);
                 } else if (comp_schema.contains("properties")) {
                     for (const auto & prop : comp_schema["properties"].items()) {
                         properties.emplace_back(prop.key(), prop.value());
@@ -1038,7 +1038,11 @@ public:
 std::string json_schema_to_grammar(const json & schema) {
     SchemaConverter converter([](const std::string &) { return json::object(); }, /* dotall= */ false);
     auto copy = schema;
-    converter.resolve_refs(copy, "input");
+    // converter.resolve_refs(copy, "input");
+    std::cout << copy.dump(4) << std::endl;
+    // for (const auto & [n, j] : converter.get_refs()) {
+    //     std::cout << "REF: " << n << " -> " << j.dump(4) << "\n";
+    // }
     converter.visit(copy, "");
     converter.check_errors();
     return converter.format_grammar();

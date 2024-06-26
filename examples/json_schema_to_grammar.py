@@ -243,8 +243,9 @@ class SchemaConverter:
         self._rules = {
             'space': SPACE_RULE,
         }
-        self._refs = {}
-        self._refs_being_resolved = set()
+        self._external_refs = {}
+        # self._refs_being_resolved = set()
+        self._ref_context = []
 
     def _format_literal(self, literal):
         escaped = GRAMMAR_LITERAL_ESCAPE_RE.sub(
@@ -331,51 +332,6 @@ class SchemaConverter:
             key = f'{esc_name}{i}'
         self._rules[key] = rule
         return key
-
-    def resolve_refs(self, schema: dict, url: str):
-        '''
-            Resolves all $ref fields in the given schema, fetching any remote schemas,
-            replacing $ref with absolute reference URL and populating self._refs with the
-            respective referenced (sub)schema dictionaries.
-        '''
-        def visit(n: dict):
-            if isinstance(n, list):
-                return [visit(x) for x in n]
-            elif isinstance(n, dict):
-                ref = n.get('$ref')
-                if ref is not None and ref not in self._refs:
-                    if ref.startswith('https://'):
-                        assert self._allow_fetch, 'Fetching remote schemas is not allowed (use --allow-fetch for force)'
-                        import requests
-
-                        frag_split = ref.split('#')
-                        base_url = frag_split[0]
-
-                        target = self._refs.get(base_url)
-                        if target is None:
-                            target = self.resolve_refs(requests.get(ref).json(), base_url)
-                            self._refs[base_url] = target
-
-                        if len(frag_split) == 1 or frag_split[-1] == '':
-                            return target
-                    elif ref.startswith('#/'):
-                        target = schema
-                        ref = f'{url}{ref}'
-                        n['$ref'] = ref
-                    else:
-                        raise ValueError(f'Unsupported ref {ref}')
-
-                    for sel in ref.split('#')[-1].split('/')[1:]:
-                        assert target is not None and sel in target, f'Error resolving ref {ref}: {sel} not in {target}'
-                        target = target[sel]
-
-                    self._refs[ref] = target
-                else:
-                    for v in n.values():
-                        visit(v)
-
-            return n
-        return visit(schema)
 
     def _generate_union_rule(self, name, alt_schemas):
         return ' | '.join((
@@ -541,18 +497,33 @@ class SchemaConverter:
                 else "\"\\\"\" " + to_rule(transform()) + " \"\\\"\" space")
 
 
-    def _resolve_ref(self, ref):
-        ref_name = ref.split('/')[-1]
-        if ref_name not in self._rules and ref not in self._refs_being_resolved:
-            self._refs_being_resolved.add(ref)
-            resolved = self._refs[ref]
-            ref_name = self.visit(resolved, ref_name)
-            self._refs_being_resolved.remove(ref)
-        return ref_name
-
     def _generate_constant_rule(self, value):
         return self._format_literal(json.dumps(value))
 
+    def _resolve_ref(self, ref):
+        parts = ref.split('#')
+        assert len(parts) == 2, f'Unsupported ref: {ref}'
+        url = parts[0]
+        is_local = url == ''
+        if is_local:
+            assert self._refs_being_resolved, 'Error resolving ref {ref}: no context'
+            target = self._refs_being_resolved[-1]
+        else:
+            if url in self._refs:
+                target = self._refs[url]
+            else:
+                assert self._allow_fetch, 'Fetching remote schemas is not allowed (use --allow-fetch for force)'
+                import requests
+                referenced = requests.get(url).json()
+                self._refs[url] = referenced
+                target = referenced
+
+        for sel in parts[1].split('/')[1:]:
+            assert target is not None and sel in target, f'Error resolving ref {ref}: {sel} not in {target}'
+            target = target[sel]
+
+        return target
+        
     def visit(self, schema, name):
         schema_type = schema.get('type')
         schema_format = schema.get('format')
