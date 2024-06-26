@@ -703,7 +703,6 @@ private:
         std::vector<std::string> prop_names;
         prop_names.reserve(properties.size() + 1);
         std::unordered_map<std::string, std::string> prop_kv_rule_names;
-        std::vector<std::string> prop_names;
         for (const auto & kv : properties) {
             const auto &prop_name = kv.first;
             const auto &prop_schema = kv.second;
