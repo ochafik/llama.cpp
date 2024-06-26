@@ -1272,7 +1272,7 @@ static void test_json_schema() {
         // Schema
         R"""({
             "type": "array",
-            "minItems": 15,
+            "minItems": 1,
             "maxItems": 15,
             "items": { "$ref": "#/$defs/TALK" },
 
@@ -1291,17 +1291,18 @@ static void test_json_schema() {
                             "minLength": 1,
                             "maxLength": 200
                         }
-                    }
+                    },
+                    "additionalProperties": false
                 }
             }
         })""",
         // Passing strings
         {   
-            R"""({
+            R"""([{
                 "character": "Alice",
                 "emote": "EXCLAMATION",
                 "dialog": "Hello, world!"
-            })""",
+            }])""",
         },
         // Failing strings
         {

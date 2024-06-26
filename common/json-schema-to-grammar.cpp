@@ -822,10 +822,6 @@ public:
         _rules["space"] = SPACE_RULE;
     }
 
-    // const std::unordered_map<std::string, json> & get_refs() const {
-    //     return _refs;
-    // }
-
     std::string _generate_constant_rule(const json & value) {
         return format_literal(value.dump());
     }
@@ -852,8 +848,8 @@ public:
             } else {
                 // Fetch the referenced schema and resolve its refs
                 auto referenced = _fetch_json(url);
-                // resolve_refs(referenced, url);
                 _external_refs[url] = referenced;
+                target = referenced;
             }
         }
         std::vector<std::string> tokens = split(parts[1], "/");
@@ -932,7 +928,7 @@ public:
             std::string hybrid_name = name;
             std::function<void(const json &, bool)> add_component = [&](const json & comp_schema, bool is_required) {
                 if (comp_schema.contains("$ref") && comp_schema["$ref"].is_string()) {
-                    auto target = _resolve_ref(schema["$ref"].get<std::string>());
+                    auto target = _resolve_ref(comp_schema["$ref"].get<std::string>());
                     add_component(target, is_required);
                 } else if (comp_schema.contains("properties")) {
                     for (const auto & prop : comp_schema["properties"].items()) {
@@ -1038,11 +1034,6 @@ public:
 std::string json_schema_to_grammar(const json & schema) {
     SchemaConverter converter([](const std::string &) { return json::object(); }, /* dotall= */ false);
     auto copy = schema;
-    // converter.resolve_refs(copy, "input");
-    std::cout << copy.dump(4) << std::endl;
-    // for (const auto & [n, j] : converter.get_refs()) {
-    //     std::cout << "REF: " << n << " -> " << j.dump(4) << "\n";
-    // }
     converter.visit(copy, "");
     converter.check_errors();
     return converter.format_grammar();
