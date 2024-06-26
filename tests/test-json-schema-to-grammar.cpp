@@ -367,18 +367,19 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
                             "minLength": 1,
                             "maxLength": 200
                         }
-                    }
+                    },
+                    "additionalProperties": false
                 }
             }
         })""",
         R"""(
             char ::= [^"\\\x7F\x00-\x1F] | [\\] (["\\bfnrt] | "u" [0-9a-fA-F]{4})
             item ::= "{" space item-character-kv "," space item-emote-kv "," space item-dialog-kv "}" space
-            item-character ::= "\"Biff\"" | "\"Alice\""
+            item-character ::= ("\"Biff\"" | "\"Alice\"") space
             item-character-kv ::= "\"character\"" space ":" space item-character
             item-dialog ::= "\"" char{1,200} "\"" space
             item-dialog-kv ::= "\"dialog\"" space ":" space item-dialog
-            item-emote ::= "\"EXCLAMATION\"" | "\"CONFUSION\"" | "\"CHEERFUL\"" | "\"LOVE\"" | "\"ANGRY\""
+            item-emote ::= ("\"EXCLAMATION\"" | "\"CONFUSION\"" | "\"CHEERFUL\"" | "\"LOVE\"" | "\"ANGRY\"") space
             item-emote-kv ::= "\"emote\"" space ":" space item-emote
             root ::= "[" space item ("," space item){14,14} "]" space
             space ::= | " " | "\n" [ \t]{0,20}
