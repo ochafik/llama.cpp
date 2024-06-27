@@ -532,7 +532,7 @@ class SchemaConverter:
         schema_type = schema.get('type')
         schema_format = schema.get('format')
         rule_name = name + '-' if name in RESERVED_NAMES else name or 'root'
- 
+
         if not self._ref_context:
             self._ref_context.append(schema)
             try:
@@ -648,7 +648,7 @@ class SchemaConverter:
 
             if not properties and (additional_properties == True or additional_properties is None):
                 return self._add_rule(rule_name, self._add_primitive('object', PRIMITIVE_RULES['object']))
-            
+
             default_additional_properties = None if is_explicit_object else False
             return self._add_rule(
                 rule_name,

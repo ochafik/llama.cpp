@@ -708,7 +708,7 @@ export class SchemaConverter {
         ruleName,
         this._buildObjectRule(properties, required, name, additionalProperties ?? defaultAdditionalProperties)
       );
-    
+
     } else {
       if (!(schemaType in PRIMITIVE_RULES)) {
         throw new Error(`Unrecognized schema: ${JSON.stringify(schema)}`);

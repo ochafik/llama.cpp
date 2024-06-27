@@ -1297,7 +1297,7 @@ static void test_json_schema() {
             }
         })""",
         // Passing strings
-        {   
+        {
             R"""([{
             "character": "Alice",
             "emote": "EXCLAMATION",
