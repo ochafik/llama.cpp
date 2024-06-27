@@ -533,14 +533,21 @@ class SchemaConverter:
         schema_format = schema.get('format')
         rule_name = name + '-' if name in RESERVED_NAMES else name or 'root'
  
+        if not self._ref_context:
+            self._ref_context.append(schema)
+            try:
+                return self.visit(schema, name)
+            finally:
+                self._ref_context.pop()
+
         if (ref := schema.get('$ref')) is not None:
             resolved = self._resolve_ref(ref)
-            if resolved.is_local:
+            if not resolved.is_local:
                 self._ref_context.append(resolved.target)
             try:
                 return self.visit(resolved.target, name if name == '' or resolved.name == '' else resolved.name)
             finally:
-                if resolved.is_local:
+                if not resolved.is_local:
                     self._ref_context.pop()
 
         elif 'oneOf' in schema or 'anyOf' in schema:
@@ -555,13 +562,6 @@ class SchemaConverter:
         elif 'enum' in schema:
             rule = '(' + ' | '.join((self._generate_constant_rule(v) for v in schema['enum'])) + ') space'
             return self._add_rule(rule_name, rule)
-
-        elif schema_type in (None, 'object') and \
-             ('properties' in schema or \
-              ('additionalProperties' in schema and schema['additionalProperties'] is not True)):
-            required = set(schema.get('required', []))
-            properties = list(schema.get('properties', {}).items())
-            return self._add_rule(rule_name, self._build_object_rule(properties, required, name, schema.get('additionalProperties')))
 
         elif schema_type in (None, 'array') and ('items' in schema or 'prefixItems' in schema):
             items = schema.get('items') or schema['prefixItems']
@@ -617,7 +617,7 @@ class SchemaConverter:
             out.append(") space")
             return self._add_rule(rule_name, ''.join(out))
 
-        elif (schema_type == 'object') or (len(schema) == 0):
+        elif (schema_type == 'object') or (schema_type is None):
             required = set(schema.get('required', []))
             properties = list(schema.get('properties', {}).items())
             is_explicit_object = schema_type == 'object' or 'properties' in schema or 'additionalProperties' in schema
@@ -625,7 +625,8 @@ class SchemaConverter:
 
             def add_component(comp_schema, is_required):
                 if (ref := comp_schema.get('$ref')) is not None:
-                    comp_schema = self._refs[ref]
+                    resolved = self._resolve_ref(ref)
+                    comp_schema = resolved.target
 
                 if 'properties' in comp_schema:
                     for prop_name, prop_schema in comp_schema['properties'].items():
@@ -638,14 +639,14 @@ class SchemaConverter:
                     elif additional_properties != comp_schema['additionalProperties']:
                         raise ValueError('Inconsistent additionalProperties in allOf')
 
-            for t in schema['allOf']:
+            for t in schema.get('allOf', []):
                 if 'anyOf' in t:
                     for tt in t['anyOf']:
                         add_component(tt, is_required=False)
                 else:
                     add_component(t, is_required=True)
 
-            if not properties and (additional_properties is True or additional_properties is None):
+            if not properties and (additional_properties == True or additional_properties is None):
                 return self._add_rule(rule_name, self._add_primitive('object', PRIMITIVE_RULES['object']))
             
             default_additional_properties = None if is_explicit_object else False

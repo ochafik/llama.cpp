@@ -398,22 +398,6 @@ private:
     std::unordered_map<std::string, json> _external_refs;
     std::vector<json> _ref_context;
 
-    struct with_context {
-        SchemaConverter * _this;
-        const json * _target;
-        with_context(SchemaConverter * _this, const json * target) : _this(_this), _target(target) {
-            if (target) {
-                _this->_ref_context.push_back(*target);
-            }
-        }
-        ~with_context() {
-            if (_target) {
-                GGML_ASSERT(_this->_ref_context.back() == *_target);  // should not have been modified
-                _this->_ref_context.pop_back();
-            }
-        }
-    };
-
     std::string _add_rule(const std::string & name, const std::string & rule) {
         std::string esc_name = regex_replace(name, INVALID_RULE_CHARS_RE, "-");
         if (_rules.find(esc_name) == _rules.end() || _rules[esc_name] == rule) {
@@ -873,7 +857,12 @@ public:
         std::string schema_format = schema.contains("format") ? schema["format"].get<std::string>() : "";
         std::string rule_name = is_reserved_name(name) ? name + "-" : name.empty() ? "root" : name;
 
-        with_context wc(this, _ref_context.empty() ? &schema : nullptr);
+        if (_ref_context.empty()) {
+            _ref_context.push_back(schema);
+            auto ret = visit(schema, name);
+            _ref_context.pop_back();
+            return ret;
+        }
 
         if (schema.contains("$ref") && schema["$ref"].is_string()) {
             const auto & ref = schema["$ref"].get<std::string>();
@@ -881,8 +870,14 @@ public:
             if (resolved.target.is_null()) {
                 return "";
             }
-            with_context wc(this, resolved.is_local ? nullptr : &resolved.target);
-            return visit(resolved.target, (name.empty() || resolved.name.empty()) ? name : resolved.name);
+            if (!resolved.is_local) {
+                _ref_context.push_back(resolved.target);
+            }
+            auto ret = visit(resolved.target, (name.empty() || resolved.name.empty()) ? name : resolved.name);
+            if (!resolved.is_local) {
+                _ref_context.pop_back();
+            }
+            return ret;
         } else if (schema.contains("oneOf") || schema.contains("anyOf")) {
             std::vector<json> alt_schemas = schema.contains("oneOf") ? schema["oneOf"].get<std::vector<json>>() : schema["anyOf"].get<std::vector<json>>();
             return _add_rule(rule_name, _generate_union_rule(name, alt_schemas));
