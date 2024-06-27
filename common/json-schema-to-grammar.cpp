@@ -393,7 +393,6 @@ private:
     std::function<json(const std::string &)> _fetch_json;
     bool _dotall;
     std::map<std::string, std::string> _rules;
-    std::unordered_set<std::string> _refs_being_resolved;
     std::vector<std::string> _errors;
     std::vector<std::string> _warnings;
     std::unordered_map<std::string, json> _external_refs;
@@ -853,12 +852,11 @@ public:
                 target = it->second;
             } else {
                 // Fetch the referenced schema and resolve its refs
-                auto referenced = _fetch_json(url);
-                _external_refs[url] = referenced;
-                target = referenced;
+                target = _fetch_json(url);
+                _external_refs[url] = target;
             }
         }
-        std::vector<std::string> tokens = split(parts[1], "/");
+        auto tokens = split(parts[1], "/");
         for (size_t i = 1; i < tokens.size(); ++i) {
             const auto & sel = tokens[i];
             if (target.is_null() || !target.contains(sel)) {
@@ -877,8 +875,6 @@ public:
 
         with_context wc(this, _ref_context.empty() ? &schema : nullptr);
 
-        std::cout << schema.dump(4) << std::endl;
-            
         if (schema.contains("$ref") && schema["$ref"].is_string()) {
             const auto & ref = schema["$ref"].get<std::string>();
             auto resolved = _resolve_ref(ref);
@@ -886,7 +882,7 @@ public:
                 return "";
             }
             with_context wc(this, resolved.is_local ? nullptr : &resolved.target);
-            return visit(resolved.target, name.empty() ? name : resolved.name.empty() ? name : resolved.name);
+            return visit(resolved.target, (name.empty() || resolved.name.empty()) ? name : resolved.name);
         } else if (schema.contains("oneOf") || schema.contains("anyOf")) {
             std::vector<json> alt_schemas = schema.contains("oneOf") ? schema["oneOf"].get<std::vector<json>>() : schema["anyOf"].get<std::vector<json>>();
             return _add_rule(rule_name, _generate_union_rule(name, alt_schemas));
@@ -959,14 +955,14 @@ public:
         } else if ((schema_type.is_null() || schema_type == "object")) {
             std::unordered_set<std::string> required;
             std::vector<std::pair<std::string, json>> properties;
-            auto is_object = schema_type == "object";
+            auto is_explicit_object = schema_type == "object";
             json additional_properties;
             if (schema.contains("additionalProperties")) {
-                is_object = true;
+                is_explicit_object = true;
                 additional_properties = schema["additionalProperties"];
             }
             if (schema.contains("properties") && schema["properties"].is_object()) {
-                is_object = true;
+                is_explicit_object = true;
                 for (const auto & prop : schema["properties"].items()) {
                     if (prop.value().is_object()) {
                         properties.emplace_back(prop.key(), prop.value());
@@ -1016,10 +1012,11 @@ public:
             if (properties.empty() && (additional_properties == true || additional_properties.is_null())) {
                 return _add_rule(rule_name, _add_primitive("object", PRIMITIVE_RULES.at("object")));
             }
+            auto default_additional_properties = is_explicit_object ? json() : json(false);
             return _add_rule(rule_name,
                 _build_object_rule(
                     properties, required, name,
-                    additional_properties.is_null() ? (is_object ? json(false) : json()) : additional_properties));
+                    additional_properties.is_null() ? default_additional_properties : additional_properties));
         } else {
             if (!schema_type.is_string() || PRIMITIVE_RULES.find(schema_type.get<std::string>()) == PRIMITIVE_RULES.end()) {
                 _errors.push_back("Unrecognized schema: " + schema.dump());
