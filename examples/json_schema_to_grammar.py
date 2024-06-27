@@ -617,77 +617,6 @@ class SchemaConverter:
             out.append(") space")
             return self._add_rule(rule_name, ''.join(out))
 
-        # } else if ((schema_type.is_null() || schema_type == "object")) {
-        #     std::unordered_set<std::string> required;
-        #     std::vector<std::pair<std::string, json>> properties;
-        #     auto is_object = schema_type == "object";
-        #     json additional_properties;
-        #     if (schema.contains("additionalProperties")) {
-        #         is_object = true;
-        #         additional_properties = schema["additionalProperties"];
-        #     }
-        #     if (schema.contains("properties") && schema["properties"].is_object()) {
-        #         is_object = true;
-        #         for (const auto & prop : schema["properties"].items()) {
-        #             if (prop.value().is_object()) {
-        #                 properties.emplace_back(prop.key(), prop.value());
-        #             }
-        #         }
-        #     }
-        #     if (schema.contains("required") && schema["required"].is_array()) {
-        #         for (const auto & item : schema["required"]) {
-        #             if (item.is_string()) {
-        #                 required.insert(item.get<std::string>());
-        #             }
-        #         }
-        #     }
-        #     if (schema.contains("allOf") && schema["allOf"].is_array()) {
-        #         std::function<void(const json &, bool)> add_component = [&](const json & comp_schema, bool is_required) {
-        #             if (comp_schema.contains("$ref") && comp_schema["$ref"].is_string()) {
-        #                 auto resolved = _resolve_ref(comp_schema["$ref"].get<std::string>());
-        #                 add_component(resolved.target, is_required);
-        #             } else if (comp_schema.contains("properties")) {
-        #                 for (const auto & prop : comp_schema["properties"].items()) {
-        #                     properties.emplace_back(prop.key(), prop.value());
-        #                     if (is_required) {
-        #                         required.insert(prop.key());
-        #                     }
-        #                 }
-        #                 if (comp_schema.contains("additionalProperties")) {
-        #                     if (additional_properties.is_null()) {
-        #                         additional_properties = comp_schema["additionalProperties"];
-        #                     } else if (additional_properties != comp_schema["additionalProperties"]) {
-        #                         _warnings.push_back("Inconsistent additionalProperties in allOf");
-        #                     }
-        #                 }
-        #             } else {
-        #             // todo warning
-        #             }
-        #         };
-        #         for (auto & t : schema["allOf"]) {
-        #             if (t.contains("anyOf")) {
-        #                 for (auto & tt : t["anyOf"]) {
-        #                     add_component(tt, false);
-        #                 }
-        #             } else {
-        #                 add_component(t, true);
-        #             }
-        #         }
-        #     }
-        #     if (properties.empty() && (additional_properties == true || additional_properties.is_null())) {
-        #         return _add_rule(rule_name, _add_primitive("object", PRIMITIVE_RULES.at("object")));
-        #     }
-        #     return _add_rule(rule_name,
-        #         _build_object_rule(
-        #             properties, required, name,
-        #             additional_properties.is_null() ? (is_object ? json(false) : json()) : additional_properties));
-
-        # elif schema_type in (None, 'object') and 'allOf' in schema:
-        #     required = set()
-        #     properties = []
-        #     hybrid_name = name
-        #     return self._add_rule(rule_name, self._build_object_rule(properties, required, hybrid_name, additional_properties=[]))
-
         elif (schema_type == 'object') or (len(schema) == 0):
             required = set(schema.get('required', []))
             properties = list(schema.get('properties', {}).items())
@@ -724,7 +653,7 @@ class SchemaConverter:
                 rule_name,
                 self._build_object_rule(
                     properties, required, name,
-                    additional_properties if additional_properties is not None else (None if is_explicit_object else False))
+                    additional_properties if additional_properties is not None else default_additional_properties))
 
         else:
             assert schema_type in PRIMITIVE_RULES, f'Unrecognized schema: {schema}'
