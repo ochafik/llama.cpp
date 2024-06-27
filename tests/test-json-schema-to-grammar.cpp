@@ -351,12 +351,12 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             "type": "array",
             "minItems": 15,
             "maxItems": 15,
-            "items": { "$ref": "#/$defs/TALK" },
+            "items": { "$ref": "#/$defs/talk" },
 
             "$defs": {
                 "characters": { "enum": ["Biff", "Alice"] },
                 "emotes": { "enum": ["EXCLAMATION", "CONFUSION", "CHEERFUL", "LOVE", "ANGRY"] },
-                "TALK": {
+                "talk": {
                     "type": "object",
                     "required": [ "character", "emote", "dialog" ],
                     "properties": {
@@ -373,16 +373,16 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             }
         })""",
         R"""(
-            TALK ::= "{" space TALK-character-kv "," space TALK-emote-kv "," space TALK-dialog-kv "}" space
-            TALK-character-kv ::= "\"character\"" space ":" space characters
-            TALK-dialog ::= "\"" char{1,200} "\"" space
-            TALK-dialog-kv ::= "\"dialog\"" space ":" space TALK-dialog
-            TALK-emote-kv ::= "\"emote\"" space ":" space emotes
             char ::= [^"\\\x7F\x00-\x1F] | [\\] (["\\bfnrt] | "u" [0-9a-fA-F]{4})
             characters ::= ("\"Biff\"" | "\"Alice\"") space
             emotes ::= ("\"EXCLAMATION\"" | "\"CONFUSION\"" | "\"CHEERFUL\"" | "\"LOVE\"" | "\"ANGRY\"") space
-            root ::= "[" space TALK ("," space TALK){14,14} "]" space
+            root ::= "[" space talk ("," space talk){14,14} "]" space
             space ::= | " " | "\n" [ \t]{0,20}
+            talk ::= "{" space talk-character-kv "," space talk-emote-kv "," space talk-dialog-kv "}" space
+            talk-character-kv ::= "\"character\"" space ":" space characters
+            talk-dialog ::= "\"" char{1,200} "\"" space
+            talk-dialog-kv ::= "\"dialog\"" space ":" space talk-dialog
+            talk-emote-kv ::= "\"emote\"" space ":" space emotes
         )""",
     });
 

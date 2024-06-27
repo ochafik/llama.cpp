@@ -537,22 +537,11 @@ export class SchemaConverter {
     return out.join('');
   }
 
-  _resolveRef(ref) {
-    let refName = ref.split('/').pop();
-    if (!(refName in this._rules) && !this._refsBeingResolved.has(ref)) {
-      this._refsBeingResolved.add(ref);
-      const resolved = this._refs[ref];
-      refName = this.visit(resolved, refName);
-      this._refsBeingResolved.delete(ref);
-    }
-    return refName;
-  }
-
   _generateConstantRule(value) {
     return this._formatLiteral(JSON.stringify(value));
   }
 
-  resolveRef(ref) {
+  _resolveRef(ref) {
     const parts = ref.split('#');
     if (parts.length !== 2) {
       throw new Error(`Unsupported ref: ${ref}`);
@@ -600,7 +589,7 @@ export class SchemaConverter {
 
     const ref = schema.$ref;
     if (ref !== undefined) {
-      const resolved = this.resolveRef(ref);
+      const resolved = this._resolveRef(ref);
       if (!resolved.isLocal) {
         this._refContext.push(resolved.target);
       }
@@ -677,7 +666,8 @@ export class SchemaConverter {
       const addComponent = (compSchema, isRequired) => {
         const ref = compSchema.$ref;
         if (ref !== undefined) {
-          compSchema = this._refs[ref];
+          const resolved = this._resolveRef(ref);
+          compSchema = resolved.target;
         }
 
         if ('properties' in compSchema) {
@@ -708,11 +698,6 @@ export class SchemaConverter {
           }
         }
       }
-
-      // console.log('schema', schema)
-      // console.log('properties', properties)
-      // console.log('required', required)
-      // console.log('additionalProperties', additionalProperties)
 
       if (properties.length === 0 && (additionalProperties === true || additionalProperties == null)) {
         return this._addRule(ruleName, this._addPrimitive('object', PRIMITIVE_RULES['object']));
