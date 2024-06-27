@@ -373,15 +373,15 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             }
         })""",
         R"""(
+            TALK ::= "{" space TALK-character-kv "," space TALK-emote-kv "," space TALK-dialog-kv "}" space
+            TALK-character-kv ::= "\"character\"" space ":" space characters
+            TALK-dialog ::= "\"" char{1,200} "\"" space
+            TALK-dialog-kv ::= "\"dialog\"" space ":" space TALK-dialog
+            TALK-emote-kv ::= "\"emote\"" space ":" space emotes
             char ::= [^"\\\x7F\x00-\x1F] | [\\] (["\\bfnrt] | "u" [0-9a-fA-F]{4})
-            item ::= "{" space item-character-kv "," space item-emote-kv "," space item-dialog-kv "}" space
-            item-character ::= ("\"Biff\"" | "\"Alice\"") space
-            item-character-kv ::= "\"character\"" space ":" space item-character
-            item-dialog ::= "\"" char{1,200} "\"" space
-            item-dialog-kv ::= "\"dialog\"" space ":" space item-dialog
-            item-emote ::= ("\"EXCLAMATION\"" | "\"CONFUSION\"" | "\"CHEERFUL\"" | "\"LOVE\"" | "\"ANGRY\"") space
-            item-emote-kv ::= "\"emote\"" space ":" space item-emote
-            root ::= "[" space item ("," space item){14,14} "]" space
+            characters ::= ("\"Biff\"" | "\"Alice\"") space
+            emotes ::= ("\"EXCLAMATION\"" | "\"CONFUSION\"" | "\"CHEERFUL\"" | "\"LOVE\"" | "\"ANGRY\"") space
+            root ::= "[" space TALK ("," space TALK){14,14} "]" space
             space ::= | " " | "\n" [ \t]{0,20}
         )""",
     });
@@ -1158,17 +1158,18 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
                     "additionalProperties": false
                 }
             },
-            "type": "object"
+            "type": "object",
+            "additionalProperties": false
         })""",
         R"""(
-            alternative-0 ::= "{" space  (alternative-0-a-kv )? "}" space
-            alternative-0-a-kv ::= "\"a\"" space ":" space number
-            alternative-1 ::= "{" space  (alternative-1-b-kv )? "}" space
-            alternative-1-b-kv ::= "\"b\"" space ":" space number
+            bar ::= "{" space  (bar-b-kv )? "}" space
+            bar-b-kv ::= "\"b\"" space ":" space number
             decimal-part ::= [0-9]{1,16}
+            foo ::= "{" space  (foo-a-kv )? "}" space
+            foo-a-kv ::= "\"a\"" space ":" space number
             integral-part ::= [0] | [1-9] [0-9]{0,15}
             number ::= ("-"? integral-part) ("." decimal-part)? ([eE] [-+]? integral-part)? space
-            root ::= alternative-0 | alternative-1
+            root ::= foo | bar
             space ::= | " " | "\n" [ \t]{0,20}
         )"""
     });
@@ -1189,38 +1190,31 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             ],
             "definitions": {
                 "foo": {
-                    "properties": {"a": {"type": "number"}},
-                    "additionalProperties": false
+                    "properties": {"a": {"type": "number"}}
                 },
                 "bar": {
-                    "properties": {"b": {"type": "number"}},
-                    "additionalProperties": false
+                    "properties": {"b": {"type": "number"}}
                 },
                 "bam": {
-                    "properties": {"c": {"type": "number"}},
-                    "additionalProperties": false
+                    "properties": {"c": {"type": "number"}}
                 },
                 "baz": {
-                    "properties": {"d": {"type": "number"}},
-                    "additionalProperties": false
+                    "properties": {"d": {"type": "number"}}
                 }
             },
-            "type": "object"
+            "additionalProperties": false
         })""",
         R"""(
-            additional-kv ::= string ":" space value
-            array ::= "[" space ( value ("," space value)* )? "]" space
-            boolean ::= ("true" | "false") space
-            char ::= [^"\\\x7F\x00-\x1F] | [\\] (["\\bfnrt] | "u" [0-9a-fA-F]{4})
+            a-kv ::= "\"a\"" space ":" space number
+            b-kv ::= "\"b\"" space ":" space number
+            c-kv ::= "\"c\"" space ":" space number
+            d-kv ::= "\"d\"" space ":" space number
+            d-rest ::= ( "," space c-kv )?
             decimal-part ::= [0-9]{1,16}
             integral-part ::= [0] | [1-9] [0-9]{0,15}
-            null ::= "null" space
             number ::= ("-"? integral-part) ("." decimal-part)? ([eE] [-+]? integral-part)? space
-            object ::= "{" space ( string ":" space value ("," space string ":" space value)* )? "}" space
-            root ::= "{" space  (additional-kv ( "," space additional-kv )* )? "}" space
+            root ::= "{" space a-kv "," space b-kv ( "," space ( d-kv d-rest | c-kv ) )? "}" space
             space ::= | " " | "\n" [ \t]{0,20}
-            string ::= "\"" char* "\"" space
-            value ::= object | array | string | number | boolean | null
         )"""
     });
 

@@ -826,11 +826,17 @@ public:
         return format_literal(value.dump());
     }
 
-    std::pair<json, bool> _resolve_ref(const std::string & ref) {
+    struct ResolvedRef {
+        json target;
+        std::string name;
+        bool is_local;
+    };
+
+    ResolvedRef _resolve_ref(const std::string & ref) {
         auto parts = split(ref, "#");
         if (parts.size() != 2) {
             _errors.push_back("Unsupported ref: " + ref);
-            return {json(), false};
+            return {json(), "", false};
         }
         const auto & url = parts[0];
         json target;
@@ -838,7 +844,7 @@ public:
         if (is_local) {
             if (_ref_context.empty()) {
                 _errors.push_back("Error resolving ref " + ref + ": no context");
-                return {json(), false};
+                return {json(), "", false};
             }
             target = _ref_context.back();
         } else {
@@ -854,14 +860,14 @@ public:
         }
         std::vector<std::string> tokens = split(parts[1], "/");
         for (size_t i = 1; i < tokens.size(); ++i) {
-            std::string sel = tokens[i];
+            const auto & sel = tokens[i];
             if (target.is_null() || !target.contains(sel)) {
                 _errors.push_back("Error resolving ref " + ref + ": " + sel + " not in " + target.dump());
-                return json();
+                return {json(), "", false};
             }
             target = target[sel];
         }
-        return {target, is_local};
+        return {target, tokens.empty() ? "" : tokens[tokens.size() - 1], is_local};
     }
 
     std::string visit(const json & schema, const std::string & name) {
@@ -871,17 +877,16 @@ public:
 
         with_context wc(this, _ref_context.empty() ? &schema : nullptr);
 
+        std::cout << schema.dump(4) << std::endl;
+            
         if (schema.contains("$ref") && schema["$ref"].is_string()) {
             const auto & ref = schema["$ref"].get<std::string>();
-            auto pair = _resolve_ref(ref);
-            auto target = pair.first;
-            auto is_local = pair.second;
-            if (target.is_null()) {
+            auto resolved = _resolve_ref(ref);
+            if (resolved.target.is_null()) {
                 return "";
             }
-            std::cout << target.dump(4) << std::endl;
-            with_context wc(this, is_local ? nullptr : &target);
-            return visit(target, name);
+            with_context wc(this, resolved.is_local ? nullptr : &resolved.target);
+            return visit(resolved.target, name.empty() ? name : resolved.name.empty() ? name : resolved.name);
         } else if (schema.contains("oneOf") || schema.contains("anyOf")) {
             std::vector<json> alt_schemas = schema.contains("oneOf") ? schema["oneOf"].get<std::vector<json>>() : schema["anyOf"].get<std::vector<json>>();
             return _add_rule(rule_name, _generate_union_rule(name, alt_schemas));
@@ -901,56 +906,6 @@ public:
                 enum_values.push_back(_generate_constant_rule(v));
             }
             return _add_rule(rule_name, "(" + join(enum_values.begin(), enum_values.end(), " | ") + ") space");
-        } else if ((schema_type.is_null() || schema_type == "object")
-                && (schema.contains("properties") ||
-                    (schema.contains("additionalProperties") && schema["additionalProperties"] != true))) {
-            std::unordered_set<std::string> required;
-            if (schema.contains("required") && schema["required"].is_array()) {
-                for (const auto & item : schema["required"]) {
-                    if (item.is_string()) {
-                        required.insert(item.get<std::string>());
-                    }
-                }
-            }
-            std::vector<std::pair<std::string, json>> properties;
-            if (schema.contains("properties")) {
-                for (const auto & prop : schema["properties"].items()) {
-                    properties.emplace_back(prop.key(), prop.value());
-                }
-            }
-            return _add_rule(rule_name,
-                _build_object_rule(
-                    properties, required, name,
-                    schema.contains("additionalProperties") ? schema["additionalProperties"] : json()));
-        } else if ((schema_type.is_null() || schema_type == "object") && schema.contains("allOf")) {
-            std::unordered_set<std::string> required;
-            std::vector<std::pair<std::string, json>> properties;
-            std::string hybrid_name = name;
-            std::function<void(const json &, bool)> add_component = [&](const json & comp_schema, bool is_required) {
-                if (comp_schema.contains("$ref") && comp_schema["$ref"].is_string()) {
-                    auto target = _resolve_ref(comp_schema["$ref"].get<std::string>());
-                    add_component(target, is_required);
-                } else if (comp_schema.contains("properties")) {
-                    for (const auto & prop : comp_schema["properties"].items()) {
-                        properties.emplace_back(prop.key(), prop.value());
-                        if (is_required) {
-                            required.insert(prop.key());
-                        }
-                    }
-                } else {
-                  // todo warning
-                }
-            };
-            for (auto & t : schema["allOf"]) {
-                if (t.contains("anyOf")) {
-                    for (auto & tt : t["anyOf"]) {
-                        add_component(tt, false);
-                    }
-                } else {
-                    add_component(t, true);
-                }
-            }
-            return _add_rule(rule_name, _build_object_rule(properties, required, hybrid_name, json()));
         } else if ((schema_type.is_null() || schema_type == "array") && (schema.contains("items") || schema.contains("prefixItems"))) {
             json items = schema.contains("items") ? schema["items"] : schema["prefixItems"];
             if (items.is_array()) {
@@ -1001,8 +956,70 @@ public:
             _build_min_max_int(min_value, max_value, out);
             out << ") space";
             return _add_rule(rule_name, out.str());
-        } else if (schema.empty() || schema_type == "object") {
-            return _add_rule(rule_name, _add_primitive("object", PRIMITIVE_RULES.at("object")));
+        } else if ((schema_type.is_null() || schema_type == "object")) {
+            std::unordered_set<std::string> required;
+            std::vector<std::pair<std::string, json>> properties;
+            auto is_object = schema_type == "object";
+            json additional_properties;
+            if (schema.contains("additionalProperties")) {
+                is_object = true;
+                additional_properties = schema["additionalProperties"];
+            }
+            if (schema.contains("properties") && schema["properties"].is_object()) {
+                is_object = true;
+                for (const auto & prop : schema["properties"].items()) {
+                    if (prop.value().is_object()) {
+                        properties.emplace_back(prop.key(), prop.value());
+                    }
+                }
+            }
+            if (schema.contains("required") && schema["required"].is_array()) {
+                for (const auto & item : schema["required"]) {
+                    if (item.is_string()) {
+                        required.insert(item.get<std::string>());
+                    }
+                }
+            }
+            if (schema.contains("allOf") && schema["allOf"].is_array()) {
+                std::function<void(const json &, bool)> add_component = [&](const json & comp_schema, bool is_required) {
+                    if (comp_schema.contains("$ref") && comp_schema["$ref"].is_string()) {
+                        auto resolved = _resolve_ref(comp_schema["$ref"].get<std::string>());
+                        add_component(resolved.target, is_required);
+                    } else if (comp_schema.contains("properties")) {
+                        for (const auto & prop : comp_schema["properties"].items()) {
+                            properties.emplace_back(prop.key(), prop.value());
+                            if (is_required) {
+                                required.insert(prop.key());
+                            }
+                        }
+                        if (comp_schema.contains("additionalProperties")) {
+                            if (additional_properties.is_null()) {
+                                additional_properties = comp_schema["additionalProperties"];
+                            } else if (additional_properties != comp_schema["additionalProperties"]) {
+                                _warnings.push_back("Inconsistent additionalProperties in allOf");
+                            }
+                        }
+                    } else {
+                    // todo warning
+                    }
+                };
+                for (auto & t : schema["allOf"]) {
+                    if (t.contains("anyOf")) {
+                        for (auto & tt : t["anyOf"]) {
+                            add_component(tt, false);
+                        }
+                    } else {
+                        add_component(t, true);
+                    }
+                }
+            }
+            if (properties.empty() && (additional_properties == true || additional_properties.is_null())) {
+                return _add_rule(rule_name, _add_primitive("object", PRIMITIVE_RULES.at("object")));
+            }
+            return _add_rule(rule_name,
+                _build_object_rule(
+                    properties, required, name,
+                    additional_properties.is_null() ? (is_object ? json(false) : json()) : additional_properties));
         } else {
             if (!schema_type.is_string() || PRIMITIVE_RULES.find(schema_type.get<std::string>()) == PRIMITIVE_RULES.end()) {
                 _errors.push_back("Unrecognized schema: " + schema.dump());
