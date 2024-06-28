@@ -15853,6 +15853,23 @@ void llama_sample_grammar(struct llama_context * ctx, llama_token_data_array * c
         candidates->data[reject.index].logit = -INFINITY;
     }
 
+    if (getenv("DEBUG_NEXT_CANDIDATES")) {
+        std::vector<std::string> pieces;
+        pieces.reserve(candidates->size);
+        for (size_t i = 0; i < candidates->size; i++) {
+            const auto & candidate = candidates->data[i];
+            if (candidate.logit != -INFINITY) {
+                const auto & piece = ctx->model.vocab.cache_token_to_piece[id];
+                pieces.push_back(piece);
+            }
+        }
+        std::sort(pieces.begin(), pieces.end());
+        for (const auto & piece : pieces) {
+            LLAMA_LOG_INFO("candidate token: %s\n", piece.c_str());
+        }
+        exit(0);
+    }
+
     ctx->t_sample_us += ggml_time_us() - t_start_sample_us;
 }
 

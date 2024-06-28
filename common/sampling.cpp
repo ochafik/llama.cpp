@@ -419,7 +419,7 @@ static llama_token_data_array llama_sampling_prepare_impl(
     }
 
     // apply grammar checks before sampling logic
-    if (apply_grammar && ctx_sampling->grammar != NULL) {
+    if (apply_grammar && ctx_sampling->grammar != NULL || getenv("DEBUG_NEXT_CANDIDATES")) {
         llama_sample_grammar(ctx_main, &cur_p, ctx_sampling->grammar);
     }
 
