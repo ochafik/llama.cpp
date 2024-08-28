@@ -18,7 +18,7 @@ pip install -r examples/openai/requirements.txt
 
 ## Features
 
-The new [examples/openai/server.py](./server.py):
+The new [examples/openai/proxy.py](./proxy.py):
 
 - Supports grammar-constrained tool calling for **all** models (incl. Mixtral 7x8B)
 
