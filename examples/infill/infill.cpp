@@ -179,7 +179,10 @@ int main(int argc, char ** argv) {
 
     // load the model and apply lora adapter, if any
     LOG("%s: load the model and apply lora adapter, if any\n", __func__);
-    std::tie(model, ctx) = llama_init_from_gpt_params(params);
+    llama_init_result llama_init = llama_init_from_gpt_params(params);
+
+    model = llama_init.model;
+    ctx = llama_init.context;
 
     if (model == NULL) {
         LOG_TEE("%s: error: unable to load model\n", __func__);
@@ -200,30 +203,32 @@ int main(int argc, char ** argv) {
         LOG_TEE("\n");
         LOG_TEE("%s\n", gpt_params_get_system_info(params).c_str());
     }
-    const bool add_bos = llama_should_add_bos_token(model);
-    GGML_ASSERT(llama_add_eos_token(model) != 1);
+    const bool add_bos = llama_add_bos_token(model);
+    GGML_ASSERT(!llama_add_eos_token(model));
     LOG("add_bos: %d\n", add_bos);
 
-    bool suff_rm_leading_spc = params.escape;
-    if (suff_rm_leading_spc && params.input_suffix.find_first_of(' ') == 0 && params.input_suffix.size() > 1) {
-        params.input_suffix.erase(0, 1);
-        suff_rm_leading_spc = false;
-    }
     std::vector<llama_token> embd_inp;
+    std::vector<llama_token> embd_end;
     std::vector<llama_token> inp_pfx = ::llama_tokenize(ctx, params.input_prefix, false);
     std::vector<llama_token> inp_sfx = ::llama_tokenize(ctx, params.input_suffix, false);
-    const int space_token = 29871;
-    if (suff_rm_leading_spc && inp_sfx[0] == space_token) {
-        inp_sfx.erase(inp_sfx.begin());
-    }
+
+    GGML_ASSERT(llama_token_prefix(model) >= 0);
+    GGML_ASSERT(llama_token_suffix(model) >= 0);
+
     inp_pfx.insert(inp_pfx.begin(), llama_token_prefix(model));
-    if (add_bos) {
-        inp_pfx.insert(inp_pfx.begin(), llama_token_bos(model));
-    }
     inp_sfx.insert(inp_sfx.begin(), llama_token_suffix(model));
-    embd_inp = inp_pfx;
-    embd_inp.insert(embd_inp.end(), inp_sfx.begin(), inp_sfx.end());
-    embd_inp.push_back(llama_token_middle(model));
+
+    embd_inp = params.spm_infill ? inp_sfx : inp_pfx;
+    embd_end = params.spm_infill ? inp_pfx : inp_sfx;
+    if (add_bos) {
+        embd_inp.insert(embd_inp.begin(), llama_token_bos(model));
+    }
+    embd_inp.insert(embd_inp.end(), embd_end.begin(), embd_end.end());
+
+    const llama_token middle_token = llama_token_middle(model);
+    if (middle_token >= 0) {
+        embd_inp.push_back(middle_token);
+    }
 
     LOG("prefix: \"%s\"\n", log_tostr(params.input_prefix));
     LOG("suffix: \"%s\"\n", log_tostr(params.input_suffix));
@@ -510,25 +515,25 @@ int main(int argc, char ** argv) {
                     string_process_escapes(params.input_prefix);
                     string_process_escapes(params.input_suffix);
                 }
-                suff_rm_leading_spc = params.escape;
-                if (suff_rm_leading_spc && params.input_suffix.find_first_of(' ') == 0 && params.input_suffix.size() > 1) {
-                    params.input_suffix.erase(0, 1);
-                    suff_rm_leading_spc = false;
-                }
+
                 // tokenize new prefix and suffix
                 std::vector<llama_token> inp_pfx = ::llama_tokenize(ctx, params.input_prefix, false);
                 std::vector<llama_token> inp_sfx = ::llama_tokenize(ctx, params.input_suffix, false);
-                if (suff_rm_leading_spc && inp_sfx[0] == space_token) {
-                    inp_sfx.erase(inp_sfx.begin());
-                }
+
                 inp_pfx.insert(inp_pfx.begin(), llama_token_prefix(model));
-                if (add_bos) {
-                    inp_pfx.insert(inp_pfx.begin(), llama_token_bos(model));
-                }
                 inp_sfx.insert(inp_sfx.begin(), llama_token_suffix(model));
-                embd_inp = inp_pfx;
-                embd_inp.insert(embd_inp.end(), inp_sfx.begin(), inp_sfx.end());
-                embd_inp.push_back(llama_token_middle(model));
+
+                embd_inp = params.spm_infill ? inp_sfx : inp_pfx;
+                embd_end = params.spm_infill ? inp_pfx : inp_sfx;
+                if (add_bos) {
+                    embd_inp.insert(embd_inp.begin(), llama_token_bos(model));
+                }
+                embd_inp.insert(embd_inp.end(), embd_end.begin(), embd_end.end());
+
+                if (middle_token >= 0) {
+                    embd_inp.push_back(middle_token);
+                }
+
                 embd.clear();
                 n_remain = params.n_predict;
                 n_past = 0;
@@ -648,4 +653,3 @@ int main(int argc, char ** argv) {
 
     return 0;
 }
-

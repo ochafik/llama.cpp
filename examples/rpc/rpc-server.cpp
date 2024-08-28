@@ -6,10 +6,6 @@
 #include "ggml-metal.h"
 #endif
 
-#ifdef GGML_USE_SYCL
-#include "ggml-sycl.h"
-#endif
-
 #include "ggml-rpc.h"
 #ifdef _WIN32
 #  include <windows.h>
@@ -20,7 +16,7 @@
 #include <stdio.h>
 
 struct rpc_server_params {
-    std::string host        = "0.0.0.0";
+    std::string host        = "127.0.0.1";
     int         port        = 50052;
     size_t      backend_mem = 0;
 };
@@ -83,12 +79,6 @@ static ggml_backend_t create_backend() {
     if (!backend) {
         fprintf(stderr, "%s: ggml_backend_metal_init() failed\n", __func__);
     }
-#elif GGML_USE_SYCL
-    fprintf(stderr, "%s: using SYCL backend\n", __func__);
-    backend = ggml_backend_sycl_init(0); // init device 0
-    if (!backend) {
-        fprintf(stderr, "%s: ggml_backend_sycl_init() failed\n", __func__);
-    }
 #endif
 
     // if there aren't GPU Backends fallback to CPU backend
@@ -124,6 +114,17 @@ int main(int argc, char * argv[]) {
         fprintf(stderr, "Invalid parameters\n");
         return 1;
     }
+
+    if (params.host != "127.0.0.1") {
+        fprintf(stderr, "\n");
+        fprintf(stderr, "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+        fprintf(stderr, "WARNING: Host ('%s') is != '127.0.0.1'\n", params.host.c_str());
+        fprintf(stderr, "         Never expose the RPC server to an open network!\n");
+        fprintf(stderr, "         This is an experimental feature and is not secure!\n");
+        fprintf(stderr, "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+        fprintf(stderr, "\n");
+    }
+
     ggml_backend_t backend = create_backend();
     if (!backend) {
         fprintf(stderr, "Failed to create backend\n");

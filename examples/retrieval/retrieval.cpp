@@ -73,9 +73,10 @@ static std::vector<chunk> chunk_file(const std::string & filename, int chunk_siz
     return chunks;
 }
 
-static void batch_add_seq(llama_batch & batch, const std::vector<int32_t> & tokens, int seq_id) {
-    for (size_t i = 0; i < tokens.size(); i++) {
-        llama_batch_add(batch, tokens[i], i, { seq_id }, i == tokens.size() - 1);
+static void batch_add_seq(llama_batch & batch, const std::vector<int32_t> & tokens, llama_seq_id seq_id) {
+    size_t n_tokens = tokens.size();
+    for (size_t i = 0; i < n_tokens; i++) {
+        llama_batch_add(batch, tokens[i], i, { seq_id }, true);
     }
 }
 
@@ -147,11 +148,12 @@ int main(int argc, char ** argv) {
     llama_backend_init();
     llama_numa_init(params.numa);
 
-    llama_model * model;
-    llama_context * ctx;
-
     // load the model
-    std::tie(model, ctx) = llama_init_from_gpt_params(params);
+    llama_init_result llama_init = llama_init_from_gpt_params(params);
+
+    llama_model * model = llama_init.model;
+    llama_context * ctx = llama_init.context;
+
     if (model == NULL) {
         fprintf(stderr, "%s: error: unable to load model\n", __func__);
         return 1;
@@ -159,6 +161,12 @@ int main(int argc, char ** argv) {
 
     const int n_ctx_train = llama_n_ctx_train(model);
     const int n_ctx = llama_n_ctx(ctx);
+
+    const enum llama_pooling_type pooling_type = llama_pooling_type(ctx);
+    if (pooling_type == LLAMA_POOLING_TYPE_NONE) {
+        fprintf(stderr, "%s: error: pooling type NONE not supported\n", __func__);
+        return 1;
+    }
 
     if (n_ctx > n_ctx_train) {
         fprintf(stderr, "%s: warning: model was trained on only %d context tokens (%d specified)\n",
@@ -245,6 +253,8 @@ int main(int argc, char ** argv) {
         chunks[i].tokens.clear();
     }
 
+    struct llama_batch query_batch = llama_batch_init(n_batch, 0, 1);
+
     // start loop, receive query and return top k similar chunks based on cosine similarity
     std::string query;
     while (true) {
@@ -252,7 +262,6 @@ int main(int argc, char ** argv) {
         std::getline(std::cin, query);
         std::vector<int32_t> query_tokens = llama_tokenize(ctx, query, true);
 
-        struct llama_batch query_batch = llama_batch_init(n_batch, 0, 1);
         batch_add_seq(query_batch, query_tokens, 0);
 
         std::vector<float> query_emb(n_embd, 0);
@@ -285,6 +294,7 @@ int main(int argc, char ** argv) {
     }
 
     // clean up
+    llama_batch_free(query_batch);
     llama_print_timings(ctx);
     llama_free(ctx);
     llama_free_model(model);

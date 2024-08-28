@@ -127,7 +127,7 @@ bool IMatrixCollector::collect_imatrix(struct ggml_tensor * t, bool ask, void * 
         }
         else if (e.values.size() != (size_t)src1->ne[0]*n_as) {
             fprintf(stderr, "Oops: inconsistent size for %s (%d vs %d)\n", wname.c_str(), (int)e.values.size(), (int)src1->ne[0]*n_as);
-            exit(1); //GGML_ASSERT(false);
+            exit(1); //GGML_ABORT("fatal error");
         }
         if (m_params.verbosity > 1) {
             printf("%s[%d]: %32s, %s, %5d x %5d, %d\n", __func__, m_last_call, wname.c_str(), ggml_op_name(t->op), (int)src1->ne[0], (int)src1->ne[2], (int)src1->type);
@@ -176,7 +176,7 @@ bool IMatrixCollector::collect_imatrix(struct ggml_tensor * t, bool ask, void * 
         }
         else if (e.values.size() != (size_t)src1->ne[0]) {
             fprintf(stderr, "Oops: inconsistent size for %s (%d vs %d)\n", wname.c_str(), (int)e.values.size(), (int)src1->ne[0]);
-            exit(1); //GGML_ASSERT(false);
+            exit(1); //GGML_ABORT("fatal error");
         }
         ++e.ncall;
         if (m_params.verbosity > 1) {
@@ -218,20 +218,64 @@ void IMatrixCollector::save_imatrix(int ncall) const {
         fname += std::to_string(ncall);
     }
 
+    // avoid writing imatrix entries that do not have full data
+    // this can happen with MoE models where some of the experts end up not being exercised by the provided training data
+
+    int n_entries = 0;
+    std::vector<std::string> to_store;
+
+    bool is_first = true; // for printing
+    for (const auto & kv : m_stats) {
+        const int n_all = kv.second.counts.size();
+
+        if (n_all == 0) {
+            continue;
+        }
+
+        int n_zeros = 0;
+        for (const int c : kv.second.counts) {
+            if (c == 0) {
+                n_zeros++;
+            }
+        }
+
+        if (n_zeros != 0 && is_first) {
+            fprintf(stderr, "\n");
+            is_first = false;
+        }
+
+        if (n_zeros == n_all) {
+            fprintf(stderr, "%s: entry '%40s' has no data - skipping\n", __func__, kv.first.c_str());
+            continue;
+        }
+
+        if (n_zeros > 0) {
+            fprintf(stderr, "%s: entry '%40s' has partial data (%.2f%%) - skipping\n", __func__, kv.first.c_str(), 100.0f * (n_all - n_zeros) / n_all);
+            continue;
+        }
+
+        n_entries++;
+        to_store.push_back(kv.first);
+    }
+
+    if (to_store.size() < m_stats.size()) {
+        fprintf(stderr, "%s: warning: storing only %zu out of %zu entries\n", __func__, to_store.size(), m_stats.size());
+    }
+
     std::ofstream out(fname, std::ios::binary);
-    int n_entries = m_stats.size();
     out.write((const char *) &n_entries, sizeof(n_entries));
-    for (const auto & p : m_stats) {
-        int len = p.first.size();
+    for (const auto & name : to_store) {
+        const auto & stat = m_stats.at(name);
+        int len = name.size();
         out.write((const char *) &len, sizeof(len));
-        out.write(p.first.c_str(), len);
-        out.write((const char *) &p.second.ncall, sizeof(p.second.ncall));
-        int nval = p.second.values.size();
+        out.write(name.c_str(), len);
+        out.write((const char *) &stat.ncall, sizeof(stat.ncall));
+        int nval = stat.values.size();
         out.write((const char *) &nval, sizeof(nval));
         if (nval > 0) {
             std::vector<float> tmp(nval);
             for (int i = 0; i < nval; i++) {
-                tmp[i] = (p.second.values[i] / static_cast<float>(p.second.counts[i])) * static_cast<float>(p.second.ncall);
+                tmp[i] = (stat.values[i] / static_cast<float>(stat.counts[i])) * static_cast<float>(stat.ncall);
             }
             out.write((const char*)tmp.data(), nval*sizeof(float));
         }
@@ -389,8 +433,8 @@ static void process_logits(
 }
 
 static bool compute_imatrix(llama_context * ctx, const gpt_params & params) {
-    const bool add_bos = llama_should_add_bos_token(llama_get_model(ctx));
-    GGML_ASSERT(llama_add_eos_token(llama_get_model(ctx)) != 1);
+    const bool add_bos = llama_add_bos_token(llama_get_model(ctx));
+    GGML_ASSERT(!llama_add_eos_token(llama_get_model(ctx)));
     const int n_ctx = llama_n_ctx(ctx);
 
     auto tim1 = std::chrono::high_resolution_clock::now();
@@ -567,10 +611,10 @@ int main(int argc, char ** argv) {
     params.warmup = false;
 
     // init
-    llama_model * model;
-    llama_context * ctx;
+    llama_init_result llama_init = llama_init_from_gpt_params(params);
 
-    std::tie(model, ctx) = llama_init_from_gpt_params(params);
+    llama_model * model = llama_init.model;
+    llama_context * ctx = llama_init.context;
     if (model == nullptr || ctx == nullptr) {
         fprintf(stderr, "%s : failed to init\n", __func__);
         return 1;
