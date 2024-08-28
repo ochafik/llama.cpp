@@ -192,7 +192,7 @@ def _generate_min_max_int(min_value: Optional[int], max_value: Optional[int], ou
 class BuiltinRule:
     def __init__(self, content: str, deps: list | None = None):
         self.content = content
-        self.deps = deps
+        self.deps = deps or []
 
 # Constraining spaces to prevent model "running away".
 SPACE_RULE = '| " " | "\\n" [ \\t]{0,20}'
@@ -334,13 +334,13 @@ class SchemaConverter:
         self._rules[key] = rule
         return key
 
-    def resolve_refs(self, schema: Any, url: str):
+    def resolve_refs(self, schema: dict, url: str):
         '''
             Resolves all $ref fields in the given schema, fetching any remote schemas,
             replacing $ref with absolute reference URL and populating self._refs with the
             respective referenced (sub)schema dictionaries.
         '''
-        def visit(n: Any):
+        def visit(n: dict):
             if isinstance(n, list):
                 return [visit(x) for x in n]
             elif isinstance(n, dict):
@@ -400,7 +400,7 @@ class SchemaConverter:
 
         assert pattern.startswith('^') and pattern.endswith('$'), 'Pattern must start with "^" and end with "$"'
         pattern = pattern[1:-1]
-        sub_rule_ids: Dict[str, str] = {}
+        sub_rule_ids = {}
 
         i = 0
         length = len(pattern)

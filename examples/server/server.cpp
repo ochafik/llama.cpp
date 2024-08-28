@@ -2617,43 +2617,6 @@ int main(int argc, char ** argv) {
     // Necessary similarity of prompt for slot selection
     ctx_server.slot_prompt_similarity = params.slot_prompt_similarity;
 
-    // // load the model
-    // if (!ctx_server.load_model(params)) {
-    //     state.store(SERVER_STATE_ERROR);
-    //     return 1;
-    // } else {
-    //     ctx_server.init();
-    //     state.store(SERVER_STATE_READY);
-    // }
-
-    // LOG_INFO("model loaded", {});
-
-    const auto model_meta = ctx_server.model_meta();
-
-    // if a custom chat template is not supplied, we will use the one that comes with the model (if any)
-    if (params.chat_template.empty()) {
-        if (!ctx_server.validate_model_chat_template()) {
-            LOG_ERROR("The chat template that comes with this model is not yet supported, falling back to chatml. This may cause the model to output suboptimal responses", {});
-            params.chat_template = "chatml";
-        }
-    }
-
-    // print sample chat example to make it clear which template is used
-    {
-        json chat;
-        chat.push_back({{"role", "system"},    {"content", "You are a helpful assistant"}});
-        chat.push_back({{"role", "user"},      {"content", "Hello"}});
-        chat.push_back({{"role", "assistant"}, {"content", "Hi there"}});
-        chat.push_back({{"role", "user"},      {"content", "How are you?"}});
-
-        const std::string chat_example = format_chat(ctx_server.model, params.chat_template, chat, "");
-
-        LOG_INFO("chat template", {
-            {"chat_example", chat_example},
-            {"built_in", params.chat_template.empty()},
-        });
-    }
-
     //
     // Middlewares
     //
