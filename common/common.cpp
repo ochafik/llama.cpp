@@ -401,6 +401,11 @@ bool gpt_params_find_arg(int argc, char ** argv, const std::string & arg, gpt_pa
     }
     if (arg == "-f" || arg == "--file") {
         CHECK_ARG
+        if (std::string(argv[i]) == "-") {
+            std::copy(std::istreambuf_iterator<char>(std::cin), std::istreambuf_iterator<char>(), back_inserter(params.prompt));
+            fprintf(stderr, "Read %zu bytes from stdin\n", params.prompt.size());
+            return true;
+        }
         std::ifstream file(argv[i]);
         if (!file) {
             fprintf(stderr, "error: failed to open file '%s'\n", argv[i]);
