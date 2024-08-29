@@ -518,7 +518,6 @@ static json parse_tool_calls(const std::string& input) {
                 break;
             }
 
-            auto offset = std::distance(input.begin(), it);
             std::string json_sub(it, it + err_loc.position);
             LOG_WARNING("Parsing tool call", {{"json_sub", json_sub}});
             auto call = json::parse(it, it + err_loc.position);
