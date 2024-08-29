@@ -1,4 +1,30 @@
 #!/usr/bin/env python3
+'''
+    python examples/json_schema_to_grammar.py --tools <( echo '[
+        {
+            "type": "function",
+            "function": {
+                "name": "foo",
+                "parameters": {
+                    "properties": {
+                        "a": {"type": "number"}
+                    }
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "bar",
+                "parameters": {
+                    "properties": {
+                        "b": {"type": "string"}
+                    }
+                }
+            }
+        }
+    ]' )
+'''
 from __future__ import annotations
 
 import argparse
@@ -747,6 +773,35 @@ class SchemaConverter:
             for name, rule in sorted(self._rules.items(), key=lambda kv: kv[0])
         )
 
+    def tool_call_grammar(self, tools, parallel_tool_calls):
+        tool_rules = []
+        for tool in tools:
+            function = tool['function']
+            name = function['name']
+            description = function.get('description', '')
+            parameters_copy = function['parameters']
+            self.resolve_refs(parameters_copy, name)
+
+            tool_rules.append(self.visit({
+                'type': 'object',
+                'description': description,
+                'properties': {
+                    'name': {'const': name},
+                    'arguments': parameters_copy,
+                },
+                'required': ['name', 'arguments'],
+            }, f'{name}-tool-call'))
+
+        tool_call_rule = self._add_rule('tool_call', " | ".join(tool_rules))
+        more_tool_calls = ''
+        if parallel_tool_calls:
+            more_tool_calls = f' ("\\n<tool_call>" {tool_call_rule} "</tool_call>")*'
+
+        self._add_rule(
+            'root',
+            '([<] ([t] ([o] ([o] ([l] ([_] ([c] ([a] ([l] ([l] ([>] ' +
+                tool_call_rule + ' "</tool_call>" ' + more_tool_calls + ' ' +
+                '| [^>] .*) | [^l] .*) | [^l] .*) | [^a] .*) | [^c] .*) | [^_] .*) | [^l] .*) | [^o] .*) | [^o] .*) | [^t] .*) | [^<] .* )?')
 
 def main(args_in = None):
     parser = argparse.ArgumentParser(
@@ -783,27 +838,41 @@ def main(args_in = None):
         default=False,
         help='Treats string patterns as raw patterns w/o quotes (or quote escapes)')
 
-    parser.add_argument('schema', help='file containing JSON schema ("-" for stdin)')
+    parser.add_argument('--schema', help='file containing JSON schema ("-" for stdin)')
+    parser.add_argument('--tools', help='file containing JSON tools array ("-" for stdin)')
+    parser.add_argument('--allow-parallel-tools', action='store_true', help='Allow multiple tool calls in parallel (requires --tools)')
     args = parser.parse_args(args_in)
 
-    if args.schema.startswith('https://'):
-        url = args.schema
-        import requests
-        schema = requests.get(url).json()
-    elif args.schema == '-':
-        url = 'stdin'
-        schema = json.load(sys.stdin)
-    else:
-        url = f'file://{args.schema}'
-        with open(args.schema) as f:
-            schema = json.load(f)
     converter = SchemaConverter(
         prop_order={name: idx for idx, name in enumerate(args.prop_order)},
         allow_fetch=args.allow_fetch,
         dotall=args.dotall,
         raw_pattern=args.raw_pattern)
-    schema = converter.resolve_refs(schema, url)
-    converter.visit(schema, '')
+    
+    if args.schema:
+        assert not args.tools, 'Cannot specify both --schema and --tools'
+        if args.schema.startswith('https://'):
+            url = args.schema
+            import requests
+            schema = requests.get(url).json()
+        elif args.schema == '-':
+            url = 'stdin'
+            schema = json.load(sys.stdin)
+        else:
+            url = f'file://{args.schema}'
+            with open(args.schema) as f:
+                schema = json.load(f)
+        schema = converter.resolve_refs(schema, url)
+        converter.visit(schema, '')
+    elif args.tools:
+        if args.tools == '-':
+            tools = json.load(sys.stdin)
+        else:
+            with open(args.tools) as f:
+                tools = json.load(f)
+        converter.tool_call_grammar(tools, parallel_tool_calls=True)
+    else:
+        raise ValueError('Must specify either --schema or --tools')
     print(converter.format_grammar())
 
 
