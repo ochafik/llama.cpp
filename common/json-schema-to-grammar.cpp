@@ -1026,6 +1026,45 @@ public:
         }
     }
 
+    void tool_call_grammar(const json & tools, bool parallel_tool_calls, bool allow_content) {
+        std::vector<std::string> tool_rules;
+        
+        for (const auto & tool : tools) {
+            const auto & function = tool["function"];
+            std::string name = function["name"];
+            auto parameters_copy = function["parameters"];
+            resolve_refs(parameters_copy, name);
+
+            tool_rules.push_back(visit(json {
+                {"type", "object"},
+                {"properties", json {
+                    {"name", json {{"const", name}}},
+                    {"arguments", parameters_copy},
+                }},
+                {"required", json::array({"name", "arguments"})},
+            }, name + "-tool-call"));
+        }
+
+        auto any_tool_call = join(tool_rules.begin(), tool_rules.end(), " | ");
+        auto tool_call_rule = _add_rule("tool_call", join(tool_rules.begin(), tool_rules.end(), " | "));
+        if (allow_content) {
+            _add_rule(
+                "root",
+                "([<] ([t] ([o] ([o] ([l] ([_] ([c] ([a] ([l] ([l] ([>] " +
+                    tool_call_rule + " \"</tool_call>\" " + 
+                    (parallel_tool_calls ? " (\"\\n\" \"<tool_call>\" " + tool_call_rule + " \"</tool_call>\")* " : "") +
+                    "| [^>] .*) | [^l] .*) | [^l] .*) | [^a] .*) | [^c] .*) | [^_] .*) | [^l] .*) | [^o] .*) | [^o] .*) | [^t] .*) | [^<] .* )?");
+        } else {
+            _add_rule(
+                "root",
+                build_repetition(
+                    "\"<tool_call>\" " + tool_call_rule + " \"</tool_call>\"",
+                    1,
+                    parallel_tool_calls ? std::numeric_limits<int>::max() : 1,
+                    " \"\\n\" "));
+        }
+    }
+
     std::string format_grammar() {
         std::stringstream ss;
         for (const auto & kv : _rules) {
@@ -1034,6 +1073,13 @@ public:
         return ss.str();
     }
 };
+
+std::string tool_call_grammar(const json & tools, bool parallel_tool_calls, bool allow_content) {
+    SchemaConverter converter([](const std::string &) { return json::object(); }, /* dotall= */ false);
+    converter.tool_call_grammar(tools, parallel_tool_calls, allow_content);
+    converter.check_errors();
+    return converter.format_grammar();
+}
 
 std::string json_schema_to_grammar(const json & schema) {
     SchemaConverter converter([](const std::string &) { return json::object(); }, /* dotall= */ false);

@@ -3056,7 +3056,7 @@ int main(int argc, char ** argv) {
             res_error(res, format_error_response("This server does not support chat completions. Start it without `--embeddings`", ERROR_TYPE_NOT_SUPPORTED));
             return;
         }
-        json data = oaicompat_completion_params_parse(ctx_server.model, json::parse(req.body), params.chat_template);
+        json data = oaicompat_completion_params_parse(ctx_server.model, json::parse(req.body), params.chat_template, ctx_server.params.tools_template, ctx_server.params.schema_template);
 
         const int id_task = ctx_server.queue_tasks.get_new_id();
 

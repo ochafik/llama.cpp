@@ -737,6 +737,16 @@ bool gpt_params_find_arg(int argc, char ** argv, const std::string & arg, gpt_pa
         params.model_draft = argv[i];
         return true;
     }
+    if (arg == "--tools-template") {
+        CHECK_ARG
+        params.tools_template = argv[i];
+        return true;
+    }
+    if (arg == "--schema-template") {
+        CHECK_ARG
+        params.schema_template = argv[i];
+        return true;
+    }
     if (arg == "-a" || arg == "--alias") {
         CHECK_ARG
         params.model_alias = argv[i];
@@ -1745,6 +1755,10 @@ void gpt_params_print_usage(int /*argc*/, char ** argv, const gpt_params & param
                                                                         "set custom jinja chat template (default: template taken from model's metadata)\n"
                                                                         "only commonly used templates are accepted:\n"
                                                                         "https://github.com/ggerganov/llama.cpp/wiki/Templates-supported-by-llama_chat_apply_template" });
+    options.push_back({ "server",      "       --tools-template TEMPLATE",
+                                                                        "set template used to append to the system prompt for tool calling. The special `{toolsJson}` placeholder will be expanded to prettified JSON array of tools.\n"});
+    options.push_back({ "server",      "       --schema-template TEMPLATE",
+                                                                        "set template used to append to the system prompt for json_schema result_type. The special `{jsonSchema}` placeholder will be expanded to prettified JSON schema.\n"});
     options.push_back({ "server",      "-sps,  --slot-prompt-similarity SIMILARITY",
                                                                         "how much the prompt of a request must match the prompt of a slot in order to use that slot (default: %.2f, 0.0 = disabled)\n", params.slot_prompt_similarity });
     options.push_back({ "server",      "       --lora-init-without-apply",     "load LoRA adapters without applying them (apply later via POST /lora-adapters) (default: %s)", params.lora_init_without_apply ? "enabled" : "disabled"});

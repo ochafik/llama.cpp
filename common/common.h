@@ -67,6 +67,19 @@ enum dimre_method {
     DIMRE_METHOD_MEAN,
 };
 
+#define LLAMA_DEFAULT_TOOLS_TEMPLATE \
+    "You may call one of the following functions to assist with the user queries:\n" \
+    "<tools>{toolsJson}</tools>\n" \
+    "A function call follows this syntax:\n" \
+    "<tool_call>\n" \
+    "{\"name\": <function-name>, \"arguments\": <args-dict>}\n" \
+    "</tool_call>\n" \
+    "Don't say which tool (if any) you're about to call, just call it directly inside <tool_call> tags.\n" \
+    "Only use tools when it makes sense, otherwise just respond normally."
+
+#define LLAMA_DEFAULT_SCHEMA_TEMPLATE \
+    "Respond in the following JSON format: {jsonSchema}"
+            
 struct gpt_params {
     uint32_t seed                 = LLAMA_DEFAULT_SEED; // RNG seed
 
@@ -130,6 +143,8 @@ struct gpt_params {
     std::string lookup_cache_dynamic = ""; // path of dynamic ngram cache file for lookup decoding
     std::string logits_file          = ""; // file for saving *all* logits
     std::string rpc_servers          = ""; // comma separated list of RPC servers
+    std::string tools_template       = LLAMA_DEFAULT_TOOLS_TEMPLATE; // system message template for tools.
+    std::string schema_template      = LLAMA_DEFAULT_SCHEMA_TEMPLATE; // system message template for JSON schema.
 
     std::vector<std::string> in_files;   // all input files
     std::vector<std::string> antiprompt; // strings upon which more user input is prompted (a.k.a. reverse prompts)
