@@ -887,51 +887,6 @@ To use the server example to serve multiple chat-type clients while keeping the 
 
 **NOTE**: You can do this automatically when starting the server by simply creating a .json file with these options and using the CLI option `-spf FNAME` or `--system-prompt-file FNAME`.
 
-### Function call
-
-```bash
-curl -X POST http://localhost:8080/v1/chat/completions -d '{
-  "messages": [
-    {"role": "user", "content": "What is 15315*3/55 ?"}
-  ],
-  "tools": [
-    {
-      "type": "function",
-      "function": {
-        "name": "eval_python",
-        "parameters": {
-          "properties": {
-            "expression": {"type": "string"}
-          }
-        }
-      }
-    }
-  ],
-  "max_tokens": 100
-}' -N
-
-curl -X POST http://localhost:8080/v1/chat/completions -d '{
-  "messages": [
-    {"role": "user", "content": "What is life?"}
-  ],
-  "tools": [
-    {
-      "type": "function",
-      "function": {
-        "name": "eval_python",
-        "parameters": {
-          "properties": {
-            "expression": {"type": "string"}
-          }
-        }
-      }
-    }
-  ],
-  "max_tokens": 100
-}' -N
-# "stream": true
-
-```
 
 ### Interactive mode
 
