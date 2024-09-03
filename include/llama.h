@@ -1034,6 +1034,11 @@ extern "C" {
             struct llama_context * ctx,
                      llama_token   token);
 
+    LLAMA_API void llama_grammar_accept_string(
+            struct llama_grammar * grammar,
+            struct llama_context * ctx,
+                     const char  * text);
+
     //
     // Sampling functions
     //

@@ -20074,6 +20074,13 @@ void llama_grammar_accept_token(
     llama_grammar_accept_token_impl(grammar, &ctx->model.vocab, &ctx->sampling, token);
 }
 
+void llama_grammar_accept_string(
+            struct llama_grammar * grammar,
+            struct llama_context * ctx,
+                     const char  * text) {
+    llama_grammar_accept_string_impl(grammar, &ctx->sampling, text);
+}
+
 //
 // sampling
 //
