@@ -33,40 +33,178 @@ nonstd_make_unique(std::size_t n) {
 }
 
 // Forward declarations
-class ASTNode;
+class TemplateNode;
 class Expression;
 
-// AST Node types
-enum class NodeType {
-    Sequence,
-    Text,
-    Variable,
-    If,
-    For,
-    Set,
-    Expression
+enum SpaceHandling {
+    Keep,
+    Strip,
+    KeepLines,
 };
 
-class ASTNode {
-    NodeType type;
-protected:
-    ASTNode(NodeType t) : type(t) {}
+class TemplateToken {
 public:
-    virtual ~ASTNode() = default;
+    enum class Type {
+        Text,
+        Variable,
+        If,
+        Else,
+        Elif,
+        EndIf,
+        For,
+        EndFor,
+        Set,
+        Comment,
+        Block,
+        EndBlock,
+    };
+
+    static std::string typeToString(Type t) {
+        switch (t) {
+            case Type::Text: return "Text";
+            case Type::Variable: return "Variable";
+            case Type::If: return "If";
+            case Type::Else: return "Else";
+            case Type::Elif: return "Elif";
+            case Type::EndIf: return "EndIf";
+            case Type::For: return "For";
+            case Type::EndFor: return "EndFor";
+            case Type::Set: return "Set";
+            case Type::Comment: return "Comment";
+            case Type::Block: return "Block";
+            case Type::EndBlock: return "EndBlock";
+        }
+        return "Unknown";
+    }
+
+    std::runtime_error unexpected(const std::string & context) const {
+      return std::runtime_error("Unexpected token in " + context + ": " + TemplateToken::typeToString(getType()));
+    }
+    std::runtime_error unterminated(const std::string & context) const {
+      return std::runtime_error("Unterminated " + context + ": " + TemplateToken::typeToString(getType()));
+    }
+    void expectType(Type type) const {
+      if (getType() != type) {
+        throw unexpected("expecting " + typeToString(type));
+      }
+    }
+
+    TemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : pos(pos), pre_space(pre), post_space(post) {}
+    virtual ~TemplateToken() = default;
+    virtual TemplateToken::Type getType() const = 0;
+
+    size_t pos;
+    SpaceHandling pre_space = SpaceHandling::Keep;
+    SpaceHandling post_space = SpaceHandling::Keep;
+};
+
+struct TextTemplateToken : public TemplateToken {
+    std::string text;
+    TextTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::string& t) : TemplateToken(pos, pre, post), text(t) {}
+    Type getType() const override { return Type::Text; }
+};
+
+struct VariableTemplateToken : public TemplateToken {
+    std::unique_ptr<Expression> expr;
+    VariableTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, std::unique_ptr<Expression> && e) : TemplateToken(pos, pre, post), expr(std::move(e)) {}
+    Type getType() const override { return Type::Variable; }
+};
+
+struct IfTemplateToken : public TemplateToken {
+    std::unique_ptr<Expression> condition;
+    IfTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, std::unique_ptr<Expression> && c) : TemplateToken(pos, pre, post), condition(std::move(c)) {}
+    Type getType() const override { return Type::If; }
+};
+
+struct ElifTemplateToken : public IfTemplateToken {
+    ElifTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, std::unique_ptr<Expression> && c) : IfTemplateToken(pos, pre, post, std::move(c)) {}
+    Type getType() const override { return Type::Elif; }
+};
+
+struct ElseTemplateToken : public TemplateToken {
+  ElseTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : TemplateToken(pos, pre, post) {}
+    Type getType() const override { return Type::Else; }
+};
+
+struct EndIfTemplateToken : public TemplateToken {
+  EndIfTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : TemplateToken(pos, pre, post) {}
+    Type getType() const override { return Type::EndIf; }
+};
+
+struct BlockTemplateToken : public TemplateToken {
+    std::string name;
+    BlockTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::string& n) : TemplateToken(pos, pre, post), name(n) {}
+    Type getType() const override { return Type::Block; }
+};
+
+struct EndBlockTemplateToken : public TemplateToken {
+  EndBlockTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : TemplateToken(pos, pre, post) {}
+    Type getType() const override { return Type::EndBlock; }
+};
+
+struct ForTemplateToken : public TemplateToken {
+    std::vector<std::string> var_names;
+    std::unique_ptr<Expression> iterable;
+    std::unique_ptr<Expression> condition;
+    bool recursive;
+    ForTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::vector<std::string> & vns, std::unique_ptr<Expression> && iter,
+      std::unique_ptr<Expression> && c, bool r)
+      : TemplateToken(pos, pre, post), var_names(vns), condition(std::move(c)),
+        iterable(std::move(iter)), recursive(r) {}
+    Type getType() const override { return Type::For; }
+};
+
+struct EndForTemplateToken : public TemplateToken {
+  EndForTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : TemplateToken(pos, pre, post) {}
+    Type getType() const override { return Type::EndFor; }
+};
+
+struct SetTemplateToken : public TemplateToken {
+    std::string var_name;
+    std::unique_ptr<Expression> value;
+    SetTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::string& vn, std::unique_ptr<Expression> && v)
+      : TemplateToken(pos, pre, post), var_name(vn), value(std::move(v)) {}
+    Type getType() const override { return Type::Set; }
+};
+
+struct CommentTemplateToken : public TemplateToken {
+    std::string text;
+    CommentTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::string& t) : TemplateToken(pos, pre, post), text(t) {}
+    Type getType() const override { return Type::Comment; }
+};
+
+class TemplateNode {
+public:
+
+    enum class Type {
+        Sequence,
+        Text,
+        Variable,
+        NamedBlock,
+        If,
+        For,
+        Set,
+        Expression
+    };
+    virtual ~TemplateNode() = default;
     virtual void render(std::ostringstream& oss, json& context) const = 0;
-    NodeType getType() const { return type; }
+    Type getType() const { return type; }
 
     std::string render(json & context) const {
         std::ostringstream oss;
         render(oss, context);
         return oss.str();
     }
+private:
+    Type type;
+protected:
+    TemplateNode(Type t) : type(t) {}
 };
 
-class SequenceNode : public ASTNode {
-    std::vector<std::unique_ptr<ASTNode>> children;
+class SequenceNode : public TemplateNode {
+    std::vector<std::unique_ptr<TemplateNode>> children;
 public:
-    SequenceNode(std::vector<std::unique_ptr<ASTNode>> && c) : ASTNode(NodeType::Sequence), children(std::move(c)) {}
+    SequenceNode(std::vector<std::unique_ptr<TemplateNode>> && c) : TemplateNode(Type::Sequence), children(std::move(c)) {}
     void render(std::ostringstream& oss, json& context) const override {
         for (const auto& child : children) {
             child->render(oss, context);
@@ -74,51 +212,59 @@ public:
     }
 };
 
-class TextNode : public ASTNode {
+class TextNode : public TemplateNode {
     std::string text;
 public:
-    TextNode(const std::string& t) : ASTNode(NodeType::Text), text(t) {}
+    TextNode(const std::string& t) : TemplateNode(Type::Text), text(t) {}
     void render(std::ostringstream& oss, json&) const override { oss << text; }
 };
 
-class VariableNode : public ASTNode {
+class VariableNode : public TemplateNode {
     std::unique_ptr<Expression> expr;
-    std::vector<std::string> filters;
 public:
     VariableNode(std::unique_ptr<Expression> && e, std::vector<std::string> && f) 
-        : ASTNode(NodeType::Variable), expr(std::move(e)), filters(std::move(f)) {}
+        : TemplateNode(Type::Variable), expr(std::move(e)) {}
     void render(std::ostringstream& oss, json& context) const override;
 };
 
-class IfNode : public ASTNode {
-    std::unique_ptr<Expression> condition;
-    std::vector<std::unique_ptr<ASTNode>> true_branch;
-    std::vector<std::unique_ptr<ASTNode>> false_branch;
+class IfNode : public TemplateNode {
+    std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<TemplateNode>>> cascade;
 public:
-    IfNode(std::unique_ptr<Expression> && cond,
-           std::vector<std::unique_ptr<ASTNode>> && tb,
-           std::vector<std::unique_ptr<ASTNode>> && fb)
-        : ASTNode(NodeType::If), condition(std::move(cond)), true_branch(std::move(tb)), false_branch(std::move(fb)) {}
+    IfNode(std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<TemplateNode>>> && c)
+        : TemplateNode(Type::If), cascade(std::move(c)) {}
     void render(std::ostringstream& oss, json& context) const override;
 };
 
-class ForNode : public ASTNode {
-    std::string var_name;
+class ForNode : public TemplateNode {
+    std::vector<std::string> var_names;
     std::unique_ptr<Expression> iterable;
-    std::vector<std::unique_ptr<ASTNode>> body;
+    std::unique_ptr<Expression> condition;
+    std::unique_ptr<TemplateNode> body;
+    bool recursive;
 public:
-    ForNode(const std::string& vn, std::unique_ptr<Expression> && iter,
-            std::vector<std::unique_ptr<ASTNode>> && b)
-            : ASTNode(NodeType::For), var_name(vn), iterable(std::move(iter)), body(std::move(b)) {}
+    ForNode(const std::vector<std::string> & vns, std::unique_ptr<Expression> && iter,
+      std::unique_ptr<Expression> && c,
+            std::unique_ptr<TemplateNode> && b, bool r)
+            : TemplateNode(Type::For), var_names(vns), condition(std::move(c)),
+            iterable(std::move(iter)), body(std::move(b)), recursive(r) {}
     void render(std::ostringstream& oss, json& context) const override;
 };
 
-class SetNode : public ASTNode {
+class BlockNode : public TemplateNode {
+    std::string name;
+    std::unique_ptr<TemplateNode> body;
+public:
+    BlockNode(const std::string& n, std::unique_ptr<TemplateNode> && b)
+        : TemplateNode(Type::NamedBlock), name(n), body(std::move(b)) {}
+    void render(std::ostringstream& oss, json& context) const override;
+};
+
+class SetNode : public TemplateNode {
     std::string var_name;
     std::unique_ptr<Expression> value;
 public:
     SetNode(const std::string& vn, std::unique_ptr<Expression> && v)
-      : ASTNode(NodeType::Set), var_name(vn), value(std::move(v)) {}
+      : TemplateNode(Type::Set), var_name(vn), value(std::move(v)) {}
     void render(std::ostringstream& oss, json& context) const override;
 };
 
@@ -139,6 +285,7 @@ class VariableExpr : public Expression {
     std::string name;
 public:
     VariableExpr(const std::string& n) : name(n) {}
+    std::string get_name() const { return name; }
     json evaluate(json& context) const override {
         return context.value(name, json(nullptr));
     }
@@ -178,7 +325,7 @@ json operator%(const json& lhs, const json& rhs) {
 
 class BinaryOpExpr : public Expression {
 public:
-    enum class Op { StrConcat, Add, Sub, Mul, Div, Mod, Eq, Ne, Lt, Gt, Le, Ge, And, Or, In };
+    enum class Op { StrConcat, Add, Sub, Mul, Div, Mod, Pow, Eq, Ne, Lt, Gt, Le, Ge, And, Or, In, Is };
 private:
     std::unique_ptr<Expression> left;
     std::unique_ptr<Expression> right;
@@ -188,35 +335,57 @@ public:
         : left(std::move(l)), right(std::move(r)), op(o) {}
     json evaluate(json& context) const override {
         json l = left->evaluate(context);
+        
+        if (op == Op::Is) {
+          auto t = dynamic_cast<VariableExpr*>(right.get());
+          if (!t) throw std::runtime_error("Right side of 'is' operator must be a variable");
+
+          const auto & name = t->get_name();
+          if (name == "boolean") return l.is_boolean();
+          if (name == "integer") return l.is_number_integer();
+          if (name == "float") return l.is_number_float();
+          if (name == "number") return l.is_number();
+          if (name == "string") return l.is_string();
+          if (name == "mapping") return l.is_object();
+          if (name == "iterable") return l.is_array();
+          if (name == "sequence") return l.is_array();
+          throw std::runtime_error("Unknown type for 'is' operator: " + name);
+        }
+
         json r = right->evaluate(context);
         switch (op) {
             case Op::StrConcat: return l.get<std::string>() + r.get<std::string>();
-            case Op::Add: return l + r;
-            case Op::Sub: return l - r;
-            case Op::Mul: return l * r;
-            case Op::Div: return l / r;
-            case Op::Mod: return l.get<int>() % r.get<int>();
-            case Op::Eq: return l == r;
-            case Op::Ne: return l != r;
-            case Op::Lt: return l < r;
-            case Op::Gt: return l > r;
-            case Op::Le: return l <= r;
-            case Op::Ge: return l >= r;
-            case Op::And: return l.get<bool>() && r.get<bool>();
-            case Op::Or: return l.get<bool>() || r.get<bool>();
-            case Op::In: return r.is_array() && r.find(l) != r.end();
+            case Op::Add:       return l + r;
+            case Op::Sub:       return l - r;
+            case Op::Mul:       return l * r;
+            case Op::Div:       return l / r;
+            case Op::Mod:       return l.get<int>() % r.get<int>();
+            case Op::Pow:       return std::pow(l.get<double>(), r.get<double>());
+            case Op::Eq:        return l == r;
+            case Op::Ne:        return l != r;
+            case Op::Lt:        return l < r;
+            case Op::Gt:        return l > r;
+            case Op::Le:        return l <= r;
+            case Op::Ge:        return l >= r;
+            case Op::And:       return l.get<bool>() && r.get<bool>();
+            case Op::Or:        return l.get<bool>() || r.get<bool>();
+            case Op::In:        return r.is_array() && r.find(l) != r.end();
+            default:            break;
         }
         throw std::runtime_error("Unknown binary operator");
     }
 };
 
 class MethodCallExpr : public Expression {
-    std::unique_ptr<Expression> object;
+    std::unique_ptr<Expression> object; // If nullptr, this is a function call
     std::string method;
     std::vector<std::unique_ptr<Expression>> args;
 public:
     MethodCallExpr(std::unique_ptr<Expression> && obj, const std::string& m, std::vector<std::unique_ptr<Expression>> && a)
         : object(std::move(obj)), method(m), args(std::move(a)) {}
+    bool is_function_call() const { return object == nullptr; }
+    const std::string& get_method() const { return method; }
+    const std::vector<std::unique_ptr<Expression>>& get_args() const { return args; }
     json evaluate(json& context) const override {
         json obj = object->evaluate(context);
         if (method == "append" && obj.is_array()) {
@@ -229,72 +398,142 @@ public:
     }
 };
 
-// Helper function to render a vector of nodes
-void renderNodes(std::ostringstream& oss, const std::vector<std::unique_ptr<ASTNode>>& nodes, json& context) {
-    for (const auto& node : nodes) {
-        node->render(oss, context);
+class PipeExpr : public Expression {
+    std::vector<std::unique_ptr<Expression>> parts;
+public:
+    PipeExpr(std::vector<std::unique_ptr<Expression>> && p) : parts(std::move(p)) {}
+    json evaluate(json& context) const override {
+        json result;
+        for (const auto& part : parts) {
+            if (auto mc = dynamic_cast<MethodCallExpr*>(part.get())) {
+                if (!mc->is_function_call()) {
+                  throw std::runtime_error("Method call in pipe expression must be a function call: " + mc->get_method());
+                }
+                if (mc->get_method() == "tojson") {
+                  auto indent = mc->get_args().empty() ? 0 : mc->get_args()[0]->evaluate(context).get<int>();
+                  result = result.dump(indent);
+                } else if (mc->get_method() == "join") {
+                  auto sep = mc->get_args().empty() ? "" : mc->get_args()[0]->evaluate(context).get<std::string>();
+                  std::ostringstream oss;
+                  auto first = true;
+                  for (const auto& item : result) {
+                    if (first) first = false;
+                    else oss << sep;
+                    oss << item.get<std::string>();
+                  }
+                  result = oss.str();
+                } else {
+                  throw std::runtime_error("Unknown function in pipe: " + mc->get_method());
+                }
+            } else {
+                result = part->evaluate(context);
+            }
+        }
+        return result;
     }
-}
+};
 
-// Implement VariableNode::render
 void VariableNode::render(std::ostringstream& oss, json& context) const {
     json result = expr->evaluate(context);
-    for (const auto& filter : filters) {
-        if (filter == "join") {
-            if (result.is_array()) {
-                oss << result.dump();
-            }
-        } else if (filter == "tojson") {
-            oss << result.dump(2);  // Pretty print JSON with 2-space indent
-        } else {
-            throw std::runtime_error("Unknown filter: " + filter);
-        }
-    }
-    if (filters.empty()) {
-        if (result.is_string()) {
-            oss << result.get<std::string>();
-        } else {
-            oss << result.dump();
-        }
-    }
-}
-
-// Implement IfNode::render
-void IfNode::render(std::ostringstream& oss, json& context) const {
-    if (condition->evaluate(context).get<bool>()) {
-        renderNodes(oss, true_branch, context);
+    if (result.is_string()) {
+        oss << result.get<std::string>();
     } else {
-        renderNodes(oss, false_branch, context);
+        // TODO: what is the behaviour here, should we explode when given an object? Be silent with null?
+        oss << result.dump();
     }
 }
 
-// Implement ForNode::render
-void ForNode::render(std::ostringstream& oss, json& context) const {
-    json loop_var = iterable->evaluate(context);
-    if (loop_var.is_array()) {
-        json original_context = context;
-        for (const auto& item : loop_var) {
-            context[var_name] = item;
-            renderNodes(oss, body, context);
+void IfNode::render(std::ostringstream& oss, json& context) const {
+    for (const auto& branch : cascade) {
+        if (branch.first->evaluate(context).get<bool>()) {
+            branch.second->render(oss, context);
+            return;
         }
-        context = original_context;
     }
 }
 
-// Implement SetNode::render
+void ForNode::render(std::ostringstream& oss, json& context) const {
+    json iterable_value = iterable->evaluate(context);
+    if (!iterable_value.is_array()) {
+      throw std::runtime_error("For loop iterable must be iterable");
+    }
+
+    // json original_context = context;
+    json original_vars = json::object();
+    for (const auto& var_name : var_names) {
+        original_vars[var_name] = context.contains(var_name) ? context[var_name] : json();
+    }
+
+    auto loop_iteration = [&](const json& item) {
+        if (var_names.size() == 1) {
+            context[var_names[0]] = item;
+        } else {
+            if (!item.is_array() || item.size() != var_names.size()) {
+                throw std::runtime_error("Mismatched number of variables and items in for loop");
+            }
+            for (size_t i = 0; i < var_names.size(); ++i) {
+                context[var_names[i]] = item[i];
+            }
+        }
+        if (!condition || condition->evaluate(context).get<bool>()) {
+          body->render(oss, context);
+        }
+    };
+    std::function<void(const json&)> visit = [&](const json& iter) {
+        for (const auto& item : iter) {
+            if (item.is_array() && recursive) {
+                visit(item);
+            // } else if (item.is_object()) {
+            //     visit(item, recursive);
+            } else {
+                loop_iteration(item);
+            }
+        }
+    };
+    visit(iterable_value);
+    
+    for (const auto & pair : original_vars.items()) {
+        if (pair.value().is_null()) {
+            context.erase(pair.key());
+        } else {
+            context[pair.key()] = pair.value();
+        }
+    }
+}
+
+void BlockNode::render(std::ostringstream& oss, json& context) const {
+    body->render(oss, context);
+}
+
 void SetNode::render(std::ostringstream&, json& context) const {
     context[var_name] = value->evaluate(context);
 }
 
 
-
-
 class JinjaParser {
 private:
-    // std::vector<std::unique_ptr<ASTNode>> ast;
+    // std::vector<std::unique_ptr<TemplateNode>> ast;
 
-    std::unique_ptr<Expression> parseExpression(const std::string& expr) {
-        std::regex binary_op_regex(R"((.+?)\s*(~|==|!=|<|>|<=|>=|\+|-|\*|/|%|in)\s*(.+))");
+    /**
+     * Parsing functions call each other in the right priority order.
+     *
+     * The parsing functions are:
+     * - parseFullExpression
+     * - 
+     * - parsePipe
+     * - parseExpression
+     * - parseEqualityExpression
+     * - parseComparisonExpression
+     * - parseAdditionExpression
+     * - parseMultiplicationExpression
+     * - parseUnaryExpression
+     * - parsePrimaryExpression
+     * - parseMethodCall
+     * 
+     */
+
+    std::unique_ptr<Expression> parseExpression(const std::string& expr) const {
+        std::regex binary_op_regex(R"((.+?)\s*(~|==|!=|<|>|<=|>=|\+|-|\*\*?|/|%|\bin\b|\bis\b)\s*(.+))");
         std::regex method_call_regex(R"((\w+)\.(\w+)\((.*?)\))");
         std::smatch match;
 
@@ -309,6 +548,7 @@ private:
             else if (op_str == "*") op = BinaryOpExpr::Op::Mul;
             else if (op_str == "/") op = BinaryOpExpr::Op::Div;
             else if (op_str == "%") op = BinaryOpExpr::Op::Mod;
+            else if (op_str == "**") op = BinaryOpExpr::Op::Pow;
             else if (op_str == "==") op = BinaryOpExpr::Op::Eq;
             else if (op_str == "!=") op = BinaryOpExpr::Op::Ne;
             else if (op_str == "<") op = BinaryOpExpr::Op::Lt;
@@ -316,6 +556,7 @@ private:
             else if (op_str == "<=") op = BinaryOpExpr::Op::Le;
             else if (op_str == ">=") op = BinaryOpExpr::Op::Ge;
             else if (op_str == "in") op = BinaryOpExpr::Op::In;
+            else if (op_str == "is") op = BinaryOpExpr::Op::Is;
             else throw std::runtime_error("Unknown binary operator: " + op_str);
             return nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), op);
         } else if (std::regex_match(expr, match, method_call_regex)) {
@@ -332,6 +573,8 @@ private:
         // Check if it's a boolean
         if (expr == "true") return nonstd_make_unique<LiteralExpr>(true);
         if (expr == "false") return nonstd_make_unique<LiteralExpr>(false);
+
+        // TODO: parse lists, strings, object literals, index access.
         
         // Check if it's a number
         try {
@@ -342,133 +585,208 @@ private:
         }
     }
 
-    std::pair<std::vector<std::unique_ptr<ASTNode>>, std::vector<std::unique_ptr<ASTNode>>>
-    parseIfBlock(std::string::const_iterator& start, std::string::const_iterator end) {
-        std::vector<std::unique_ptr<ASTNode>> true_branch;
-        std::vector<std::unique_ptr<ASTNode>> false_branch;
-        std::regex else_regex(R"(\{%\s*else\s*%\})");
-        std::regex endif_regex(R"(\{%\s*endif\s*%\})");
-        std::smatch match;
-
-        auto current_branch = &true_branch;
-
-        while (start != end) {
-            if (std::regex_search(start, end, match, else_regex)) {
-                if (match.position() > 0) {
-                    current_branch->push_back(nonstd_make_unique<TextNode>(std::string(start, start + match.position())));
-                }
-                current_branch = &false_branch;
-                start += match.position() + match.length();
-            } else if (std::regex_search(start, end, match, endif_regex)) {
-                if (match.position() > 0) {
-                    current_branch->push_back(nonstd_make_unique<TextNode>(std::string(start, start + match.position())));
-                }
-                start += match.position() + match.length();
-                break;
-            } else {
-                auto nested = parse(std::string(start, end));
-                current_branch->push_back(std::move(nested));
-                break;
-            }
-        }
-
-        return {std::move(true_branch), std::move(false_branch)};
+    static SpaceHandling parseSpaceHandling(const std::string& s) {
+        if (s == "-") return SpaceHandling::Strip;
+        if (s == "~") return SpaceHandling::KeepLines;
+        return SpaceHandling::Keep;
     }
 
-    std::vector<std::unique_ptr<ASTNode>> parseForBlock(std::string::const_iterator& start, std::string::const_iterator end) {
-        std::vector<std::unique_ptr<ASTNode>> body;
-        std::regex endfor_regex(R"(\{%\s*endfor\s*%\})");
-        std::smatch match;
+    using TemplateTokenVector = std::vector<std::unique_ptr<TemplateToken>>;
+    using TemplateTokenIterator = TemplateTokenVector::const_iterator;
 
-        while (start != end) {
-            if (std::regex_search(start, end, match, endfor_regex)) {
-                if (match.position() > 0) {
-                    body.push_back(nonstd_make_unique<TextNode>(std::string(start, start + match.position())));
+    TemplateTokenVector tokenize(const std::string& template_str) const {
+      std::regex token_regex(R"(\{\{([-~]?)\s*(.*?)\s*([-~]?)\}\}|\{%([-~]?)\s*(.*?)\s*([-~]?)%\}|\{#\s*(.*?)\s*#\})");
+
+      std::regex var_regex(R"(\{\{\s*(.*?)\s*\}\})");
+      std::regex if_regex(R"((el)?if\b\s*(.*?))");
+      std::regex for_regex(R"(for\s+((?:\w+)(?:\s*,\s*?:\w+)*)\s+in\b\s*(.*?)(\bif\b(.*?))?(?:\s*\b(recursive))?)");
+      std::regex set_regex(R"(set\s+(\w+)\s*=\s*(.*?))");
+      std::regex named_block_regex(R"(block\s+(\w+))");
+
+      std::vector<std::unique_ptr<TemplateToken>> tokens;
+      const auto start = template_str.begin();
+      auto it = start;
+      const auto end = template_str.end();
+      std::smatch match;
+
+      while (it != end) {
+        auto pos = std::distance(start, it);
+        SpaceHandling pre_space = SpaceHandling::Keep;
+        SpaceHandling post_space = SpaceHandling::Keep;
+        if (std::regex_search(it, end, match, token_regex)) {
+          if (match.position() > 0) {
+            tokens.push_back(nonstd_make_unique<TextTemplateToken>(pos, pre_space, post_space, std::string(it, it + match.position())));
+          }
+          it += match.position() + match.length();
+
+          if (match[7].matched) {
+            tokens.push_back(nonstd_make_unique<CommentTemplateToken>(pos, pre_space, post_space, match[7].str()));
+            continue;
+          }
+          
+          std::string content;
+          bool is_block = false;
+          if (match[1].matched) {
+            pre_space = parseSpaceHandling(match[1].str());
+            content = match[2].str();
+            post_space = parseSpaceHandling(match[3].str());
+          } else {
+            pre_space = parseSpaceHandling(match[4].str());
+            content = match[5].str();
+            post_space = parseSpaceHandling(match[6].str());
+            is_block = true;
+          }
+          
+          if (is_block) {
+            if (std::regex_match(content, match, set_regex)) {
+                std::string var_name = match[1].str();
+                auto value = parseExpression(match[2].str());
+                tokens.push_back(nonstd_make_unique<SetTemplateToken>(pos, pre_space, post_space, var_name, std::move(value)));
+            } else if (std::regex_match(content, match, if_regex)) {
+                auto is_elif = match[1].matched;
+                auto condition = parseExpression(match[2].str());
+                tokens.push_back(
+                  is_elif ? nonstd_make_unique<ElifTemplateToken>(pos, pre_space, post_space, std::move(condition))
+                          : nonstd_make_unique<IfTemplateToken>(pos, pre_space, post_space, std::move(condition)));
+            } else if (std::regex_match(content, match, for_regex)) {
+                std::vector<std::string> var_names;
+                std::istringstream iss(match[1].str());
+                std::string var_name;
+                while (std::getline(iss, var_name, ',')) {
+                    var_names.push_back(std::regex_replace(var_name, std::regex("^\\s+|\\s+$"), ""));
                 }
-                start += match.position() + match.length();
-                break;
+                auto iterable = parseExpression(match[2].str());
+                std::unique_ptr<Expression> condition;
+                if (match[3].matched) {
+                    condition = parseExpression(match[4].str());
+                }
+                bool recursive = match[5].matched;
+                tokens.push_back(nonstd_make_unique<ForTemplateToken>(pos, pre_space, post_space, std::move(var_names), std::move(iterable), std::move(condition), recursive));
+            } else if (std::regex_match(content, match, named_block_regex)) {
+                tokens.push_back(nonstd_make_unique<BlockTemplateToken>(pos, pre_space, post_space, match[1].str()));
+            } else if (content == "else") {
+                tokens.push_back(nonstd_make_unique<ElseTemplateToken>(pos, pre_space, post_space));
+            } else if (content == "endif") {
+                tokens.push_back(nonstd_make_unique<EndIfTemplateToken>(pos, pre_space, post_space));
+            } else if (content == "endfor") {
+                tokens.push_back(nonstd_make_unique<EndForTemplateToken>(pos, pre_space, post_space));
+            } else if (content == "endblock") {
+                tokens.push_back(nonstd_make_unique<EndBlockTemplateToken>(pos, pre_space, post_space));
             } else {
-                auto nested = parse(std::string(start, end));
-                body.push_back(std::move(nested));
-                break;
+                throw std::runtime_error("Unknown block type: " + content);
             }
+          } else {
+            tokens.push_back(nonstd_make_unique<VariableTemplateToken>(pos, pre_space, post_space, std::move(parseExpression(content))));
+          }
+        } else {
+          tokens.push_back(nonstd_make_unique<TextTemplateToken>(pos, pre_space, post_space, std::string(it, end)));
+          break;
         }
+      }
+      return tokens;
+    }
 
-        return body;
+    std::unique_ptr<TemplateNode> parseTemplate(TemplateTokenIterator & it, const TemplateTokenIterator & end) const {
+        std::vector<std::unique_ptr<TemplateNode>> children;
+        auto done = false;
+        while (it != end && !done) {
+          const auto start = it;
+          switch ((*it)->getType()) {
+            case TemplateToken::Type::If: {
+              std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<TemplateNode>>> cascade;
+
+              auto if_token = dynamic_cast<IfTemplateToken*>((*(it++)).get());
+              cascade.emplace_back(std::move(if_token->condition), std::move(parseTemplate(it, end)));
+
+              while (it != end) {
+                  auto & token = *it;
+                  switch ((*it)->getType()) {
+                      case TemplateToken::Type::Elif: {
+                          auto elif_token = dynamic_cast<ElifTemplateToken*>((*(it++)).get());
+                          cascade.emplace_back(std::move(elif_token->condition), std::move(parseTemplate(it, end)));
+                          break;
+                      }
+                      case TemplateToken::Type::Else:
+                          cascade.emplace_back(nullptr, std::move(parseTemplate(++it, end)));
+                          break;
+                      case TemplateToken::Type::EndIf:
+                          it++;
+                          break;
+                      default:
+                          throw token->unexpected("if block");
+                  }
+              }
+              if (it == end) {
+                throw (*start)->unterminated("if block");
+              }
+              children.emplace_back(nonstd_make_unique<IfNode>(std::move(cascade)));
+              break;
+            }
+            case TemplateToken::Type::For: {
+              auto for_token = dynamic_cast<ForTemplateToken*>((*it).get());
+              auto body = parseTemplate(++it, end);
+              if (it == end || (*(it++))->getType() != TemplateToken::Type::EndFor) {
+                  throw (*start)->unterminated("for block");
+              }
+              children.emplace_back(nonstd_make_unique<ForNode>(for_token->var_names, std::move(for_token->iterable), std::move(for_token->condition), std::move(body), for_token->recursive));
+              break;
+            }
+            case TemplateToken::Type::Text:
+              children.emplace_back(nonstd_make_unique<TextNode>(dynamic_cast<TextTemplateToken*>((*(it++)).get())->text));
+              break;
+            case TemplateToken::Type::Variable:
+              children.emplace_back(nonstd_make_unique<VariableNode>(std::move(dynamic_cast<VariableTemplateToken*>((*(it++)).get())->expr), std::vector<std::string>()));
+              break;
+            case TemplateToken::Type::Set: {
+              auto set_token = dynamic_cast<SetTemplateToken*>((*(it++)).get());
+              children.emplace_back(nonstd_make_unique<SetNode>(set_token->var_name, std::move(set_token->value)));
+              break;
+            }
+            case TemplateToken::Type::Comment:
+              // Ignore comments
+              it++;
+              break;
+            case TemplateToken::Type::Block: {
+              auto block_token = dynamic_cast<BlockTemplateToken*>((it++)->get());
+              auto body = parseTemplate(++it, end);
+              if (it == end || (*(it++))->getType() != TemplateToken::Type::EndBlock) {
+                  throw (*start)->unterminated("named block");
+              }
+              children.emplace_back(nonstd_make_unique<BlockNode>(block_token->name, std::move(body)));
+              break;
+            }
+            case TemplateToken::Type::EndBlock:
+            case TemplateToken::Type::EndFor:
+            case TemplateToken::Type::EndIf:
+            case TemplateToken::Type::Else:
+            case TemplateToken::Type::Elif:
+              done = true;
+              break;
+            default:
+              throw (*it)->unexpected("template");
+          }
+        }
+        if (children.empty()) {
+          return nonstd_make_unique<TextNode>(""); // Empty template!
+        } else if (children.size() == 1) {
+          return std::move(children[0]);
+        } else {
+          return nonstd_make_unique<SequenceNode>(std::move(children));
+        }
     }
 
 public:
     JinjaParser() {}
 
-    std::unique_ptr<ASTNode> parse(const std::string& template_str) {
-        std::regex var_regex(R"(\{\{\s*(.*?)\s*\}\})");
-        std::regex if_regex(R"(\{%\s*if\s+(.*?)\s*%\})");
-        std::regex else_regex(R"(\{%\s*else\s*%\})");
-        std::regex endif_regex(R"(\{%\s*endif\s*%\})");
-        std::regex for_regex(R"(\{%\s*for\s+(\w+)\s+in\s+(.*?)\s*%\})");
-        std::regex endfor_regex(R"(\{%\s*endfor\s*%\})");
-        std::regex set_regex(R"(\{%\s*set\s+(\w+)\s*=\s*(.*?)\s*%\})");
+    std::unique_ptr<TemplateNode> parse(const std::string& template_str) const {
+        auto tokens = tokenize(template_str);
 
-        std::string::const_iterator start = template_str.begin();
-        std::string::const_iterator end = template_str.end();
-        std::smatch match;
-
-        std::vector<std::unique_ptr<ASTNode>> children;
-
-        while (start != end) {
-            if (std::regex_search(start, end, match, var_regex)) {
-                if (match.position() > 0) {
-                    children.push_back(nonstd_make_unique<TextNode>(std::string(start, start + match.position())));
-                }
-                std::string var_expr = match[1].str();
-                std::vector<std::string> filters;
-                size_t pipe_pos = var_expr.find('|');
-                if (pipe_pos != std::string::npos) {
-                    std::string filters_str = var_expr.substr(pipe_pos + 1);
-                    var_expr = var_expr.substr(0, pipe_pos);
-                    std::istringstream iss(filters_str);
-                    std::string filter;
-                    while (std::getline(iss, filter, '|')) {
-                        // Strip leading and trailing whitespaces
-                        filter = std::regex_replace(filter, std::regex("^\\s+|\\s+$"), "");
-                        filters.push_back(filter);
-                    }
-                }
-                children.push_back(nonstd_make_unique<VariableNode>(parseExpression(var_expr), std::move(filters)));
-                start += match.position() + match.length();
-            } else if (std::regex_search(start, end, match, set_regex)) {
-                if (match.position() > 0) {
-                    children.push_back(nonstd_make_unique<TextNode>(std::string(start, start + match.position())));
-                }
-                std::string var_name = match[1].str();
-                auto value = parseExpression(match[2].str());
-                children.push_back(nonstd_make_unique<SetNode>(var_name, std::move(value)));
-                start += match.position() + match.length();
-            } else if (std::regex_search(start, end, match, if_regex)) {
-                if (match.position() > 0) {
-                    children.push_back(nonstd_make_unique<TextNode>(std::string(start, start + match.position())));
-                }
-                start += match.position() + match.length();
-                auto condition = parseExpression(match[1].str());
-                auto if_block = parseIfBlock(start, end);
-                const auto & true_branch = if_block.first;
-                const auto & false_branch = if_block.second;
-                // children.push_back(nonstd_make_unique<IfNode>(std::move(condition), std::move(true_branch), std::move(false_branch)));
-                // children.emplace_back(nonstd_make_unique<IfNode>(std::move(condition), std::move(true_branch), std::move(false_branch)));
-            } else if (std::regex_search(start, end, match, for_regex)) {
-                if (match.position() > 0) {
-                    children.push_back(nonstd_make_unique<TextNode>(std::string(start, start + match.position())));
-                }
-                start += match.position() + match.length();
-                std::string var_name = match[1].str();
-                auto iterable = parseExpression(match[2].str());
-                auto body = parseForBlock(start, end);
-                children.push_back(nonstd_make_unique<ForNode>(var_name, std::move(iterable), std::move(body)));
-            } else {
-                children.push_back(nonstd_make_unique<TextNode>(std::string(start, end)));
-                break;
-            }
+        TemplateTokenIterator it = tokens.begin();
+        TemplateTokenIterator end = tokens.end();
+        auto ret = parseTemplate(it, end);
+        if (it != end) {
+            throw (*it)->unexpected("end of template");
         }
-        return nonstd_make_unique<SequenceNode>(std::move(children));
+        return ret;
     }
 };

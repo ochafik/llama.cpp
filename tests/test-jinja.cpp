@@ -31,10 +31,10 @@ int main() {
 {% for tool in tools %}
     {% if tool.function.name == 'ipython' %}
         {% set has_ipython = true %}
-    {% else if tool.function.name in predefined_tools %}
-        {% set * = displayed_tools.append(tool.function.name) %}
+    {% elif tool.function.name in predefined_tools %}
+        {% set _ = displayed_tools.append(tool.function.name) %}
     {% else %}
-        {% set * = other_tools.append(tool) %}
+        {% set _ = other_tools.append(tool) %}
     {% endif %}
 {% endfor %}
 {% if has_ipython %}
