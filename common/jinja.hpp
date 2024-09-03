@@ -32,6 +32,16 @@ nonstd_make_unique(std::size_t n) {
   return std::unique_ptr<T>(new RT[n]);
 }
 
+bool is_true(const json& j) {
+  if (j.is_boolean()) return j.get<bool>();
+  if (j.is_number()) return j.get<double>() != 0;
+  if (j.is_string()) return !j.get<std::string>().empty();
+  if (j.is_array()) return !j.empty();
+  // TODO: check truthfulness semantics of jinja
+  return !j.is_null();
+}
+
+
 // Forward declarations
 class TemplateNode;
 class Expression;
@@ -367,8 +377,8 @@ public:
             case Op::Gt:        return l > r;
             case Op::Le:        return l <= r;
             case Op::Ge:        return l >= r;
-            case Op::And:       return l.get<bool>() && r.get<bool>();
-            case Op::Or:        return l.get<bool>() || r.get<bool>();
+            case Op::And:       return is_true(l) && is_true(r);
+            case Op::Or:        return is_true(l) || is_true(r);
             case Op::In:        return r.is_array() && r.find(l) != r.end();
             default:            break;
         }
@@ -445,7 +455,7 @@ void VariableNode::render(std::ostringstream& oss, json& context) const {
 
 void IfNode::render(std::ostringstream& oss, json& context) const {
     for (const auto& branch : cascade) {
-        if (branch.first->evaluate(context).get<bool>()) {
+        if (is_true(branch.first->evaluate(context))) {
             branch.second->render(oss, context);
             return;
         }
@@ -475,7 +485,7 @@ void ForNode::render(std::ostringstream& oss, json& context) const {
                 context[var_names[i]] = item[i];
             }
         }
-        if (!condition || condition->evaluate(context).get<bool>()) {
+        if (!condition || is_true(condition->evaluate(context))) {
           body->render(oss, context);
         }
     };
@@ -698,26 +708,16 @@ private:
               auto if_token = dynamic_cast<IfTemplateToken*>((*(it++)).get());
               cascade.emplace_back(std::move(if_token->condition), std::move(parseTemplate(it, end)));
 
-              while (it != end) {
-                  auto & token = *it;
-                  switch ((*it)->getType()) {
-                      case TemplateToken::Type::Elif: {
-                          auto elif_token = dynamic_cast<ElifTemplateToken*>((*(it++)).get());
-                          cascade.emplace_back(std::move(elif_token->condition), std::move(parseTemplate(it, end)));
-                          break;
-                      }
-                      case TemplateToken::Type::Else:
-                          cascade.emplace_back(nullptr, std::move(parseTemplate(++it, end)));
-                          break;
-                      case TemplateToken::Type::EndIf:
-                          it++;
-                          break;
-                      default:
-                          throw token->unexpected("if block");
-                  }
+              while (it != end && (*it)->getType() == TemplateToken::Type::Elif) {
+                  auto elif_token = dynamic_cast<ElifTemplateToken*>((*(it++)).get());
+                  cascade.emplace_back(std::move(elif_token->condition), std::move(parseTemplate(it, end)));
               }
-              if (it == end) {
-                throw (*start)->unterminated("if block");
+
+              if (it != end && (*it)->getType() == TemplateToken::Type::Else) {
+                cascade.emplace_back(nullptr, std::move(parseTemplate(++it, end)));
+              }
+              if (it == end || (*(it++))->getType() != TemplateToken::Type::EndIf) {
+                  throw (*start)->unterminated("if block");
               }
               children.emplace_back(nonstd_make_unique<IfNode>(std::move(cascade)));
               break;
