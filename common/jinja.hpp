@@ -66,12 +66,12 @@ public:
     if (v.is_object()) {
       type = Object;
       for (auto it = v.begin(); it != v.end(); ++it) {
-        object_[it.key()] = std::make_shared<Value>(it.value());
+        object_[it.key()] = Value::make(it.value());
       }
     } else if (v.is_array()) {
       type = Array;
       for (const auto& item : v) {
-        array_.push_back(std::make_shared<Value>(item));
+        array_.push_back(Value::make(item));
       }
     } else {
       type = Primitive;
@@ -96,14 +96,18 @@ public:
   static std::shared_ptr<Value> array(const std::vector<std::shared_ptr<Value>>& v = {}) {
     return std::shared_ptr<Value>(new Value(v));
   }
+  static std::shared_ptr<Value> object(const std::unordered_map<json, std::shared_ptr<Value>>& v = {}) {
+    return std::shared_ptr<Value>(new Value(v));
+  }
+  
+  template <class... Args>
+  static std::shared_ptr<Value> make(Args &&...args) {
+    return std::shared_ptr<Value>(new Value(std::forward<Args>(args)...));
+  }
 
   void push_back(const std::shared_ptr<Value>& v) {
     if (!is_array()) throw std::runtime_error("Value is not an array");
     array_.push_back(v);
-  }
-
-  static std::shared_ptr<Value> object(const std::unordered_map<json, std::shared_ptr<Value>>& v = {}) {
-    return std::shared_ptr<Value>(new Value(v));
   }
 
   std::shared_ptr<Value>& operator[](const Value& key) {
@@ -176,6 +180,10 @@ public:
     }
     return false;
   }
+  void erase(const std::string & key) {
+    if (!is_object()) throw std::runtime_error("Value is not an object");
+    object_.erase(key);
+  }
   bool contains(const Value & value) const {
     if (is_null()) throw std::runtime_error("Undefined value or reference");
     if (is_array()) {
@@ -246,46 +254,46 @@ public:
 
   std::shared_ptr<Value> operator-() const {
       if (is_number_integer())
-        return std::make_shared<Value>(-get<int64_t>());
+        return Value::make(-get<int64_t>());
       else
-        return std::make_shared<Value>(-get<double>());
+        return Value::make(-get<double>());
   }
 
   std::shared_ptr<Value> operator!() const {
       bool b = *this;
-      return std::make_shared<Value>(!b);
+      return Value::make(!b);
   }
 
   std::shared_ptr<Value> operator+(const Value& rhs) {
       if (is_number_integer() && rhs.is_number_integer())
-        return std::make_shared<Value>(get<int64_t>() + rhs.get<int64_t>());
+        return Value::make(get<int64_t>() + rhs.get<int64_t>());
       else
-        return std::make_shared<Value>(get<double>() + rhs.get<double>());
+        return Value::make(get<double>() + rhs.get<double>());
   }
 
   std::shared_ptr<Value> operator-(const Value& rhs) {
       if (is_number_integer() && rhs.is_number_integer())
-        return std::make_shared<Value>(get<int64_t>() - rhs.get<int64_t>());
+        return Value::make(get<int64_t>() - rhs.get<int64_t>());
       else
-        return std::make_shared<Value>(get<double>() - rhs.get<double>());
+        return Value::make(get<double>() - rhs.get<double>());
   }
 
   std::shared_ptr<Value> operator*(const Value& rhs) {
       if (is_number_integer() && rhs.is_number_integer())
-        return std::make_shared<Value>(get<int64_t>() * rhs.get<int64_t>());
+        return Value::make(get<int64_t>() * rhs.get<int64_t>());
       else
-        return std::make_shared<Value>(get<double>() * rhs.get<double>());
+        return Value::make(get<double>() * rhs.get<double>());
   }
 
   std::shared_ptr<Value> operator/(const Value& rhs) {
       if (is_number_integer() && rhs.is_number_integer())
-        return std::make_shared<Value>(get<int64_t>() / rhs.get<int64_t>());
+        return Value::make(get<int64_t>() / rhs.get<int64_t>());
       else
-        return std::make_shared<Value>(get<double>() / rhs.get<double>());
+        return Value::make(get<double>() / rhs.get<double>());
   }
 
   std::shared_ptr<Value> operator%(const Value& rhs) {
-    return std::make_shared<Value>(get<int64_t>() % rhs.get<int64_t>());
+    return Value::make(get<int64_t>() % rhs.get<int64_t>());
   }
 
   std::string dump(int indent=0) const {
@@ -662,36 +670,36 @@ public:
           if (!t) throw std::runtime_error("Right side of 'is' operator must be a variable");
 
           const auto & name = t->get_name();
-          if (name == "boolean") return std::make_shared<Value>(l->is_boolean());
-          if (name == "integer") return std::make_shared<Value>(l->is_number_integer());
-          if (name == "float") return std::make_shared<Value>(l->is_number_float());
-          if (name == "number") return std::make_shared<Value>(l->is_number());
-          if (name == "string") return std::make_shared<Value>(l->is_string());
-          if (name == "mapping") return std::make_shared<Value>(l->is_object());
-          if (name == "iterable") return std::make_shared<Value>(l->is_array());
-          if (name == "sequence") return std::make_shared<Value>(l->is_array());
+          if (name == "boolean") return Value::make(l->is_boolean());
+          if (name == "integer") return Value::make(l->is_number_integer());
+          if (name == "float") return Value::make(l->is_number_float());
+          if (name == "number") return Value::make(l->is_number());
+          if (name == "string") return Value::make(l->is_string());
+          if (name == "mapping") return Value::make(l->is_object());
+          if (name == "iterable") return Value::make(l->is_array());
+          if (name == "sequence") return Value::make(l->is_array());
           throw std::runtime_error("Unknown type for 'is' operator: " + name);
         }
 
         auto r = right->evaluate(context);
         switch (op) {
-            case Op::StrConcat: return std::make_shared<Value>(l->get<std::string>() + r->get<std::string>());
+            case Op::StrConcat: return Value::make(l->get<std::string>() + r->get<std::string>());
             case Op::Add:       return (*l) + (*r);
             case Op::Sub:       return (*l) - (*r);
             case Op::Mul:       return (*l) * (*r);
             case Op::Div:       return (*l) / (*r);
-            case Op::MulMul:    return std::make_shared<Value>(std::pow(l->get<double>(), r->get<double>()));
-            case Op::DivDiv:    return std::make_shared<Value>(l->get<int64_t>() / r->get<int64_t>());
-            case Op::Mod:       return std::make_shared<Value>(l->get<int64_t>() % r->get<int64_t>());
-            case Op::Eq:        return std::make_shared<Value>((*l) == (*r));
-            case Op::Ne:        return std::make_shared<Value>((*l) != (*r));
-            case Op::Lt:        return std::make_shared<Value>((*l) < (*r));
-            case Op::Gt:        return std::make_shared<Value>((*l) > (*r));
-            case Op::Le:        return std::make_shared<Value>((*l) <= (*r));
-            case Op::Ge:        return std::make_shared<Value>((*l) >= (*r));
-            case Op::And:       return std::make_shared<Value>((*l) && (*r));
-            case Op::Or:        return std::make_shared<Value>((*l) || (*r));
-            case Op::In:        return std::make_shared<Value>(r->is_array() && r->contains(*l));
+            case Op::MulMul:    return Value::make(std::pow(l->get<double>(), r->get<double>()));
+            case Op::DivDiv:    return Value::make(l->get<int64_t>() / r->get<int64_t>());
+            case Op::Mod:       return Value::make(l->get<int64_t>() % r->get<int64_t>());
+            case Op::Eq:        return Value::make((*l) == (*r));
+            case Op::Ne:        return Value::make((*l) != (*r));
+            case Op::Lt:        return Value::make((*l) < (*r));
+            case Op::Gt:        return Value::make((*l) > (*r));
+            case Op::Le:        return Value::make((*l) <= (*r));
+            case Op::Ge:        return Value::make((*l) >= (*r));
+            case Op::And:       return Value::make((*l) && (*r));
+            case Op::Or:        return Value::make((*l) || (*r));
+            case Op::In:        return Value::make(r->is_array() && r->contains(*l));
             default:            break;
         }
         throw std::runtime_error("Unknown binary operator");
@@ -707,16 +715,12 @@ public:
         : object(std::move(obj)), method(m), args(std::move(a)) {}
     bool is_function_call() const { return object == nullptr; }
     const std::string& get_method() const { return method; }
-    // const std::vector<std::unique_ptr<Expression>>& get_args() const { return args; }
     std::shared_ptr<Value> evaluate(Value & context) const override {
         auto obj = object->evaluate(context);
         if (method == "append" && obj->is_array()) {
             if (args.size() != 1 || !args[0].first.empty()) throw std::runtime_error("append method must have exactly one unnamed argument");
             obj->push_back(args[0].second->evaluate(context));
-            // for (const auto& arg : args) {
-            //     obj.push_back(arg.second->evaluate(context));
-            // }
-            return std::make_shared<Value>();
+            return Value::make();
         }
         throw std::runtime_error("Unknown method: " + method);
     }
@@ -751,10 +755,10 @@ public:
     std::shared_ptr<Value> evaluateAsPipe(Value & context, std::shared_ptr<Value>& input) const override {
         std::shared_ptr<Value> result(input);
         if (name == "tojson") {
-          auto indent = getSingleArg("indent", true, context, std::make_shared<Value>(0LL))->get<int64_t>();
-          result = std::make_shared<Value>(result->dump(indent));
+          auto indent = getSingleArg("indent", true, context, Value::make(0LL))->get<int64_t>();
+          result = Value::make(result->dump(indent));
         } else if (name == "join") {
-          auto sep = getSingleArg("d", true, context, std::make_shared<Value>(""))->get<std::string>();
+          auto sep = getSingleArg("d", true, context, Value::make(""))->get<std::string>();
           std::ostringstream oss;
           auto first = true;
           for (size_t i = 0, n = input->size(); i < n; ++i) {
@@ -762,7 +766,7 @@ public:
             else oss << sep;
             oss << input->at(i)->get<std::string>();
           }
-          result = std::make_shared<Value>(oss.str());
+          result = Value::make(oss.str());
         } else {
           throw std::runtime_error("Unknown pipe function: " + name);
         }
@@ -822,7 +826,7 @@ void ForNode::render(std::ostringstream& oss, Value & context) const {
     auto original_context = context;
     auto original_vars = Value::object();
     for (const auto& var_name : var_names) {
-        (*original_vars)[var_name] = context.contains(var_name) ? context[var_name] : std::make_shared<Value>();
+        (*original_vars)[var_name] = context.contains(var_name) ? context[var_name] : Value::make();
     }
 
     auto loop_iteration = [&](const std::shared_ptr<Value>& item) {
@@ -837,19 +841,15 @@ void ForNode::render(std::ostringstream& oss, Value & context) const {
                 context[var_names[i]] = item->at(i);
             }
         }
-        // Context child_context(bindings, context.shared_from_this());
         if (!condition || condition->evaluate(context)) {
           body->render(oss, context);
         }
     };
     std::function<void(const std::shared_ptr<Value>&)> visit = [&](const std::shared_ptr<Value>& iter) {
-        // for (const auto& item : iter) {
         for (size_t i = 0, n = iter->size(); i < n; ++i) {
             auto & item = iter->at(i);
             if (item->is_array() && recursive) {
                 visit(item);
-            // } else if (item.is_object()) {
-            //     visit(item, recursive);
             } else {
                 loop_iteration(item);
             }
@@ -857,13 +857,13 @@ void ForNode::render(std::ostringstream& oss, Value & context) const {
     };
     visit(iterable_value);
     
-    // for (const auto & pair : original_vars.items()) {
-    //     if (pair.value().is_null()) {
-    //         context.erase(pair.key());
-    //     } else {
-    //         context[pair.key()] = pair.value();
-    //     }
-    // }
+    for (const auto& var_name : var_names) {
+        if (original_vars->contains(var_name)) {
+            context[var_name] = original_vars->at(var_name);
+        } else {
+            context.erase(var_name);
+        }
+    }
 }
 
 void BlockNode::render(std::ostringstream& oss, Value & context) const {
@@ -907,8 +907,6 @@ private:
                   result += *it;
                 }
                 break;
-              // case quote: result += '"'; break;
-              // default: result += *it; break;
             }
           } else if (*it == '\\') {
             escape = true;
@@ -968,29 +966,29 @@ private:
       if (it == end) return nullptr;
       if (*it == '"' || *it == '\'') {
         auto str = parseString(it, end);
-        if (str) return std::make_shared<Value>(*str);
+        if (str) return Value::make(*str);
       }
       if (*it == 't') {
         if (std::distance(it, end) >= 4 && std::string(it, it + 4) == "true") {
           it += 4;
-          return std::make_shared<Value>(true);
+          return Value::make(true);
         }
       }
       if (*it == 'f') {
         if (std::distance(it, end) >= 5 && std::string(it, it + 5) == "false") {
           it += 5;
-          return std::make_shared<Value>(false);
+          return Value::make(false);
         }
       }
       if (*it == 'n') {
         if (std::distance(it, end) >= 4 && std::string(it, it + 4) == "null") {
           it += 4;
-          return std::make_shared<Value>(nullptr);
+          return Value::make(nullptr);
         }
       }
 
       auto number = parseNumber(it, end);
-      return std::make_shared<Value>(number);
+      return Value::make(number);
     }
 
     class expression_parsing_error : public std::runtime_error {
@@ -1003,7 +1001,6 @@ private:
       }
     };
     
-
     expression_parsing_error expr_parse_error(const std::string & message, const CharIterator & it, const CharIterator & end) const {
         return expression_parsing_error(message, it);
     }
@@ -1048,12 +1045,11 @@ private:
       * - MathMulDiv = MathUnaryPlusMinus (("*" | "/" | "//" | "%") MathMulDiv)? = MathUnaryPlusMinus (("*" | "/" | "//" | "%") MathUnaryPlusMinus)*
       * - MathUnaryPlusMinus = ("+" | "-" | "!")? ValueExpression ("|" FilterExpression)?
       * - FilterExpression = identifier CallParams ("|" FilterExpression)? = identifier CallParams ("|" identifier CallParams)*
-      * - ValueExpression = (identifier | number | string | bool | BracedExpressionOrArray | Tuple | Dictionary ) SubScript? Call?
+      * - ValueExpression = (identifier | number | string | bool | BracedExpressionOrArray | Tuple | Dictionary ) SubScript? CallParams?
       * - BracedExpressionOrArray = "(" FullExpression ("," FullExpression)* ")"
       * - Tuple = "[" (FullExpression ("," FullExpression)*)? "]"
       * - Dictionary = "{" (string "=" FullExpression ("," string "=" FullExpression)*)? "}"
-      * - SubScript = ("[" FullExpression "]" | "." identifier )+
-      * - Call = CallParams 
+      * - SubScript = ("[" FullExpression "]" | "." identifier CallParams? )+
       * - CallParams = "(" ((identifier "=")? FullExpression ("," (identifier "=")? FullExpression)*)? ")"
       */
     std::unique_ptr<Expression> parseExpression(const std::string & expr) const {
@@ -1298,7 +1294,7 @@ private:
         if (!constant->is_null()) return nonstd_make_unique<LiteralExpr>(constant);
 
         static std::regex null_regex(R"(null\b)");
-        if (!consumeToken(null_regex, it, end).empty()) return nonstd_make_unique<LiteralExpr>(std::make_shared<Value>());
+        if (!consumeToken(null_regex, it, end).empty()) return nonstd_make_unique<LiteralExpr>(Value::make());
 
         auto identifier = parseIdentifier(it, end);
         if (!identifier.empty()) return nonstd_make_unique<VariableExpr>(identifier);
@@ -1332,7 +1328,7 @@ private:
               auto callParams = parseCallParams(it, end);
               value = nonstd_make_unique<MethodCallExpr>(std::move(value), identifier, std::move(callParams));
             } else {
-              value = nonstd_make_unique<SubscriptExpr>(std::move(value), nonstd_make_unique<LiteralExpr>(std::make_shared<Value>(identifier)));
+              value = nonstd_make_unique<SubscriptExpr>(std::move(value), nonstd_make_unique<LiteralExpr>(Value::make(identifier)));
             }
         }
       }
