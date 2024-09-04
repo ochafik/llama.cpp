@@ -6,12 +6,44 @@
 
 using json = nlohmann::json;
 
+void test_render(const std::string & template_str, const json & context, const std::string & expected, const json & expected_context = json()) {
+    auto root = JinjaParser::parse(template_str);
+    auto copy = context.is_null() ? json::object() : context;
+    auto actual = root->render(copy);
+
+    if (expected != actual) {
+        std::cerr << "Expected: " << expected << std::endl;
+        std::cerr << "Actual: " << actual << std::endl;
+        throw std::runtime_error("Test failed");
+    }
+
+    if (!expected_context.is_null()) {
+        for (const auto & kv : expected_context.items()) {
+            if (copy[kv.key()] != kv.value()) {
+                std::cerr << "Expected context: " << expected_context.dump() << std::endl;
+                std::cerr << "Actual context: " << copy.dump() << std::endl;
+                throw std::runtime_error("Test failed");
+            }
+        }
+    }
+}
+
 /*
     cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -t test-jinja -j && ./build/bin/test-jinja
 
     cmake -B buildDebug -DCMAKE_BUILD_TYPE=Debug && cmake --build buildDebug -t test-jinja -j && ./buildDebug/bin/test-jinja
 */
 int main() {
+    test_render(R"(
+        {%- set user = "Olivier" -%}
+        {%- set greeting = "Hello " ~ user -%}
+        {{- greeting -}}
+    )", json(), "Hello Olivier");
+
+    test_render(
+        R"( {{ "a" -}} b {{- "c" }} )", json(),
+        " abc ");
+
     json context = {
         {"tools", {
             {{"function", {{"name", "ipython"}}}},

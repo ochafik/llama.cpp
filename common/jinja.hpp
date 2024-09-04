@@ -573,8 +573,7 @@ void VariableNode::render(std::ostringstream& oss, json& context) const {
     json result = expr->evaluate(context);
     if (result.is_string()) {
         oss << result.get<std::string>();
-    } else {
-        // TODO: what is the behaviour here, should we explode when given an object? Be silent with null?
+    } else if (!result.is_null()) {
         oss << result.dump();
     }
 }
@@ -901,12 +900,12 @@ private:
         if (!left) throw expr_parse_error("Expected left side of 'logical compare' expression", it, end);
 
         static std::regex compare_tok(R"((==|!=|<=?|>=?|in|is)\b)");
-        std::smatch match;
-        while (!consumeToken(compare_tok, it, end).empty()) {
+        std::string op_str;
+        while (!(op_str = consumeToken(compare_tok, it, end)).empty()) {
             auto right = parseStringConcat(it, end);
             if (!right) throw expr_parse_error("Expected right side of 'logical compare' expression", it, end);
             BinaryOpExpr::Op op;
-            if (match[0] == "is") {
+            if (op_str == "is") {
               auto identifier = parseIdentifier(it, end);
               auto callParams = parseCallParams(it, end);
               // if (!callParams) throw expr_parse_error("Expected call params after 'is' keyword", it, end);
@@ -916,13 +915,13 @@ private:
                   nonstd_make_unique<MethodCallExpr>(nullptr, identifier, std::move(callParams)),
                   BinaryOpExpr::Op::Is);
             }
-            if (match[0] == "==") op = BinaryOpExpr::Op::Eq;
-            else if (match[0] == "!=") op = BinaryOpExpr::Op::Ne;
-            else if (match[0] == "<") op = BinaryOpExpr::Op::Lt;
-            else if (match[0] == ">") op = BinaryOpExpr::Op::Gt;
-            else if (match[0] == "<=") op = BinaryOpExpr::Op::Le;
-            else if (match[0] == ">=") op = BinaryOpExpr::Op::Ge;
-            else if (match[0] == "in") op = BinaryOpExpr::Op::In;
+            if (op_str == "==") op = BinaryOpExpr::Op::Eq;
+            else if (op_str == "!=") op = BinaryOpExpr::Op::Ne;
+            else if (op_str == "<") op = BinaryOpExpr::Op::Lt;
+            else if (op_str == ">") op = BinaryOpExpr::Op::Gt;
+            else if (op_str == "<=") op = BinaryOpExpr::Op::Le;
+            else if (op_str == ">=") op = BinaryOpExpr::Op::Ge;
+            else if (op_str == "in") op = BinaryOpExpr::Op::In;
             left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), op);
         }
         return left;
@@ -980,7 +979,6 @@ private:
         auto left = parseMathPlusMinus(it, end);
         if (!left) throw expr_parse_error("Expected left side of 'math pow' expression", it, end);
 
-        std::smatch match;
         while (!consumeToken("**", it, end).empty()) {
             auto right = parseMathPlusMinus(it, end);
             if (!right) throw expr_parse_error("Expected right side of 'math pow' expression", it, end);
@@ -1291,7 +1289,7 @@ private:
       return tokens;
     }
 
-    std::unique_ptr<TemplateNode> parseTemplate(TemplateTokenIterator & it, const TemplateTokenIterator & end) const {
+    std::unique_ptr<TemplateNode> parseTemplate(const TemplateTokenIterator & begin, TemplateTokenIterator & it, const TemplateTokenIterator & end) const {
         std::vector<std::unique_ptr<TemplateNode>> children;
         auto done = false;
         while (it != end && !done) {
@@ -1301,15 +1299,15 @@ private:
               std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<TemplateNode>>> cascade;
 
               auto if_token = dynamic_cast<IfTemplateToken*>((*(it++)).get());
-              cascade.emplace_back(std::move(if_token->condition), std::move(parseTemplate(it, end)));
+              cascade.emplace_back(std::move(if_token->condition), std::move(parseTemplate(begin, it, end)));
 
               while (it != end && (*it)->getType() == TemplateToken::Type::Elif) {
                   auto elif_token = dynamic_cast<ElifTemplateToken*>((*(it++)).get());
-                  cascade.emplace_back(std::move(elif_token->condition), std::move(parseTemplate(it, end)));
+                  cascade.emplace_back(std::move(elif_token->condition), std::move(parseTemplate(begin, it, end)));
               }
 
               if (it != end && (*it)->getType() == TemplateToken::Type::Else) {
-                cascade.emplace_back(nullptr, std::move(parseTemplate(++it, end)));
+                cascade.emplace_back(nullptr, std::move(parseTemplate(begin, ++it, end)));
               }
               if (it == end || (*(it++))->getType() != TemplateToken::Type::EndIf) {
                   throw (*start)->unterminated("if block");
@@ -1319,16 +1317,35 @@ private:
             }
             case TemplateToken::Type::For: {
               auto for_token = dynamic_cast<ForTemplateToken*>((*it).get());
-              auto body = parseTemplate(++it, end);
+              auto body = parseTemplate(begin, ++it, end);
               if (it == end || (*(it++))->getType() != TemplateToken::Type::EndFor) {
                   throw (*start)->unterminated("for block");
               }
               children.emplace_back(nonstd_make_unique<ForNode>(for_token->var_names, std::move(for_token->iterable), std::move(for_token->condition), std::move(body), for_token->recursive));
               break;
             }
-            case TemplateToken::Type::Text:
-              children.emplace_back(nonstd_make_unique<TextNode>(dynamic_cast<TextTemplateToken*>((*(it++)).get())->text));
+            case TemplateToken::Type::Text: {
+              SpaceHandling pre_space = it != begin ? (*(it - 1))->post_space : SpaceHandling::Keep;
+              SpaceHandling post_space = it + 1 != end ? (*(it + 1))->pre_space : SpaceHandling::Keep;
+              auto text = dynamic_cast<TextTemplateToken*>((*(it++)).get())->text;
+              if (pre_space == SpaceHandling::Strip) {
+                static std::regex r(R"(^(\s|\r|\n)+)");
+                text = std::regex_replace(text, r, "");
+              } else if (pre_space == SpaceHandling::KeepLines) {
+                static std::regex r(R"(^\s+)");
+                text = std::regex_replace(text, r, "\n");
+              }
+              if (post_space == SpaceHandling::Strip) {
+                static std::regex r(R"((\s|\r|\n)+$)");
+                text = std::regex_replace(text, r, "");
+              } else if (post_space == SpaceHandling::KeepLines) {
+                static std::regex r(R"(\s+$)");
+                text = std::regex_replace(text, r, "");
+              }
+
+              children.emplace_back(nonstd_make_unique<TextNode>(text));
               break;
+            }
             case TemplateToken::Type::Variable:
               children.emplace_back(nonstd_make_unique<VariableNode>(std::move(dynamic_cast<VariableTemplateToken*>((*(it++)).get())->expr), std::vector<std::string>()));
               break;
@@ -1343,7 +1360,7 @@ private:
               break;
             case TemplateToken::Type::Block: {
               auto block_token = dynamic_cast<BlockTemplateToken*>((it++)->get());
-              auto body = parseTemplate(++it, end);
+              auto body = parseTemplate(begin, ++it, end);
               if (it == end || (*(it++))->getType() != TemplateToken::Type::EndBlock) {
                   throw (*start)->unterminated("named block");
               }
@@ -1379,9 +1396,10 @@ public:
         JinjaParser parser(template_str);
 
         auto tokens = parser.tokenize();
-        TemplateTokenIterator it = tokens.begin();
+        TemplateTokenIterator begin = tokens.begin();
+        auto it = begin;
         TemplateTokenIterator end = tokens.end();
-        auto ret = parser.parseTemplate(it, end);
+        auto ret = parser.parseTemplate(begin, it, end);
         if (it != end) {
             throw (*it)->unexpected("end of template");
         }
