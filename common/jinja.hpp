@@ -346,7 +346,7 @@ class TemplateToken {
 public:
     enum class Type {
         Text,
-        Variable,
+        Expression,
         If,
         Else,
         Elif,
@@ -361,32 +361,20 @@ public:
 
     static std::string typeToString(Type t) {
         switch (t) {
-            case Type::Text: return "Text";
-            case Type::Variable: return "Variable";
-            case Type::If: return "If";
-            case Type::Else: return "Else";
-            case Type::Elif: return "Elif";
-            case Type::EndIf: return "EndIf";
-            case Type::For: return "For";
-            case Type::EndFor: return "EndFor";
-            case Type::Set: return "Set";
-            case Type::Comment: return "Comment";
-            case Type::Block: return "Block";
-            case Type::EndBlock: return "EndBlock";
+            case Type::Text: return "text";
+            case Type::Expression: return "expression";
+            case Type::If: return "if";
+            case Type::Else: return "else";
+            case Type::Elif: return "elif";
+            case Type::EndIf: return "endif";
+            case Type::For: return "for";
+            case Type::EndFor: return "endfor";
+            case Type::Set: return "set";
+            case Type::Comment: return "comment";
+            case Type::Block: return "block";
+            case Type::EndBlock: return "endblock";
         }
         return "Unknown";
-    }
-
-    std::runtime_error unexpected(const std::string & context) const {
-      return std::runtime_error("Unexpected token in " + context + ": " + TemplateToken::typeToString(getType()));
-    }
-    std::runtime_error unterminated(const std::string & context) const {
-      return std::runtime_error("Unterminated " + context + ": " + TemplateToken::typeToString(getType()));
-    }
-    void expectType(Type type) const {
-      if (getType() != type) {
-        throw unexpected("expecting " + typeToString(type));
-      }
     }
 
     TemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : pos(pos), pre_space(pre), post_space(post) {}
@@ -404,10 +392,10 @@ struct TextTemplateToken : public TemplateToken {
     Type getType() const override { return Type::Text; }
 };
 
-struct VariableTemplateToken : public TemplateToken {
+struct ExpressionTemplateToken : public TemplateToken {
     std::unique_ptr<Expression> expr;
-    VariableTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, std::unique_ptr<Expression> && e) : TemplateToken(pos, pre, post), expr(std::move(e)) {}
-    Type getType() const override { return Type::Variable; }
+    ExpressionTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, std::unique_ptr<Expression> && e) : TemplateToken(pos, pre, post), expr(std::move(e)) {}
+    Type getType() const override { return Type::Expression; }
 };
 
 struct IfTemplateToken : public TemplateToken {
@@ -1221,7 +1209,8 @@ private:
         auto left = parseMathPow(it, end);
         if (!left) throw std::runtime_error("Expected left side of 'string concat' expression");
 
-        if (!consumeToken("~", it, end).empty()) {
+        static std::regex concat_tok(R"(~(?!\}))");
+        if (!consumeToken(concat_tok, it, end).empty()) {
             auto right = parseLogicalAnd(it, end);
             if (!right) throw std::runtime_error("Expected right side of 'string concat' expression");
             left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), BinaryOpExpr::Op::StrConcat);
@@ -1242,10 +1231,10 @@ private:
     }
 
     std::unique_ptr<Expression> parseMathPlusMinus(CharIterator & it, const CharIterator & end) const {
+        static std::regex plus_minus_tok(R"(\+|-(?![}%#]\}))");
+
         auto left = parseMathMulDiv(it, end);
         if (!left) throw std::runtime_error("Expected left side of 'math plus/minus' expression");
-
-        static std::regex plus_minus_tok(R"([-+])");
         std::string op_str;
         while (!(op_str = consumeToken(plus_minus_tok, it, end)).empty()) {
             auto right = parseMathMulDiv(it, end);
@@ -1303,7 +1292,7 @@ private:
 
     std::unique_ptr<Expression> parseMathUnaryPlusMinus(CharIterator & it, const CharIterator & end) const {
         consumeSpaces(it, end);
-        static std::regex unary_plus_minus_tok(R"([-+]|not)");
+        static std::regex unary_plus_minus_tok(R"(\+|-(?![}%#]\})|not)");
         auto op_str = consumeToken(unary_plus_minus_tok, it, end);
         auto expr = parseValueExpression(it, end);
         if (!expr) throw std::runtime_error("Expected expr of 'unary plus/minus' expression");
@@ -1470,12 +1459,31 @@ private:
       return varnames;
     }
 
+
+    std::runtime_error unexpected(const TemplateToken & token, const std::string & context) const {
+      return std::runtime_error("Unexpected " + TemplateToken::typeToString(token.getType())
+        + error_location_suffix(token.pos));// + " in " + context);
+    }
+    std::runtime_error unterminated(const TemplateToken & token) const {
+      return std::runtime_error("Unterminated " + TemplateToken::typeToString(token.getType())
+        + error_location_suffix(token.pos));
+      // context);// + ": " + TemplateToken::typeToString(getType()));
+    }
+    std::string error_location_suffix(size_t pos) const {
+      auto start = template_str.begin();
+      auto end = template_str.end();
+      auto it = start + pos;
+      auto line = std::count(start, it, '\n') + 1;
+      auto col = pos - std::string(start, it).rfind('\n');
+      return " at row " + std::to_string(line) + ", column " + std::to_string(col) + ": " + std::string(it, end);
+    }
+
     TemplateTokenVector tokenize() const {
       std::vector<std::string> group;
       static std::regex comment_tok(R"(\{#([-~]?)(.*?)([-~]?)#\{)");
       static std::regex expr_open_regex(R"(\{\{([-~])?)");
       static std::regex block_open_regex(R"(^\{%([-~])?[\s\n]*)");
-      static std::regex block_keyword_tok(R"((if|for|set|block)\b)");
+      static std::regex block_keyword_tok(R"((if|else|elif|endif|for|endfor|set|block|endblock)\b)");
       static std::regex text_regex(R"(.*?($|(?=\{\{|\{%|\{#)))");
       static std::regex expr_close_regex(R"([\s\n]*([-~])?\}\})");
       static std::regex block_close_regex(R"([\s\n]*([-~])?%\})");
@@ -1506,7 +1514,7 @@ private:
             }
 
             auto post_space = parseSpaceHandling(group[1]);
-            tokens.push_back(nonstd_make_unique<VariableTemplateToken>(pos, pre_space, post_space, std::move(expr)));
+            tokens.push_back(nonstd_make_unique<ExpressionTemplateToken>(pos, pre_space, post_space, std::move(expr)));
           }
           
 
@@ -1577,8 +1585,11 @@ private:
 
               auto post_space = parseBlockClose();
               tokens.push_back(nonstd_make_unique<BlockTemplateToken>(pos, pre_space, post_space, blockname));
+            } else if (keyword == "endblock") {
+              auto post_space = parseBlockClose();
+              tokens.push_back(nonstd_make_unique<EndBlockTemplateToken>(pos, pre_space, post_space));
             } else {
-              throw std::runtime_error("Unknown block keyword: " + keyword);
+              throw std::runtime_error("Unexpected block: " + keyword);
             }
           }
 
@@ -1589,16 +1600,15 @@ private:
         }
         return tokens;
       } catch (const std::runtime_error & e) {
-        std::string message = e.what();
-        auto pos = std::distance(start, it);
-        auto line = std::count(start, it, '\n') + 1;
-        auto col = pos - std::string(start, it).rfind('\n');
-        message += " at row " + std::to_string(line) + ", column " + std::to_string(col) + ": " + std::string(it, end);
-        throw std::runtime_error(message);
+        throw std::runtime_error(e.what() + error_location_suffix(std::distance(start, it)));
       }
     }
 
-    std::unique_ptr<TemplateNode> parseTemplate(const TemplateTokenIterator & begin, TemplateTokenIterator & it, const TemplateTokenIterator & end) const {
+    std::unique_ptr<TemplateNode> parseTemplate(
+          const TemplateTokenIterator & begin,
+          TemplateTokenIterator & it,
+          const TemplateTokenIterator & end,
+          bool fully = false) const {
         std::vector<std::unique_ptr<TemplateNode>> children;
         auto done = false;
         while (it != end && !done) {
@@ -1619,7 +1629,7 @@ private:
                 cascade.emplace_back(nullptr, parseTemplate(begin, ++it, end));
               }
               if (it == end || (*(it++))->getType() != TemplateToken::Type::EndIf) {
-                  throw (*start)->unterminated("if block");
+                  throw unterminated(**start);
               }
               children.emplace_back(nonstd_make_unique<IfNode>(std::move(cascade)));
               break;
@@ -1628,7 +1638,7 @@ private:
               auto for_token = dynamic_cast<ForTemplateToken*>((*it).get());
               auto body = parseTemplate(begin, ++it, end);
               if (it == end || (*(it++))->getType() != TemplateToken::Type::EndFor) {
-                  throw (*start)->unterminated("for block");
+                  throw unterminated(**start);
               }
               children.emplace_back(nonstd_make_unique<ForNode>(for_token->var_names, std::move(for_token->iterable), std::move(for_token->condition), std::move(body), for_token->recursive));
               break;
@@ -1655,8 +1665,8 @@ private:
               children.emplace_back(nonstd_make_unique<TextNode>(text));
               break;
             }
-            case TemplateToken::Type::Variable:
-              children.emplace_back(nonstd_make_unique<VariableNode>(std::move(dynamic_cast<VariableTemplateToken*>((*(it++)).get())->expr), std::vector<std::string>()));
+            case TemplateToken::Type::Expression:
+              children.emplace_back(nonstd_make_unique<VariableNode>(std::move(dynamic_cast<ExpressionTemplateToken*>((*(it++)).get())->expr), std::vector<std::string>()));
               break;
             case TemplateToken::Type::Set: {
               auto set_token = dynamic_cast<SetTemplateToken*>((*(it++)).get());
@@ -1669,9 +1679,9 @@ private:
               break;
             case TemplateToken::Type::Block: {
               auto block_token = dynamic_cast<BlockTemplateToken*>((it++)->get());
-              auto body = parseTemplate(begin, ++it, end);
+              auto body = parseTemplate(begin, it, end);
               if (it == end || (*(it++))->getType() != TemplateToken::Type::EndBlock) {
-                  throw (*start)->unterminated("named block");
+                  throw unterminated(**start);
               }
               children.emplace_back(nonstd_make_unique<BlockNode>(block_token->name, std::move(body)));
               break;
@@ -1684,8 +1694,11 @@ private:
               done = true;
               break;
             default:
-              throw (*it)->unexpected("template");
+              throw unexpected(**it, "template");
           }
+        }
+        if (fully && it != end) {
+            throw unexpected(**it, "end of template");
         }
         if (children.empty()) {
           return nonstd_make_unique<TextNode>(""); // Empty template!
@@ -1708,10 +1721,6 @@ public:
         TemplateTokenIterator begin = tokens.begin();
         auto it = begin;
         TemplateTokenIterator end = tokens.end();
-        auto ret = parser.parseTemplate(begin, it, end);
-        if (it != end) {
-            throw (*it)->unexpected("end of template");
-        }
-        return ret;
+        return parser.parseTemplate(begin, it, end, /* full= */ true);
     }
 };

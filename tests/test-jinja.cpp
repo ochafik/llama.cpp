@@ -4,9 +4,9 @@
 #include <string>
 #include <json.hpp>
 
-using json = nlohmann::json;
 
 void test_render(const std::string & template_str, const json & context, const std::string & expected, const json & expected_context = json()) {
+    std::cout << "Testing: " << template_str << std::endl;
     auto root = JinjaParser::parse(template_str);
     auto copy = context.is_null() ? Value::object() : std::make_shared<Value>(context);
     auto actual = root->render(*copy);
@@ -29,6 +29,23 @@ void test_render(const std::string & template_str, const json & context, const s
     }
     std::cout << "Test passed: " << template_str << std::endl;
 }
+void test_error(const std::string & template_str, const json & context, const std::string & expected) {
+    std::cout << "Testing: " << template_str << std::endl;
+    try {
+        auto root = JinjaParser::parse(template_str);
+        auto copy = context.is_null() ? Value::object() : std::make_shared<Value>(context);
+        auto actual = root->render(*copy);
+        throw std::runtime_error("Expected error: "  + expected + ", but got successful result instead: "  + actual);
+    } catch (const std::runtime_error & e) {
+        auto actual = e.what();
+        if (expected != actual) {
+            std::cerr << "Expected: " << expected << std::endl;
+            std::cerr << "Actual: " << actual << std::endl;
+            throw std::runtime_error("Test failed");
+        }
+    }
+    std::cout << "Test passed: " << template_str << std::endl;
+}
 
 /*
     cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -t test-jinja -j && ./build/bin/test-jinja
@@ -37,14 +54,43 @@ void test_render(const std::string & template_str, const json & context, const s
 */
 int main() {
     test_render(
+        R"( {{ "a" -}} b {{- "c" }} )", json(),
+        " abc ");
+
+    test_error("{% else %}", json(), "Unexpected else at row 1, column 1: {% else %}");
+    test_error("{% endif %}", json(), "Unexpected endif at row 1, column 1: {% endif %}");
+    test_error("{% elif 1 %}", json(), "Unexpected elif at row 1, column 1: {% elif 1 %}");
+    test_error("{% endblock %}", json(), "Unexpected endblock at row 1, column 1: {% endblock %}");
+    test_error("{% endfor %}", json(), "Unexpected endfor at row 1, column 1: {% endfor %}");
+
+    test_error("{% if 1 %}", json(), "Unterminated if at row 1, column 1: {% if 1 %}");
+    test_error("{% block foo %}", json(), "Unterminated block at row 1, column 1: {% block foo %}");
+    test_error("{% for x in 1 %}", json(), "Unterminated for at row 1, column 1: {% for x in 1 %}");
+    test_error("{% if 1 %}{% else %}", json(), "Unterminated if at row 1, column 1: {% if 1 %}{% else %}");
+    test_error("{% if 1 %}{% else %}{% elif 1 %}{% endif %}", json(), "Unterminated if at row 1, column 1: {% if 1 %}{% else %}{% elif 1 %}{% endif %}");
+
+
+    test_render("{% if 1 %}{% elif 1 %}{% else %}{% endif %}", json(), "");
+    
+    test_render(
         "{% set x = [] %}{% set _ = x.append(1) %}{{ x | tojson(indent=2) }}", json(), 
         "[\n  1\n]");
+
+    test_render(
+        "{{ not [] }}", json(), 
+        "True");
     
     test_render("{{ tool.function.name == 'ipython' }}", 
         json({{"tool", json({
             {"function", {{"name", "ipython"}}}
         })}}),
         "True");
+
+    test_render(R"(
+        {%- set user = "Olivier" -%}
+        {%- set greeting = "Hello " ~ user -%}
+        {{- greeting -}}
+    )", json(), "Hello Olivier");
 
     json context = {
         {"tools", {
@@ -76,6 +122,8 @@ Environment: ipython
 {% endif %}
 {%- if displayed_tools -%}
 Tools: {{ displayed_tools | join }}
+{{ displayed_tools }}
+{# displayed_tools is sequence #}
 {% endif %}
 Cutting Knowledge Date: {{ cutting_knowledge_date }}
 Today's Date: {{ todays_date }}
@@ -93,16 +141,6 @@ You have access to the following functions: {{ other_tools | tojson }}
     // auto root = JinjaParser::parse(template_str);
     // std::cout << root->render(std::make_shared<Value>(context)) << std::endl;
     test_render(template_str, context, R"()");
-
-    test_render(R"(
-        {%- set user = "Olivier" -%}
-        {%- set greeting = "Hello " ~ user -%}
-        {{- greeting -}}
-    )", json(), "Hello Olivier");
-
-    test_render(
-        R"( {{ "a" -}} b {{- "c" }} )", json(),
-        " abc ");
 
     return 0;
 }
