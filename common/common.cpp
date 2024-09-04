@@ -1166,6 +1166,11 @@ bool gpt_params_find_arg(int argc, char ** argv, const std::string & arg, gpt_pa
         sparams.grammar = argv[i];
         return true;
     }
+    if (arg == "--chat-handler") {
+        CHECK_ARG
+        params.chat_handler_name = argv[i];
+        return true;
+    }
     if (arg == "--grammar-file") {
         CHECK_ARG
         std::ifstream file(argv[i]);
@@ -1600,6 +1605,7 @@ void gpt_params_print_usage(int /*argc*/, char ** argv, const gpt_params & param
     options.push_back({ "*",           "-j,    --json-schema SCHEMA",
                                                                         "JSON schema to constrain generations (https://json-schema.org/), e.g. `{}` for any JSON object\n"
                                                                         "For schemas w/ external $refs, use --grammar + example/json_schema_to_grammar.py instead" });
+    options.push_back({ "server",      "       --chat-handler NAME",    "Name of chat handler (default: 'none'; 'auto' to pick the best, otherwise NAME must match an entry in prompts/chat_handlers.yaml)"});
 
     options.push_back({ "embedding" });
     options.push_back({ "embedding",   "       --pooling {none,mean,cls,last}",

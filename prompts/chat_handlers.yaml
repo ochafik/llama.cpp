@@ -89,8 +89,8 @@
     - https://huggingface.co/blog/llama31#built-in-tool-calling
     - https://docs.together.ai/docs/llama-3-function-calling
     - https://github.com/meta-llama/llama-agentic-system
-  condition:
-    model('general.basename') == 'Meta-Llama-3.1'
+  condition: |
+    {{ model['general.basename'] == 'Meta-Llama-3.1' }}
   system_template: |
     {%- set ipython_enabled = false -%}
     {%- set enabled_predefined_tools = [] -%}
@@ -155,7 +155,8 @@
     {{ conv.togrammar() }}
 
 - name: functionary-2.2
-  condition: true
+  condition: |
+    {{ True }}
   chat_template: |
     {% hahaha %}
   system_template: |
@@ -210,7 +211,8 @@
     {{ conv.togrammar() }}
 
 - name: Hermes-Pro
-  condition: model('general.basename') == 'Hermes-3-Llama-3.1'
+  condition: |
+    {{ model['general.basename'] == 'Hermes-3-Llama-3.1' }}
   docs:
     - https://github.com/NousResearch/Hermes-Function-Calling
     - https://huggingface.co/NousResearch/Hermes-3-Llama-3.1-8B#prompt-format-for-function-calling

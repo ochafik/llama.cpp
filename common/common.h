@@ -81,7 +81,9 @@ enum dimre_method {
 
 #define LLAMA_DEFAULT_SCHEMA_TEMPLATE \
     "Respond in the following JSON format: {jsonSchema}"
-            
+
+#define LLAMA_DEFAULT_CHAT_HANDLER_NAME "none"
+
 struct gpt_params {
     uint32_t seed                 = LLAMA_DEFAULT_SEED; // RNG seed
 
@@ -147,6 +149,7 @@ struct gpt_params {
     std::string rpc_servers          = ""; // comma separated list of RPC servers
     std::string tools_template       = LLAMA_DEFAULT_TOOLS_TEMPLATE; // system message template for tools.
     std::string schema_template      = LLAMA_DEFAULT_SCHEMA_TEMPLATE; // system message template for JSON schema.
+    std::string chat_handler_name    = LLAMA_DEFAULT_CHAT_HANDLER_NAME; // chat handler name. 'none' to disable, 'auto' to pick the best, or a specific mode by name.
 
     std::vector<std::string> in_files;   // all input files
     std::vector<std::string> antiprompt; // strings upon which more user input is prompted (a.k.a. reverse prompts)

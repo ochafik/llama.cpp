@@ -19,6 +19,7 @@
 class ChatHandler {
     using json = nlohmann::ordered_json;
     
+    std::string name_;
     json model_context;
     std::unique_ptr<TemplateNode> chat_template_;
     std::unique_ptr<TemplateNode> tool_call_system_template_;
@@ -32,7 +33,7 @@ public:
         std::vector<std::string> stop_words;
     };
 
-    ChatHandler(const json & model_context, const json & handler) : model_context(model_context)
+    ChatHandler(const std::string & name, const json & model_context, const json & handler) : name_(name), model_context(model_context)
     {
         std::string chat_template = model_context["tokenizer.chat_template"];
         std::string tool_call_system_template;
@@ -46,6 +47,8 @@ public:
         if (!tool_call_system_template.empty()) tool_call_system_template_ = JinjaParser::parse(tool_call_system_template);
         if (!tool_call_grammar_template.empty()) tool_call_grammar_template_ = JinjaParser::parse(tool_call_grammar_template);
     }
+
+    const std::string & name() const { return name_; }
 
     std::pair<std::string, std::string> format_chat(const json & messages, const json & tools, const json & json_schema) const {
         std::string grammar;
@@ -79,8 +82,8 @@ public:
         return {prompt, grammar};
     }
 
-    static json build_model_context(const json & body, llama_model * model) {
-        json context = body;
+    static json build_model_context(llama_model * model) {
+        auto model_context = json::object();
         std::vector<std::string> keys = {
             "general.type",
             "general.architecture",
@@ -100,11 +103,11 @@ public:
             if (tlen > 0) {
                 std::vector<char> curr_tmpl_buf(tlen + 1, 0);
                 if (llama_model_meta_val_str(model, key.c_str(), curr_tmpl_buf.data(), curr_tmpl_buf.size()) == tlen) {
-                    context[key] = std::string(curr_tmpl_buf.data(), tlen);
+                    model_context[key] = std::string(curr_tmpl_buf.data(), tlen);
                 }
             }
         }
-        return context;
+        return model_context;
     }
 
     static std::unique_ptr<ChatHandler> find(const std::string & name, const json & model_context) {
@@ -139,8 +142,8 @@ public:
 
                 auto condition_eval = JinjaParser::parse(handler["condition"]);
                 Value context(json({{"model", model_context}}));
-                auto result = condition_eval->render(context);
-                if (result != "True" && result != "False") {
+                auto result = string_strip(condition_eval->render(context));
+                if ((result != "True") && (result != "False")) {
                     throw std::runtime_error("Invalid tool call condition evaluation result (expected True/False): " + result);
                 }
                 if (result == "True") {
@@ -152,6 +155,9 @@ public:
                 throw std::runtime_error("No matching handler found for model context: " + model_context.dump(2));
             }
         }
-        return std::unique_ptr<ChatHandler>(new ChatHandler(model_context, handlers[handler_idx]));
+        return std::unique_ptr<ChatHandler>(
+            new ChatHandler(
+                handlers[handler_idx]["name"],
+                model_context, handlers[handler_idx]));
     }
 };

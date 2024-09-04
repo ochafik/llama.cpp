@@ -623,6 +623,8 @@ struct server_context {
 
     server_metrics metrics;
 
+    std::unique_ptr<ChatHandler> chat_handler;
+
     // Necessary similarity of prompt for slot selection
     float slot_prompt_similarity = 0.0f;
 
@@ -3426,6 +3428,9 @@ int main(int argc, char ** argv) {
         state.store(SERVER_STATE_READY);
 
         LOG_INFO("model loaded", {});
+
+        auto model_context = ChatHandler::build_model_context(ctx_server.model);
+        ctx_server.chat_handler = std::move(ChatHandler::find(params.chat_handler_name, model_context));
 
         // if a custom chat template is not supplied, we will use the one that comes with the model (if any)
         if (params.chat_template.empty()) {
