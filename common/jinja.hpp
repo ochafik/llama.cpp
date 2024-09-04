@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <json.hpp>
 
-using json = nlohmann::json;
+using json = nlohmann::ordered_json;
 
 /*
 * Backport nonstd_make_unique from C++14.
@@ -422,8 +422,7 @@ struct ForTemplateToken : public TemplateToken {
     bool recursive;
     ForTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::vector<std::string> & vns, std::unique_ptr<Expression> && iter,
       std::unique_ptr<Expression> && c, bool r)
-      : TemplateToken(pos, pre, post), var_names(vns), condition(std::move(c)),
-        iterable(std::move(iter)), recursive(r) {}
+      : TemplateToken(pos, pre, post), var_names(vns), iterable(std::move(iter)), condition(std::move(c)), recursive(r) {}
     Type getType() const override { return Type::For; }
 };
 
@@ -546,7 +545,7 @@ public:
     virtual ~Expression() = default;
     virtual std::shared_ptr<Value> evaluate(Value & context) const = 0;
 
-    virtual std::shared_ptr<Value> evaluateAsPipe(Value & context, std::shared_ptr<Value>& input) const{
+    virtual std::shared_ptr<Value> evaluateAsPipe(Value & context, std::shared_ptr<Value>&) const{
       throw std::runtime_error("This expression cannot be used as a pipe");
     }
 };
@@ -1532,15 +1531,15 @@ private:
               std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<TemplateNode>>> cascade;
 
               auto if_token = dynamic_cast<IfTemplateToken*>((*(it++)).get());
-              cascade.emplace_back(std::move(if_token->condition), std::move(parseTemplate(begin, it, end)));
+              cascade.emplace_back(std::move(if_token->condition), parseTemplate(begin, it, end));
 
               while (it != end && (*it)->getType() == TemplateToken::Type::Elif) {
                   auto elif_token = dynamic_cast<ElifTemplateToken*>((*(it++)).get());
-                  cascade.emplace_back(std::move(elif_token->condition), std::move(parseTemplate(begin, it, end)));
+                  cascade.emplace_back(std::move(elif_token->condition), parseTemplate(begin, it, end));
               }
 
               if (it != end && (*it)->getType() == TemplateToken::Type::Else) {
-                cascade.emplace_back(nullptr, std::move(parseTemplate(begin, ++it, end)));
+                cascade.emplace_back(nullptr, parseTemplate(begin, ++it, end));
               }
               if (it == end || (*(it++))->getType() != TemplateToken::Type::EndIf) {
                   throw (*start)->unterminated("if block");
