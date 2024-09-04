@@ -7,6 +7,7 @@
 #define JSON_ASSERT GGML_ASSERT
 #include "json.hpp"
 #include "json-schema-to-grammar.h"
+#include "chat_handler.hpp"
 
 #include <string>
 #include <vector>

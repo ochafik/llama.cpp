@@ -1432,7 +1432,7 @@ llama-server: \
 	examples/server/completion.js.hpp \
 	examples/server/system-prompts.js.hpp \
 	examples/server/prompt-formats.js.hpp \
-	examples/server/tool-calling.json.hpp \
+	examples/server/chat_handlers.json.hpp \
 	examples/server/json-schema-to-grammar.mjs.hpp \
 	common/json.hpp \
 	common/stb_image.h \
@@ -1440,7 +1440,7 @@ llama-server: \
 	$(CXX) $(CXXFLAGS) -c $< -o $(call GET_OBJ_FILE, $<)
 	$(CXX) $(CXXFLAGS) $(filter-out %.h %.hpp $<,$^) -Iexamples/server $(call GET_OBJ_FILE, $<) -o $@ $(LDFLAGS) $(LWINSOCK2)
 
-examples/server/public/tool-calling.json: prompts/tool-calling.yaml
+examples/server/public/chat_handlers.json: prompts/chat_handlers.yaml
 	yq -o=json eval $< > $@
 
 # Portable equivalent of `cd examples/server/public && xxd -i $(notdir $<) ../$(notdir $<).hpp`:
