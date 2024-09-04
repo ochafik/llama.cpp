@@ -37,7 +37,7 @@ void test_render(const std::string & template_str, const json & context, const s
 */
 int main() {
     test_render(
-        "{% set x = [] %}{% set _ = x.append(1) %}{{ x }}", json(), 
+        "{% set x = [] %}{% set _ = x.append(1) %}{{ x | tojson(indent=2) }}", json(), 
         "[\n  1\n]");
     
     test_render("{{ tool.function.name == 'ipython' }}", 
@@ -58,31 +58,31 @@ int main() {
     };
 
     std::string template_str = R"(
-{% set has_ipython = false %}
-{% set predefined_tools = ['brave_search', 'wolfram_alpha'] %}
-{% set displayed_tools = [] %}
-{% set other_tools = [] %}
-{% for tool in tools %}
-    {% if tool.function.name == 'ipython' %}
-        {% set has_ipython = true %}
-    {% elif tool.function.name in predefined_tools %}
-        {% set _ = displayed_tools.append(tool.function.name) %}
-    {% else %}
-        {% set _ = other_tools.append(tool) %}
-    {% endif %}
-{% endfor %}
-{% if has_ipython %}
+{%- set has_ipython = false -%}
+{%- set predefined_tools = ['brave_search', 'wolfram_alpha'] -%}
+{%- set displayed_tools = [] -%}
+{%- set other_tools = [] -%}
+{%- for tool in tools -%}
+    {%- if tool.function.name == 'ipython' -%}
+        {%- set has_ipython = true -%}
+    {%- elif tool.function.name in predefined_tools -%}
+        {%- set _ = displayed_tools.append(tool.function.name) -%}
+    {%- else -%}
+        {%- set _ = other_tools.append(tool) -%}
+    {%- endif -%}
+{%- endfor -%}
+{%- if has_ipython -%}
 Environment: ipython
 {% endif %}
-{% if displayed_tools %}
+{%- if displayed_tools -%}
 Tools: {{ displayed_tools | join }}
 {% endif %}
 Cutting Knowledge Date: {{ cutting_knowledge_date }}
 Today's Date: {{ todays_date }}
 You are a helpful assistant with tool calling capabilities. When you receive a tool call response, use the output to format an answer to the original user question.
-{% if other_tools %}
+{%- if other_tools %}
 You have access to the following functions: {{ other_tools | tojson }}
-{% endif %}
+{%- endif -%}
     )";
 
 // Tools: {{ displayed_tools | join(', ') }}

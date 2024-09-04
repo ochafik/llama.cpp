@@ -57,6 +57,7 @@ public:
   Value(const double& v) : primitive_(v), type(Primitive) {}
   Value(const nullptr_t& v) : primitive_(v), type(Primitive) {}
   Value(const std::string& v) : primitive_(v), type(Primitive) {}
+  Value(const char * v) : primitive_(std::string(v)), type(Primitive) {}
   Value(const Value& other) {
     *this = other;
   }
@@ -103,7 +104,6 @@ public:
 
   static std::shared_ptr<Value> object(const std::unordered_map<json, std::shared_ptr<Value>>& v = {}) {
     return std::shared_ptr<Value>(new Value(v));
-    // return std::make_shared<Value>(v);
   }
 
   std::shared_ptr<Value>& operator[](const Value& key) {
@@ -116,11 +116,11 @@ public:
 
   bool is_null() const { return type == Undefined || type == Primitive && primitive_.is_null(); }
 
-  bool is_boolean() const { return type == Primitive && this->is_boolean(); }
-  bool is_number_integer() const { return type == Primitive && this->is_number_integer(); }
-  bool is_number_float() const { return type == Primitive && this->is_number_float(); }
-  bool is_number() const { return type == Primitive && this->is_number(); }
-  bool is_string() const { return type == Primitive && this->is_string(); }
+  bool is_boolean() const { return type == Primitive && primitive_.is_boolean(); }
+  bool is_number_integer() const { return type == Primitive && primitive_.is_number_integer(); }
+  bool is_number_float() const { return type == Primitive && primitive_.is_number_float(); }
+  bool is_number() const { return type == Primitive && primitive_.is_number(); }
+  bool is_string() const { return type == Primitive && primitive_.is_string(); }
 
   bool is_object() const { return type == Object; }
   bool is_array() const { return type == Array; }
@@ -144,7 +144,9 @@ public:
   }
 
   bool operator==(const Value & other) const {
-    if (type != other.type) return false;
+    if (type != other.type) {
+      return false;
+    }
     if (is_array()) {
       if (array_.size() != other.array_.size()) return false;
       for (size_t i = 0; i < array_.size(); ++i) {
@@ -681,14 +683,14 @@ public:
             case Op::MulMul:    return std::make_shared<Value>(std::pow(l->get<double>(), r->get<double>()));
             case Op::DivDiv:    return std::make_shared<Value>(l->get<int64_t>() / r->get<int64_t>());
             case Op::Mod:       return std::make_shared<Value>(l->get<int64_t>() % r->get<int64_t>());
-            case Op::Eq:        return std::make_shared<Value>(l == r);
-            case Op::Ne:        return std::make_shared<Value>(l != r);
-            case Op::Lt:        return std::make_shared<Value>(l < r);
-            case Op::Gt:        return std::make_shared<Value>(l > r);
-            case Op::Le:        return std::make_shared<Value>(l <= r);
-            case Op::Ge:        return std::make_shared<Value>(l >= r);
-            case Op::And:       return std::make_shared<Value>(l && r);
-            case Op::Or:        return std::make_shared<Value>(l || r);
+            case Op::Eq:        return std::make_shared<Value>((*l) == (*r));
+            case Op::Ne:        return std::make_shared<Value>((*l) != (*r));
+            case Op::Lt:        return std::make_shared<Value>((*l) < (*r));
+            case Op::Gt:        return std::make_shared<Value>((*l) > (*r));
+            case Op::Le:        return std::make_shared<Value>((*l) <= (*r));
+            case Op::Ge:        return std::make_shared<Value>((*l) >= (*r));
+            case Op::And:       return std::make_shared<Value>((*l) && (*r));
+            case Op::Or:        return std::make_shared<Value>((*l) || (*r));
             case Op::In:        return std::make_shared<Value>(r->is_array() && r->contains(*l));
             default:            break;
         }
