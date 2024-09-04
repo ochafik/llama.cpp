@@ -1432,12 +1432,16 @@ llama-server: \
 	examples/server/completion.js.hpp \
 	examples/server/system-prompts.js.hpp \
 	examples/server/prompt-formats.js.hpp \
+	examples/server/tool-calling.json.hpp \
 	examples/server/json-schema-to-grammar.mjs.hpp \
 	common/json.hpp \
 	common/stb_image.h \
 	$(OBJ_ALL)
 	$(CXX) $(CXXFLAGS) -c $< -o $(call GET_OBJ_FILE, $<)
 	$(CXX) $(CXXFLAGS) $(filter-out %.h %.hpp $<,$^) -Iexamples/server $(call GET_OBJ_FILE, $<) -o $@ $(LDFLAGS) $(LWINSOCK2)
+
+examples/server/public/tool-calling.json: prompts/tool-calling.yaml
+	yq -o=json eval $< > $@
 
 # Portable equivalent of `cd examples/server/public && xxd -i $(notdir $<) ../$(notdir $<).hpp`:
 examples/server/%.hpp: examples/server/public/% Makefile
