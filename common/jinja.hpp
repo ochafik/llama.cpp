@@ -37,10 +37,18 @@ nonstd_make_unique(std::size_t n) {
  * but we do for primitives.
  */
 class Value : public std::enable_shared_from_this<Value> {
-  json primitive_; // boolean, number, string, null
+public:
+  using CallableArgs = std::vector<std::pair<std::string, std::shared_ptr<Value>>>;
+  using CallableType = std::function<std::shared_ptr<Value>(const CallableArgs &)>;
+
+private:
+  // boolean, number, string, null
+  json primitive_;
   std::vector<std::shared_ptr<Value>> array_;
   // keys must be primitive json values (string, number, boolean)
   std::unordered_map<json, std::shared_ptr<Value>> object_;
+  bool is_callable_;
+  CallableType callable_;
 
   enum Type {
     Undefined,
@@ -61,6 +69,7 @@ public:
   Value(const nullptr_t& v) : primitive_(v), type(Primitive) {}
   Value(const std::string& v) : primitive_(v), type(Primitive) {}
   Value(const char * v) : primitive_(std::string(v)), type(Primitive) {}
+  Value(const CallableType & c) : callable_(c), is_callable_(true), type(Object) {}
   Value(const Value& other) {
     *this = other;
   }
@@ -93,6 +102,7 @@ public:
     primitive_ = other.primitive_;
     array_ = other.array_;
     object_ = other.object_;
+    callable_ = other.callable_;
     return *this;
   }
 
@@ -119,7 +129,24 @@ public:
     return object_[key.primitive_];
   }
 
+  std::shared_ptr<Value>& operator[](const std::string& key) {
+    if (!is_object()) throw std::runtime_error("Value is not an object");
+    return object_[key];
+  }
+
+  std::shared_ptr<Value>& operator[](const size_t& i) {
+    if (is_object()) return object_[i];
+    if (is_array()) return array_[i];
+    throw std::runtime_error("Value is not an array or object");
+  }
+
+  std::shared_ptr<Value> call(const CallableArgs & args) const {
+    if (!is_callable()) throw std::runtime_error("Value is not callable");
+    return callable_(args);
+  }
+
   bool is_undefined() const { return type == Undefined; }
+  bool is_callable() const { return is_callable_; }
 
   bool is_null() const { return type == Undefined || type == Primitive && primitive_.is_null(); }
 
