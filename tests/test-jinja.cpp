@@ -53,8 +53,10 @@ You have access to the following functions: {{ other_tools | tojson }}
 
 // Tools: {{ displayed_tools | join(', ') }}
 // You have access to the following functions: {{ other_tools | tojson(indent=2) }}
-    JinjaParser parser;
-    auto root = parser.parse(template_str);
+
+    // template_str = "{% for tool in tools %}";
+
+    auto root = JinjaParser::parse(template_str);
     std::cout << root->render(context) << std::endl;
 
     return 0;

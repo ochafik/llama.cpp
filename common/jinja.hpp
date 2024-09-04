@@ -32,7 +32,7 @@ nonstd_make_unique(std::size_t n) {
   return std::unique_ptr<T>(new RT[n]);
 }
 
-bool is_true(const json& j) {
+bool to_bool(const json& j) {
   if (j.is_boolean()) return j.get<bool>();
   if (j.is_number()) return j.get<double>() != 0;
   if (j.is_string()) return !j.get<std::string>().empty();
@@ -282,6 +282,23 @@ class Expression {
 public:
     virtual ~Expression() = default;
     virtual json evaluate(json& context) const = 0;
+
+
+    virtual json evaluateAsPipe(json& context, json& input) const {
+      throw std::runtime_error("This expression cannot be used as a pipe");
+    }
+};
+
+class IfExpr : public Expression {
+    std::unique_ptr<Expression> condition;
+    std::unique_ptr<Expression> then_expr;
+    std::unique_ptr<Expression> else_expr;
+public:
+    IfExpr(std::unique_ptr<Expression> && c, std::unique_ptr<Expression> && t, std::unique_ptr<Expression> && e)
+        : condition(std::move(c)), then_expr(std::move(t)), else_expr(std::move(e)) {}
+    json evaluate(json& context) const override {
+        return to_bool(condition->evaluate(context)) ? then_expr->evaluate(context) : else_expr->evaluate(context);
+    }
 };
 
 class LiteralExpr : public Expression {
@@ -289,6 +306,50 @@ class LiteralExpr : public Expression {
 public:
     LiteralExpr(const json& v) : value(v) {}
     json evaluate(json&) const override { return value; }
+};
+
+class ArrayExpr : public Expression {
+    std::vector<std::unique_ptr<Expression>> elements;
+public:
+    ArrayExpr(std::vector<std::unique_ptr<Expression>> && e) : elements(std::move(e)) {}
+    json evaluate(json & context) const override {
+        json result = json::array();
+        for (const auto& e : elements) {
+            result.push_back(e->evaluate(context));
+        }
+        return result;
+    }
+};
+
+class DictExpr : public Expression {
+    std::vector<std::pair<std::string, std::unique_ptr<Expression>>> elements;
+public:
+    DictExpr(std::vector<std::pair<std::string, std::unique_ptr<Expression>>> && e) : elements(std::move(e)) {}
+    json evaluate(json & context) const override {
+        json result = json::object();
+        for (const auto& e : elements) {
+            result[e.first] = e.second->evaluate(context);
+        }
+        return result;
+    }
+};
+
+class SubscriptExpr : public Expression {
+    std::unique_ptr<Expression> base;
+    std::unique_ptr<Expression> index;
+public:
+    SubscriptExpr(std::unique_ptr<Expression> && b, std::unique_ptr<Expression> && i)
+        : base(std::move(b)), index(std::move(i)) {}
+    json evaluate(json & context) const override {
+        json target = base->evaluate(context);
+        if (target.is_array()) {
+            return target.at(index->evaluate(context).get<int>());
+        } else if (target.is_object()) {
+            return target.at(index->evaluate(context).get<std::string>());
+        } else {
+            throw std::runtime_error("Subscripting non-array or non-object");
+        }
+    }
 };
 
 class VariableExpr : public Expression {
@@ -306,6 +367,13 @@ json operator+(const json& lhs, const json& rhs) {
       return lhs.get<int64_t>() + rhs.get<int64_t>();
     else
       return lhs.get<double>() + rhs.get<double>();
+}
+
+json operator-(const json& lhs) {
+    if (lhs.is_number_integer())
+      return -lhs.get<int64_t>();
+    else
+      return -lhs.get<double>();
 }
 
 json operator-(const json& lhs, const json& rhs) {
@@ -333,9 +401,28 @@ json operator%(const json& lhs, const json& rhs) {
   return lhs.get<int64_t>() % rhs.get<int64_t>();
 }
 
+class UnaryOpExpr : public Expression {
+public:
+    enum class Op { Plus, Minus, LogicalNot };
+private:
+    std::unique_ptr<Expression> expr;
+    Op op;
+public:
+    UnaryOpExpr(std::unique_ptr<Expression> && e, Op o) : expr(std::move(e)), op(o) {}
+    json evaluate(json& context) const override {
+        json e = expr->evaluate(context);
+        switch (op) {
+            case Op::Plus: return e;
+            case Op::Minus: return -e;
+            case Op::LogicalNot: return !to_bool(e);
+        }
+        throw std::runtime_error("Unknown unary operator");
+    }
+};
+
 class BinaryOpExpr : public Expression {
 public:
-    enum class Op { StrConcat, Add, Sub, Mul, Div, Mod, Pow, Eq, Ne, Lt, Gt, Le, Ge, And, Or, In, Is };
+    enum class Op { StrConcat, Add, Sub, Mul, MulMul, Div, DivDiv, Mod, Eq, Ne, Lt, Gt, Le, Ge, And, Or, In, Is };
 private:
     std::unique_ptr<Expression> left;
     std::unique_ptr<Expression> right;
@@ -368,17 +455,18 @@ public:
             case Op::Add:       return l + r;
             case Op::Sub:       return l - r;
             case Op::Mul:       return l * r;
+            case Op::MulMul:    return std::pow(l.get<double>(), r.get<double>());
             case Op::Div:       return l / r;
+            case Op::DivDiv:    return l.get<int>() / r.get<int>();
             case Op::Mod:       return l.get<int>() % r.get<int>();
-            case Op::Pow:       return std::pow(l.get<double>(), r.get<double>());
             case Op::Eq:        return l == r;
             case Op::Ne:        return l != r;
             case Op::Lt:        return l < r;
             case Op::Gt:        return l > r;
             case Op::Le:        return l <= r;
             case Op::Ge:        return l >= r;
-            case Op::And:       return is_true(l) && is_true(r);
-            case Op::Or:        return is_true(l) || is_true(r);
+            case Op::And:       return to_bool(l) && to_bool(r);
+            case Op::Or:        return to_bool(l) || to_bool(r);
             case Op::In:        return r.is_array() && r.find(l) != r.end();
             default:            break;
         }
@@ -389,57 +477,95 @@ public:
 class MethodCallExpr : public Expression {
     std::unique_ptr<Expression> object; // If nullptr, this is a function call
     std::string method;
-    std::vector<std::unique_ptr<Expression>> args;
+    std::vector<std::pair<std::string, std::unique_ptr<Expression>>> args;
 public:
-    MethodCallExpr(std::unique_ptr<Expression> && obj, const std::string& m, std::vector<std::unique_ptr<Expression>> && a)
+    MethodCallExpr(std::unique_ptr<Expression> && obj, const std::string& m, std::vector<std::pair<std::string, std::unique_ptr<Expression>>> && a)
         : object(std::move(obj)), method(m), args(std::move(a)) {}
     bool is_function_call() const { return object == nullptr; }
     const std::string& get_method() const { return method; }
-    const std::vector<std::unique_ptr<Expression>>& get_args() const { return args; }
+    // const std::vector<std::unique_ptr<Expression>>& get_args() const { return args; }
     json evaluate(json& context) const override {
         json obj = object->evaluate(context);
         if (method == "append" && obj.is_array()) {
-            for (const auto& arg : args) {
-                obj.push_back(arg->evaluate(context));
-            }
-            return obj;
+            if (args.size() != 1 || !args[0].first.empty()) throw std::runtime_error("append method must have exactly one unnamed argument");
+            obj.push_back(args[0].second->evaluate(context));
+            // for (const auto& arg : args) {
+            //     obj.push_back(arg.second->evaluate(context));
+            // }
+            return json();
         }
         throw std::runtime_error("Unknown method: " + method);
     }
 };
 
-class PipeExpr : public Expression {
-    std::vector<std::unique_ptr<Expression>> parts;
+class FunctionCallExpr : public Expression {
+    std::string name;
+    std::vector<std::pair<std::string, std::unique_ptr<Expression>>> args;
+
+    json getSingleArg(const std::string & arg_name, bool allowPositional, json& context, bool has_default_value = false, const json & default_value = json()) const {
+      if (args.empty()) {
+        if (has_default_value) return default_value;
+        throw std::runtime_error("Function " + name + " must have exactly one argument (" + arg_name + ")");
+      }
+      if (args.size() != 1) throw std::runtime_error("Function " + name + " must have exactly one argument (" + arg_name + ")");
+      if (!args[0].first.empty()) {
+        if (args[0].first != arg_name) throw std::runtime_error("Function " + name + " argument name mismatch: " + args[0].first + " != " + arg_name);
+      } else {
+        if (!allowPositional) throw std::runtime_error("Function " + name + " argument " + arg_name + " must be provided by name, not position");
+      }
+      return args[0].second->evaluate(context);
+    }
+    
 public:
-    PipeExpr(std::vector<std::unique_ptr<Expression>> && p) : parts(std::move(p)) {}
+    FunctionCallExpr(const std::string& n, std::vector<std::pair<std::string, std::unique_ptr<Expression>>> && a = {})
+        : name(n), args(std::move(a)) {}
+    
     json evaluate(json& context) const override {
+        throw std::runtime_error("Unknown function (or maybe can only be evaluated as a pipe): " + name);
+    }
+    
+    json evaluateAsPipe(json& context, json& input) const override {
         json result;
-        for (const auto& part : parts) {
-            if (auto mc = dynamic_cast<MethodCallExpr*>(part.get())) {
-                if (!mc->is_function_call()) {
-                  throw std::runtime_error("Method call in pipe expression must be a function call: " + mc->get_method());
-                }
-                if (mc->get_method() == "tojson") {
-                  auto indent = mc->get_args().empty() ? 0 : mc->get_args()[0]->evaluate(context).get<int>();
-                  result = result.dump(indent);
-                } else if (mc->get_method() == "join") {
-                  auto sep = mc->get_args().empty() ? "" : mc->get_args()[0]->evaluate(context).get<std::string>();
-                  std::ostringstream oss;
-                  auto first = true;
-                  for (const auto& item : result) {
-                    if (first) first = false;
-                    else oss << sep;
-                    oss << item.get<std::string>();
-                  }
-                  result = oss.str();
-                } else {
-                  throw std::runtime_error("Unknown function in pipe: " + mc->get_method());
-                }
-            } else {
-                result = part->evaluate(context);
-            }
+        if (name == "tojson") {
+          auto indent = getSingleArg("indent", true, context, 0);
+          result = result.dump(indent);
+        } else if (name == "join") {
+          auto sep = getSingleArg("d", true, context, "").get<std::string>();
+          std::ostringstream oss;
+          auto first = true;
+          for (const auto& item : result) {
+            if (first) first = false;
+            else oss << sep;
+            oss << item.get<std::string>();
+          }
+          result = oss.str();
+        } else {
+          throw std::runtime_error("Unknown pipe function: " + name);
         }
         return result;
+    }
+};
+
+class FilterExpr : public Expression {
+    std::vector<std::unique_ptr<Expression>> parts;
+public:
+    FilterExpr(std::vector<std::unique_ptr<Expression>> && p) : parts(std::move(p)) {}
+    json evaluate(json& context) const override {
+        json result;
+        bool first = true;
+        for (const auto& part : parts) {
+          if (first) {
+            first = false;
+            result = part->evaluate(context);
+          } else {
+            result = part->evaluateAsPipe(context, result);
+          }
+        }
+        return result;
+    }
+
+    void prepend(std::unique_ptr<Expression> && e) {
+        parts.insert(parts.begin(), std::move(e));
     }
 };
 
@@ -455,7 +581,7 @@ void VariableNode::render(std::ostringstream& oss, json& context) const {
 
 void IfNode::render(std::ostringstream& oss, json& context) const {
     for (const auto& branch : cascade) {
-        if (is_true(branch.first->evaluate(context))) {
+        if (to_bool(branch.first->evaluate(context))) {
             branch.second->render(oss, context);
             return;
         }
@@ -485,7 +611,7 @@ void ForNode::render(std::ostringstream& oss, json& context) const {
                 context[var_names[i]] = item[i];
             }
         }
-        if (!condition || is_true(condition->evaluate(context))) {
+        if (!condition || to_bool(condition->evaluate(context))) {
           body->render(oss, context);
         }
     };
@@ -522,77 +648,546 @@ void SetNode::render(std::ostringstream&, json& context) const {
 
 class JinjaParser {
 private:
+    using CharIterator = std::string::const_iterator;
+
     // std::vector<std::unique_ptr<TemplateNode>> ast;
 
-    /**
-     * Parsing functions call each other in the right priority order.
-     *
-     * The parsing functions are:
-     * - parseFullExpression
-     * - 
-     * - parsePipe
-     * - parseExpression
-     * - parseEqualityExpression
-     * - parseComparisonExpression
-     * - parseAdditionExpression
-     * - parseMultiplicationExpression
-     * - parseUnaryExpression
-     * - parsePrimaryExpression
-     * - parseMethodCall
-     * 
-     */
+    void consumeSpaces(CharIterator & it, const CharIterator & end) const {
+        while (it != end && std::isspace(*it)) ++it;
+    }
+    std::unique_ptr<std::string> parseString(CharIterator & it, const CharIterator & end) const {
 
-    std::unique_ptr<Expression> parseExpression(const std::string& expr) const {
-        std::regex binary_op_regex(R"((.+?)\s*(~|==|!=|<|>|<=|>=|\+|-|\*\*?|/|%|\bin\b|\bis\b)\s*(.+))");
-        std::regex method_call_regex(R"((\w+)\.(\w+)\((.*?)\))");
-        std::smatch match;
-
-        if (std::regex_match(expr, match, binary_op_regex)) {
-            auto left = parseExpression(match[1].str());
-            auto right = parseExpression(match[3].str());
-            std::string op_str = match[2].str();
-            BinaryOpExpr::Op op;
-            if (op_str == "~") op = BinaryOpExpr::Op::StrConcat;
-            else if (op_str == "+") op = BinaryOpExpr::Op::Add;
-            else if (op_str == "-") op = BinaryOpExpr::Op::Sub;
-            else if (op_str == "*") op = BinaryOpExpr::Op::Mul;
-            else if (op_str == "/") op = BinaryOpExpr::Op::Div;
-            else if (op_str == "%") op = BinaryOpExpr::Op::Mod;
-            else if (op_str == "**") op = BinaryOpExpr::Op::Pow;
-            else if (op_str == "==") op = BinaryOpExpr::Op::Eq;
-            else if (op_str == "!=") op = BinaryOpExpr::Op::Ne;
-            else if (op_str == "<") op = BinaryOpExpr::Op::Lt;
-            else if (op_str == ">") op = BinaryOpExpr::Op::Gt;
-            else if (op_str == "<=") op = BinaryOpExpr::Op::Le;
-            else if (op_str == ">=") op = BinaryOpExpr::Op::Ge;
-            else if (op_str == "in") op = BinaryOpExpr::Op::In;
-            else if (op_str == "is") op = BinaryOpExpr::Op::Is;
-            else throw std::runtime_error("Unknown binary operator: " + op_str);
-            return nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), op);
-        } else if (std::regex_match(expr, match, method_call_regex)) {
-            auto object = nonstd_make_unique<VariableExpr>(match[1].str());
-            std::string method = match[2].str();
-            std::vector<std::unique_ptr<Expression>> args;
-            std::string args_str = match[3].str();
-            if (!args_str.empty()) {
-                args.push_back(parseExpression(args_str));
+      auto doParse = [&](char quote) -> std::unique_ptr<std::string> {
+        if (it == end || *it != quote) return nullptr;
+        std::string result;
+        bool escape = false;
+        for (++it; it != end; ++it) {
+          if (escape) {
+            escape = false;
+            switch (*it) {
+              case 'n': result += '\n'; break;
+              case 'r': result += '\r'; break;
+              case 't': result += '\t'; break;
+              case 'b': result += '\b'; break;
+              case 'f': result += '\f'; break;
+              case '\\': result += '\\'; break;
+              default: 
+                if (*it == quote) {
+                  result += quote;
+                } else {
+                  result += *it;
+                }
+                break;
+              // case quote: result += '"'; break;
+              // default: result += *it; break;
             }
-            return nonstd_make_unique<MethodCallExpr>(std::move(object), method, std::move(args));
+          } else if (*it == '\\') {
+            escape = true;
+          } else if (*it == quote) {
+              ++it; // Move past the closing quote
+            return nonstd_make_unique<std::string>(result);
+          } else {
+            result += *it;
+          }
         }
-        
-        // Check if it's a boolean
-        if (expr == "true") return nonstd_make_unique<LiteralExpr>(true);
-        if (expr == "false") return nonstd_make_unique<LiteralExpr>(false);
+        return nullptr;
+      };
 
-        // TODO: parse lists, strings, object literals, index access.
-        
-        // Check if it's a number
-        try {
-            return nonstd_make_unique<LiteralExpr>(std::stod(expr));
-        } catch (const std::invalid_argument&) {
-            // Not a number, treat as a variable
-            return nonstd_make_unique<VariableExpr>(expr);
+      consumeSpaces(it, end);
+      if (it == end) return nullptr;
+      if (*it == '"') return doParse('"');
+      if (*it == '\'') return doParse('\'');
+      return nullptr;
+    }
+
+    json parseNumber(CharIterator& it, const CharIterator& end) const {
+        consumeSpaces(it, end);
+        auto start = it;
+        bool hasDecimal = false;
+        bool hasExponent = false;
+
+        if (it != end && (*it == '-' || *it == '+')) ++it;
+
+        while (it != end && (std::isdigit(*it) || *it == '.' || *it == 'e' || *it == 'E' || *it == '-' || *it == '+')) {
+            if (*it == '.') {
+                if (hasDecimal) return json(); // Multiple decimal points
+                hasDecimal = true;
+            } else if (*it == 'e' || *it == 'E') {
+                if (hasExponent) return json(); // Multiple exponents
+                hasExponent = true;
+            }
+            ++it;
         }
+
+        if (start == it) return json(); // No valid characters found
+
+        std::string str(start, it);
+        try {
+          return std::stoll(str);
+        } catch (...) {
+          try {
+            return std::stod(str);
+          } catch (...) {
+              return json(); // Invalid number format
+          }
+        }
+    }
+
+    /** integer, float, bool, string */
+    json parseConstant(CharIterator & it, const CharIterator & end) const {
+      consumeSpaces(it, end);
+      if (it == end) return nullptr;
+      if (*it == '"' || *it == '\'') {
+        auto str = parseString(it, end);
+        if (str) return *str;
+      }
+      if (*it == 't') {
+        if (std::distance(it, end) >= 4 && std::string(it, it + 4) == "true") {
+          it += 4;
+          return true;
+        }
+      }
+      if (*it == 'f') {
+        if (std::distance(it, end) >= 5 && std::string(it, it + 5) == "false") {
+          it += 5;
+          return false;
+        }
+      }
+      if (*it == 'n') {
+        if (std::distance(it, end) >= 4 && std::string(it, it + 4) == "null") {
+          it += 4;
+          return nullptr;
+        }
+      }
+
+      auto number = parseNumber(it, end);
+      return number;
+    }
+
+    class expression_parsing_error : public std::runtime_error {
+      const CharIterator it;
+     public:
+      expression_parsing_error(const std::string & message, const CharIterator & it)
+        : std::runtime_error(message), it(it) {}
+      size_t get_pos(const CharIterator & begin) const {
+        return std::distance(begin, it);
+      }
+    };
+    
+
+    expression_parsing_error expr_parse_error(const std::string & message, const CharIterator & it, const CharIterator & end) const {
+        return expression_parsing_error(message, it);
+    }
+
+    bool peekSymbols(const std::vector<std::string> & symbols, const CharIterator & it, const CharIterator & end) const {
+        for (const auto & symbol : symbols) {
+            if (std::distance(it, end) >= symbol.size() && std::string(it, it + symbol.size()) == symbol) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    std::string consumeToken(const std::regex & regex, CharIterator & it, const CharIterator & end) const {
+        consumeSpaces(it, end);
+        std::smatch match;
+        if (std::regex_search(it, end, match, regex) && match.position() == 0) {
+            it += match[0].length();
+            return match[0].str();
+        }
+        return "";
+    }
+
+    std::string consumeToken(const std::string & token, CharIterator & it, const CharIterator & end) const {
+        consumeSpaces(it, end);
+        if (std::distance(it, end) >= token.size() && std::string(it, it + token.size()) == token) {
+            it += token.size();
+            return token;
+        }
+        return "";
+    }
+
+    /**
+      * - FullExpression = LogicalOr ("if" IfExpression)?
+      * - IfExpression = LogicalOr "else" FullExpression
+      * - LogicalOr = LogicalAnd ("or" LogicalOr)? = LogicalAnd ("or" LogicalAnd)*
+      * - LogicalAnd = LogicalCompare ("and" LogicalAnd)? = LogicalCompare ("and" LogicalCompare)*
+      * - LogicalCompare = StringConcat ((("==" | "!=" | "<" | ">" | "<=" | ">=" | "in") StringConcat) | "is" identifier CallParams)?
+      * - StringConcat = MathPow ("~" LogicalAnd)?
+      * - MathPow = MathPlusMinus ("**" MathPow)? = MatPlusMinus ("**" MathPlusMinus)*
+      * - MathPlusMinus = MathMulDiv (("+" | "-") MathPlusMinus)? = MathMulDiv (("+" | "-") MathMulDiv)*
+      * - MathMulDiv = MathUnaryPlusMinus (("*" | "/" | "//" | "%") MathMulDiv)? = MathUnaryPlusMinus (("*" | "/" | "//" | "%") MathUnaryPlusMinus)*
+      * - MathUnaryPlusMinus = ("+" | "-" | "!")? ValueExpression ("|" FilterExpression)?
+      * - FilterExpression = identifier CallParams ("|" FilterExpression)? = identifier CallParams ("|" identifier CallParams)*
+      * - ValueExpression = (identifier | number | string | bool | BracedExpressionOrArray | Tuple | Dictionary ) SubScript? Call?
+      * - BracedExpressionOrArray = "(" FullExpression ("," FullExpression)* ")"
+      * - Tuple = "[" (FullExpression ("," FullExpression)*)? "]"
+      * - Dictionary = "{" (string "=" FullExpression ("," string "=" FullExpression)*)? "}"
+      * - SubScript = ("[" FullExpression "]" | "." identifier )+
+      * - Call = CallParams 
+      * - CallParams = "(" ((identifier "=")? FullExpression ("," (identifier "=")? FullExpression)*)? ")"
+      */
+    std::unique_ptr<Expression> parseExpression(const std::string & expr) const {
+        auto it = expr.begin();
+        auto end = expr.end();
+        try {
+          auto res = parseFullExpression(it, end);
+          if (it != end) throw expr_parse_error("Unexpected characters at the end of the expression", it, end);
+          return res;
+        } catch (const expression_parsing_error & e) {
+          std::string message = e.what();
+          auto pos = e.get_pos(expr.begin());
+          auto line = std::count(expr.begin(), expr.begin() + pos, '\n') + 1;
+          auto col = pos - std::string(expr.begin(), expr.begin() + pos).rfind('\n');
+          message += " at row " + std::to_string(line) + ", column " + std::to_string(col) + ": " + std::string(expr.begin() + pos, expr.end());
+          throw std::runtime_error(message);
+        }
+    }
+    std::unique_ptr<Expression> parseFullExpression(CharIterator & it, const CharIterator & end) const {
+        auto left = parseLogicalOr(it, end);
+        if (it == end) return left;
+
+        static std::regex if_tok(R"(if\b)");
+        if (consumeToken(if_tok, it, end).empty()) {
+          return left;
+        }
+
+        auto if_expr = parseIfExpression(it, end);
+        return nonstd_make_unique<IfExpr>(std::move(left), std::move(if_expr.first), std::move(if_expr.second));
+        // throw std::runtime_error("Expected more after 'if' keyword");
+    }
+
+    std::pair<std::unique_ptr<Expression>, std::unique_ptr<Expression>> parseIfExpression(CharIterator & it, const CharIterator & end) const {
+        auto condition = parseLogicalOr(it, end);
+        if (!condition) throw expr_parse_error("Expected condition expression", it, end);
+
+        static std::regex else_tok(R"(else\b)");
+        if (consumeToken(else_tok, it, end).empty()) throw std::runtime_error("Expected 'else' keyword");
+        
+        auto else_expr = parseFullExpression(it, end);
+        if (!else_expr) throw expr_parse_error("Expected 'else' expression", it, end);
+
+        return std::make_pair(std::move(condition), std::move(else_expr));
+    }
+
+    std::unique_ptr<Expression> parseLogicalOr(CharIterator & it, const CharIterator & end) const {
+        auto left = parseLogicalAnd(it, end);
+        if (!left) throw expr_parse_error("Expected left side of 'logical or' expression", it, end);
+
+        static std::regex or_tok(R"(or\b)");
+        while (!consumeToken(or_tok, it, end).empty()) {
+            auto right = parseLogicalAnd(it, end);
+            if (!right) throw expr_parse_error("Expected right side of 'or' expression", it, end);
+            left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), BinaryOpExpr::Op::Or);
+        }
+        return left;
+    }
+
+    std::unique_ptr<Expression> parseLogicalAnd(CharIterator & it, const CharIterator & end) const {
+        auto left = parseLogicalCompare(it, end);
+        if (!left) throw expr_parse_error("Expected left side of 'logical and' expression", it, end);
+
+        static std::regex and_tok(R"(and\b)");
+        while (!consumeToken(and_tok, it, end).empty()) {
+            auto right = parseLogicalCompare(it, end);
+            if (!right) throw expr_parse_error("Expected right side of 'and' expression", it, end);
+            left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), BinaryOpExpr::Op::And);
+        }
+        return left;
+    }
+
+    std::unique_ptr<Expression> parseLogicalCompare(CharIterator & it, const CharIterator & end) const {
+        auto left = parseStringConcat(it, end);
+        if (!left) throw expr_parse_error("Expected left side of 'logical compare' expression", it, end);
+
+        static std::regex compare_tok(R"((==|!=|<=?|>=?|in|is)\b)");
+        std::smatch match;
+        while (!consumeToken(compare_tok, it, end).empty()) {
+            auto right = parseStringConcat(it, end);
+            if (!right) throw expr_parse_error("Expected right side of 'logical compare' expression", it, end);
+            BinaryOpExpr::Op op;
+            if (match[0] == "is") {
+              auto identifier = parseIdentifier(it, end);
+              auto callParams = parseCallParams(it, end);
+              // if (!callParams) throw expr_parse_error("Expected call params after 'is' keyword", it, end);
+
+              return nonstd_make_unique<BinaryOpExpr>(
+                  std::move(left),
+                  nonstd_make_unique<MethodCallExpr>(nullptr, identifier, std::move(callParams)),
+                  BinaryOpExpr::Op::Is);
+            }
+            if (match[0] == "==") op = BinaryOpExpr::Op::Eq;
+            else if (match[0] == "!=") op = BinaryOpExpr::Op::Ne;
+            else if (match[0] == "<") op = BinaryOpExpr::Op::Lt;
+            else if (match[0] == ">") op = BinaryOpExpr::Op::Gt;
+            else if (match[0] == "<=") op = BinaryOpExpr::Op::Le;
+            else if (match[0] == ">=") op = BinaryOpExpr::Op::Ge;
+            else if (match[0] == "in") op = BinaryOpExpr::Op::In;
+            left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), op);
+        }
+        return left;
+    }
+
+    std::vector<std::pair<std::string, std::unique_ptr<Expression>>> parseCallParams(CharIterator & it, const CharIterator & end) const {
+        consumeSpaces(it, end);
+        if (consumeToken("(", it, end).empty()) throw expr_parse_error("Expected opening parenthesis in call args", it, end);
+
+        std::vector<std::pair<std::string, std::unique_ptr<Expression>>> result;
+        
+        while (it != end) {
+            consumeSpaces(it, end);
+            if (!consumeToken(")", it, end).empty()) {
+                return result;
+            }
+            auto identifier = parseIdentifier(it, end);
+            if (!identifier.empty()) {
+                consumeSpaces(it, end);
+                static std::regex single_eq_tok(R"(=(?!=))"); // negative lookahead to avoid consuming '=='
+                if (!consumeToken(single_eq_tok, it, end).empty()) {
+                    auto expr = parseFullExpression(it, end);
+                    if (!expr) throw expr_parse_error("Expected expression in for named arg", it, end);
+                    result.emplace_back(identifier, std::move(expr));
+                } else {
+                    result.emplace_back(std::string(), nonstd_make_unique<VariableExpr>(identifier));
+                }
+            } else {
+                auto expr = parseFullExpression(it, end);
+                if (!expr) throw expr_parse_error("Expected expression in call args", it, end);
+                result.emplace_back(std::string(), std::move(expr));
+            }
+        }
+        throw expr_parse_error("Expected closing parenthesis in call args", it, end);
+    }
+
+    std::string parseIdentifier(CharIterator & it, const CharIterator & end) const {
+        static std::regex ident_regex(R"(\w+)");
+        return consumeToken(ident_regex, it, end);
+    }
+
+    std::unique_ptr<Expression> parseStringConcat(CharIterator & it, const CharIterator & end) const {
+        auto left = parseMathPow(it, end);
+        if (!left) throw expr_parse_error("Expected left side of 'string concat' expression", it, end);
+
+        if (!consumeToken("~", it, end).empty()) {
+            auto right = parseLogicalAnd(it, end);
+            if (!right) throw expr_parse_error("Expected right side of 'string concat' expression", it, end);
+            left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), BinaryOpExpr::Op::StrConcat);
+        }
+        return left;
+    }
+
+    std::unique_ptr<Expression> parseMathPow(CharIterator & it, const CharIterator & end) const {
+        auto left = parseMathPlusMinus(it, end);
+        if (!left) throw expr_parse_error("Expected left side of 'math pow' expression", it, end);
+
+        std::smatch match;
+        while (!consumeToken("**", it, end).empty()) {
+            auto right = parseMathPlusMinus(it, end);
+            if (!right) throw expr_parse_error("Expected right side of 'math pow' expression", it, end);
+            left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), BinaryOpExpr::Op::MulMul);
+        }
+        return left;
+    }
+
+    std::unique_ptr<Expression> parseMathPlusMinus(CharIterator & it, const CharIterator & end) const {
+        auto left = parseMathMulDiv(it, end);
+        if (!left) throw expr_parse_error("Expected left side of 'math plus/minus' expression", it, end);
+
+        static std::regex plus_minus_tok(R"([-+])");
+        std::string op_str;
+        while (!(op_str = consumeToken(plus_minus_tok, it, end)).empty()) {
+            auto right = parseMathMulDiv(it, end);
+            if (!right) throw expr_parse_error("Expected right side of 'math plus/minus' expression", it, end);
+            auto op = op_str == "+" ? BinaryOpExpr::Op::Add : BinaryOpExpr::Op::Sub;
+            left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), op);
+        }
+        return left;
+    }
+    
+    std::unique_ptr<Expression> parseMathMulDiv(CharIterator & it, const CharIterator & end) const {
+        auto left = parseMathUnaryPlusMinus(it, end);
+        if (!left) throw expr_parse_error("Expected left side of 'math mul/div' expression", it, end);
+
+        static std::regex mul_div_tok(R"(\*\*?|//?|%)");
+        std::string op_str;
+        while (!(op_str = consumeToken(mul_div_tok, it, end)).empty()) {
+            auto right = parseMathUnaryPlusMinus(it, end);
+            if (!right) throw expr_parse_error("Expected right side of 'math mul/div' expression", it, end);
+            auto op = op_str == "*" ? BinaryOpExpr::Op::Mul 
+                : op_str == "**" ? BinaryOpExpr::Op::MulMul 
+                : op_str == "/" ? BinaryOpExpr::Op::Div 
+                : op_str == "//" ? BinaryOpExpr::Op::DivDiv
+                : BinaryOpExpr::Op::Mod;
+            left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), op);
+        }
+
+        if (!consumeToken("|", it, end).empty()) {
+            auto filter = parseFilterExpression(it, end);
+            filter->prepend(std::move(left));
+            return filter;
+        }
+        return left;
+    }
+
+    std::unique_ptr<FilterExpr> parseFilterExpression(CharIterator & it, const CharIterator & end) const {
+        std::vector<std::unique_ptr<Expression>> parts;
+        auto parseFunctionCall = [&]() {
+            auto identifier = parseIdentifier(it, end);
+            if (identifier.empty()) throw expr_parse_error("Expected identifier in filter expression", it, end);
+
+            if (peekSymbols({ "(" }, it, end)) {
+                auto callParams = parseCallParams(it, end);
+                parts.push_back(nonstd_make_unique<FunctionCallExpr>(identifier, std::move(callParams)));
+            } else {
+                parts.push_back(nonstd_make_unique<FunctionCallExpr>(identifier));
+            }
+        };
+        parseFunctionCall();
+        while (it != end && !consumeToken("|", it, end).empty()) {
+            parseFunctionCall();
+        }
+        return nonstd_make_unique<FilterExpr>(std::move(parts));
+    }
+
+    std::unique_ptr<Expression> parseMathUnaryPlusMinus(CharIterator & it, const CharIterator & end) const {
+        consumeSpaces(it, end);
+        static std::regex unary_plus_minus_tok(R"([-+!])");
+        auto op_str = consumeToken(unary_plus_minus_tok, it, end);
+        auto expr = parseValueExpression(it, end);
+        if (!expr) throw expr_parse_error("Expected expr of 'unary plus/minus' expression", it, end);
+        
+        if (!op_str.empty()) {
+            auto op = op_str == "+" ? UnaryOpExpr::Op::Plus : op_str == "-" ? UnaryOpExpr::Op::Minus : UnaryOpExpr::Op::LogicalNot;
+            return nonstd_make_unique<UnaryOpExpr>(std::move(expr), op);
+        }
+        return expr;
+    }
+
+    // * - ValueExpression = (identifier | number | string | bool | BracedExpressionOrArray | Tuple | Dictionary ) SubScript? Call?
+    //   * - SubScript = ("[" FullExpression "]" | "." identifier )+
+        
+    std::unique_ptr<Expression> parseValueExpression(CharIterator & it, const CharIterator & end) const {
+      auto parseValue = [&]() -> std::unique_ptr<Expression> {
+        auto constant = parseConstant(it, end);
+        if (!constant.is_null()) return nonstd_make_unique<LiteralExpr>(constant);
+
+        static std::regex null_regex(R"(null\b)");
+        if (!consumeToken(null_regex, it, end).empty()) return nonstd_make_unique<LiteralExpr>(json());
+
+        auto identifier = parseIdentifier(it, end);
+        if (!identifier.empty()) return nonstd_make_unique<VariableExpr>(identifier);
+
+        auto braced = parseBracedExpressionOrArray(it, end);
+        if (braced) return braced;
+
+        auto array = parseArray(it, end);
+        if (array) return array;
+
+        auto dictionary = parseDictionary(it, end);
+        if (dictionary) return dictionary;
+
+        throw expr_parse_error("Expected value expression", it, end);
+      };
+
+      auto value = parseValue();
+      
+      while (it != end && peekSymbols({ "[", "." }, it, end)) {
+        if (!consumeToken("[", it, end).empty()) {
+            auto index = parseFullExpression(it, end);
+            if (!index) throw expr_parse_error("Expected index in subscript", it, end);
+            if (consumeToken("]", it, end).empty()) throw expr_parse_error("Expected closing bracket in subscript", it, end);
+            
+            value = nonstd_make_unique<SubscriptExpr>(std::move(value), std::move(index));
+        } else if (!consumeToken(".", it, end).empty()) {
+            auto identifier = parseIdentifier(it, end);
+            if (identifier.empty()) throw expr_parse_error("Expected identifier in subscript", it, end);
+            value = nonstd_make_unique<SubscriptExpr>(std::move(value), nonstd_make_unique<LiteralExpr>(identifier));
+        }
+      }
+      return value;
+    }
+
+    std::unique_ptr<Expression> parseBracedExpressionOrArray(CharIterator & it, const CharIterator & end) const {
+        if (consumeToken("(", it, end).empty()) return nullptr;
+        
+        auto expr = parseFullExpression(it, end);
+        if (!expr) throw expr_parse_error("Expected expression in braced expression", it, end);
+        
+        if (!consumeToken(")", it, end).empty()) {
+            // Drop the parentheses
+            return expr;
+        }
+
+        std::vector<std::unique_ptr<Expression>> tuple;
+        tuple.emplace_back(std::move(expr));
+
+        while (it != end) {
+          if (consumeToken(",", it, end).empty()) throw std::runtime_error("Expected comma in tuple");
+          auto next = parseFullExpression(it, end);
+          if (!next) throw std::runtime_error("Expected expression in tuple");
+          tuple.push_back(std::move(next));
+
+          if (!consumeToken(")", it, end).empty()) {
+              return nonstd_make_unique<ArrayExpr>(std::move(tuple));
+          }
+        }
+        throw std::runtime_error("Expected closing parenthesis");
+    }
+
+    std::unique_ptr<Expression> parseArray(CharIterator & it, const CharIterator & end) const {
+        if (consumeToken("[", it, end).empty()) return nullptr;
+        
+        std::vector<std::unique_ptr<Expression>> elements;
+        if (!consumeToken("]", it, end).empty()) {
+            return nonstd_make_unique<ArrayExpr>(std::move(elements));
+        }
+        auto first_expr = parseFullExpression(it, end);
+        if (!first_expr) throw std::runtime_error("Expected first expression in array");
+        elements.push_back(std::move(first_expr));
+
+        while (it != end) {
+            if (!consumeToken(",", it, end).empty()) {
+              auto expr = parseFullExpression(it, end);
+              if (!expr) throw std::runtime_error("Expected expression in array");
+              elements.push_back(std::move(expr));
+            } else if (!consumeToken("]", it, end).empty()) {
+                return nonstd_make_unique<ArrayExpr>(std::move(elements));
+            } else {
+                throw std::runtime_error("Expected comma or closing bracket in array");
+            }
+        }
+        throw std::runtime_error("Expected closing bracket");
+    }
+
+    std::unique_ptr<Expression> parseDictionary(CharIterator & it, const CharIterator & end) const {
+        if (consumeToken("{", it, end).empty()) return nullptr;
+        
+        std::vector<std::pair<std::string, std::unique_ptr<Expression>>> elements;
+        if (!consumeToken("}", it, end).empty()) {
+            return nonstd_make_unique<DictExpr>(std::move(elements));
+        }
+
+        auto parseKeyValuePair = [&]() {
+            auto key = parseString(it, end);
+            if (!key) throw std::runtime_error("Expected key in dictionary");
+            if (consumeToken("=", it, end).empty()) throw std::runtime_error("Expected equals sign in dictionary");
+            auto value = parseFullExpression(it, end);
+            if (!value) throw std::runtime_error("Expected value in dictionary");
+            elements.emplace_back(std::make_pair(*key, std::move(value)));
+        };
+
+        parseKeyValuePair();
+        
+        while (it != end) {
+            if (!consumeToken(",", it, end).empty()) {
+                parseKeyValuePair();
+            } else if (!consumeToken("}", it, end).empty()) {
+                return nonstd_make_unique<DictExpr>(std::move(elements));
+            } else {
+                throw std::runtime_error("Expected comma or closing brace in dictionary");
+            }
+        }
+        throw std::runtime_error("Expected closing brace");
     }
 
     static SpaceHandling parseSpaceHandling(const std::string& s) {
@@ -604,7 +1199,7 @@ private:
     using TemplateTokenVector = std::vector<std::unique_ptr<TemplateToken>>;
     using TemplateTokenIterator = TemplateTokenVector::const_iterator;
 
-    TemplateTokenVector tokenize(const std::string& template_str) const {
+    TemplateTokenVector tokenize() const {
       std::regex token_regex(R"(\{\{([-~]?)\s*(.*?)\s*([-~]?)\}\}|\{%([-~]?)\s*(.*?)\s*([-~]?)%\}|\{#\s*(.*?)\s*#\})");
 
       std::regex var_regex(R"(\{\{\s*(.*?)\s*\}\})");
@@ -775,15 +1370,18 @@ private:
         }
     }
 
+    std::string template_str;
+    JinjaParser(const std::string& template_str) : template_str(template_str) {}
+
 public:
-    JinjaParser() {}
 
-    std::unique_ptr<TemplateNode> parse(const std::string& template_str) const {
-        auto tokens = tokenize(template_str);
+    static std::unique_ptr<TemplateNode> parse(const std::string& template_str) {
+        JinjaParser parser(template_str);
 
+        auto tokens = parser.tokenize();
         TemplateTokenIterator it = tokens.begin();
         TemplateTokenIterator end = tokens.end();
-        auto ret = parseTemplate(it, end);
+        auto ret = parser.parseTemplate(it, end);
         if (it != end) {
             throw (*it)->unexpected("end of template");
         }
