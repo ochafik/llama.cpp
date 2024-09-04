@@ -1,3 +1,10 @@
+'''
+  Basic jinja2 implementation in C++.
+
+  Supports the bare minimum needed to render prompt templates,
+  and then some more (we use this for function calling system templates,
+  and grammar templates).
+'''
 #include <iostream>
 #include <string>
 #include <vector>
@@ -32,7 +39,10 @@ nonstd_make_unique(std::size_t n) {
   return std::unique_ptr<T>(new RT[n]);
 }
 
-/* jinja templates may mess with objects by reference so we can't just json for arrays & objects */
+/* Values that behave roughly like in Python.
+ * jinja templates deal with objects by reference so we can't just json for arrays & objects,
+ * but we do for primitives.
+ */
 class Value : public std::enable_shared_from_this<Value> {
   json primitive_; // boolean, number, string, null
   std::vector<std::shared_ptr<Value>> array_;
