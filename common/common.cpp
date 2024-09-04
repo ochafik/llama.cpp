@@ -2893,12 +2893,10 @@ std::string llama_chat_format_single(const struct llama_model * model,
 
 std::string llama_chat_format_example(const struct llama_model * model,
         const std::string & tmpl) {
-    std::vector<llama_chat_msg> msgs = {
-        {"system",    "You are a helpful assistant"},
-        {"user",      "Hello"},
-        {"assistant", "Hi there"},
-        {"user",      "How are you?"},
-    };
+    std::vector<llama_chat_msg> msgs;
+    for (const auto & pair : LLAMA_CHAT_EXAMPLE.items()) {
+        msgs.push_back({pair.key(), pair.value()});
+    }
     return llama_chat_apply_template(model, tmpl, msgs, true);
 }
 

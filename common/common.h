@@ -429,6 +429,13 @@ std::string llama_chat_format_single(const struct llama_model * model,
         bool add_ass);
 
 // Returns an example of formatted chat
+#define LLAMA_CHAT_EXAMPLE json({ \
+    {"system",    "You are a helpful assistant"}, \
+    {"user",      "Hello"}, \
+    {"assistant", "Hi there"}, \
+    {"user",      "How are you?"} \
+})
+
 std::string llama_chat_format_example(const struct llama_model * model,
         const std::string & tmpl);
 
