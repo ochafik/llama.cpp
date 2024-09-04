@@ -2,7 +2,7 @@
 #include "sampling.h"
 #include <random>
 
-void llama_sampling_init_grammar(const struct llama_sampling_params & params, llama_sampling_context * context) {
+void llama_sampling_init_grammar(llama_sampling_context * context) {
     std::vector<const llama_grammar_element *> grammar_rules(context->parsed_grammar.c_rules());
 
     struct llama_grammar * grammar = llama_grammar_init(
@@ -39,7 +39,7 @@ struct llama_sampling_context * llama_sampling_init(const struct llama_sampling_
         }
 
         if (params.grammar_trigger_words.empty()) {
-            llama_sampling_init_grammar(params, result);
+            llama_sampling_init_grammar(result);
         }
     }
 

@@ -94,7 +94,7 @@ struct llama_sampling_context {
 struct llama_sampling_context * llama_sampling_init(const struct llama_sampling_params & params);
 
 // Initialize the grammar in the sampling context. Done by llama_sampling_init unless the grammar has lazy trigger words.
-void llama_sampling_init_grammar(const struct llama_sampling_params & params, llama_sampling_context * context);
+void llama_sampling_init_grammar(llama_sampling_context * context);
 
 void llama_sampling_free(struct llama_sampling_context * ctx);
 

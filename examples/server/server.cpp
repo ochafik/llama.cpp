@@ -1172,7 +1172,7 @@ struct server_context {
         if (match.pos != std::string::npos && !match.is_partial) {
             if (match.is_grammar_trigger) {
                 if (!slot.ctx_sampling->grammar) {
-                    llama_sampling_init_grammar(slot.sparams, slot.ctx_sampling);
+                    llama_sampling_init_grammar(slot.ctx_sampling);
                     llama_grammar_accept_token(slot.ctx_sampling->grammar, ctx, result.tok);
                 }
             } else {
@@ -1226,7 +1226,7 @@ struct server_context {
             // If there is a lazy grammar trigger word at stop_pos, enable the lazy grammar
             if (match.is_grammar_trigger && !slot.ctx_sampling->grammar) {
                 is_grammar_trigger = true;
-                llama_sampling_init_grammar(slot.sparams, slot.ctx_sampling);
+                llama_sampling_init_grammar(slot.ctx_sampling);
                 llama_grammar_accept_string(slot.ctx_sampling->grammar, ctx, match.pattern.c_str());
                 
                 length = pos + match.pos + match.matchLength;
