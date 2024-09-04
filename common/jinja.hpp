@@ -32,14 +32,264 @@ nonstd_make_unique(std::size_t n) {
   return std::unique_ptr<T>(new RT[n]);
 }
 
-bool to_bool(const json& j) {
-  if (j.is_boolean()) return j.get<bool>();
-  if (j.is_number()) return j.get<double>() != 0;
-  if (j.is_string()) return !j.get<std::string>().empty();
-  if (j.is_array()) return !j.empty();
-  // TODO: check truthfulness semantics of jinja
-  return !j.is_null();
-}
+/* jinja templates may mess with objects by reference so we can't just json for arrays & objects */
+class Value : public std::enable_shared_from_this<Value> {
+  json primitive_; // boolean, number, string, null
+  std::vector<std::shared_ptr<Value>> array_;
+  // keys must be primitive json values (string, number, boolean)
+  std::unordered_map<json, std::shared_ptr<Value>> object_;
+
+  enum Type {
+    Undefined,
+    Primitive,
+    Array,
+    Object,
+  };
+  Type type;
+
+  Value(const std::unordered_map<json, std::shared_ptr<Value>>& v) : object_(v), type(Object) {}
+  Value(const std::vector<std::shared_ptr<Value>>& v) : array_(v), type(Array) {}
+
+public:
+  Value() : type(Undefined) {}
+  Value(const bool& v) : primitive_(v), type(Primitive) {}
+  Value(const int64_t& v) : primitive_(v), type(Primitive) {}
+  Value(const double& v) : primitive_(v), type(Primitive) {}
+  Value(const nullptr_t& v) : primitive_(v), type(Primitive) {}
+  Value(const std::string& v) : primitive_(v), type(Primitive) {}
+  Value(const Value& other) {
+    *this = other;
+  }
+
+  Value(const json& v) {
+    if (v.is_object()) {
+      type = Object;
+      for (auto it = v.begin(); it != v.end(); ++it) {
+        object_[it.key()] = std::make_shared<Value>(it.value());
+      }
+    } else if (v.is_array()) {
+      type = Array;
+      for (const auto& item : v) {
+        array_.push_back(std::make_shared<Value>(item));
+      }
+    } else {
+      type = Primitive;
+      primitive_ = v;
+    }
+  }
+
+  size_t size() const {
+    if (!is_array()) throw std::runtime_error("Value is not an array");
+    return array_.size();
+  }
+
+  Value& operator=(const Value& other) {
+    if (this == &other) return *this;
+    type = other.type;
+    primitive_ = other.primitive_;
+    array_ = other.array_;
+    object_ = other.object_;
+    return *this;
+  }
+
+  static std::shared_ptr<Value> array(const std::vector<std::shared_ptr<Value>>& v = {}) {
+    return std::shared_ptr<Value>(new Value(v));
+  }
+
+  void push_back(const std::shared_ptr<Value>& v) {
+    if (!is_array()) throw std::runtime_error("Value is not an array");
+    array_.push_back(v);
+  }
+
+  static std::shared_ptr<Value> object(const std::unordered_map<json, std::shared_ptr<Value>>& v = {}) {
+    return std::shared_ptr<Value>(new Value(v));
+    // return std::make_shared<Value>(v);
+  }
+
+  std::shared_ptr<Value>& operator[](const Value& key) {
+    if (!is_object()) throw std::runtime_error("Value is not an object");
+    if (!key.is_hashable()) throw std::runtime_error("Unashable type");
+    return object_[key.primitive_];
+  }
+
+  bool is_undefined() const { return type == Undefined; }
+
+  bool is_null() const { return type == Undefined || type == Primitive && primitive_.is_null(); }
+
+  bool is_boolean() const { return type == Primitive && this->is_boolean(); }
+  bool is_number_integer() const { return type == Primitive && this->is_number_integer(); }
+  bool is_number_float() const { return type == Primitive && this->is_number_float(); }
+  bool is_number() const { return type == Primitive && this->is_number(); }
+  bool is_string() const { return type == Primitive && this->is_string(); }
+
+  bool is_object() const { return type == Object; }
+  bool is_array() const { return type == Array; }
+
+  bool empty() const {
+    if (is_null()) throw std::runtime_error("Undefined value or reference");
+    if (is_string()) return primitive_.empty();
+    if (is_array()) return array_.empty();
+    if (is_object()) return object_.empty();
+    return false;
+  }
+
+  operator bool() const {
+    if (is_undefined()) return false;
+    if (is_boolean()) return get<bool>();
+    if (is_number()) return get<double>() != 0;
+    if (is_string()) return !get<std::string>().empty();
+    if (is_array()) return !empty();
+    // TODO: check truthfulness semantics of jinja
+    return !is_null();
+  }
+
+  bool operator==(const Value & other) const {
+    if (type != other.type) return false;
+    if (is_array()) {
+      if (array_.size() != other.array_.size()) return false;
+      for (size_t i = 0; i < array_.size(); ++i) {
+        if (!array_[i] || !other.array_[i] || *array_[i] != *other.array_[i]) return false;
+      }
+      return true;
+    } else if (is_object()) {
+      if (object_.size() != other.object_.size()) return false;
+      for (const auto& item : object_) {
+        if (!item.second || !other.object_.count(item.first) || *item.second != *other.object_.at(item.first)) return false;
+      }
+      return true;
+    } else {
+      return primitive_ == other.primitive_;
+    }
+  }
+
+  bool operator!=(const Value & other) const {
+    return !(*this == other);
+  }
+
+  bool contains(const std::string & key) const {
+    if (is_null()) throw std::runtime_error("Undefined value or reference");
+
+    if (is_object()) {
+      return object_.find(key) != object_.end();
+    }
+    return false;
+  }
+  bool contains(const Value & value) const {
+    if (is_null()) throw std::runtime_error("Undefined value or reference");
+    if (is_array()) {
+      for (const auto& item : array_) {
+        if (item && *item == value) return true;
+      }
+    } else if (is_object()) {
+      for (const auto& item : object_) {
+        if (*item.second == value) return true;
+      }
+    }
+    return this->contains(value);
+  }
+  const std::shared_ptr<Value>& at(size_t index) const {
+    if (is_undefined()) throw std::runtime_error("Undefined value or reference");
+    if (is_array()) return array_.at(index);
+    if (is_object()) return object_.at(index);
+    throw std::runtime_error("Value is not an array or object");
+  }
+  const std::shared_ptr<Value>& at(const Value & index) const {
+    if (!index.is_hashable()) throw std::runtime_error("Unashable type");
+    if (is_array()) return array_.at(index.get<int>());
+    if (is_object()) return object_.at(index.primitive_);
+    return this->at(index);
+  }
+  
+  bool is_primitive() const {
+    return type == Primitive;
+  }
+  bool is_hashable() const {
+    return is_primitive();
+  }
+  template <typename T>
+  T get() const {
+    if (is_primitive()) return primitive_.get<T>();
+    throw std::runtime_error("Get not defined for this value type");
+  }
+  template <>
+  std::vector<std::string> get<std::vector<std::string>>() const {
+    if (is_array()) {
+      std::vector<std::string> res;
+      for (const auto& item : array_) {
+        res.push_back(item->get<std::string>());
+      }
+      return res;
+    }
+    throw std::runtime_error("Get not defined for this value type");
+  }
+  template <>
+  json get<json>() const {
+    if (is_primitive()) return primitive_;
+    if (is_array()) {
+      std::vector<json> res;
+      for (const auto& item : array_) {
+        res.push_back(item->get<json>());
+      }
+      return res;
+    }
+    if (is_object()) {
+      json res;
+      for (const auto& item : object_) {
+        res[item.first.get<std::string>()] = item.second->get<json>();
+      }
+      return res;
+    }
+    throw std::runtime_error("Get not defined for this value type");
+  }
+
+  std::shared_ptr<Value> operator-() const {
+      if (is_number_integer())
+        return std::make_shared<Value>(-get<int64_t>());
+      else
+        return std::make_shared<Value>(-get<double>());
+  }
+
+  std::shared_ptr<Value> operator!() const {
+      bool b = *this;
+      return std::make_shared<Value>(!b);
+  }
+
+  std::shared_ptr<Value> operator+(const Value& rhs) {
+      if (is_number_integer() && rhs.is_number_integer())
+        return std::make_shared<Value>(get<int64_t>() + rhs.get<int64_t>());
+      else
+        return std::make_shared<Value>(get<double>() + rhs.get<double>());
+  }
+
+  std::shared_ptr<Value> operator-(const Value& rhs) {
+      if (is_number_integer() && rhs.is_number_integer())
+        return std::make_shared<Value>(get<int64_t>() - rhs.get<int64_t>());
+      else
+        return std::make_shared<Value>(get<double>() - rhs.get<double>());
+  }
+
+  std::shared_ptr<Value> operator*(const Value& rhs) {
+      if (is_number_integer() && rhs.is_number_integer())
+        return std::make_shared<Value>(get<int64_t>() * rhs.get<int64_t>());
+      else
+        return std::make_shared<Value>(get<double>() * rhs.get<double>());
+  }
+
+  std::shared_ptr<Value> operator/(const Value& rhs) {
+      if (is_number_integer() && rhs.is_number_integer())
+        return std::make_shared<Value>(get<int64_t>() / rhs.get<int64_t>());
+      else
+        return std::make_shared<Value>(get<double>() / rhs.get<double>());
+  }
+
+  std::shared_ptr<Value> operator%(const Value& rhs) {
+    return std::make_shared<Value>(get<int64_t>() % rhs.get<int64_t>());
+  }
+
+  std::string dump(int indent=0) const {
+    return get<json>().dump(indent);
+  }
+};
 
 
 // Forward declarations
@@ -197,10 +447,10 @@ public:
         Expression
     };
     virtual ~TemplateNode() = default;
-    virtual void render(std::ostringstream& oss, json& context) const = 0;
+    virtual void render(std::ostringstream& oss, Value & context) const = 0;
     Type getType() const { return type; }
 
-    std::string render(json & context) const {
+    std::string render(Value & context) const {
         std::ostringstream oss;
         render(oss, context);
         return oss.str();
@@ -215,7 +465,7 @@ class SequenceNode : public TemplateNode {
     std::vector<std::unique_ptr<TemplateNode>> children;
 public:
     SequenceNode(std::vector<std::unique_ptr<TemplateNode>> && c) : TemplateNode(Type::Sequence), children(std::move(c)) {}
-    void render(std::ostringstream& oss, json& context) const override {
+    void render(std::ostringstream& oss, Value & context) const override {
         for (const auto& child : children) {
             child->render(oss, context);
         }
@@ -226,7 +476,7 @@ class TextNode : public TemplateNode {
     std::string text;
 public:
     TextNode(const std::string& t) : TemplateNode(Type::Text), text(t) {}
-    void render(std::ostringstream& oss, json&) const override { oss << text; }
+    void render(std::ostringstream& oss, Value &) const override { oss << text; }
 };
 
 class VariableNode : public TemplateNode {
@@ -234,7 +484,7 @@ class VariableNode : public TemplateNode {
 public:
     VariableNode(std::unique_ptr<Expression> && e, std::vector<std::string> && f) 
         : TemplateNode(Type::Variable), expr(std::move(e)) {}
-    void render(std::ostringstream& oss, json& context) const override;
+    void render(std::ostringstream& oss, Value & context) const override;
 };
 
 class IfNode : public TemplateNode {
@@ -242,7 +492,7 @@ class IfNode : public TemplateNode {
 public:
     IfNode(std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<TemplateNode>>> && c)
         : TemplateNode(Type::If), cascade(std::move(c)) {}
-    void render(std::ostringstream& oss, json& context) const override;
+    void render(std::ostringstream& oss, Value & context) const override;
 };
 
 class ForNode : public TemplateNode {
@@ -257,7 +507,7 @@ public:
             std::unique_ptr<TemplateNode> && b, bool r)
             : TemplateNode(Type::For), var_names(vns), condition(std::move(c)),
             iterable(std::move(iter)), body(std::move(b)), recursive(r) {}
-    void render(std::ostringstream& oss, json& context) const override;
+    void render(std::ostringstream& oss, Value & context) const override;
 };
 
 class BlockNode : public TemplateNode {
@@ -266,7 +516,7 @@ class BlockNode : public TemplateNode {
 public:
     BlockNode(const std::string& n, std::unique_ptr<TemplateNode> && b)
         : TemplateNode(Type::NamedBlock), name(n), body(std::move(b)) {}
-    void render(std::ostringstream& oss, json& context) const override;
+    void render(std::ostringstream& oss, Value & context) const override;
 };
 
 class SetNode : public TemplateNode {
@@ -275,16 +525,15 @@ class SetNode : public TemplateNode {
 public:
     SetNode(const std::string& vn, std::unique_ptr<Expression> && v)
       : TemplateNode(Type::Set), var_name(vn), value(std::move(v)) {}
-    void render(std::ostringstream& oss, json& context) const override;
+    void render(std::ostringstream& oss, Value & context) const override;
 };
 
 class Expression {
 public:
     virtual ~Expression() = default;
-    virtual json evaluate(json& context) const = 0;
+    virtual std::shared_ptr<Value> evaluate(Value & context) const = 0;
 
-
-    virtual json evaluateAsPipe(json& context, json& input) const {
+    virtual std::shared_ptr<Value> evaluateAsPipe(Value & context, std::shared_ptr<Value>& input) const{
       throw std::runtime_error("This expression cannot be used as a pipe");
     }
 };
@@ -296,26 +545,26 @@ class IfExpr : public Expression {
 public:
     IfExpr(std::unique_ptr<Expression> && c, std::unique_ptr<Expression> && t, std::unique_ptr<Expression> && e)
         : condition(std::move(c)), then_expr(std::move(t)), else_expr(std::move(e)) {}
-    json evaluate(json& context) const override {
-        return to_bool(condition->evaluate(context)) ? then_expr->evaluate(context) : else_expr->evaluate(context);
+    std::shared_ptr<Value> evaluate(Value & context) const override {
+        return condition->evaluate(context) ? then_expr->evaluate(context) : else_expr->evaluate(context);
     }
 };
 
 class LiteralExpr : public Expression {
-    json value;
+    std::shared_ptr<Value> value;
 public:
-    LiteralExpr(const json& v) : value(v) {}
-    json evaluate(json&) const override { return value; }
+    LiteralExpr(const std::shared_ptr<Value>& v) : value(v) {}
+    std::shared_ptr<Value> evaluate(Value &) const override { return value; }
 };
 
 class ArrayExpr : public Expression {
     std::vector<std::unique_ptr<Expression>> elements;
 public:
     ArrayExpr(std::vector<std::unique_ptr<Expression>> && e) : elements(std::move(e)) {}
-    json evaluate(json & context) const override {
-        json result = json::array();
+    std::shared_ptr<Value> evaluate(Value & context) const override {
+        auto result = Value::array();
         for (const auto& e : elements) {
-            result.push_back(e->evaluate(context));
+            result->push_back(e->evaluate(context));
         }
         return result;
     }
@@ -325,12 +574,23 @@ class DictExpr : public Expression {
     std::vector<std::pair<std::string, std::unique_ptr<Expression>>> elements;
 public:
     DictExpr(std::vector<std::pair<std::string, std::unique_ptr<Expression>>> && e) : elements(std::move(e)) {}
-    json evaluate(json & context) const override {
-        json result = json::object();
+    std::shared_ptr<Value> evaluate(Value & context) const override {
+        auto result = Value::object();
         for (const auto& e : elements) {
-            result[e.first] = e.second->evaluate(context);
+            (*result)[e.first] = e.second->evaluate(context);
         }
         return result;
+    }
+};
+
+
+class VariableExpr : public Expression {
+    std::string name;
+public:
+    VariableExpr(const std::string& n) : name(n) {}
+    std::string get_name() const { return name; }
+    std::shared_ptr<Value> evaluate(Value & context) const override {
+        return context.at(name);
     }
 };
 
@@ -340,66 +600,28 @@ class SubscriptExpr : public Expression {
 public:
     SubscriptExpr(std::unique_ptr<Expression> && b, std::unique_ptr<Expression> && i)
         : base(std::move(b)), index(std::move(i)) {}
-    json evaluate(json & context) const override {
-        json target = base->evaluate(context);
-        if (target.is_array()) {
-            return target.at(index->evaluate(context).get<int>());
-        } else if (target.is_object()) {
-            return target.at(index->evaluate(context).get<std::string>());
+    std::shared_ptr<Value> evaluate(Value & context) const override {
+        auto target_value = base->evaluate(context);
+        auto index_value = index->evaluate(context);
+        if (target_value->is_null()) {
+          if (auto t = dynamic_cast<VariableExpr*>(base.get())) {
+            throw std::runtime_error("'" + t->get_name() + "' is " + (context.contains(t->get_name()) ? "null" : "not defined"));
+          }
+          throw std::runtime_error("Trying to access property '" +  index_value->dump() + "' on null!");
+        }
+        if (target_value->is_array()) {
+            return target_value->at(index_value->get<int>());
+        } else if (target_value->is_object()) {
+            auto key = index_value->get<std::string>();
+            if (!target_value->contains(key)) {
+                throw std::runtime_error("'dict object' has no attribute '" + key + "'");
+            }
+            return target_value->at(key);
         } else {
             throw std::runtime_error("Subscripting non-array or non-object");
         }
     }
 };
-
-class VariableExpr : public Expression {
-    std::string name;
-public:
-    VariableExpr(const std::string& n) : name(n) {}
-    std::string get_name() const { return name; }
-    json evaluate(json& context) const override {
-        return context.value(name, json(nullptr));
-    }
-};
-
-json operator+(const json& lhs, const json& rhs) {
-    if (lhs.is_number_integer() && rhs.is_number_integer())
-      return lhs.get<int64_t>() + rhs.get<int64_t>();
-    else
-      return lhs.get<double>() + rhs.get<double>();
-}
-
-json operator-(const json& lhs) {
-    if (lhs.is_number_integer())
-      return -lhs.get<int64_t>();
-    else
-      return -lhs.get<double>();
-}
-
-json operator-(const json& lhs, const json& rhs) {
-    if (lhs.is_number_integer() && rhs.is_number_integer())
-      return lhs.get<int64_t>() - rhs.get<int64_t>();
-    else
-      return lhs.get<double>() - rhs.get<double>();
-}
-
-json operator*(const json& lhs, const json& rhs) {
-    if (lhs.is_number_integer() && rhs.is_number_integer())
-      return lhs.get<int64_t>() * rhs.get<int64_t>();
-    else
-      return lhs.get<double>() * rhs.get<double>();
-}
-
-json operator/(const json& lhs, const json& rhs) {
-    if (lhs.is_number_integer() && rhs.is_number_integer())
-      return lhs.get<int64_t>() / rhs.get<int64_t>();
-    else
-      return lhs.get<double>() / rhs.get<double>();
-}
-
-json operator%(const json& lhs, const json& rhs) {
-  return lhs.get<int64_t>() % rhs.get<int64_t>();
-}
 
 class UnaryOpExpr : public Expression {
 public:
@@ -409,12 +631,12 @@ private:
     Op op;
 public:
     UnaryOpExpr(std::unique_ptr<Expression> && e, Op o) : expr(std::move(e)), op(o) {}
-    json evaluate(json& context) const override {
-        json e = expr->evaluate(context);
+    std::shared_ptr<Value> evaluate(Value & context) const override {
+        auto e = expr->evaluate(context);
         switch (op) {
             case Op::Plus: return e;
-            case Op::Minus: return -e;
-            case Op::LogicalNot: return !to_bool(e);
+            case Op::Minus: return -(*e);
+            case Op::LogicalNot: return !(*e);
         }
         throw std::runtime_error("Unknown unary operator");
     }
@@ -430,44 +652,44 @@ private:
 public:
     BinaryOpExpr(std::unique_ptr<Expression> && l, std::unique_ptr<Expression> && r, Op o)
         : left(std::move(l)), right(std::move(r)), op(o) {}
-    json evaluate(json& context) const override {
-        json l = left->evaluate(context);
+    std::shared_ptr<Value> evaluate(Value & context) const override {
+        auto l = left->evaluate(context);
         
         if (op == Op::Is) {
           auto t = dynamic_cast<VariableExpr*>(right.get());
           if (!t) throw std::runtime_error("Right side of 'is' operator must be a variable");
 
           const auto & name = t->get_name();
-          if (name == "boolean") return l.is_boolean();
-          if (name == "integer") return l.is_number_integer();
-          if (name == "float") return l.is_number_float();
-          if (name == "number") return l.is_number();
-          if (name == "string") return l.is_string();
-          if (name == "mapping") return l.is_object();
-          if (name == "iterable") return l.is_array();
-          if (name == "sequence") return l.is_array();
+          if (name == "boolean") return std::make_shared<Value>(l->is_boolean());
+          if (name == "integer") return std::make_shared<Value>(l->is_number_integer());
+          if (name == "float") return std::make_shared<Value>(l->is_number_float());
+          if (name == "number") return std::make_shared<Value>(l->is_number());
+          if (name == "string") return std::make_shared<Value>(l->is_string());
+          if (name == "mapping") return std::make_shared<Value>(l->is_object());
+          if (name == "iterable") return std::make_shared<Value>(l->is_array());
+          if (name == "sequence") return std::make_shared<Value>(l->is_array());
           throw std::runtime_error("Unknown type for 'is' operator: " + name);
         }
 
-        json r = right->evaluate(context);
+        auto r = right->evaluate(context);
         switch (op) {
-            case Op::StrConcat: return l.get<std::string>() + r.get<std::string>();
-            case Op::Add:       return l + r;
-            case Op::Sub:       return l - r;
-            case Op::Mul:       return l * r;
-            case Op::MulMul:    return std::pow(l.get<double>(), r.get<double>());
-            case Op::Div:       return l / r;
-            case Op::DivDiv:    return l.get<int>() / r.get<int>();
-            case Op::Mod:       return l.get<int>() % r.get<int>();
-            case Op::Eq:        return l == r;
-            case Op::Ne:        return l != r;
-            case Op::Lt:        return l < r;
-            case Op::Gt:        return l > r;
-            case Op::Le:        return l <= r;
-            case Op::Ge:        return l >= r;
-            case Op::And:       return to_bool(l) && to_bool(r);
-            case Op::Or:        return to_bool(l) || to_bool(r);
-            case Op::In:        return r.is_array() && r.find(l) != r.end();
+            case Op::StrConcat: return std::make_shared<Value>(l->get<std::string>() + r->get<std::string>());
+            case Op::Add:       return (*l) + (*r);
+            case Op::Sub:       return (*l) - (*r);
+            case Op::Mul:       return (*l) * (*r);
+            case Op::Div:       return (*l) / (*r);
+            case Op::MulMul:    return std::make_shared<Value>(std::pow(l->get<double>(), r->get<double>()));
+            case Op::DivDiv:    return std::make_shared<Value>(l->get<int64_t>() / r->get<int64_t>());
+            case Op::Mod:       return std::make_shared<Value>(l->get<int64_t>() % r->get<int64_t>());
+            case Op::Eq:        return std::make_shared<Value>(l == r);
+            case Op::Ne:        return std::make_shared<Value>(l != r);
+            case Op::Lt:        return std::make_shared<Value>(l < r);
+            case Op::Gt:        return std::make_shared<Value>(l > r);
+            case Op::Le:        return std::make_shared<Value>(l <= r);
+            case Op::Ge:        return std::make_shared<Value>(l >= r);
+            case Op::And:       return std::make_shared<Value>(l && r);
+            case Op::Or:        return std::make_shared<Value>(l || r);
+            case Op::In:        return std::make_shared<Value>(r->is_array() && r->contains(*l));
             default:            break;
         }
         throw std::runtime_error("Unknown binary operator");
@@ -484,15 +706,15 @@ public:
     bool is_function_call() const { return object == nullptr; }
     const std::string& get_method() const { return method; }
     // const std::vector<std::unique_ptr<Expression>>& get_args() const { return args; }
-    json evaluate(json& context) const override {
-        json obj = object->evaluate(context);
-        if (method == "append" && obj.is_array()) {
+    std::shared_ptr<Value> evaluate(Value & context) const override {
+        auto obj = object->evaluate(context);
+        if (method == "append" && obj->is_array()) {
             if (args.size() != 1 || !args[0].first.empty()) throw std::runtime_error("append method must have exactly one unnamed argument");
-            obj.push_back(args[0].second->evaluate(context));
+            obj->push_back(args[0].second->evaluate(context));
             // for (const auto& arg : args) {
             //     obj.push_back(arg.second->evaluate(context));
             // }
-            return json();
+            return std::make_shared<Value>();
         }
         throw std::runtime_error("Unknown method: " + method);
     }
@@ -502,9 +724,9 @@ class FunctionCallExpr : public Expression {
     std::string name;
     std::vector<std::pair<std::string, std::unique_ptr<Expression>>> args;
 
-    json getSingleArg(const std::string & arg_name, bool allowPositional, json& context, bool has_default_value = false, const json & default_value = json()) const {
+    std::shared_ptr<Value> getSingleArg(const std::string & arg_name, bool allowPositional, Value & context, const std::shared_ptr<Value> & default_value = nullptr) const {
       if (args.empty()) {
-        if (has_default_value) return default_value;
+        if (default_value) return default_value;
         throw std::runtime_error("Function " + name + " must have exactly one argument (" + arg_name + ")");
       }
       if (args.size() != 1) throw std::runtime_error("Function " + name + " must have exactly one argument (" + arg_name + ")");
@@ -520,25 +742,25 @@ public:
     FunctionCallExpr(const std::string& n, std::vector<std::pair<std::string, std::unique_ptr<Expression>>> && a = {})
         : name(n), args(std::move(a)) {}
     
-    json evaluate(json& context) const override {
+    std::shared_ptr<Value> evaluate(Value & context) const override {
         throw std::runtime_error("Unknown function (or maybe can only be evaluated as a pipe): " + name);
     }
     
-    json evaluateAsPipe(json& context, json& input) const override {
-        json result;
+    std::shared_ptr<Value> evaluateAsPipe(Value & context, std::shared_ptr<Value>& input) const override {
+        std::shared_ptr<Value> result(input);
         if (name == "tojson") {
-          auto indent = getSingleArg("indent", true, context, 0);
-          result = result.dump(indent);
+          auto indent = getSingleArg("indent", true, context, std::make_shared<Value>(0LL))->get<int64_t>();
+          result = std::make_shared<Value>(result->dump(indent));
         } else if (name == "join") {
-          auto sep = getSingleArg("d", true, context, "").get<std::string>();
+          auto sep = getSingleArg("d", true, context, std::make_shared<Value>(""))->get<std::string>();
           std::ostringstream oss;
           auto first = true;
-          for (const auto& item : result) {
+          for (size_t i = 0, n = input->size(); i < n; ++i) {
             if (first) first = false;
             else oss << sep;
-            oss << item.get<std::string>();
+            oss << input->at(i)->get<std::string>();
           }
-          result = oss.str();
+          result = std::make_shared<Value>(oss.str());
         } else {
           throw std::runtime_error("Unknown pipe function: " + name);
         }
@@ -550,8 +772,8 @@ class FilterExpr : public Expression {
     std::vector<std::unique_ptr<Expression>> parts;
 public:
     FilterExpr(std::vector<std::unique_ptr<Expression>> && p) : parts(std::move(p)) {}
-    json evaluate(json& context) const override {
-        json result;
+    std::shared_ptr<Value> evaluate(Value & context) const override {
+        std::shared_ptr<Value> result;
         bool first = true;
         for (const auto& part : parts) {
           if (first) {
@@ -569,54 +791,60 @@ public:
     }
 };
 
-void VariableNode::render(std::ostringstream& oss, json& context) const {
-    json result = expr->evaluate(context);
-    if (result.is_string()) {
-        oss << result.get<std::string>();
-    } else if (!result.is_null()) {
-        oss << result.dump();
+void VariableNode::render(std::ostringstream& oss, Value & context) const {
+    auto result = expr->evaluate(context);
+    if (result->is_string()) {
+        oss << result->get<std::string>();
+    } else if (result->is_boolean()) {
+        oss << (result->get<bool>() ? "True" : "False");
+    } else if (!result->is_null()) {
+        oss << result->dump(2);
     }
 }
 
-void IfNode::render(std::ostringstream& oss, json& context) const {
+void IfNode::render(std::ostringstream& oss, Value & context) const {
     for (const auto& branch : cascade) {
-        if (to_bool(branch.first->evaluate(context))) {
+        if (branch.first->evaluate(context)) {
             branch.second->render(oss, context);
             return;
         }
     }
 }
 
-void ForNode::render(std::ostringstream& oss, json& context) const {
-    json iterable_value = iterable->evaluate(context);
-    if (!iterable_value.is_array()) {
+void ForNode::render(std::ostringstream& oss, Value & context) const {
+    auto iterable_value = iterable->evaluate(context);
+    if (!iterable_value->is_array()) {
       throw std::runtime_error("For loop iterable must be iterable");
     }
 
-    // json original_context = context;
-    json original_vars = json::object();
+    auto original_context = context;
+    auto original_vars = Value::object();
     for (const auto& var_name : var_names) {
-        original_vars[var_name] = context.contains(var_name) ? context[var_name] : json();
+        (*original_vars)[var_name] = context.contains(var_name) ? context[var_name] : std::make_shared<Value>();
     }
 
-    auto loop_iteration = [&](const json& item) {
+    auto loop_iteration = [&](const std::shared_ptr<Value>& item) {
+        // auto bindings = Value::object();
         if (var_names.size() == 1) {
             context[var_names[0]] = item;
         } else {
-            if (!item.is_array() || item.size() != var_names.size()) {
+            if (!item->is_array() || item->size() != var_names.size()) {
                 throw std::runtime_error("Mismatched number of variables and items in for loop");
             }
             for (size_t i = 0; i < var_names.size(); ++i) {
-                context[var_names[i]] = item[i];
+                context[var_names[i]] = item->at(i);
             }
         }
-        if (!condition || to_bool(condition->evaluate(context))) {
+        // Context child_context(bindings, context.shared_from_this());
+        if (!condition || condition->evaluate(context)) {
           body->render(oss, context);
         }
     };
-    std::function<void(const json&)> visit = [&](const json& iter) {
-        for (const auto& item : iter) {
-            if (item.is_array() && recursive) {
+    std::function<void(const std::shared_ptr<Value>&)> visit = [&](const std::shared_ptr<Value>& iter) {
+        // for (const auto& item : iter) {
+        for (size_t i = 0, n = iter->size(); i < n; ++i) {
+            auto & item = iter->at(i);
+            if (item->is_array() && recursive) {
                 visit(item);
             // } else if (item.is_object()) {
             //     visit(item, recursive);
@@ -627,20 +855,20 @@ void ForNode::render(std::ostringstream& oss, json& context) const {
     };
     visit(iterable_value);
     
-    for (const auto & pair : original_vars.items()) {
-        if (pair.value().is_null()) {
-            context.erase(pair.key());
-        } else {
-            context[pair.key()] = pair.value();
-        }
-    }
+    // for (const auto & pair : original_vars.items()) {
+    //     if (pair.value().is_null()) {
+    //         context.erase(pair.key());
+    //     } else {
+    //         context[pair.key()] = pair.value();
+    //     }
+    // }
 }
 
-void BlockNode::render(std::ostringstream& oss, json& context) const {
+void BlockNode::render(std::ostringstream& oss, Value & context) const {
     body->render(oss, context);
 }
 
-void SetNode::render(std::ostringstream&, json& context) const {
+void SetNode::render(std::ostringstream&, Value & context) const {
     context[var_name] = value->evaluate(context);
 }
 
@@ -733,34 +961,34 @@ private:
     }
 
     /** integer, float, bool, string */
-    json parseConstant(CharIterator & it, const CharIterator & end) const {
+    std::shared_ptr<Value> parseConstant(CharIterator & it, const CharIterator & end) const {
       consumeSpaces(it, end);
       if (it == end) return nullptr;
       if (*it == '"' || *it == '\'') {
         auto str = parseString(it, end);
-        if (str) return *str;
+        if (str) return std::make_shared<Value>(*str);
       }
       if (*it == 't') {
         if (std::distance(it, end) >= 4 && std::string(it, it + 4) == "true") {
           it += 4;
-          return true;
+          return std::make_shared<Value>(true);
         }
       }
       if (*it == 'f') {
         if (std::distance(it, end) >= 5 && std::string(it, it + 5) == "false") {
           it += 5;
-          return false;
+          return std::make_shared<Value>(false);
         }
       }
       if (*it == 'n') {
         if (std::distance(it, end) >= 4 && std::string(it, it + 4) == "null") {
           it += 4;
-          return nullptr;
+          return std::make_shared<Value>(nullptr);
         }
       }
 
       auto number = parseNumber(it, end);
-      return number;
+      return std::make_shared<Value>(number);
     }
 
     class expression_parsing_error : public std::runtime_error {
@@ -899,7 +1127,7 @@ private:
         auto left = parseStringConcat(it, end);
         if (!left) throw expr_parse_error("Expected left side of 'logical compare' expression", it, end);
 
-        static std::regex compare_tok(R"((==|!=|<=?|>=?|in|is)\b)");
+        static std::regex compare_tok(R"(==|!=|<=?|>=?|in\b|is\b)");
         std::string op_str;
         while (!(op_str = consumeToken(compare_tok, it, end)).empty()) {
             auto right = parseStringConcat(it, end);
@@ -922,6 +1150,7 @@ private:
             else if (op_str == "<=") op = BinaryOpExpr::Op::Le;
             else if (op_str == ">=") op = BinaryOpExpr::Op::Ge;
             else if (op_str == "in") op = BinaryOpExpr::Op::In;
+            else throw expr_parse_error("Unknown comparison operator: " + op_str, it, end);
             left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), op);
         }
         return left;
@@ -959,7 +1188,7 @@ private:
     }
 
     std::string parseIdentifier(CharIterator & it, const CharIterator & end) const {
-        static std::regex ident_regex(R"(\w+)");
+        static std::regex ident_regex(R"([a-zA-Z_]\w*)");
         return consumeToken(ident_regex, it, end);
     }
 
@@ -1060,17 +1289,14 @@ private:
         }
         return expr;
     }
-
-    // * - ValueExpression = (identifier | number | string | bool | BracedExpressionOrArray | Tuple | Dictionary ) SubScript? Call?
-    //   * - SubScript = ("[" FullExpression "]" | "." identifier )+
         
     std::unique_ptr<Expression> parseValueExpression(CharIterator & it, const CharIterator & end) const {
       auto parseValue = [&]() -> std::unique_ptr<Expression> {
         auto constant = parseConstant(it, end);
-        if (!constant.is_null()) return nonstd_make_unique<LiteralExpr>(constant);
+        if (!constant->is_null()) return nonstd_make_unique<LiteralExpr>(constant);
 
         static std::regex null_regex(R"(null\b)");
-        if (!consumeToken(null_regex, it, end).empty()) return nonstd_make_unique<LiteralExpr>(json());
+        if (!consumeToken(null_regex, it, end).empty()) return nonstd_make_unique<LiteralExpr>(std::make_shared<Value>());
 
         auto identifier = parseIdentifier(it, end);
         if (!identifier.empty()) return nonstd_make_unique<VariableExpr>(identifier);
@@ -1099,7 +1325,13 @@ private:
         } else if (!consumeToken(".", it, end).empty()) {
             auto identifier = parseIdentifier(it, end);
             if (identifier.empty()) throw expr_parse_error("Expected identifier in subscript", it, end);
-            value = nonstd_make_unique<SubscriptExpr>(std::move(value), nonstd_make_unique<LiteralExpr>(identifier));
+
+            if (peekSymbols({ "(" }, it, end)) {
+              auto callParams = parseCallParams(it, end);
+              value = nonstd_make_unique<MethodCallExpr>(std::move(value), identifier, std::move(callParams));
+            } else {
+              value = nonstd_make_unique<SubscriptExpr>(std::move(value), nonstd_make_unique<LiteralExpr>(std::make_shared<Value>(identifier)));
+            }
         }
       }
       return value;
