@@ -4,7 +4,6 @@
 
   TODO:
   - Add loop.index, .first and friends https://jinja.palletsprojects.com/en/3.0.x/templates/#for
-  - Add `{% set ns.value = 1 %}`
   - Add more tests
   - Add more functions
     - https://jinja.palletsprojects.com/en/3.0.x/templates/#builtin-filters
@@ -380,7 +379,7 @@ enum SpaceHandling { Keep, Strip, KeepLines };
 
 class TemplateToken {
 public:
-    enum class Type { Text, Expression, If, Else, Elif, EndIf, For, EndFor, Set, Comment, Block, EndBlock };
+    enum class Type { Text, Expression, If, Else, Elif, EndIf, For, EndFor, Set, NamespacedSet, Comment, Block, EndBlock };
 
     static std::string typeToString(Type t) {
         switch (t) {
@@ -393,6 +392,7 @@ public:
             case Type::For: return "for";
             case Type::EndFor: return "endfor";
             case Type::Set: return "set";
+            case Type::NamespacedSet: return "namespaced set";
             case Type::Comment: return "comment";
             case Type::Block: return "block";
             case Type::EndBlock: return "endblock";
@@ -475,6 +475,14 @@ struct SetTemplateToken : public TemplateToken {
     SetTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::vector<std::string> & vns, std::unique_ptr<Expression> && v)
       : TemplateToken(pos, pre, post), var_names(vns), value(std::move(v)) {}
     Type getType() const override { return Type::Set; }
+};
+
+struct NamespacedSetTemplateToken : public TemplateToken {
+    std::string ns, name;
+    std::unique_ptr<Expression> value;
+    NamespacedSetTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::string& ns, const std::string& name, std::unique_ptr<Expression> && v)
+      : TemplateToken(pos, pre, post), ns(ns), name(name), value(std::move(v)) {}
+    Type getType() const override { return Type::NamespacedSet; }
 };
 
 struct CommentTemplateToken : public TemplateToken {
@@ -563,6 +571,15 @@ class SetNode : public TemplateNode {
 public:
     SetNode(const std::vector<std::string> & vns, std::unique_ptr<Expression> && v)
       : TemplateNode(Type::Set), var_names(vns), value(std::move(v)) {}
+    void render(std::ostringstream& oss, Value & context) const override;
+};
+
+class NamespacedSetNode : public TemplateNode {
+    std::string ns, name;
+    std::unique_ptr<Expression> value;
+public:
+    NamespacedSetNode(const std::string& ns, const std::string& name, std::unique_ptr<Expression> && v)
+      : TemplateNode(Type::Set), ns(ns), name(name), value(std::move(v)) {}
     void render(std::ostringstream& oss, Value & context) const override;
 };
 
@@ -919,6 +936,11 @@ void SetNode::render(std::ostringstream&, Value & context) const {
     destructuring_assign(var_names, context, value->evaluate(context));
 }
 
+void NamespacedSetNode::render(std::ostringstream&, Value & context) const {
+    auto ns_value = context[ns];
+    if (!ns_value->is_object()) throw std::runtime_error("Namespace '" + ns + "' is not an object");
+    (*ns_value)[name] = this->value->evaluate(context);
+}
 
 class JinjaParser {
 private:
@@ -1608,15 +1630,29 @@ private:
               auto post_space = parseBlockClose();
               tokens.push_back(nonstd_make_unique<EndForTemplateToken>(pos, pre_space, post_space));
             } else if (keyword == "set") {
-              auto varnames = parseVarNames(it, end);
+              static std::regex namespaced_var_regex(R"((\w+)\.(\w+))");
+              if (!(group = consumeTokenGroups(namespaced_var_regex, it, end)).empty()) {
+                auto ns = group[1];
+                auto var = group[2]; 
 
-              if (consumeToken("=", it, end).empty()) throw std::runtime_error("Expected equals sign in set block");
+                if (consumeToken("=", it, end).empty()) throw std::runtime_error("Expected equals sign in set block");
 
-              auto value = parseFullExpression(it, end);
-              if (!value) throw std::runtime_error("Expected value in set block");
+                auto value = parseFullExpression(it, end);
+                if (!value) throw std::runtime_error("Expected value in set block");
 
-              auto post_space = parseBlockClose();
-              tokens.push_back(nonstd_make_unique<SetTemplateToken>(pos, pre_space, post_space, varnames, std::move(value)));
+                auto post_space = parseBlockClose();
+                tokens.push_back(nonstd_make_unique<NamespacedSetTemplateToken>(pos, pre_space, post_space, ns, var, std::move(value)));
+              } else {
+                auto varnames = parseVarNames(it, end);
+
+                if (consumeToken("=", it, end).empty()) throw std::runtime_error("Expected equals sign in set block");
+
+                auto value = parseFullExpression(it, end);
+                if (!value) throw std::runtime_error("Expected value in set block");
+
+                auto post_space = parseBlockClose();
+                tokens.push_back(nonstd_make_unique<SetTemplateToken>(pos, pre_space, post_space, varnames, std::move(value)));
+              }
             } else if (keyword == "block") {
               auto blockname = parseIdentifier(it, end);
               if (blockname.empty()) throw std::runtime_error("Expected block name in block block");
@@ -1708,6 +1744,11 @@ private:
             case TemplateToken::Type::Set: {
               auto set_token = dynamic_cast<SetTemplateToken*>((*(it++)).get());
               children.emplace_back(nonstd_make_unique<SetNode>(set_token->var_names, std::move(set_token->value)));
+              break;
+            }
+            case TemplateToken::Type::NamespacedSet: {
+              auto set_token = dynamic_cast<NamespacedSetTemplateToken*>((*(it++)).get());
+              children.emplace_back(nonstd_make_unique<NamespacedSetNode>(set_token->ns, set_token->name, std::move(set_token->value)));
               break;
             }
             case TemplateToken::Type::Comment:

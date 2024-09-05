@@ -80,9 +80,9 @@ int main() {
             {%- set n = namespace(value=1, title='') -%}
             {{- n.value }} "{{ n.title }}",
             {%- set n.value = 2 -%}
-            {%- set n.title = 'Hello' %}title='') -%}
+            {%- set n.title = 'Hello' -%}
             {{- n.value }} "{{ n.title }}"
-        )", {}, "1 \"\"2 \"Hello\"");
+        )", {}, "1 \"\",2 \"Hello\"");
 
     // List files
     for (const auto & entry : std::__fs::filesystem::directory_iterator("templates")) {
