@@ -67,6 +67,11 @@ inline std::string read_file(const std::string &path) {
     cmake -B buildDebug -DCMAKE_BUILD_TYPE=Debug && cmake --build buildDebug -t test-jinja -j && ./buildDebug/bin/test-jinja
 */
 int main() {
+    test_render(" a {{  'b' -}} c ", {}, " a bc ");
+    test_render(" a {{- 'b'  }} c ", {}, " ab c ");
+    test_render("a\n{{- 'b'  }}\nc", {}, "ab\nc");
+    test_render("a\n{{  'b' -}}\nc", {}, "a\nbc");
+
     test_error("{{ raise_exception('hey') }}", {}, "hey");
     
     test_render("{{ [] is iterable }}", {}, "True");
