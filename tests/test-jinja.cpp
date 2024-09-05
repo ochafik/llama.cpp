@@ -5,6 +5,7 @@
 #include <string>
 #include <json.hpp>
 
+// using json = nlohmann::json;
 
 void test_render(const std::string & template_str, const json & bindings, const std::string & expected, const json & expected_context = json()) {
     std::cout << "Testing: " << template_str << std::endl;
@@ -66,10 +67,13 @@ inline std::string read_file(const std::string &path) {
     cmake -B buildDebug -DCMAKE_BUILD_TYPE=Debug && cmake --build buildDebug -t test-jinja -j && ./buildDebug/bin/test-jinja
 */
 int main() {
-    test_error(
-        "{{ raise_exception('hey') }}", json(),
-        "hey");
+    test_error("{{ raise_exception('hey') }}", {}, "hey");
     
+    test_render("{{ [] is iterable }}", {}, "True");
+    test_render("{{ [] is not number }}", {}, "True");
+    test_render("{% set x = [0, 1, 2, 3] %}{{ x[1:] }}{{ x[:2] }}{{ x[1:3] }}", {}, "[1,2,3][0,1][1,2]");
+    test_render("{{ ' a  ' | strip }}", {}, "a");
+    test_render("{{ range(3) }}{{ range(4, 7) }}{{ range(0, 10, step=2) }}", {}, "[0,1,2][4,5,6][0,2,4,6,8]");
 
     // List files
     for (const auto & entry : std::__fs::filesystem::directory_iterator("templates")) {

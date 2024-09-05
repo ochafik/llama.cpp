@@ -913,14 +913,12 @@ class JinjaParser {
 private:
     using CharIterator = std::string::const_iterator;
 
-    // std::vector<std::unique_ptr<TemplateNode>> ast;
-
     bool consumeSpaces(CharIterator & it, const CharIterator & end) const {
         while (it != end && std::isspace(*it)) ++it;
         return true;
     }
-    std::unique_ptr<std::string> parseString(CharIterator & it, const CharIterator & end) const {
 
+    std::unique_ptr<std::string> parseString(CharIterator & it, const CharIterator & end) const {
       auto doParse = [&](char quote) -> std::unique_ptr<std::string> {
         if (it == end || *it != quote) return nullptr;
         std::string result;
@@ -1003,23 +1001,13 @@ private:
         auto str = parseString(it, end);
         if (str) return Value::make(*str);
       }
-      if (*it == 't') {
-        if (std::distance(it, end) >= 4 && std::string(it, it + 4) == "true") {
-          it += 4;
-          return Value::make(true);
-        }
-      }
-      if (*it == 'f') {
-        if (std::distance(it, end) >= 5 && std::string(it, it + 5) == "false") {
-          it += 5;
-          return Value::make(false);
-        }
-      }
-      if (*it == 'n') {
-        if (std::distance(it, end) >= 4 && std::string(it, it + 4) == "null") {
-          it += 4;
-          return Value::make(nullptr);
-        }
+      static std::regex tok(R"(true\b|false\b|null\b)");
+      auto token = consumeToken(tok, it, end);
+      if (!token.empty()) {
+        if (token == "true") return Value::make(true);
+        if (token == "false") return Value::make(false);
+        if (token == "null") return Value::make(nullptr);
+        throw std::runtime_error("Unknown constant token: " + token);
       }
 
       auto number = parseNumber(it, end);
@@ -1035,7 +1023,6 @@ private:
         return std::distance(begin, it);
       }
     };
-    
 
     bool peekSymbols(const std::vector<std::string> & symbols, const CharIterator & it, const CharIterator & end) const {
         for (const auto & symbol : symbols) {
@@ -1108,7 +1095,6 @@ private:
 
         auto if_expr = parseIfExpression(it, end);
         return nonstd_make_unique<IfExpr>(std::move(left), std::move(if_expr.first), std::move(if_expr.second));
-        // throw std::runtime_error("Expected more after 'if' keyword");
     }
 
     std::pair<std::unique_ptr<Expression>, std::unique_ptr<Expression>> parseIfExpression(CharIterator & it, const CharIterator & end) const {
@@ -1163,13 +1149,9 @@ private:
 
               auto identifier = parseIdentifier(it, end);
               if (identifier.empty()) throw std::runtime_error("Expected identifier after 'is' keyword");
-              // auto callParams = parseCallParams(it, end);
-              // if (!callParams) throw std::runtime_error("Expected call params after 'is' keyword");
 
               return nonstd_make_unique<BinaryOpExpr>(
-                  std::move(left),
-                  nonstd_make_unique<VariableExpr>(identifier),
-                  // nonstd_make_unique<MethodCallExpr>(nullptr, identifier, std::move(callParams)),
+                  std::move(left), nonstd_make_unique<VariableExpr>(identifier),
                   negated ? BinaryOpExpr::Op::IsNot : BinaryOpExpr::Op::Is);
             }
             auto right = parseStringConcat(it, end);
@@ -1296,10 +1278,7 @@ private:
     }
 
     std::unique_ptr<Expression> call_func(const std::string & name, Expression::CallableArgs && args) const {
-        return nonstd_make_unique<CallExpr>(
-            nonstd_make_unique<VariableExpr>(name),
-            std::move(args));
-        // return nonstd_make_unique<FunctionCallExpr>(name, std::move(args));
+        return nonstd_make_unique<CallExpr>(nonstd_make_unique<VariableExpr>(name), std::move(args));
     }
 
     std::unique_ptr<FilterExpr> parseFilterExpression(CharIterator & it, const CharIterator & end) const {
@@ -1311,10 +1290,8 @@ private:
             if (peekSymbols({ "(" }, it, end)) {
                 auto callParams = parseCallParams(it, end);
                 parts.push_back(call_func(identifier, std::move(callParams)));
-                // parts.push_back(nonstd_make_unique<FunctionCallExpr>(identifier, std::move(callParams)));
             } else {
                 parts.push_back(call_func(identifier, {}));
-                // parts.push_back(nonstd_make_unique<FunctionCallExpr>(identifier));
             }
         };
         parseFunctionCall();
@@ -1415,8 +1392,7 @@ private:
         if (!expr) throw std::runtime_error("Expected expression in braced expression");
         
         if (!consumeToken(")", it, end).empty()) {
-            // Drop the parentheses
-            return expr;
+            return expr;  // Drop the parentheses
         }
 
         std::vector<std::unique_ptr<Expression>> tuple;
@@ -1729,8 +1705,7 @@ private:
               break;
             }
             case TemplateToken::Type::Comment:
-              // Ignore comments
-              it++;
+              it++;  // Ignore comments
               break;
             case TemplateToken::Type::Block: {
               auto block_token = dynamic_cast<BlockTemplateToken*>((it++)->get());
