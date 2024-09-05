@@ -1,3 +1,8 @@
+#pragma once
+
+#include "llama.h"
+#include "common.h"
+
 #include <iostream>
 #include <string>
 #include <vector>
@@ -350,7 +355,7 @@ public:
     return Value::make(get<int64_t>() % rhs.get<int64_t>());
   }
 
-  std::string dump(int indent=0) const {
+  std::string dump(int indent=-1) const {
     return get<json>().dump(indent);
   }
 };
@@ -360,28 +365,11 @@ public:
 class TemplateNode;
 class Expression;
 
-enum SpaceHandling {
-    Keep,
-    Strip,
-    KeepLines,
-};
+enum SpaceHandling { Keep, Strip, KeepLines };
 
 class TemplateToken {
 public:
-    enum class Type {
-        Text,
-        Expression,
-        If,
-        Else,
-        Elif,
-        EndIf,
-        For,
-        EndFor,
-        Set,
-        Comment,
-        Block,
-        EndBlock,
-    };
+    enum class Type { Text, Expression, If, Else, Elif, EndIf, For, EndFor, Set, Comment, Block, EndBlock };
 
     static std::string typeToString(Type t) {
         switch (t) {
@@ -486,17 +474,7 @@ struct CommentTemplateToken : public TemplateToken {
 
 class TemplateNode {
 public:
-
-    enum class Type {
-        Sequence,
-        Text,
-        Variable,
-        NamedBlock,
-        If,
-        For,
-        Set,
-        Expression
-    };
+    enum class Type { Sequence, Text, Variable, NamedBlock, If, For, Set, Expression };
     virtual ~TemplateNode() = default;
     virtual void render(std::ostringstream& oss, Value & context) const = 0;
     Type getType() const { return type; }
@@ -517,9 +495,7 @@ class SequenceNode : public TemplateNode {
 public:
     SequenceNode(std::vector<std::unique_ptr<TemplateNode>> && c) : TemplateNode(Type::Sequence), children(std::move(c)) {}
     void render(std::ostringstream& oss, Value & context) const override {
-        for (const auto& child : children) {
-            child->render(oss, context);
-        }
+        for (const auto& child : children) child->render(oss, context);
     }
 };
 
@@ -858,7 +834,7 @@ void VariableNode::render(std::ostringstream& oss, Value & context) const {
     } else if (result->is_boolean()) {
         oss << (result->get<bool>() ? "True" : "False");
     } else if (!result->is_null()) {
-        oss << result->dump(2);
+        oss << result->dump();
     }
 }
 
@@ -1238,6 +1214,12 @@ private:
                 auto expr = parseFullExpression(it, end);
                 if (!expr) throw std::runtime_error("Expected expression in call args");
                 result.emplace_back(std::string(), std::move(expr));
+            }
+            if (consumeToken(",", it, end).empty()) {
+              if (consumeToken(")", it, end).empty()) {
+                throw std::runtime_error("Expected closing parenthesis in call args");
+              }
+              return result;
             }
         }
         throw std::runtime_error("Expected closing parenthesis in call args");
@@ -1848,7 +1830,7 @@ std::shared_ptr<Value> Value::context(const std::shared_ptr<Value> & values) {
     throw std::runtime_error(args.at("message")->get<std::string>());
   });
   register_function("tojson", { "value", "indent" }, [&](const Value & args) -> std::shared_ptr<Value> {
-    auto indent = args.get<int64_t>("indent", 0);
+    auto indent = args.get<int64_t>("indent", -1);
     return Value::make(args.at("value")->dump(indent));
   });
   register_function("strip", { "text" }, [&](const Value & args) -> std::shared_ptr<Value> {
@@ -1865,6 +1847,42 @@ std::shared_ptr<Value> Value::context(const std::shared_ptr<Value> & values) {
       oss << items->at(i)->get<std::string>();
     }
     return Value::make(oss.str());
+  });
+  context_obj["range"] = callable([=](const Value::CallableArgs & args) -> std::shared_ptr<Value> {
+    int64_t start = 0;
+    int64_t end = 0;
+    int64_t step = 1;
+    // auto pos_count = std::count_if(args.begin(), args.end(), [](const auto & arg) { return arg.first.empty(); });
+    if (args.size() == 1) {
+      if (!args[0].first.empty()) throw std::runtime_error("When range is called with just 1 argument it must be positional");
+      end = args[0].second->get<int64_t>();
+    } else {
+      auto positional = true;
+      for (size_t i = 0; i < args.size(); i++) {
+        auto & arg = args[i];
+        auto v = arg.second->get<int64_t>();
+        if (positional && i < 3 && arg.first.empty()) {
+          (i == 0 ? start : i == 1 ? end : step) = v;
+        } else {
+          positional = false;
+          if (arg.first == "start") start = v;
+          else if (arg.first == "end") end = v;
+          else if (arg.first == "step") step = v;
+          else throw std::runtime_error("Unknown argument " + arg.first + " for function range");
+        }
+      }
+    }
+    auto res = Value::array();
+    if (step > 0) {
+      for (int64_t i = start; i < end; i += step) {
+        res->push_back(Value::make(i));
+      }
+    } else {
+      for (int64_t i = start; i > end; i += step) {
+        res->push_back(Value::make(i));
+      }
+    }
+    return res;
   });
   
 
