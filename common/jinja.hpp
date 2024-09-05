@@ -647,6 +647,15 @@ public:
     }
 };
 
+class SliceExpr : public Expression {
+public:
+    std::unique_ptr<Expression> start, end;
+    SliceExpr(std::unique_ptr<Expression> && s, std::unique_ptr<Expression> && e) : start(std::move(s)), end(std::move(e)) {}
+    std::shared_ptr<Value> evaluate(Value & context) const override {
+        throw std::runtime_error("SliceExpr not implemented");
+    }
+};
+
 class SubscriptExpr : public Expression {
     std::unique_ptr<Expression> base;
     std::unique_ptr<Expression> index;
@@ -655,23 +664,35 @@ public:
         : base(std::move(b)), index(std::move(i)) {}
     std::shared_ptr<Value> evaluate(Value & context) const override {
         auto target_value = base->evaluate(context);
-        auto index_value = index->evaluate(context);
-        if (target_value->is_null()) {
-          if (auto t = dynamic_cast<VariableExpr*>(base.get())) {
-            throw std::runtime_error("'" + t->get_name() + "' is " + (context.contains(t->get_name()) ? "null" : "not defined"));
+        if (auto slice = dynamic_cast<SliceExpr*>(index.get())) {
+          if (!target_value->is_array()) throw std::runtime_error("Subscripting non-array");
+
+          auto start = slice->start ? slice->start->evaluate(context)->get<int>() : 0;
+          auto end = slice->end ? slice->end->evaluate(context)->get<int>() : target_value->size();
+          auto result = Value::array();
+          for (int i = start; i < end; ++i) {
+            result->push_back(target_value->at(i));
           }
-          throw std::runtime_error("Trying to access property '" +  index_value->dump() + "' on null!");
-        }
-        if (target_value->is_array()) {
-            return target_value->at(index_value->get<int>());
-        } else if (target_value->is_object()) {
-            auto key = index_value->get<std::string>();
-            if (!target_value->contains(key)) {
-                throw std::runtime_error("'dict object' has no attribute '" + key + "'");
-            }
-            return target_value->at(key);
+          return result;
         } else {
-            throw std::runtime_error("Subscripting non-array or non-object");
+          auto index_value = index->evaluate(context);
+          if (target_value->is_null()) {
+            if (auto t = dynamic_cast<VariableExpr*>(base.get())) {
+              throw std::runtime_error("'" + t->get_name() + "' is " + (context.contains(t->get_name()) ? "null" : "not defined"));
+            }
+            throw std::runtime_error("Trying to access property '" +  index_value->dump() + "' on null!");
+          }
+          if (target_value->is_array()) {
+              return target_value->at(index_value->get<int>());
+          } else if (target_value->is_object()) {
+              auto key = index_value->get<std::string>();
+              if (!target_value->contains(key)) {
+                  throw std::runtime_error("'dict object' has no attribute '" + key + "'");
+              }
+              return target_value->at(key);
+          } else {
+              throw std::runtime_error("Subscripting non-array or non-object");
+          }
         }
     }
 };
@@ -697,7 +718,7 @@ public:
 
 class BinaryOpExpr : public Expression {
 public:
-    enum class Op { StrConcat, Add, Sub, Mul, MulMul, Div, DivDiv, Mod, Eq, Ne, Lt, Gt, Le, Ge, And, Or, In, Is };
+    enum class Op { StrConcat, Add, Sub, Mul, MulMul, Div, DivDiv, Mod, Eq, Ne, Lt, Gt, Le, Ge, And, Or, In, Is, IsNot };
 private:
     std::unique_ptr<Expression> left;
     std::unique_ptr<Expression> right;
@@ -708,21 +729,26 @@ public:
     std::shared_ptr<Value> evaluate(Value & context) const override {
         auto l = left->evaluate(context);
         
-        if (op == Op::Is) {
+        if (op == Op::Is || op == Op::IsNot) {
           auto t = dynamic_cast<VariableExpr*>(right.get());
           if (!t) throw std::runtime_error("Right side of 'is' operator must be a variable");
 
-          const auto & name = t->get_name();
-          if (name == "boolean") return Value::make(l->is_boolean());
-          if (name == "integer") return Value::make(l->is_number_integer());
-          if (name == "float") return Value::make(l->is_number_float());
-          if (name == "number") return Value::make(l->is_number());
-          if (name == "string") return Value::make(l->is_string());
-          if (name == "mapping") return Value::make(l->is_object());
-          if (name == "iterable") return Value::make(l->is_array());
-          if (name == "sequence") return Value::make(l->is_array());
-          if (name == "defined") return Value::make(!l->is_null());
-          throw std::runtime_error("Unknown type for 'is' operator: " + name);
+          auto eval = [&]() {
+            const auto & name = t->get_name();
+            if (name == "none") return l->is_null();
+            if (name == "boolean") return l->is_boolean();
+            if (name == "integer") return l->is_number_integer();
+            if (name == "float") return l->is_number_float();
+            if (name == "number") return l->is_number();
+            if (name == "string") return l->is_string();
+            if (name == "mapping") return l->is_object();
+            if (name == "iterable") return l->is_array();
+            if (name == "sequence") return l->is_array();
+            if (name == "defined") return !l->is_null();
+            throw std::runtime_error("Unknown type for 'is' operator: " + name);
+          };
+          auto value = eval();
+          return Value::make(op == Op::Is ? value : !value);
         }
 
         auto r = right->evaluate(context);
@@ -769,9 +795,6 @@ public:
         throw std::runtime_error("Unknown method: " + method);
     }
 };
-
-    
-    
 
 class CallExpr : public Expression {
     std::unique_ptr<Expression> object;
@@ -916,8 +939,9 @@ private:
 
     // std::vector<std::unique_ptr<TemplateNode>> ast;
 
-    void consumeSpaces(CharIterator & it, const CharIterator & end) const {
+    bool consumeSpaces(CharIterator & it, const CharIterator & end) const {
         while (it != end && std::isspace(*it)) ++it;
+        return true;
     }
     std::unique_ptr<std::string> parseString(CharIterator & it, const CharIterator & end) const {
 
@@ -1155,9 +1179,12 @@ private:
         if (!left) throw std::runtime_error("Expected left side of 'logical compare' expression");
 
         static std::regex compare_tok(R"(==|!=|<=?|>=?|in\b|is\b)");
+        static std::regex not_tok(R"(not\b)");
         std::string op_str;
         while (!(op_str = consumeToken(compare_tok, it, end)).empty()) {
             if (op_str == "is") {
+              auto negated = !consumeToken(not_tok, it, end).empty();
+
               auto identifier = parseIdentifier(it, end);
               if (identifier.empty()) throw std::runtime_error("Expected identifier after 'is' keyword");
               // auto callParams = parseCallParams(it, end);
@@ -1167,7 +1194,7 @@ private:
                   std::move(left),
                   nonstd_make_unique<VariableExpr>(identifier),
                   // nonstd_make_unique<MethodCallExpr>(nullptr, identifier, std::move(callParams)),
-                  BinaryOpExpr::Op::Is);
+                  negated ? BinaryOpExpr::Op::IsNot : BinaryOpExpr::Op::Is);
             }
             auto right = parseStringConcat(it, end);
             if (!right) throw std::runtime_error("Expected right side of 'logical compare' expression");
@@ -1354,10 +1381,27 @@ private:
 
       auto value = parseValue();
       
-      while (it != end && peekSymbols({ "[", "." }, it, end)) {
+      while (it != end && consumeSpaces(it, end) && peekSymbols({ "[", "." }, it, end)) {
         if (!consumeToken("[", it, end).empty()) {
-            auto index = parseFullExpression(it, end);
-            if (!index) throw std::runtime_error("Expected index in subscript");
+            std::unique_ptr<Expression> index;
+            if (!consumeToken(":", it, end).empty()) {
+              auto slice_end = parseFullExpression(it, end);
+              index = nonstd_make_unique<SliceExpr>(nullptr, std::move(slice_end));
+            } else {
+              auto slice_start = parseFullExpression(it, end);
+              if (!consumeToken(":", it, end).empty()) {
+                consumeSpaces(it, end);
+                if (peekSymbols({ "]" }, it, end)) {
+                  index = nonstd_make_unique<SliceExpr>(std::move(slice_start), nullptr);
+                } else {
+                  auto slice_end = parseFullExpression(it, end);
+                  index = nonstd_make_unique<SliceExpr>(std::move(slice_start), std::move(slice_end));
+                }
+              } else {
+                index = std::move(slice_start);
+              }
+            }
+            if (!index) throw std::runtime_error("Empty index in subscript");
             if (consumeToken("]", it, end).empty()) throw std::runtime_error("Expected closing bracket in subscript");
             
             value = nonstd_make_unique<SubscriptExpr>(std::move(value), std::move(index));
@@ -1372,6 +1416,7 @@ private:
               value = nonstd_make_unique<SubscriptExpr>(std::move(value), nonstd_make_unique<LiteralExpr>(Value::make(identifier)));
             }
         }
+        consumeSpaces(it, end);
       }
 
       if (peekSymbols({ "(" }, it, end)) {
@@ -1752,6 +1797,7 @@ public:
         return parser.parseTemplate(begin, it, end, /* full= */ true);
     }
 };
+
 std::shared_ptr<Value> Value::context(const std::shared_ptr<Value> & values) {
   std::unordered_map<json, std::shared_ptr<Value>> context_obj;
 
