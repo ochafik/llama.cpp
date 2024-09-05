@@ -1,3 +1,15 @@
+/*
+  The absolute minimum needed to run chat templates.
+  As it turns out, Llama 3.1's template is relatively involved, so we need a proper template engine.CLOCK_MONOTONIC_RAW_APPROX
+
+  TODO:
+  - Add loop.index and friends https://jinja.palletsprojects.com/en/3.0.x/templates/#for
+  - Add more tests
+  - Add more functions
+    - https://jinja.palletsprojects.com/en/3.0.x/templates/#builtin-filters
+    - https://jbmoelker.github.io/jinja-compat-tests/
+      - `{% raw %}{{ broken }{% endraw %}` https://jbmoelker.github.io/jinja-compat-tests/tags/raw/
+*/
 #pragma once
 
 #include "llama.h"
@@ -361,8 +373,6 @@ public:
 };
 
 
-// Forward declarations
-class TemplateNode;
 class Expression;
 
 enum SpaceHandling { Keep, Strip, KeepLines };
@@ -1804,14 +1814,16 @@ std::shared_ptr<Value> Value::context(const std::shared_ptr<Value> & values) {
   register_function("raise_exception", { "message" }, [&](const Value & args) -> std::shared_ptr<Value> {
     throw std::runtime_error(args.at("message")->get<std::string>());
   });
-  register_function("tojson", { "value", "indent" }, [&](const Value & args) -> std::shared_ptr<Value> {
-    auto indent = args.get<int64_t>("indent", -1);
-    return Value::make(args.at("value")->dump(indent));
+  register_function("tojson", { "value", "indent" }, [&](const Value & args) {
+    return Value::make(args.at("value")->dump(args.get<int64_t>("indent", -1)));
   });
-  register_function("strip", { "text" }, [&](const Value & args) -> std::shared_ptr<Value> {
+  register_function("strip", { "text" }, [&](const Value & args) {
     return Value::make(strip(args.at("text")->get<std::string>()));
   });
-  register_function("join", { "items", "d" }, [&](const Value & args) -> std::shared_ptr<Value> {
+  register_function("count", { "items" }, [&](const Value & args) {
+    return Value::make(args.at("items")->size());
+  });
+  register_function("join", { "items", "d" }, [&](const Value & args) {
     auto sep = args.get<std::string>("d", "");
     std::ostringstream oss;
     auto first = true;
@@ -1823,7 +1835,7 @@ std::shared_ptr<Value> Value::context(const std::shared_ptr<Value> & values) {
     }
     return Value::make(oss.str());
   });
-  context_obj["range"] = callable([=](const Value::CallableArgs & args) -> std::shared_ptr<Value> {
+  context_obj["range"] = callable([=](const Value::CallableArgs & args) {
     int64_t start = 0;
     int64_t end = 0;
     int64_t step = 1;
