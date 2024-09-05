@@ -32,6 +32,11 @@ nonstd_make_unique(std::size_t n) {
   return std::unique_ptr<T>(new RT[n]);
 }
 
+std::string strip(const std::string & s) {
+  static std::regex trailing_spaces_regex("^\\s+|\\s+$");
+  return std::regex_replace(s, trailing_spaces_regex, "");
+}
+
 /* Values that behave roughly like in Python.
  * jinja templates deal with objects by reference so we can't just json for arrays & objects,
  * but we do for primitives.
@@ -49,6 +54,7 @@ private:
   std::unordered_map<json, std::shared_ptr<Value>> object_;
   bool is_callable_;
   CallableType callable_;
+  std::shared_ptr<Value> parent_;
 
   enum Type {
     Undefined,
@@ -74,7 +80,7 @@ public:
     *this = other;
   }
 
-  Value(const json& v) {
+  Value(const json& v, const std::shared_ptr<Value> parent = nullptr) : parent_(parent) {
     if (v.is_object()) {
       type = Object;
       for (auto it = v.begin(); it != v.end(); ++it) {
@@ -112,6 +118,11 @@ public:
   static std::shared_ptr<Value> object(const std::unordered_map<json, std::shared_ptr<Value>>& v = {}) {
     return std::shared_ptr<Value>(new Value(v));
   }
+
+  static std::shared_ptr<Value> callable(const Value::CallableType & callable) {
+    return Value::make(callable);
+  }
+  static std::shared_ptr<Value> context(const std::shared_ptr<Value> & values = {});
   
   template <class... Args>
   static std::shared_ptr<Value> make(Args &&...args) {
@@ -132,6 +143,10 @@ public:
   std::shared_ptr<Value>& operator[](const std::string& key) {
     if (!is_object()) throw std::runtime_error("Value is not an object");
     return object_[key];
+  }
+
+  std::shared_ptr<Value>& operator[](const char * key) {
+    return (*this)[std::string(key)];
   }
 
   std::shared_ptr<Value>& operator[](const size_t& i) {
@@ -251,6 +266,13 @@ public:
     if (is_primitive()) return primitive_.get<T>();
     throw std::runtime_error("Get not defined for this value type");
   }
+
+  template <typename T>
+  T get(const std::string & key, T default_value) const {
+    if (!contains(key)) return default_value;
+    return this->at(key)->get<T>();
+  }
+
   template <>
   std::vector<std::string> get<std::vector<std::string>>() const {
     if (is_array()) {
@@ -295,7 +317,9 @@ public:
   }
 
   std::shared_ptr<Value> operator+(const Value& rhs) {
-      if (is_number_integer() && rhs.is_number_integer())
+      if (is_string() || rhs.is_string())
+        return Value::make(get<std::string>() + rhs.get<std::string>());
+      else if (is_number_integer() && rhs.is_number_integer())
         return Value::make(get<int64_t>() + rhs.get<int64_t>());
       else
         return Value::make(get<double>() + rhs.get<double>());
@@ -557,6 +581,8 @@ public:
 
 class Expression {
 public:
+    using CallableArgs = std::vector<std::pair<std::string, std::unique_ptr<Expression>>>;
+
     virtual ~Expression() = default;
     virtual std::shared_ptr<Value> evaluate(Value & context) const = 0;
 
@@ -610,14 +636,14 @@ public:
     }
 };
 
-
 class VariableExpr : public Expression {
     std::string name;
 public:
     VariableExpr(const std::string& n) : name(n) {}
     std::string get_name() const { return name; }
     std::shared_ptr<Value> evaluate(Value & context) const override {
-        return context.at(name);
+        auto res = context[name];
+        return res ? res : Value::make(nullptr);
     }
 };
 
@@ -695,6 +721,7 @@ public:
           if (name == "mapping") return Value::make(l->is_object());
           if (name == "iterable") return Value::make(l->is_array());
           if (name == "sequence") return Value::make(l->is_array());
+          if (name == "defined") return Value::make(!l->is_null());
           throw std::runtime_error("Unknown type for 'is' operator: " + name);
         }
 
@@ -724,13 +751,13 @@ public:
 };
 
 class MethodCallExpr : public Expression {
-    std::unique_ptr<Expression> object; // If nullptr, this is a function call
+    std::unique_ptr<Expression> object;
     std::string method;
     std::vector<std::pair<std::string, std::unique_ptr<Expression>>> args;
 public:
     MethodCallExpr(std::unique_ptr<Expression> && obj, const std::string& m, std::vector<std::pair<std::string, std::unique_ptr<Expression>>> && a)
         : object(std::move(obj)), method(m), args(std::move(a)) {}
-    bool is_function_call() const { return object == nullptr; }
+    // bool is_function_call() const { return object == nullptr; }
     const std::string& get_method() const { return method; }
     std::shared_ptr<Value> evaluate(Value & context) const override {
         auto obj = object->evaluate(context);
@@ -743,51 +770,38 @@ public:
     }
 };
 
-class FunctionCallExpr : public Expression {
-    std::string name;
-    std::vector<std::pair<std::string, std::unique_ptr<Expression>>> args;
+    
+    
 
-    std::shared_ptr<Value> getSingleArg(const std::string & arg_name, bool allowPositional, Value & context, const std::shared_ptr<Value> & default_value = nullptr) const {
-      if (args.empty()) {
-        if (default_value) return default_value;
-        throw std::runtime_error("Function " + name + " must have exactly one argument (" + arg_name + ")");
-      }
-      if (args.size() != 1) throw std::runtime_error("Function " + name + " must have exactly one argument (" + arg_name + ")");
-      if (!args[0].first.empty()) {
-        if (args[0].first != arg_name) throw std::runtime_error("Function " + name + " argument name mismatch: " + args[0].first + " != " + arg_name);
-      } else {
-        if (!allowPositional) throw std::runtime_error("Function " + name + " argument " + arg_name + " must be provided by name, not position");
-      }
-      return args[0].second->evaluate(context);
-    }
-    
+class CallExpr : public Expression {
+    std::unique_ptr<Expression> object;
+    Expression::CallableArgs args;
 public:
-    FunctionCallExpr(const std::string& n, std::vector<std::pair<std::string, std::unique_ptr<Expression>>> && a = {})
-        : name(n), args(std::move(a)) {}
-    
+    CallExpr(std::unique_ptr<Expression> && obj, Expression::CallableArgs && a)
+        : object(std::move(obj)), args(std::move(a)) {}
     std::shared_ptr<Value> evaluate(Value & context) const override {
-        throw std::runtime_error("Unknown function (or maybe can only be evaluated as a pipe): " + name);
-    }
-    
-    std::shared_ptr<Value> evaluateAsPipe(Value & context, std::shared_ptr<Value>& input) const override {
-        std::shared_ptr<Value> result(input);
-        if (name == "tojson") {
-          auto indent = getSingleArg("indent", true, context, Value::make(0LL))->get<int64_t>();
-          result = Value::make(result->dump(indent));
-        } else if (name == "join") {
-          auto sep = getSingleArg("d", true, context, Value::make(""))->get<std::string>();
-          std::ostringstream oss;
-          auto first = true;
-          for (size_t i = 0, n = input->size(); i < n; ++i) {
-            if (first) first = false;
-            else oss << sep;
-            oss << input->at(i)->get<std::string>();
-          }
-          result = Value::make(oss.str());
-        } else {
-          throw std::runtime_error("Unknown pipe function: " + name);
+        auto obj = object->evaluate(context);
+        if (!obj->is_callable()) {
+          throw std::runtime_error("Object is not callable: " + obj->dump(2));
         }
-        return result;
+        Value::CallableArgs vargs;
+        for (const auto& arg : args) {
+            vargs.push_back({arg.first, arg.second->evaluate(context)});
+        }
+        return obj->call(vargs);
+    }
+
+    std::shared_ptr<Value> evaluateAsPipe(Value & context, std::shared_ptr<Value>& input) const override {
+        auto obj = object->evaluate(context);
+        if (!obj->is_callable()) {
+          throw std::runtime_error("Object is not callable: " + obj->dump(2));
+        }
+        Value::CallableArgs vargs;
+        vargs.push_back({"", input});
+        for (const auto& arg : args) {
+            vargs.push_back({arg.first, arg.second->evaluate(context)});
+        }
+        return obj->call(vargs);
     }
 };
 
@@ -1143,19 +1157,21 @@ private:
         static std::regex compare_tok(R"(==|!=|<=?|>=?|in\b|is\b)");
         std::string op_str;
         while (!(op_str = consumeToken(compare_tok, it, end)).empty()) {
-            auto right = parseStringConcat(it, end);
-            if (!right) throw std::runtime_error("Expected right side of 'logical compare' expression");
-            BinaryOpExpr::Op op;
             if (op_str == "is") {
               auto identifier = parseIdentifier(it, end);
-              auto callParams = parseCallParams(it, end);
+              if (identifier.empty()) throw std::runtime_error("Expected identifier after 'is' keyword");
+              // auto callParams = parseCallParams(it, end);
               // if (!callParams) throw std::runtime_error("Expected call params after 'is' keyword");
 
               return nonstd_make_unique<BinaryOpExpr>(
                   std::move(left),
-                  nonstd_make_unique<MethodCallExpr>(nullptr, identifier, std::move(callParams)),
+                  nonstd_make_unique<VariableExpr>(identifier),
+                  // nonstd_make_unique<MethodCallExpr>(nullptr, identifier, std::move(callParams)),
                   BinaryOpExpr::Op::Is);
             }
+            auto right = parseStringConcat(it, end);
+            if (!right) throw std::runtime_error("Expected right side of 'logical compare' expression");
+            BinaryOpExpr::Op op;
             if (op_str == "==") op = BinaryOpExpr::Op::Eq;
             else if (op_str == "!=") op = BinaryOpExpr::Op::Ne;
             else if (op_str == "<") op = BinaryOpExpr::Op::Lt;
@@ -1169,11 +1185,11 @@ private:
         return left;
     }
 
-    std::vector<std::pair<std::string, std::unique_ptr<Expression>>> parseCallParams(CharIterator & it, const CharIterator & end) const {
+    Expression::CallableArgs parseCallParams(CharIterator & it, const CharIterator & end) const {
         consumeSpaces(it, end);
         if (consumeToken("(", it, end).empty()) throw std::runtime_error("Expected opening parenthesis in call args");
 
-        std::vector<std::pair<std::string, std::unique_ptr<Expression>>> result;
+        Expression::CallableArgs result;
         
         while (it != end) {
             consumeSpaces(it, end);
@@ -1270,6 +1286,13 @@ private:
         return left;
     }
 
+    std::unique_ptr<Expression> call_func(const std::string & name, Expression::CallableArgs && args) const {
+        return nonstd_make_unique<CallExpr>(
+            nonstd_make_unique<VariableExpr>(name),
+            std::move(args));
+        // return nonstd_make_unique<FunctionCallExpr>(name, std::move(args));
+    }
+
     std::unique_ptr<FilterExpr> parseFilterExpression(CharIterator & it, const CharIterator & end) const {
         std::vector<std::unique_ptr<Expression>> parts;
         auto parseFunctionCall = [&]() {
@@ -1278,9 +1301,11 @@ private:
 
             if (peekSymbols({ "(" }, it, end)) {
                 auto callParams = parseCallParams(it, end);
-                parts.push_back(nonstd_make_unique<FunctionCallExpr>(identifier, std::move(callParams)));
+                parts.push_back(call_func(identifier, std::move(callParams)));
+                // parts.push_back(nonstd_make_unique<FunctionCallExpr>(identifier, std::move(callParams)));
             } else {
-                parts.push_back(nonstd_make_unique<FunctionCallExpr>(identifier));
+                parts.push_back(call_func(identifier, {}));
+                // parts.push_back(nonstd_make_unique<FunctionCallExpr>(identifier));
             }
         };
         parseFunctionCall();
@@ -1347,6 +1372,11 @@ private:
               value = nonstd_make_unique<SubscriptExpr>(std::move(value), nonstd_make_unique<LiteralExpr>(Value::make(identifier)));
             }
         }
+      }
+
+      if (peekSymbols({ "(" }, it, end)) {
+        auto callParams = parseCallParams(it, end);
+        value = nonstd_make_unique<CallExpr>(std::move(value), std::move(callParams));
       }
       return value;
     }
@@ -1445,7 +1475,6 @@ private:
 
     std::vector<std::string> parseVarNames(CharIterator & it, const CharIterator & end) const {
       static std::regex varnames_regex(R"(((?:\w+)(?:[\n\s]*,[\n\s]*?:\w+)*)[\n\s]*)");
-      static std::regex trailing_spaces_regex("^\\s+|\\s+$");
 
       std::vector<std::string> group;
       if ((group = consumeTokenGroups(varnames_regex, it, end)).empty()) throw std::runtime_error("Expected variable names");
@@ -1453,8 +1482,7 @@ private:
       std::istringstream iss(group[1]);
       std::string varname;
       while (std::getline(iss, varname, ',')) {
-        varname = std::regex_replace(varname, trailing_spaces_regex, "");
-        varnames.push_back(varname);
+        varnames.push_back(strip(varname));
       }
       return varnames;
     }
@@ -1480,7 +1508,7 @@ private:
 
     TemplateTokenVector tokenize() const {
       std::vector<std::string> group;
-      static std::regex comment_tok(R"(\{#([-~]?)(.*?)([-~]?)#\{)");
+      static std::regex comment_tok(R"(\{#([-~]?)(.*?)([-~]?)#\})");
       static std::regex expr_open_regex(R"(\{\{([-~])?)");
       static std::regex block_open_regex(R"(^\{%([-~])?[\s\n]*)");
       static std::regex block_keyword_tok(R"((if|else|elif|endif|for|endfor|set|block|endblock)\b)");
@@ -1724,3 +1752,81 @@ public:
         return parser.parseTemplate(begin, it, end, /* full= */ true);
     }
 };
+std::shared_ptr<Value> Value::context(const std::shared_ptr<Value> & values) {
+  std::unordered_map<json, std::shared_ptr<Value>> context_obj;
+
+
+  auto getSingleArg = [](const Value::CallableArgs & args, const std::string & fn_name, const std::string & arg_name, bool allowPositional, const std::shared_ptr<Value> & default_value = nullptr) {
+    if (args.empty()) {
+      if (default_value) return default_value;
+      throw std::runtime_error("Function " + fn_name + " must have exactly one argument (" + arg_name + ")");
+    }
+    if (args.size() != 1) throw std::runtime_error("Function " + fn_name + " must have exactly one argument (" + arg_name + ")");
+    if (!args[0].first.empty()) {
+      if (args[0].first != arg_name) throw std::runtime_error("Function " + fn_name + " argument name mismatch: " + args[0].first + " != " + arg_name);
+    } else {
+      if (!allowPositional) throw std::runtime_error("Function " + fn_name + " argument " + arg_name + " must be provided by name, not position");
+    }
+    return args[0].second;
+  };
+
+  auto register_function = [&](const std::string & fn_name, const std::vector<std::string> & params, const std::function<std::shared_ptr<Value>(const Value & args)> & fn) {
+    std::map<std::string, size_t> named_positions;
+    for (size_t i = 0, n = params.size(); i < n; i++) named_positions[params[i]] = i;
+
+    // for (auto & p : arg_names) {
+    context_obj[fn_name] = callable([=](const Value::CallableArgs & args) -> std::shared_ptr<Value> {
+      auto args_obj = Value::object();
+      auto positional = true;
+      for (size_t i = 0, n = args.size(); i < n; i++) {
+        auto & arg = args[i];
+        if (positional) {
+          if (arg.first.empty() || (i < params.size() && arg.first == params[i])) {
+            if (i >= params.size()) throw std::runtime_error("Too many positional params for " + fn_name);
+            (*args_obj)[params[i]] = arg.second;
+            continue;
+          } else {
+            positional = false;
+          }
+        }
+        if (named_positions.find(arg.first) == named_positions.end()) {
+          throw std::runtime_error("Unknown argument " + arg.first + " for function " + fn_name);
+        }
+        (*args_obj)[arg.first] = arg.second;
+      }
+      return fn(*args_obj);
+    });
+  };
+
+  register_function("raise_exception", { "message" }, [&](const Value & args) -> std::shared_ptr<Value> {
+    throw std::runtime_error(args.at("message")->get<std::string>());
+  });
+  register_function("tojson", { "value", "indent" }, [&](const Value & args) -> std::shared_ptr<Value> {
+    auto indent = args.get<int64_t>("indent", 0);
+    return Value::make(args.at("value")->dump(indent));
+  });
+  register_function("strip", { "text" }, [&](const Value & args) -> std::shared_ptr<Value> {
+    return Value::make(strip(args.at("text")->get<std::string>()));
+  });
+  register_function("join", { "items", "d" }, [&](const Value & args) -> std::shared_ptr<Value> {
+    auto sep = args.get<std::string>("d", "");
+    std::ostringstream oss;
+    auto first = true;
+    auto & items = args.at("items");
+    for (size_t i = 0, n = items->size(); i < n; ++i) {
+      if (first) first = false;
+      else oss << sep;
+      oss << items->at(i)->get<std::string>();
+    }
+    return Value::make(oss.str());
+  });
+  
+
+  if (values && !values->is_null()) {
+    if (!values->is_object()) throw std::runtime_error("Values must be an object");
+    for (auto & pair : values->object_) {
+      context_obj[pair.first] = pair.second;
+    }
+  }
+  return Value::object(context_obj);
+}

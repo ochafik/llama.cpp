@@ -1,15 +1,16 @@
 #include "jinja.hpp"
 
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <json.hpp>
 
 
-void test_render(const std::string & template_str, const json & context, const std::string & expected, const json & expected_context = json()) {
+void test_render(const std::string & template_str, const json & bindings, const std::string & expected, const json & expected_context = json()) {
     std::cout << "Testing: " << template_str << std::endl;
     auto root = JinjaParser::parse(template_str);
-    auto copy = context.is_null() ? Value::object() : std::make_shared<Value>(context);
-    auto actual = root->render(*copy);
+    auto context = Value::context(Value::make(bindings));
+    auto actual = root->render(*context);
 
     if (expected != actual) {
         std::cerr << "Expected: " << expected << std::endl;
@@ -18,7 +19,7 @@ void test_render(const std::string & template_str, const json & context, const s
     }
 
     if (!expected_context.is_null()) {
-        auto dump = copy->get<json>();
+        auto dump = context->get<json>();
         for (const auto & kv : expected_context.items()) {
             if (dump[kv.key()] != kv.value()) {
                 std::cerr << "Expected context: " << expected_context.dump(2) << std::endl;
@@ -29,12 +30,13 @@ void test_render(const std::string & template_str, const json & context, const s
     }
     std::cout << "Test passed: " << template_str << std::endl;
 }
-void test_error(const std::string & template_str, const json & context, const std::string & expected) {
+void test_error(const std::string & template_str, const json & bindings, const std::string & expected) {
     std::cout << "Testing: " << template_str << std::endl;
     try {
         auto root = JinjaParser::parse(template_str);
-        auto copy = context.is_null() ? Value::object() : std::make_shared<Value>(context);
-        auto actual = root->render(*copy);
+        auto context = Value::context(Value::make(bindings));
+        // auto copy = context.is_null() ? Value::object() : std::make_shared<Value>(context);
+        auto actual = root->render(*context);
         throw std::runtime_error("Expected error: "  + expected + ", but got successful result instead: "  + actual);
     } catch (const std::runtime_error & e) {
         auto actual = e.what();
@@ -47,12 +49,39 @@ void test_error(const std::string & template_str, const json & context, const st
     std::cout << "Test passed: " << template_str << std::endl;
 }
 
+inline std::string read_file(const std::string &path) {
+  std::ifstream fs(path, std::ios_base::binary);
+  fs.seekg(0, std::ios_base::end);
+  auto size = fs.tellg();
+  fs.seekg(0);
+  std::string out;
+  out.resize(static_cast<size_t>(size));
+  fs.read(&out[0], static_cast<std::streamsize>(size));
+  return out;
+}
+
 /*
     cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -t test-jinja -j && ./build/bin/test-jinja
 
     cmake -B buildDebug -DCMAKE_BUILD_TYPE=Debug && cmake --build buildDebug -t test-jinja -j && ./buildDebug/bin/test-jinja
 */
 int main() {
+    test_error(
+        "{{ raise_exception('hey') }}", json(),
+        "hey");
+    
+
+    // List files
+    for (const auto & entry : std::__fs::filesystem::directory_iterator("templates")) {
+        if (entry.path().extension() != ".jinja") {
+            continue;
+        }
+        std::string text_content = read_file(entry.path());
+        std::cout << "# Parsing " << entry.path() << ":" << std::endl;
+        std::cout << text_content << std::endl;
+        JinjaParser::parse(text_content);
+    }
+
     test_render(
         R"( {{ "a" -}} b {{- "c" }} )", json(),
         " abc ");
