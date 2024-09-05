@@ -67,6 +67,21 @@ inline std::string read_file(const std::string &path) {
     cmake -B buildDebug -DCMAKE_BUILD_TYPE=Debug && cmake --build buildDebug -t test-jinja -j && ./buildDebug/bin/test-jinja
 */
 int main() {
+    test_render(R"(
+        {%- for x, y in z -%}
+            {{- x }},{{ y -}};
+        {%- endfor -%}
+    )", {{"z", json({json({1, 10}), json({2, 20})})}}, "1,10;2,20;");
+    
+    test_render("a\nb\n", {}, "a\nb");
+    test_render(
+        R"(
+            {%- set n = namespace(value=1, title='') -%}
+            {{- n.value }} "{{ n.title }}",
+            {%- set n.value = 2 -%}
+            {%- set n.title = 'Hello' -%}
+            {{- n.value }} "{{ n.title }}")", {}, R"(1 "",2 "Hello")");
+
     test_render(" a {{  'b' -}} c ", {}, " a bc ");
     test_render(" a {{- 'b'  }} c ", {}, " ab c ");
     test_render("a\n{{- 'b'  }}\nc", {}, "ab\nc");
@@ -79,15 +94,6 @@ int main() {
     test_render("{% set x = [0, 1, 2, 3] %}{{ x[1:] }}{{ x[:2] }}{{ x[1:3] }}", {}, "[1,2,3][0,1][1,2]");
     test_render("{{ ' a  ' | strip }}", {}, "a");
     test_render("{{ range(3) }}{{ range(4, 7) }}{{ range(0, 10, step=2) }}", {}, "[0,1,2][4,5,6][0,2,4,6,8]");
-
-    test_render(
-        R"(
-            {%- set n = namespace(value=1, title='') -%}
-            {{- n.value }} "{{ n.title }}",
-            {%- set n.value = 2 -%}
-            {%- set n.title = 'Hello' -%}
-            {{- n.value }} "{{ n.title }}"
-        )", {}, "1 \"\",2 \"Hello\"");
 
     // List files
     for (const auto & entry : std::__fs::filesystem::directory_iterator("templates")) {

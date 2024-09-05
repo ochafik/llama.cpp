@@ -375,7 +375,7 @@ public:
 
 class Expression;
 
-enum SpaceHandling { Keep, Strip, KeepLines };
+enum SpaceHandling { Keep, Strip };
 
 class TemplateToken {
 public:
@@ -947,9 +947,7 @@ private:
     using CharIterator = std::string::const_iterator;
 
     bool consumeSpaces(CharIterator & it, const CharIterator & end, SpaceHandling space_handling) const {
-      if (space_handling == SpaceHandling::KeepLines) {
-        while (it != end && (*it == ' ' || *it == '\t')) ++it;
-      } else if (space_handling == SpaceHandling::Strip) {
+      if (space_handling == SpaceHandling::Strip) {
         while (it != end && std::isspace(*it)) ++it;
       }
       return true;
@@ -1519,7 +1517,6 @@ private:
 
     static SpaceHandling parseSpaceHandling(const std::string& s) {
         if (s == "-") return SpaceHandling::Strip;
-        if (s == "~") return SpaceHandling::KeepLines;
         return SpaceHandling::Keep;
     }
 
@@ -1527,7 +1524,7 @@ private:
     using TemplateTokenIterator = TemplateTokenVector::const_iterator;
 
     std::vector<std::string> parseVarNames(CharIterator & it, const CharIterator & end) const {
-      static std::regex varnames_regex(R"(((?:\w+)(?:[\n\s]*,[\n\s]*?:\w+)*)[\n\s]*)");
+      static std::regex varnames_regex(R"(((?:\w+)(?:[\n\s]*,[\n\s]*(?:\w+))*)[\n\s]*)");
 
       std::vector<std::string> group;
       if ((group = consumeTokenGroups(varnames_regex, it, end, SpaceHandling::Strip)).empty()) throw std::runtime_error("Expected variable names");
@@ -1577,7 +1574,7 @@ private:
       
       try {
         while (it != end) {
-          if (!tokens.empty()) std::cout << "Prev token: " << TemplateToken::typeToString(tokens.back()->getType()) << std::endl;
+          // if (!tokens.empty()) std::cout << "Prev token: " << TemplateToken::typeToString(tokens.back()->getType()) << std::endl;
           auto pos = std::distance(start, it);
       
           if (!(group = consumeTokenGroups(comment_tok, it, end, SpaceHandling::Keep)).empty()) {
@@ -1740,18 +1737,17 @@ private:
               if (pre_space == SpaceHandling::Strip) {
                 static std::regex r(R"(^(\s|\r|\n)+)");
                 text = std::regex_replace(text, r, "");
-              } else if (pre_space == SpaceHandling::KeepLines) {
-                static std::regex r(R"(^\s+)");
-                text = std::regex_replace(text, r, "");
               }
               if (post_space == SpaceHandling::Strip) {
                 static std::regex r(R"((\s|\r|\n)+$)");
                 text = std::regex_replace(text, r, "");
-              } else if (post_space == SpaceHandling::KeepLines) {
-                static std::regex r(R"(\s+$)");
-                text = std::regex_replace(text, r, "");
               }
 
+              if (it == end) {
+                // Strip one trailing newline
+                static std::regex r(R"([\n\r]$)");
+                text = std::regex_replace(text, r, "");
+              }
               children.emplace_back(nonstd_make_unique<TextNode>(text));
               break;
             }
