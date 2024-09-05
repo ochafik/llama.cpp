@@ -4,7 +4,7 @@
 
   TODO:
   - Add loop.index, .first and friends https://jinja.palletsprojects.com/en/3.0.x/templates/#for
-  - Add namespace
+  - Add `{% set ns.value = 1 %}`
   - Add more tests
   - Add more functions
     - https://jinja.palletsprojects.com/en/3.0.x/templates/#builtin-filters
@@ -1521,12 +1521,11 @@ private:
     }
 
     TemplateTokenVector tokenize() const {
-      std::vector<std::string> group;
       static std::regex comment_tok(R"(\{#([-~]?)(.*?)([-~]?)#\})");
       static std::regex expr_open_regex(R"(\{\{([-~])?)");
       static std::regex block_open_regex(R"(^\{%([-~])?[\s\n]*)");
       static std::regex block_keyword_tok(R"((if|else|elif|endif|for|endfor|set|block|endblock)\b)");
-      static std::regex text_regex(R"(.*?($|(?=\{\{|\{%|\{#)))");
+      static std::regex text_regex(R"([\s\S\n]*?($|(?=\{\{|\{%|\{#)))");
       static std::regex expr_close_regex(R"([\s\n]*([-~])?\}\})");
       static std::regex block_close_regex(R"([\s\n]*([-~])?%\})");
               
@@ -1534,10 +1533,12 @@ private:
       const auto start = template_str.begin();
       auto it = start;
       const auto end = template_str.end();
-      std::smatch match;
+      std::vector<std::string> group;
+      std::string text;
       
       try {
         while (it != end) {
+          if (!tokens.empty()) std::cout << "Prev token: " << TemplateToken::typeToString(tokens.back()->getType()) << std::endl;
           auto pos = std::distance(start, it);
       
           if (!(group = consumeTokenGroups(comment_tok, it, end)).empty()) {
@@ -1545,9 +1546,7 @@ private:
             auto content = group[2];
             auto post_space = parseSpaceHandling(group[3]);
             tokens.push_back(nonstd_make_unique<CommentTemplateToken>(pos, pre_space, post_space, content));
-          }
-          
-          if (!(group = consumeTokenGroups(expr_open_regex, it, end)).empty()) {
+          } else if (!(group = consumeTokenGroups(expr_open_regex, it, end)).empty()) {
             auto pre_space = parseSpaceHandling(group[1]);
             auto expr = parseFullExpression(it, end);
 
@@ -1557,10 +1556,7 @@ private:
 
             auto post_space = parseSpaceHandling(group[1]);
             tokens.push_back(nonstd_make_unique<ExpressionTemplateToken>(pos, pre_space, post_space, std::move(expr)));
-          }
-          
-
-          if (!(group = consumeTokenGroups(block_open_regex, it, end)).empty()) {
+          } else if (!(group = consumeTokenGroups(block_open_regex, it, end)).empty()) {
             auto pre_space = parseSpaceHandling(group[1]);
 
             std::string keyword;
@@ -1633,11 +1629,10 @@ private:
             } else {
               throw std::runtime_error("Unexpected block: " + keyword);
             }
-          }
-
-          auto text = consumeToken(text_regex, it, end);
-          if (!text.empty()) {
+          } else if (!(text = consumeToken(text_regex, it, end)).empty()) {
             tokens.push_back(nonstd_make_unique<TextTemplateToken>(pos, SpaceHandling::Keep, SpaceHandling::Keep, text));
+          } else {
+            if (it != end) throw std::runtime_error("Unexpected character");
           }
         }
         return tokens;
@@ -1822,7 +1817,7 @@ std::shared_ptr<Value> Value::context(const std::shared_ptr<Value> & values) {
     return Value::make(strip(args.at("text")->get<std::string>()));
   });
   register_function("count", { "items" }, [&](const Value & args) {
-    return Value::make(args.at("items")->size());
+    return Value::make((int64_t) args.at("items")->size());
   });
   register_function("join", { "items", "d" }, [&](const Value & args) {
     auto sep = args.get<std::string>("d", "");
@@ -1835,6 +1830,13 @@ std::shared_ptr<Value> Value::context(const std::shared_ptr<Value> & values) {
       oss << items->at(i)->get<std::string>();
     }
     return Value::make(oss.str());
+  });
+  context_obj["namespace"] = callable([=](const Value::CallableArgs & args) {
+    auto ns = Value::object();
+    for (auto & arg : args) {
+      (*ns)[arg.first] = arg.second;
+    }
+    return ns;
   });
   context_obj["range"] = callable([=](const Value::CallableArgs & args) {
     int64_t start = 0;

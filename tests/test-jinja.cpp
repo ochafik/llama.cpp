@@ -7,7 +7,7 @@
 
 // using json = nlohmann::json;
 
-void test_render(const std::string & template_str, const json & bindings, const std::string & expected, const json & expected_context = json()) {
+void test_render(const std::string & template_str, const json & bindings, const std::string & expected, const json & expected_context = {}) {
     std::cout << "Testing: " << template_str << std::endl;
     auto root = JinjaParser::parse(template_str);
     auto context = Value::context(Value::make(bindings));
@@ -75,6 +75,15 @@ int main() {
     test_render("{{ ' a  ' | strip }}", {}, "a");
     test_render("{{ range(3) }}{{ range(4, 7) }}{{ range(0, 10, step=2) }}", {}, "[0,1,2][4,5,6][0,2,4,6,8]");
 
+    test_render(
+        R"(
+            {%- set n = namespace(value=1, title='') -%}
+            {{- n.value }} "{{ n.title }}",
+            {%- set n.value = 2 -%}
+            {%- set n.title = 'Hello' %}title='') -%}
+            {{- n.value }} "{{ n.title }}"
+        )", {}, "1 \"\"2 \"Hello\"");
+
     // List files
     for (const auto & entry : std::__fs::filesystem::directory_iterator("templates")) {
         if (entry.path().extension() != ".jinja") {
@@ -87,30 +96,30 @@ int main() {
     }
 
     test_render(
-        R"( {{ "a" -}} b {{- "c" }} )", json(),
+        R"( {{ "a" -}} b {{- "c" }} )", {},
         " abc ");
 
-    test_error("{% else %}", json(), "Unexpected else at row 1, column 1: {% else %}");
-    test_error("{% endif %}", json(), "Unexpected endif at row 1, column 1: {% endif %}");
-    test_error("{% elif 1 %}", json(), "Unexpected elif at row 1, column 1: {% elif 1 %}");
-    test_error("{% endblock %}", json(), "Unexpected endblock at row 1, column 1: {% endblock %}");
-    test_error("{% endfor %}", json(), "Unexpected endfor at row 1, column 1: {% endfor %}");
+    test_error("{% else %}", {}, "Unexpected else at row 1, column 1: {% else %}");
+    test_error("{% endif %}", {}, "Unexpected endif at row 1, column 1: {% endif %}");
+    test_error("{% elif 1 %}", {}, "Unexpected elif at row 1, column 1: {% elif 1 %}");
+    test_error("{% endblock %}", {}, "Unexpected endblock at row 1, column 1: {% endblock %}");
+    test_error("{% endfor %}", {}, "Unexpected endfor at row 1, column 1: {% endfor %}");
 
-    test_error("{% if 1 %}", json(), "Unterminated if at row 1, column 1: {% if 1 %}");
-    test_error("{% block foo %}", json(), "Unterminated block at row 1, column 1: {% block foo %}");
-    test_error("{% for x in 1 %}", json(), "Unterminated for at row 1, column 1: {% for x in 1 %}");
-    test_error("{% if 1 %}{% else %}", json(), "Unterminated if at row 1, column 1: {% if 1 %}{% else %}");
-    test_error("{% if 1 %}{% else %}{% elif 1 %}{% endif %}", json(), "Unterminated if at row 1, column 1: {% if 1 %}{% else %}{% elif 1 %}{% endif %}");
+    test_error("{% if 1 %}", {}, "Unterminated if at row 1, column 1: {% if 1 %}");
+    test_error("{% block foo %}", {}, "Unterminated block at row 1, column 1: {% block foo %}");
+    test_error("{% for x in 1 %}", {}, "Unterminated for at row 1, column 1: {% for x in 1 %}");
+    test_error("{% if 1 %}{% else %}", {}, "Unterminated if at row 1, column 1: {% if 1 %}{% else %}");
+    test_error("{% if 1 %}{% else %}{% elif 1 %}{% endif %}", {}, "Unterminated if at row 1, column 1: {% if 1 %}{% else %}{% elif 1 %}{% endif %}");
 
 
-    test_render("{% if 1 %}{% elif 1 %}{% else %}{% endif %}", json(), "");
+    test_render("{% if 1 %}{% elif 1 %}{% else %}{% endif %}", {}, "");
     
     test_render(
-        "{% set x = [] %}{% set _ = x.append(1) %}{{ x | tojson(indent=2) }}", json(), 
+        "{% set x = [] %}{% set _ = x.append(1) %}{{ x | tojson(indent=2) }}", {}, 
         "[\n  1\n]");
 
     test_render(
-        "{{ not [] }}", json(), 
+        "{{ not [] }}", {}, 
         "True");
     
     test_render("{{ tool.function.name == 'ipython' }}", 
@@ -123,7 +132,7 @@ int main() {
         {%- set user = "Olivier" -%}
         {%- set greeting = "Hello " ~ user -%}
         {{- greeting -}}
-    )", json(), "Hello Olivier");
+    )", {}, "Hello Olivier");
 
     json context = {
         {"tools", {
