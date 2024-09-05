@@ -3,7 +3,8 @@
   As it turns out, Llama 3.1's template is relatively involved, so we need a proper template engine.CLOCK_MONOTONIC_RAW_APPROX
 
   TODO:
-  - Add loop.index and friends https://jinja.palletsprojects.com/en/3.0.x/templates/#for
+  - Add loop.index, .first and friends https://jinja.palletsprojects.com/en/3.0.x/templates/#for
+  - Add namespace
   - Add more tests
   - Add more functions
     - https://jinja.palletsprojects.com/en/3.0.x/templates/#builtin-filters
