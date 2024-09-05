@@ -1229,19 +1229,18 @@ private:
             if (!consumeToken(")", it, end, SpaceHandling::Strip).empty()) {
                 return result;
             }
-            auto identifier = parseIdentifier(it, end);
-            if (!identifier.empty()) {
-                static std::regex single_eq_tok(R"(=(?!=))"); // negative lookahead to avoid consuming '=='
-                if (!consumeToken(single_eq_tok, it, end, SpaceHandling::Strip).empty()) {
-                    auto expr = parseFullExpression(it, end);
-                    if (!expr) throw std::runtime_error("Expected expression in for named arg");
-                    result.emplace_back(identifier, std::move(expr));
+            auto expr = parseFullExpression(it, end);
+            if (!expr) throw std::runtime_error("Expected expression in call args");
+
+            if (auto ident = dynamic_cast<VariableExpr*>(expr.get())) {
+                if (!consumeToken("=", it, end, SpaceHandling::Strip).empty()) {
+                    auto value = parseFullExpression(it, end);
+                    if (!value) throw std::runtime_error("Expected expression in for named arg");
+                    result.emplace_back(ident->get_name(), std::move(value));
                 } else {
-                    result.emplace_back(std::string(), nonstd_make_unique<VariableExpr>(identifier));
+                    result.emplace_back(std::string(), std::move(expr));
                 }
             } else {
-                auto expr = parseFullExpression(it, end);
-                if (!expr) throw std::runtime_error("Expected expression in call args");
                 result.emplace_back(std::string(), std::move(expr));
             }
             if (consumeToken(",", it, end, SpaceHandling::Strip).empty()) {
@@ -1931,7 +1930,9 @@ std::shared_ptr<Value> Value::context(const std::shared_ptr<Value> & values) {
   
 
   if (values && !values->is_null()) {
-    if (!values->is_object()) throw std::runtime_error("Values must be an object");
+    if (!values->is_object()) {
+      throw std::runtime_error("Values must be an object");
+    }
     for (auto & pair : values->object_) {
       context_obj[pair.first] = pair.second;
     }
