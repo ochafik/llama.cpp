@@ -946,14 +946,14 @@ class JinjaParser {
 private:
     using CharIterator = std::string::const_iterator;
 
-    bool consumeSpaces(CharIterator & it, const CharIterator & end, SpaceHandling space_handling) const {
+    bool consumeSpaces(SpaceHandling space_handling = SpaceHandling::Strip) {
       if (space_handling == SpaceHandling::Strip) {
         while (it != end && std::isspace(*it)) ++it;
       }
       return true;
     }
 
-    std::unique_ptr<std::string> parseString(CharIterator & it, const CharIterator & end) const {
+    std::unique_ptr<std::string> parseString() {
       auto doParse = [&](char quote) -> std::unique_ptr<std::string> {
         if (it == end || *it != quote) return nullptr;
         std::string result;
@@ -988,16 +988,16 @@ private:
         return nullptr;
       };
 
-      consumeSpaces(it, end, SpaceHandling::Strip);
+      consumeSpaces();
       if (it == end) return nullptr;
       if (*it == '"') return doParse('"');
       if (*it == '\'') return doParse('\'');
       return nullptr;
     }
 
-    json parseNumber(CharIterator& it, const CharIterator& end) const {
+    json parseNumber(CharIterator& it, const CharIterator& end) {
         auto before = it;
-        consumeSpaces(it, end, SpaceHandling::Strip);
+        consumeSpaces();
         auto start = it;
         bool hasDecimal = false;
         bool hasExponent = false;
@@ -1033,16 +1033,16 @@ private:
     }
 
     /** integer, float, bool, string */
-    std::shared_ptr<Value> parseConstant(CharIterator & it, const CharIterator & end) const {
+    std::shared_ptr<Value> parseConstant() {
       auto start = it;
-      consumeSpaces(it, end, SpaceHandling::Strip);
+      consumeSpaces();
       if (it == end) return nullptr;
       if (*it == '"' || *it == '\'') {
-        auto str = parseString(it, end);
+        auto str = parseString();
         if (str) return Value::make(*str);
       }
       static std::regex tok(R"(true\b|false\b|null\b)");
-      auto token = consumeToken(tok, it, end, SpaceHandling::Strip);
+      auto token = consumeToken(tok);
       if (!token.empty()) {
         if (token == "true") return Value::make(true);
         if (token == "false") return Value::make(false);
@@ -1067,7 +1067,7 @@ private:
       }
     };
 
-    bool peekSymbols(const std::vector<std::string> & symbols, const CharIterator & it, const CharIterator & end) const {
+    bool peekSymbols(const std::vector<std::string> & symbols) const {
         for (const auto & symbol : symbols) {
             if (std::distance(it, end) >= symbol.size() && std::string(it, it + symbol.size()) == symbol) {
                 return true;
@@ -1076,9 +1076,9 @@ private:
         return false;
     }
 
-    std::vector<std::string> consumeTokenGroups(const std::regex & regex, CharIterator & it, const CharIterator & end, SpaceHandling space_handling) const {
+    std::vector<std::string> consumeTokenGroups(const std::regex & regex, SpaceHandling space_handling = SpaceHandling::Strip) {
         auto start = it;
-        consumeSpaces(it, end, space_handling);
+        consumeSpaces(space_handling);
         std::smatch match;
         if (std::regex_search(it, end, match, regex) && match.position() == 0) {
             it += match[0].length();
@@ -1091,9 +1091,9 @@ private:
         it = start;
         return {};
     }
-    std::string consumeToken(const std::regex & regex, CharIterator & it, const CharIterator & end, SpaceHandling space_handling) const {
+    std::string consumeToken(const std::regex & regex, SpaceHandling space_handling = SpaceHandling::Strip) {
         auto start = it;
-        consumeSpaces(it, end, space_handling);
+        consumeSpaces(space_handling);
         std::smatch match;
         if (std::regex_search(it, end, match, regex) && match.position() == 0) {
             it += match[0].length();
@@ -1103,9 +1103,9 @@ private:
         return "";
     }
 
-    std::string consumeToken(const std::string & token, CharIterator & it, const CharIterator & end, SpaceHandling space_handling) const {
+    std::string consumeToken(const std::string & token, SpaceHandling space_handling = SpaceHandling::Strip) {
         auto start = it;
-        consumeSpaces(it, end, space_handling);
+        consumeSpaces(space_handling);
         if (std::distance(it, end) >= token.size() && std::string(it, it + token.size()) == token) {
             it += token.size();
             return token;
@@ -1133,77 +1133,77 @@ private:
       * - SubScript = ("[" FullExpression "]" | "." identifier CallParams? )+
       * - CallParams = "(" ((identifier "=")? FullExpression ("," (identifier "=")? FullExpression)*)? ")"
       */
-    std::unique_ptr<Expression> parseFullExpression(CharIterator & it, const CharIterator & end) const {
-        auto left = parseLogicalOr(it, end);
+    std::unique_ptr<Expression> parseFullExpression() {
+        auto left = parseLogicalOr();
         if (it == end) return left;
 
         static std::regex if_tok(R"(if\b)");
-        if (consumeToken(if_tok, it, end, SpaceHandling::Strip).empty()) {
+        if (consumeToken(if_tok).empty()) {
           return left;
         }
 
-        auto if_expr = parseIfExpression(it, end);
+        auto if_expr = parseIfExpression();
         return nonstd_make_unique<IfExpr>(std::move(left), std::move(if_expr.first), std::move(if_expr.second));
     }
 
-    std::pair<std::unique_ptr<Expression>, std::unique_ptr<Expression>> parseIfExpression(CharIterator & it, const CharIterator & end) const {
-        auto condition = parseLogicalOr(it, end);
+    std::pair<std::unique_ptr<Expression>, std::unique_ptr<Expression>> parseIfExpression() {
+        auto condition = parseLogicalOr();
         if (!condition) throw std::runtime_error("Expected condition expression");
 
         static std::regex else_tok(R"(else\b)");
-        if (consumeToken(else_tok, it, end, SpaceHandling::Strip).empty()) throw std::runtime_error("Expected 'else' keyword");
+        if (consumeToken(else_tok).empty()) throw std::runtime_error("Expected 'else' keyword");
         
-        auto else_expr = parseFullExpression(it, end);
+        auto else_expr = parseFullExpression();
         if (!else_expr) throw std::runtime_error("Expected 'else' expression");
 
         return std::make_pair(std::move(condition), std::move(else_expr));
     }
 
-    std::unique_ptr<Expression> parseLogicalOr(CharIterator & it, const CharIterator & end) const {
-        auto left = parseLogicalAnd(it, end);
+    std::unique_ptr<Expression> parseLogicalOr() {
+        auto left = parseLogicalAnd();
         if (!left) throw std::runtime_error("Expected left side of 'logical or' expression");
 
         static std::regex or_tok(R"(or\b)");
-        while (!consumeToken(or_tok, it, end, SpaceHandling::Strip).empty()) {
-            auto right = parseLogicalAnd(it, end);
+        while (!consumeToken(or_tok).empty()) {
+            auto right = parseLogicalAnd();
             if (!right) throw std::runtime_error("Expected right side of 'or' expression");
             left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), BinaryOpExpr::Op::Or);
         }
         return left;
     }
 
-    std::unique_ptr<Expression> parseLogicalAnd(CharIterator & it, const CharIterator & end) const {
-        auto left = parseLogicalCompare(it, end);
+    std::unique_ptr<Expression> parseLogicalAnd() {
+        auto left = parseLogicalCompare();
         if (!left) throw std::runtime_error("Expected left side of 'logical and' expression");
 
         static std::regex and_tok(R"(and\b)");
-        while (!consumeToken(and_tok, it, end, SpaceHandling::Strip).empty()) {
-            auto right = parseLogicalCompare(it, end);
+        while (!consumeToken(and_tok).empty()) {
+            auto right = parseLogicalCompare();
             if (!right) throw std::runtime_error("Expected right side of 'and' expression");
             left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), BinaryOpExpr::Op::And);
         }
         return left;
     }
 
-    std::unique_ptr<Expression> parseLogicalCompare(CharIterator & it, const CharIterator & end) const {
-        auto left = parseStringConcat(it, end);
+    std::unique_ptr<Expression> parseLogicalCompare() {
+        auto left = parseStringConcat();
         if (!left) throw std::runtime_error("Expected left side of 'logical compare' expression");
 
         static std::regex compare_tok(R"(==|!=|<=?|>=?|in\b|is\b)");
         static std::regex not_tok(R"(not\b)");
         std::string op_str;
-        while (!(op_str = consumeToken(compare_tok, it, end, SpaceHandling::Strip)).empty()) {
+        while (!(op_str = consumeToken(compare_tok)).empty()) {
             if (op_str == "is") {
-              auto negated = !consumeToken(not_tok, it, end, SpaceHandling::Strip).empty();
+              auto negated = !consumeToken(not_tok).empty();
 
-              auto identifier = parseIdentifier(it, end);
+              auto identifier = parseIdentifier();
               if (identifier.empty()) throw std::runtime_error("Expected identifier after 'is' keyword");
 
               return nonstd_make_unique<BinaryOpExpr>(
                   std::move(left), nonstd_make_unique<VariableExpr>(identifier),
                   negated ? BinaryOpExpr::Op::IsNot : BinaryOpExpr::Op::Is);
             }
-            auto right = parseStringConcat(it, end);
+            auto right = parseStringConcat();
             if (!right) throw std::runtime_error("Expected right side of 'logical compare' expression");
             BinaryOpExpr::Op op;
             if (op_str == "==") op = BinaryOpExpr::Op::Eq;
@@ -1219,22 +1219,22 @@ private:
         return left;
     }
 
-    Expression::CallableArgs parseCallParams(CharIterator & it, const CharIterator & end) const {
-        consumeSpaces(it, end, SpaceHandling::Strip);
-        if (consumeToken("(", it, end, SpaceHandling::Strip).empty()) throw std::runtime_error("Expected opening parenthesis in call args");
+    Expression::CallableArgs parseCallParams() {
+        consumeSpaces();
+        if (consumeToken("(").empty()) throw std::runtime_error("Expected opening parenthesis in call args");
 
         Expression::CallableArgs result;
         
         while (it != end) {
-            if (!consumeToken(")", it, end, SpaceHandling::Strip).empty()) {
+            if (!consumeToken(")").empty()) {
                 return result;
             }
-            auto expr = parseFullExpression(it, end);
+            auto expr = parseFullExpression();
             if (!expr) throw std::runtime_error("Expected expression in call args");
 
             if (auto ident = dynamic_cast<VariableExpr*>(expr.get())) {
-                if (!consumeToken("=", it, end, SpaceHandling::Strip).empty()) {
-                    auto value = parseFullExpression(it, end);
+                if (!consumeToken("=").empty()) {
+                    auto value = parseFullExpression();
                     if (!value) throw std::runtime_error("Expected expression in for named arg");
                     result.emplace_back(ident->get_name(), std::move(value));
                 } else {
@@ -1243,8 +1243,8 @@ private:
             } else {
                 result.emplace_back(std::string(), std::move(expr));
             }
-            if (consumeToken(",", it, end, SpaceHandling::Strip).empty()) {
-              if (consumeToken(")", it, end, SpaceHandling::Strip).empty()) {
+            if (consumeToken(",").empty()) {
+              if (consumeToken(")").empty()) {
                 throw std::runtime_error("Expected closing parenthesis in call args");
               }
               return result;
@@ -1253,44 +1253,44 @@ private:
         throw std::runtime_error("Expected closing parenthesis in call args");
     }
 
-    std::string parseIdentifier(CharIterator & it, const CharIterator & end) const {
+    std::string parseIdentifier() {
         static std::regex ident_regex(R"((?!not|is|and|or|del)[a-zA-Z_]\w*)");
-        return consumeToken(ident_regex, it, end, SpaceHandling::Strip);
+        return consumeToken(ident_regex);
     }
 
-    std::unique_ptr<Expression> parseStringConcat(CharIterator & it, const CharIterator & end) const {
-        auto left = parseMathPow(it, end);
+    std::unique_ptr<Expression> parseStringConcat() {
+        auto left = parseMathPow();
         if (!left) throw std::runtime_error("Expected left side of 'string concat' expression");
 
         static std::regex concat_tok(R"(~(?!\}))");
-        if (!consumeToken(concat_tok, it, end, SpaceHandling::Strip).empty()) {
-            auto right = parseLogicalAnd(it, end);
+        if (!consumeToken(concat_tok).empty()) {
+            auto right = parseLogicalAnd();
             if (!right) throw std::runtime_error("Expected right side of 'string concat' expression");
             left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), BinaryOpExpr::Op::StrConcat);
         }
         return left;
     }
 
-    std::unique_ptr<Expression> parseMathPow(CharIterator & it, const CharIterator & end) const {
-        auto left = parseMathPlusMinus(it, end);
+    std::unique_ptr<Expression> parseMathPow() {
+        auto left = parseMathPlusMinus();
         if (!left) throw std::runtime_error("Expected left side of 'math pow' expression");
 
-        while (!consumeToken("**", it, end, SpaceHandling::Strip).empty()) {
-            auto right = parseMathPlusMinus(it, end);
+        while (!consumeToken("**").empty()) {
+            auto right = parseMathPlusMinus();
             if (!right) throw std::runtime_error("Expected right side of 'math pow' expression");
             left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), BinaryOpExpr::Op::MulMul);
         }
         return left;
     }
 
-    std::unique_ptr<Expression> parseMathPlusMinus(CharIterator & it, const CharIterator & end) const {
+    std::unique_ptr<Expression> parseMathPlusMinus() {
         static std::regex plus_minus_tok(R"(\+|-(?![}%#]\}))");
 
-        auto left = parseMathMulDiv(it, end);
+        auto left = parseMathMulDiv();
         if (!left) throw std::runtime_error("Expected left side of 'math plus/minus' expression");
         std::string op_str;
-        while (!(op_str = consumeToken(plus_minus_tok, it, end, SpaceHandling::Strip)).empty()) {
-            auto right = parseMathMulDiv(it, end);
+        while (!(op_str = consumeToken(plus_minus_tok)).empty()) {
+            auto right = parseMathMulDiv();
             if (!right) throw std::runtime_error("Expected right side of 'math plus/minus' expression");
             auto op = op_str == "+" ? BinaryOpExpr::Op::Add : BinaryOpExpr::Op::Sub;
             left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), op);
@@ -1298,14 +1298,14 @@ private:
         return left;
     }
     
-    std::unique_ptr<Expression> parseMathMulDiv(CharIterator & it, const CharIterator & end) const {
-        auto left = parseMathUnaryPlusMinus(it, end);
+    std::unique_ptr<Expression> parseMathMulDiv() {
+        auto left = parseMathUnaryPlusMinus();
         if (!left) throw std::runtime_error("Expected left side of 'math mul/div' expression");
 
         static std::regex mul_div_tok(R"(\*\*?|//?|%(?!\}))");
         std::string op_str;
-        while (!(op_str = consumeToken(mul_div_tok, it, end, SpaceHandling::Strip)).empty()) {
-            auto right = parseMathUnaryPlusMinus(it, end);
+        while (!(op_str = consumeToken(mul_div_tok)).empty()) {
+            auto right = parseMathUnaryPlusMinus();
             if (!right) throw std::runtime_error("Expected right side of 'math mul/div' expression");
             auto op = op_str == "*" ? BinaryOpExpr::Op::Mul 
                 : op_str == "**" ? BinaryOpExpr::Op::MulMul 
@@ -1315,8 +1315,8 @@ private:
             left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), op);
         }
 
-        if (!consumeToken("|", it, end, SpaceHandling::Strip).empty()) {
-            auto filter = parseFilterExpression(it, end);
+        if (!consumeToken("|").empty()) {
+            auto filter = parseFilterExpression();
             filter->prepend(std::move(left));
             return filter;
         }
@@ -1327,31 +1327,31 @@ private:
         return nonstd_make_unique<CallExpr>(nonstd_make_unique<VariableExpr>(name), std::move(args));
     }
 
-    std::unique_ptr<FilterExpr> parseFilterExpression(CharIterator & it, const CharIterator & end) const {
+    std::unique_ptr<FilterExpr> parseFilterExpression() {
         std::vector<std::unique_ptr<Expression>> parts;
         auto parseFunctionCall = [&]() {
-            auto identifier = parseIdentifier(it, end);
+            auto identifier = parseIdentifier();
             if (identifier.empty()) throw std::runtime_error("Expected identifier in filter expression");
 
-            if (peekSymbols({ "(" }, it, end)) {
-                auto callParams = parseCallParams(it, end);
+            if (peekSymbols({ "(" })) {
+                auto callParams = parseCallParams();
                 parts.push_back(call_func(identifier, std::move(callParams)));
             } else {
                 parts.push_back(call_func(identifier, {}));
             }
         };
         parseFunctionCall();
-        while (it != end && !consumeToken("|", it, end, SpaceHandling::Strip).empty()) {
+        while (it != end && !consumeToken("|").empty()) {
             parseFunctionCall();
         }
         return nonstd_make_unique<FilterExpr>(std::move(parts));
     }
 
-    std::unique_ptr<Expression> parseMathUnaryPlusMinus(CharIterator & it, const CharIterator & end) const {
-        // consumeSpaces(it, end, SpaceHandling::Strip);
+    std::unique_ptr<Expression> parseMathUnaryPlusMinus() {
+        // consumeSpaces();
         static std::regex unary_plus_minus_tok(R"(\+|-(?![}%#]\})|not)");
-        auto op_str = consumeToken(unary_plus_minus_tok, it, end, SpaceHandling::Strip);
-        auto expr = parseValueExpression(it, end);
+        auto op_str = consumeToken(unary_plus_minus_tok);
+        auto expr = parseValueExpression();
         if (!expr) throw std::runtime_error("Expected expr of 'unary plus/minus' expression");
         
         if (!op_str.empty()) {
@@ -1361,24 +1361,24 @@ private:
         return expr;
     }
         
-    std::unique_ptr<Expression> parseValueExpression(CharIterator & it, const CharIterator & end) const {
+    std::unique_ptr<Expression> parseValueExpression() {
       auto parseValue = [&]() -> std::unique_ptr<Expression> {
-        auto constant = parseConstant(it, end);
+        auto constant = parseConstant();
         if (!constant->is_null()) return nonstd_make_unique<LiteralExpr>(constant);
 
         static std::regex null_regex(R"(null\b)");
-        if (!consumeToken(null_regex, it, end, SpaceHandling::Strip).empty()) return nonstd_make_unique<LiteralExpr>(Value::make());
+        if (!consumeToken(null_regex).empty()) return nonstd_make_unique<LiteralExpr>(Value::make());
 
-        auto identifier = parseIdentifier(it, end);
+        auto identifier = parseIdentifier();
         if (!identifier.empty()) return nonstd_make_unique<VariableExpr>(identifier);
 
-        auto braced = parseBracedExpressionOrArray(it, end);
+        auto braced = parseBracedExpressionOrArray();
         if (braced) return braced;
 
-        auto array = parseArray(it, end);
+        auto array = parseArray();
         if (array) return array;
 
-        auto dictionary = parseDictionary(it, end);
+        auto dictionary = parseDictionary();
         if (dictionary) return dictionary;
 
         throw std::runtime_error("Expected value expression");
@@ -1386,20 +1386,20 @@ private:
 
       auto value = parseValue();
       
-      while (it != end && consumeSpaces(it, end, SpaceHandling::Strip) && peekSymbols({ "[", "." }, it, end)) {
-        if (!consumeToken("[", it, end, SpaceHandling::Strip).empty()) {
+      while (it != end && consumeSpaces() && peekSymbols({ "[", "." })) {
+        if (!consumeToken("[").empty()) {
             std::unique_ptr<Expression> index;
-            if (!consumeToken(":", it, end, SpaceHandling::Strip).empty()) {
-              auto slice_end = parseFullExpression(it, end);
+            if (!consumeToken(":").empty()) {
+              auto slice_end = parseFullExpression();
               index = nonstd_make_unique<SliceExpr>(nullptr, std::move(slice_end));
             } else {
-              auto slice_start = parseFullExpression(it, end);
-              if (!consumeToken(":", it, end, SpaceHandling::Strip).empty()) {
-                consumeSpaces(it, end, SpaceHandling::Strip);
-                if (peekSymbols({ "]" }, it, end)) {
+              auto slice_start = parseFullExpression();
+              if (!consumeToken(":").empty()) {
+                consumeSpaces();
+                if (peekSymbols({ "]" })) {
                   index = nonstd_make_unique<SliceExpr>(std::move(slice_start), nullptr);
                 } else {
-                  auto slice_end = parseFullExpression(it, end);
+                  auto slice_end = parseFullExpression();
                   index = nonstd_make_unique<SliceExpr>(std::move(slice_start), std::move(slice_end));
                 }
               } else {
@@ -1407,38 +1407,38 @@ private:
               }
             }
             if (!index) throw std::runtime_error("Empty index in subscript");
-            if (consumeToken("]", it, end, SpaceHandling::Strip).empty()) throw std::runtime_error("Expected closing bracket in subscript");
+            if (consumeToken("]").empty()) throw std::runtime_error("Expected closing bracket in subscript");
             
             value = nonstd_make_unique<SubscriptExpr>(std::move(value), std::move(index));
-        } else if (!consumeToken(".", it, end, SpaceHandling::Strip).empty()) {
-            auto identifier = parseIdentifier(it, end);
+        } else if (!consumeToken(".").empty()) {
+            auto identifier = parseIdentifier();
             if (identifier.empty()) throw std::runtime_error("Expected identifier in subscript");
 
-            consumeSpaces(it, end, SpaceHandling::Strip);
-            if (peekSymbols({ "(" }, it, end)) {
-              auto callParams = parseCallParams(it, end);
+            consumeSpaces();
+            if (peekSymbols({ "(" })) {
+              auto callParams = parseCallParams();
               value = nonstd_make_unique<MethodCallExpr>(std::move(value), identifier, std::move(callParams));
             } else {
               value = nonstd_make_unique<SubscriptExpr>(std::move(value), nonstd_make_unique<LiteralExpr>(Value::make(identifier)));
             }
         }
-        consumeSpaces(it, end, SpaceHandling::Strip);
+        consumeSpaces();
       }
 
-      if (peekSymbols({ "(" }, it, end)) {
-        auto callParams = parseCallParams(it, end);
+      if (peekSymbols({ "(" })) {
+        auto callParams = parseCallParams();
         value = nonstd_make_unique<CallExpr>(std::move(value), std::move(callParams));
       }
       return value;
     }
 
-    std::unique_ptr<Expression> parseBracedExpressionOrArray(CharIterator & it, const CharIterator & end) const {
-        if (consumeToken("(", it, end, SpaceHandling::Strip).empty()) return nullptr;
+    std::unique_ptr<Expression> parseBracedExpressionOrArray() {
+        if (consumeToken("(").empty()) return nullptr;
         
-        auto expr = parseFullExpression(it, end);
+        auto expr = parseFullExpression();
         if (!expr) throw std::runtime_error("Expected expression in braced expression");
         
-        if (!consumeToken(")", it, end, SpaceHandling::Strip).empty()) {
+        if (!consumeToken(")").empty()) {
             return expr;  // Drop the parentheses
         }
 
@@ -1446,35 +1446,35 @@ private:
         tuple.emplace_back(std::move(expr));
 
         while (it != end) {
-          if (consumeToken(",", it, end, SpaceHandling::Strip).empty()) throw std::runtime_error("Expected comma in tuple");
-          auto next = parseFullExpression(it, end);
+          if (consumeToken(",").empty()) throw std::runtime_error("Expected comma in tuple");
+          auto next = parseFullExpression();
           if (!next) throw std::runtime_error("Expected expression in tuple");
           tuple.push_back(std::move(next));
 
-          if (!consumeToken(")", it, end, SpaceHandling::Strip).empty()) {
+          if (!consumeToken(")").empty()) {
               return nonstd_make_unique<ArrayExpr>(std::move(tuple));
           }
         }
         throw std::runtime_error("Expected closing parenthesis");
     }
 
-    std::unique_ptr<Expression> parseArray(CharIterator & it, const CharIterator & end) const {
-        if (consumeToken("[", it, end, SpaceHandling::Strip).empty()) return nullptr;
+    std::unique_ptr<Expression> parseArray() {
+        if (consumeToken("[").empty()) return nullptr;
         
         std::vector<std::unique_ptr<Expression>> elements;
-        if (!consumeToken("]", it, end, SpaceHandling::Strip).empty()) {
+        if (!consumeToken("]").empty()) {
             return nonstd_make_unique<ArrayExpr>(std::move(elements));
         }
-        auto first_expr = parseFullExpression(it, end);
+        auto first_expr = parseFullExpression();
         if (!first_expr) throw std::runtime_error("Expected first expression in array");
         elements.push_back(std::move(first_expr));
 
         while (it != end) {
-            if (!consumeToken(",", it, end, SpaceHandling::Strip).empty()) {
-              auto expr = parseFullExpression(it, end);
+            if (!consumeToken(",").empty()) {
+              auto expr = parseFullExpression();
               if (!expr) throw std::runtime_error("Expected expression in array");
               elements.push_back(std::move(expr));
-            } else if (!consumeToken("]", it, end, SpaceHandling::Strip).empty()) {
+            } else if (!consumeToken("]").empty()) {
                 return nonstd_make_unique<ArrayExpr>(std::move(elements));
             } else {
                 throw std::runtime_error("Expected comma or closing bracket in array");
@@ -1483,19 +1483,19 @@ private:
         throw std::runtime_error("Expected closing bracket");
     }
 
-    std::unique_ptr<Expression> parseDictionary(CharIterator & it, const CharIterator & end) const {
-        if (consumeToken("{", it, end, SpaceHandling::Strip).empty()) return nullptr;
+    std::unique_ptr<Expression> parseDictionary() {
+        if (consumeToken("{").empty()) return nullptr;
         
         std::vector<std::pair<std::string, std::unique_ptr<Expression>>> elements;
-        if (!consumeToken("}", it, end, SpaceHandling::Strip).empty()) {
+        if (!consumeToken("}").empty()) {
             return nonstd_make_unique<DictExpr>(std::move(elements));
         }
 
         auto parseKeyValuePair = [&]() {
-            auto key = parseString(it, end);
+            auto key = parseString();
             if (!key) throw std::runtime_error("Expected key in dictionary");
-            if (consumeToken("=", it, end, SpaceHandling::Strip).empty()) throw std::runtime_error("Expected equals sign in dictionary");
-            auto value = parseFullExpression(it, end);
+            if (consumeToken("=").empty()) throw std::runtime_error("Expected equals sign in dictionary");
+            auto value = parseFullExpression();
             if (!value) throw std::runtime_error("Expected value in dictionary");
             elements.emplace_back(std::make_pair(*key, std::move(value)));
         };
@@ -1503,9 +1503,9 @@ private:
         parseKeyValuePair();
         
         while (it != end) {
-            if (!consumeToken(",", it, end, SpaceHandling::Strip).empty()) {
+            if (!consumeToken(",").empty()) {
                 parseKeyValuePair();
-            } else if (!consumeToken("}", it, end, SpaceHandling::Strip).empty()) {
+            } else if (!consumeToken("}").empty()) {
                 return nonstd_make_unique<DictExpr>(std::move(elements));
             } else {
                 throw std::runtime_error("Expected comma or closing brace in dictionary");
@@ -1522,11 +1522,11 @@ private:
     using TemplateTokenVector = std::vector<std::unique_ptr<TemplateToken>>;
     using TemplateTokenIterator = TemplateTokenVector::const_iterator;
 
-    std::vector<std::string> parseVarNames(CharIterator & it, const CharIterator & end) const {
+    std::vector<std::string> parseVarNames() {
       static std::regex varnames_regex(R"(((?:\w+)(?:[\n\s]*,[\n\s]*(?:\w+))*)[\n\s]*)");
 
       std::vector<std::string> group;
-      if ((group = consumeTokenGroups(varnames_regex, it, end, SpaceHandling::Strip)).empty()) throw std::runtime_error("Expected variable names");
+      if ((group = consumeTokenGroups(varnames_regex)).empty()) throw std::runtime_error("Expected variable names");
       std::vector<std::string> varnames;
       std::istringstream iss(group[1]);
       std::string varname;
@@ -1536,16 +1536,15 @@ private:
       return varnames;
     }
 
-
-    std::runtime_error unexpected(const TemplateToken & token, const std::string & context) const {
+    std::runtime_error unexpected(const TemplateToken & token) const {
       return std::runtime_error("Unexpected " + TemplateToken::typeToString(token.getType())
-        + error_location_suffix(token.pos));// + " in " + context);
+        + error_location_suffix(token.pos));
     }
     std::runtime_error unterminated(const TemplateToken & token) const {
       return std::runtime_error("Unterminated " + TemplateToken::typeToString(token.getType())
         + error_location_suffix(token.pos));
-      // context);// + ": " + TemplateToken::typeToString(getType()));
     }
+
     std::string error_location_suffix(size_t pos) const {
       auto start = template_str.begin();
       auto end = template_str.end();
@@ -1555,7 +1554,7 @@ private:
       return " at row " + std::to_string(line) + ", column " + std::to_string(col) + ": " + std::string(it, end);
     }
 
-    TemplateTokenVector tokenize() const {
+    TemplateTokenVector tokenize() {
       static std::regex comment_tok(R"(\{#([-~]?)(.*?)([-~]?)#\})");
       static std::regex expr_open_regex(R"(\{\{([-~])?)");
       static std::regex block_open_regex(R"(^\{%([-~])?[\s\n]*)");
@@ -1565,9 +1564,6 @@ private:
       static std::regex block_close_regex(R"([\s\n]*([-~])?%\})");
               
       TemplateTokenVector tokens;
-      const auto start = template_str.begin();
-      auto it = start;
-      const auto end = template_str.end();
       std::vector<std::string> group;
       std::string text;
       
@@ -1576,41 +1572,41 @@ private:
           // if (!tokens.empty()) std::cout << "Prev token: " << TemplateToken::typeToString(tokens.back()->getType()) << std::endl;
           auto pos = std::distance(start, it);
       
-          if (!(group = consumeTokenGroups(comment_tok, it, end, SpaceHandling::Keep)).empty()) {
+          if (!(group = consumeTokenGroups(comment_tok, SpaceHandling::Keep)).empty()) {
             auto pre_space = parseSpaceHandling(group[1]);
             auto content = group[2];
             auto post_space = parseSpaceHandling(group[3]);
             tokens.push_back(nonstd_make_unique<CommentTemplateToken>(pos, pre_space, post_space, content));
-          } else if (!(group = consumeTokenGroups(expr_open_regex, it, end, SpaceHandling::Keep)).empty()) {
+          } else if (!(group = consumeTokenGroups(expr_open_regex, SpaceHandling::Keep)).empty()) {
             auto pre_space = parseSpaceHandling(group[1]);
-            auto expr = parseFullExpression(it, end);
+            auto expr = parseFullExpression();
 
-            if ((group = consumeTokenGroups(expr_close_regex, it, end, SpaceHandling::Strip)).empty()) {
+            if ((group = consumeTokenGroups(expr_close_regex)).empty()) {
               throw std::runtime_error("Expected closing expression tag");
             }
 
             auto post_space = parseSpaceHandling(group[1]);
             tokens.push_back(nonstd_make_unique<ExpressionTemplateToken>(pos, pre_space, post_space, std::move(expr)));
-          } else if (!(group = consumeTokenGroups(block_open_regex, it, end, SpaceHandling::Keep)).empty()) {
+          } else if (!(group = consumeTokenGroups(block_open_regex, SpaceHandling::Keep)).empty()) {
             auto pre_space = parseSpaceHandling(group[1]);
 
             std::string keyword;
 
             auto parseBlockClose = [&]() -> SpaceHandling {
-              if ((group = consumeTokenGroups(block_close_regex, it, end, SpaceHandling::Strip)).empty()) throw std::runtime_error("Expected closing block tag");
+              if ((group = consumeTokenGroups(block_close_regex)).empty()) throw std::runtime_error("Expected closing block tag");
               return parseSpaceHandling(group[1]);
             };
 
-            if ((keyword = consumeToken(block_keyword_tok, it, end, SpaceHandling::Strip)).empty()) throw std::runtime_error("Expected block keyword");
+            if ((keyword = consumeToken(block_keyword_tok)).empty()) throw std::runtime_error("Expected block keyword");
             
             if (keyword == "if") {
-              auto condition = parseFullExpression(it, end);
+              auto condition = parseFullExpression();
               if (!condition) throw std::runtime_error("Expected condition in if block");
 
               auto post_space = parseBlockClose();
               tokens.push_back(nonstd_make_unique<IfTemplateToken>(pos, pre_space, post_space, std::move(condition)));
             } else if (keyword == "elif") {
-              auto condition = parseFullExpression(it, end);
+              auto condition = parseFullExpression();
               if (!condition) throw std::runtime_error("Expected condition in elif block");
 
               auto post_space = parseBlockClose();
@@ -1625,17 +1621,17 @@ private:
               static std::regex recursive_tok(R"(recursive\b)");
               static std::regex if_tok(R"(if\b)");
 
-              auto varnames = parseVarNames(it, end);
+              auto varnames = parseVarNames();
               static std::regex in_tok(R"(in\b)");
-              if (consumeToken(in_tok, it, end, SpaceHandling::Strip).empty()) throw std::runtime_error("Expected 'in' keyword in for block");
-              auto iterable = parseFullExpression(it, end);
+              if (consumeToken(in_tok).empty()) throw std::runtime_error("Expected 'in' keyword in for block");
+              auto iterable = parseFullExpression();
               if (!iterable) throw std::runtime_error("Expected iterable in for block");
 
               std::unique_ptr<Expression> condition;
-              if (!consumeToken(if_tok, it, end, SpaceHandling::Strip).empty()) {
-                condition = parseFullExpression(it, end);
+              if (!consumeToken(if_tok).empty()) {
+                condition = parseFullExpression();
               }
-              auto recursive = !consumeToken(recursive_tok, it, end, SpaceHandling::Strip).empty();
+              auto recursive = !consumeToken(recursive_tok).empty();
             
               auto post_space = parseBlockClose();
               tokens.push_back(nonstd_make_unique<ForTemplateToken>(pos, pre_space, post_space, std::move(varnames), std::move(iterable), std::move(condition), recursive));
@@ -1644,30 +1640,30 @@ private:
               tokens.push_back(nonstd_make_unique<EndForTemplateToken>(pos, pre_space, post_space));
             } else if (keyword == "set") {
               static std::regex namespaced_var_regex(R"((\w+)[\s\n]*\.[\s\n]*(\w+))");
-              if (!(group = consumeTokenGroups(namespaced_var_regex, it, end, SpaceHandling::Strip)).empty()) {
+              if (!(group = consumeTokenGroups(namespaced_var_regex)).empty()) {
                 auto ns = group[1];
                 auto var = group[2]; 
 
-                if (consumeToken("=", it, end, SpaceHandling::Strip).empty()) throw std::runtime_error("Expected equals sign in set block");
+                if (consumeToken("=").empty()) throw std::runtime_error("Expected equals sign in set block");
 
-                auto value = parseFullExpression(it, end);
+                auto value = parseFullExpression();
                 if (!value) throw std::runtime_error("Expected value in set block");
 
                 auto post_space = parseBlockClose();
                 tokens.push_back(nonstd_make_unique<NamespacedSetTemplateToken>(pos, pre_space, post_space, ns, var, std::move(value)));
               } else {
-                auto varnames = parseVarNames(it, end);
+                auto varnames = parseVarNames();
 
-                if (consumeToken("=", it, end, SpaceHandling::Strip).empty()) throw std::runtime_error("Expected equals sign in set block");
+                if (consumeToken("=").empty()) throw std::runtime_error("Expected equals sign in set block");
 
-                auto value = parseFullExpression(it, end);
+                auto value = parseFullExpression();
                 if (!value) throw std::runtime_error("Expected value in set block");
 
                 auto post_space = parseBlockClose();
                 tokens.push_back(nonstd_make_unique<SetTemplateToken>(pos, pre_space, post_space, varnames, std::move(value)));
               }
             } else if (keyword == "block") {
-              auto blockname = parseIdentifier(it, end);
+              auto blockname = parseIdentifier();
               if (blockname.empty()) throw std::runtime_error("Expected block name in block block");
 
               auto post_space = parseBlockClose();
@@ -1678,7 +1674,7 @@ private:
             } else {
               throw std::runtime_error("Unexpected block: " + keyword);
             }
-          } else if (!(text = consumeToken(text_regex, it, end, SpaceHandling::Keep)).empty()) {
+          } else if (!(text = consumeToken(text_regex, SpaceHandling::Keep)).empty()) {
             tokens.push_back(nonstd_make_unique<TextTemplateToken>(pos, SpaceHandling::Keep, SpaceHandling::Keep, text));
           } else {
             if (it != end) throw std::runtime_error("Unexpected character");
@@ -1783,11 +1779,11 @@ private:
               done = true;
               break;
             default:
-              throw unexpected(**it, "template");
+              throw unexpected(**it);
           }
         }
         if (fully && it != end) {
-            throw unexpected(**it, "end of template");
+            throw unexpected(**it);
         }
         if (children.empty()) {
           return nonstd_make_unique<TextNode>(""); // Empty template!
@@ -1799,7 +1795,12 @@ private:
     }
 
     std::string template_str;
-    JinjaParser(const std::string& template_str) : template_str(template_str) {}
+    CharIterator start, end, it;
+      
+    JinjaParser(const std::string& template_str) : template_str(template_str) {
+      start = it = this->template_str.begin();
+      end = this->template_str.end();
+    }
 
 public:
 
