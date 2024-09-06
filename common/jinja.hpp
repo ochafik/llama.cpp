@@ -61,7 +61,7 @@ std::string strip(const std::string & s) {
 class Value : public std::enable_shared_from_this<Value> {
 public:
   using CallableArgs = std::vector<std::pair<std::string, std::shared_ptr<Value>>>;
-  using CallableType = std::function<std::shared_ptr<Value>(const CallableArgs &)>;
+  using CallableType = std::function<std::shared_ptr<Value>(Value &, const CallableArgs &)>;
 
 private:
   // boolean, number, string, null
@@ -174,9 +174,9 @@ public:
     throw std::runtime_error("Value is not an array or object");
   }
 
-  std::shared_ptr<Value> call(const CallableArgs & args) const {
+  std::shared_ptr<Value> call(Value & context, const CallableArgs & args) const {
     if (!is_callable()) throw std::runtime_error("Value is not callable");
-    return callable_(args);
+    return callable_(context, args);
   }
 
   bool is_undefined() const { return type == Undefined; }
@@ -818,7 +818,7 @@ public:
         for (const auto& arg : args) {
             vargs.push_back({arg.first, arg.second->evaluate(context)});
         }
-        return obj->call(vargs);
+        return obj->call(context, vargs);
     }
 
     std::shared_ptr<Value> evaluateAsPipe(Value & context, std::shared_ptr<Value>& input) const override {
@@ -834,7 +834,7 @@ public:
         for (const auto& arg : args) {
             vargs.push_back({arg.first, arg.second->evaluate(context)});
         }
-        return obj->call(vargs);
+        return obj->call(context, vargs);
     }
 };
 
@@ -1847,29 +1847,15 @@ public:
 };
 
 std::shared_ptr<Value> Value::context(const std::shared_ptr<Value> & values) {
-  std::unordered_map<json, std::shared_ptr<Value>> context_obj;
+  std::unordered_map<json, std::shared_ptr<Value>> context;
 
-
-  auto getSingleArg = [](const Value::CallableArgs & args, const std::string & fn_name, const std::string & arg_name, bool allowPositional, const std::shared_ptr<Value> & default_value = nullptr) {
-    if (args.empty()) {
-      if (default_value) return default_value;
-      throw std::runtime_error("Function " + fn_name + " must have exactly one argument (" + arg_name + ")");
-    }
-    if (args.size() != 1) throw std::runtime_error("Function " + fn_name + " must have exactly one argument (" + arg_name + ")");
-    if (!args[0].first.empty()) {
-      if (args[0].first != arg_name) throw std::runtime_error("Function " + fn_name + " argument name mismatch: " + args[0].first + " != " + arg_name);
-    } else {
-      if (!allowPositional) throw std::runtime_error("Function " + fn_name + " argument " + arg_name + " must be provided by name, not position");
-    }
-    return args[0].second;
-  };
-
-  auto register_function = [&](const std::string & fn_name, const std::vector<std::string> & params, const std::function<std::shared_ptr<Value>(const Value & args)> & fn) {
+  
+  auto simple_function = [&](const std::string & fn_name, const std::vector<std::string> & params, const std::function<std::shared_ptr<Value>(Value &, const Value & args)> & fn) {
     std::map<std::string, size_t> named_positions;
     for (size_t i = 0, n = params.size(); i < n; i++) named_positions[params[i]] = i;
 
     // for (auto & p : arg_names) {
-    context_obj[fn_name] = callable([=](const Value::CallableArgs & args) -> std::shared_ptr<Value> {
+    return callable([=](Value & context, const Value::CallableArgs & args) -> std::shared_ptr<Value> {
       auto args_obj = Value::object();
       auto positional = true;
       for (size_t i = 0, n = args.size(); i < n; i++) {
@@ -1888,23 +1874,22 @@ std::shared_ptr<Value> Value::context(const std::shared_ptr<Value> & values) {
         }
         (*args_obj)[arg.first] = arg.second;
       }
-      return fn(*args_obj);
+      return fn(context, *args_obj);
     });
   };
-
-  register_function("raise_exception", { "message" }, [&](const Value & args) -> std::shared_ptr<Value> {
+  context["raise_exception"] = simple_function("raise_exception", { "message" }, [&](Value & context, const Value & args) -> std::shared_ptr<Value> {
     throw std::runtime_error(args.at("message")->get<std::string>());
   });
-  register_function("tojson", { "value", "indent" }, [&](const Value & args) {
+  context["tojson"] = simple_function("tojson", { "value", "indent" }, [&](Value & context, const Value & args) {
     return Value::make(args.at("value")->dump(args.get<int64_t>("indent", -1)));
   });
-  register_function("trim", { "text" }, [&](const Value & args) {
+  context["trim"] = simple_function("trim", { "text" }, [&](Value & context, const Value & args) {
     return Value::make(strip(args.at("text")->get<std::string>()));
   });
-  register_function("count", { "items" }, [&](const Value & args) {
+  context["count"] = simple_function("count", { "items" }, [&](Value & context, const Value & args) {
     return Value::make((int64_t) args.at("items")->size());
   });
-  register_function("join", { "items", "d" }, [&](const Value & args) {
+  context["join"] = simple_function("join", { "items", "d" }, [&](Value & context, const Value & args) {
     auto sep = args.get<std::string>("d", "");
     std::ostringstream oss;
     auto first = true;
@@ -1916,14 +1901,56 @@ std::shared_ptr<Value> Value::context(const std::shared_ptr<Value> & values) {
     }
     return Value::make(oss.str());
   });
-  context_obj["namespace"] = callable([=](const Value::CallableArgs & args) {
+  context["namespace"] = callable([=](Value & context, const Value::CallableArgs & args) {
     auto ns = Value::object();
     for (auto & arg : args) {
       (*ns)[arg.first] = arg.second;
     }
     return ns;
   });
-  context_obj["range"] = callable([=](const Value::CallableArgs & args) {
+  context["equalto"] = simple_function("equalto", { "expected" }, [&](Value & context, const Value & args0) {
+    return simple_function("", { "actual" }, [&](Value & context, const Value & args1) {
+      return Value::make(*args1.at("actual") == *args0.at("expected"));
+    });
+  });
+  auto make_filter = [&](Value & filter, Value & extra_args) -> std::shared_ptr<Value> {
+    return simple_function("", { "value" }, [&](Value & context, const Value & args) {
+      auto value = args.at("value");
+      Value::CallableArgs actual_args;
+      actual_args.emplace_back("", value);
+      for (size_t i = 0, n = extra_args.size(); i < n; i++) {
+        actual_args.emplace_back("", extra_args.at(i));
+      }
+      return filter.call(context, actual_args);
+    });
+  };
+  context["reject"] = callable([=](Value & context, const Value::CallableArgs & args) {
+    // https://jinja.palletsprojects.com/en/3.0.x/templates/#jinja-filters.reject
+
+    // {{- "Tools: " + builtin_tools | reject('equalto', 'code_interpreter') | join(", ") + "\n\n"}}
+
+    auto & items = args[0].second;
+    auto filter_fn = context[*args[1].second];
+
+    auto filter_args = Value::array();
+    for (size_t i = 2, n = args.size(); i < n; i++) {
+      filter_args->push_back(args[i].second);
+    }
+    auto filter = make_filter(*filter_fn, *filter_args);
+
+    return simple_function("", {"items"}, [&](Value & context, const Value & args) {
+      auto items = args.at("items");
+      auto res = Value::array();
+      for (size_t i = 0, n = items->size(); i < n; i++) {
+        auto res = filter->call(context, { { "", items->at(i) } });
+        if (!(res && *res)) {
+          res->push_back(items->at(i));
+        }
+      }
+      return res;
+    });
+  });
+  context["range"] = callable([=](Value & context, const Value::CallableArgs & args) {
     int64_t start = 0;
     int64_t end = 0;
     int64_t step = 1;
@@ -1966,8 +1993,8 @@ std::shared_ptr<Value> Value::context(const std::shared_ptr<Value> & values) {
       throw std::runtime_error("Values must be an object");
     }
     for (auto & pair : values->object_) {
-      context_obj[pair.first] = pair.second;
+      context[pair.first] = pair.second;
     }
   }
-  return Value::object(context_obj);
+  return Value::object(context);
 }

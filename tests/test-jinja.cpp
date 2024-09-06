@@ -245,6 +245,9 @@ int main() {
       }
     ])");
 
+//     {{- "Tools: " + builtin_tools | reject('equalto', 'code_interpreter') | join(", ") + "\n\n"}}
+// {%- endif %}
+
     const auto llama3_1_template = read_file("templates/Meta-Llama-3.1-8B-Instruct.jinja");
     test_render(llama3_1_template, json::object({    
         {"messages", simple_messages},
