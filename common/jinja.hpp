@@ -156,16 +156,21 @@ public:
   std::shared_ptr<Value>& operator[](const Value& key) {
     if (!is_object()) throw std::runtime_error("Value is not an object");
     if (!key.is_hashable()) throw std::runtime_error("Unashable type");
-    return object_[key.primitive_];
+    return (*this)[key.primitive_];
   }
 
-  std::shared_ptr<Value>& operator[](const std::string& key) {
+  std::shared_ptr<Value>& operator[](const json& key) {
     if (!is_object()) throw std::runtime_error("Value is not an object");
+    if (object_.count(key) == 0) object_[key] = Value::make();
     return object_[key];
   }
 
+  std::shared_ptr<Value>& operator[](const std::string& key) {
+    return (*this)[json(key)];
+  }
+
   std::shared_ptr<Value>& operator[](const char * key) {
-    return (*this)[std::string(key)];
+    return (*this)[json(key)];
   }
 
   std::shared_ptr<Value>& operator[](const size_t& i) {
@@ -375,8 +380,30 @@ public:
   }
 };
 
+class Expression {
+public:
+    using CallableArgs = std::vector<std::pair<std::string, std::unique_ptr<Expression>>>;
 
-class Expression;
+    virtual ~Expression() = default;
+    virtual std::shared_ptr<Value> evaluate(Value & context) const = 0;
+
+    virtual std::shared_ptr<Value> evaluateAsPipe(Value & context, std::shared_ptr<Value>&) const{
+      throw std::runtime_error("This expression cannot be used as a pipe");
+    }
+};
+
+static void destructuring_assign(const std::vector<std::string> & var_names, Value & context, const std::shared_ptr<Value>& item) {
+  if (var_names.size() == 1) {
+      context[var_names[0]] = item;
+  } else {
+      if (!item->is_array() || item->size() != var_names.size()) {
+          throw std::runtime_error("Mismatched number of variables and items in destructuring assignment");
+      }
+      for (size_t i = 0; i < var_names.size(); ++i) {
+          context[var_names[i]] = item->at(i);
+      }
+  }
+}
 
 enum SpaceHandling { Keep, Strip };
 
@@ -533,7 +560,16 @@ class VariableNode : public TemplateNode {
 public:
     VariableNode(std::unique_ptr<Expression> && e, std::vector<std::string> && f) 
         : TemplateNode(Type::Variable), expr(std::move(e)) {}
-    void render(std::ostringstream& oss, Value & context) const override;
+    void render(std::ostringstream& oss, Value & context) const override {
+      auto result = expr->evaluate(context);
+      if (result->is_string()) {
+          oss << result->get<std::string>();
+      } else if (result->is_boolean()) {
+          oss << (result->get<bool>() ? "True" : "False");
+      } else if (!result->is_null()) {
+          oss << result->dump();
+      }
+  }
 };
 
 class IfNode : public TemplateNode {
@@ -541,7 +577,19 @@ class IfNode : public TemplateNode {
 public:
     IfNode(std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<TemplateNode>>> && c)
         : TemplateNode(Type::If), cascade(std::move(c)) {}
-    void render(std::ostringstream& oss, Value & context) const override;
+    void render(std::ostringstream& oss, Value & context) const override {
+    for (const auto& branch : cascade) {
+        auto enter_branch = true;
+        if (branch.first) {
+          auto result = branch.first->evaluate(context);
+          enter_branch = result && (*result);
+        }
+        if (enter_branch) {
+            branch.second->render(oss, context);
+            return;
+        }
+    }
+  }
 };
 
 class ForNode : public TemplateNode {
@@ -556,7 +604,45 @@ public:
             std::unique_ptr<TemplateNode> && b, bool r)
             : TemplateNode(Type::For), var_names(vns), condition(std::move(c)),
             iterable(std::move(iter)), body(std::move(b)), recursive(r) {}
-    void render(std::ostringstream& oss, Value & context) const override;
+    void render(std::ostringstream& oss, Value & context) const override {
+      auto iterable_value = iterable->evaluate(context);
+      if (!iterable_value->is_array()) {
+        throw std::runtime_error("For loop iterable must be iterable");
+      }
+
+      auto original_context = context;
+      auto original_vars = Value::object();
+      for (const auto& var_name : var_names) {
+          (*original_vars)[var_name] = context.contains(var_name) ? context[var_name] : Value::make();
+      }
+
+      auto loop_iteration = [&](const std::shared_ptr<Value>& item) {
+          // auto bindings = Value::object();
+          destructuring_assign(var_names, context, item);
+          if (!condition || condition->evaluate(context)) {
+            body->render(oss, context);
+          }
+      };
+      std::function<void(const std::shared_ptr<Value>&)> visit = [&](const std::shared_ptr<Value>& iter) {
+          for (size_t i = 0, n = iter->size(); i < n; ++i) {
+              auto & item = iter->at(i);
+              if (item->is_array() && recursive) {
+                  visit(item);
+              } else {
+                  loop_iteration(item);
+              }
+          }
+      };
+      visit(iterable_value);
+      
+      for (const auto& var_name : var_names) {
+          if (original_vars->contains(var_name)) {
+              context[var_name] = original_vars->at(var_name);
+          } else {
+              context.erase(var_name);
+          }
+      }
+  }
 };
 
 class BlockNode : public TemplateNode {
@@ -565,7 +651,9 @@ class BlockNode : public TemplateNode {
 public:
     BlockNode(const std::string& n, std::unique_ptr<TemplateNode> && b)
         : TemplateNode(Type::NamedBlock), name(n), body(std::move(b)) {}
-    void render(std::ostringstream& oss, Value & context) const override;
+    void render(std::ostringstream& oss, Value & context) const override {
+        body->render(oss, context);
+    }
 };
 
 class SetNode : public TemplateNode {
@@ -574,7 +662,9 @@ class SetNode : public TemplateNode {
 public:
     SetNode(const std::vector<std::string> & vns, std::unique_ptr<Expression> && v)
       : TemplateNode(Type::Set), var_names(vns), value(std::move(v)) {}
-    void render(std::ostringstream& oss, Value & context) const override;
+    void render(std::ostringstream& oss, Value & context) const override {
+        destructuring_assign(var_names, context, value->evaluate(context));
+    }
 };
 
 class NamespacedSetNode : public TemplateNode {
@@ -583,18 +673,10 @@ class NamespacedSetNode : public TemplateNode {
 public:
     NamespacedSetNode(const std::string& ns, const std::string& name, std::unique_ptr<Expression> && v)
       : TemplateNode(Type::Set), ns(ns), name(name), value(std::move(v)) {}
-    void render(std::ostringstream& oss, Value & context) const override;
-};
-
-class Expression {
-public:
-    using CallableArgs = std::vector<std::pair<std::string, std::unique_ptr<Expression>>>;
-
-    virtual ~Expression() = default;
-    virtual std::shared_ptr<Value> evaluate(Value & context) const = 0;
-
-    virtual std::shared_ptr<Value> evaluateAsPipe(Value & context, std::shared_ptr<Value>&) const{
-      throw std::runtime_error("This expression cannot be used as a pipe");
+    void render(std::ostringstream& oss, Value & context) const override {
+        auto ns_value = context[ns];
+        if (!ns_value->is_object()) throw std::runtime_error("Namespace '" + ns + "' is not an object");
+        (*ns_value)[name] = this->value->evaluate(context);
     }
 };
 
@@ -860,98 +942,6 @@ public:
         parts.insert(parts.begin(), std::move(e));
     }
 };
-
-void VariableNode::render(std::ostringstream& oss, Value & context) const {
-    auto result = expr->evaluate(context);
-    if (result->is_string()) {
-        oss << result->get<std::string>();
-    } else if (result->is_boolean()) {
-        oss << (result->get<bool>() ? "True" : "False");
-    } else if (!result->is_null()) {
-        oss << result->dump();
-    }
-}
-
-void IfNode::render(std::ostringstream& oss, Value & context) const {
-    for (const auto& branch : cascade) {
-        auto enter_branch = true;
-        if (branch.first) {
-          auto result = branch.first->evaluate(context);
-          enter_branch = result && (*result);
-        }
-        if (enter_branch) {
-            branch.second->render(oss, context);
-            return;
-        }
-    }
-}
-
-static void destructuring_assign(const std::vector<std::string> & var_names, Value & context, const std::shared_ptr<Value>& item) {
-  if (var_names.size() == 1) {
-      context[var_names[0]] = item;
-  } else {
-      if (!item->is_array() || item->size() != var_names.size()) {
-          throw std::runtime_error("Mismatched number of variables and items in destructuring assignment");
-      }
-      for (size_t i = 0; i < var_names.size(); ++i) {
-          context[var_names[i]] = item->at(i);
-      }
-  }
-}
-
-void ForNode::render(std::ostringstream& oss, Value & context) const {
-    auto iterable_value = iterable->evaluate(context);
-    if (!iterable_value->is_array()) {
-      throw std::runtime_error("For loop iterable must be iterable");
-    }
-
-    auto original_context = context;
-    auto original_vars = Value::object();
-    for (const auto& var_name : var_names) {
-        (*original_vars)[var_name] = context.contains(var_name) ? context[var_name] : Value::make();
-    }
-
-    auto loop_iteration = [&](const std::shared_ptr<Value>& item) {
-        // auto bindings = Value::object();
-        destructuring_assign(var_names, context, item);
-        if (!condition || condition->evaluate(context)) {
-          body->render(oss, context);
-        }
-    };
-    std::function<void(const std::shared_ptr<Value>&)> visit = [&](const std::shared_ptr<Value>& iter) {
-        for (size_t i = 0, n = iter->size(); i < n; ++i) {
-            auto & item = iter->at(i);
-            if (item->is_array() && recursive) {
-                visit(item);
-            } else {
-                loop_iteration(item);
-            }
-        }
-    };
-    visit(iterable_value);
-    
-    for (const auto& var_name : var_names) {
-        if (original_vars->contains(var_name)) {
-            context[var_name] = original_vars->at(var_name);
-        } else {
-            context.erase(var_name);
-        }
-    }
-}
-
-void BlockNode::render(std::ostringstream& oss, Value & context) const {
-    body->render(oss, context);
-}
-
-void SetNode::render(std::ostringstream&, Value & context) const {
-    destructuring_assign(var_names, context, value->evaluate(context));
-}
-
-void NamespacedSetNode::render(std::ostringstream&, Value & context) const {
-    auto ns_value = context[ns];
-    if (!ns_value->is_object()) throw std::runtime_error("Namespace '" + ns + "' is not an object");
-    (*ns_value)[name] = this->value->evaluate(context);
-}
 
 class JinjaParser {
 private:
@@ -1894,6 +1884,7 @@ std::shared_ptr<Value> Value::context(const std::shared_ptr<Value> & values) {
     std::ostringstream oss;
     auto first = true;
     auto & items = args.at("items");
+    if (!items->is_array()) throw std::runtime_error("join expects an array for items, got: " + items->dump());
     for (size_t i = 0, n = items->size(); i < n; ++i) {
       if (first) first = false;
       else oss << sep;
