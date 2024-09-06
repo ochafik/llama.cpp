@@ -1041,8 +1041,8 @@ private:
         auto str = parseString();
         if (str) return Value::make(*str);
       }
-      static std::regex tok(R"(true\b|false\b|null\b)");
-      auto token = consumeToken(tok);
+      static std::regex prim_tok(R"(true\b|false\b|null\b)");
+      auto token = consumeToken(prim_tok);
       if (!token.empty()) {
         if (token == "true") return Value::make(true);
         if (token == "false") return Value::make(false);
@@ -1545,13 +1545,33 @@ private:
         + error_location_suffix(token.pos));
     }
 
+    /** Helper to get the n-th line (1-based) */
+    std::string get_line(size_t line) const {
+      auto start = template_str.begin();
+      for (size_t i = 1; i < line; ++i) {
+        start = std::find(start, template_str.end(), '\n') + 1;
+      }
+      auto end = std::find(start, template_str.end(), '\n');
+      return std::string(start, end);
+    }
+
     std::string error_location_suffix(size_t pos) const {
       auto start = template_str.begin();
       auto end = template_str.end();
       auto it = start + pos;
       auto line = std::count(start, it, '\n') + 1;
+      auto max_line = std::count(start, end, '\n') + 1;
       auto col = pos - std::string(start, it).rfind('\n');
-      return " at row " + std::to_string(line) + ", column " + std::to_string(col) + ": " + std::string(it, end);
+      // Get content of line before and after, if any. And show a ^ caret right under the line of the error, at the right col.
+      
+      std::ostringstream out;
+      out << " at row " << line << ", column " << col << ":\n";
+      if (line > 1) out << get_line(line - 1) << "\n";
+      out << get_line(line) << "\n";
+      out << std::string(col - 1, ' ') << "^" << "\n";
+      if (line < max_line) out << get_line(line + 1) << "\n";
+
+      return out.str();
     }
 
     TemplateTokenVector tokenize() {
@@ -1730,12 +1750,12 @@ private:
               SpaceHandling post_space = it + 1 != end ? (*(it + 1))->pre_space : SpaceHandling::Keep;
               auto text = dynamic_cast<TextTemplateToken*>((*(it++)).get())->text;
               if (pre_space == SpaceHandling::Strip) {
-                static std::regex r(R"(^(\s|\r|\n)+)");
-                text = std::regex_replace(text, r, "");
+                static std::regex leading_space_regex(R"(^(\s|\r|\n)+)");
+                text = std::regex_replace(text, leading_space_regex, "");
               }
               if (post_space == SpaceHandling::Strip) {
-                static std::regex r(R"((\s|\r|\n)+$)");
-                text = std::regex_replace(text, r, "");
+                static std::regex trailing_space_regex(R"((\s|\r|\n)+$)");
+                text = std::regex_replace(text, trailing_space_regex, "");
               }
 
               if (it == end) {
