@@ -89,7 +89,7 @@ public:
   Value(const bool& v) : primitive_(v), type(Primitive) {}
   Value(const int64_t& v) : primitive_(v), type(Primitive) {}
   Value(const double& v) : primitive_(v), type(Primitive) {}
-  Value(const nullptr_t& v) : primitive_(v), type(Primitive) {}
+  Value(const nullptr_t& v) : type(Undefined) {}
   Value(const std::string& v) : primitive_(v), type(Primitive) {}
   Value(const char * v) : primitive_(std::string(v)), type(Primitive) {}
   Value(const CallableType & c) : callable_(c), is_callable_(true), type(Object) {}
@@ -108,6 +108,8 @@ public:
       for (const auto& item : v) {
         array_.push_back(Value::make(item));
       }
+    } else if (v.is_null()) {
+      type = Undefined;
     } else {
       type = Primitive;
       primitive_ = v;
@@ -304,6 +306,7 @@ public:
   template <>
   json get<json>() const {
     if (is_primitive()) return primitive_;
+    if (is_undefined()) return json();
     if (is_array()) {
       std::vector<json> res;
       for (const auto& item : array_) {
@@ -820,6 +823,9 @@ public:
 
     std::shared_ptr<Value> evaluateAsPipe(Value & context, std::shared_ptr<Value>& input) const override {
         auto obj = object->evaluate(context);
+        if (obj->is_null()) {
+          throw std::runtime_error("Object is null, cannot be called");
+        }
         if (!obj->is_callable()) {
           throw std::runtime_error("Object is not callable: " + obj->dump(2));
         }
@@ -868,7 +874,12 @@ void VariableNode::render(std::ostringstream& oss, Value & context) const {
 
 void IfNode::render(std::ostringstream& oss, Value & context) const {
     for (const auto& branch : cascade) {
-        if (branch.first->evaluate(context)) {
+        auto enter_branch = true;
+        if (branch.first) {
+          auto result = branch.first->evaluate(context);
+          enter_branch = result && (*result);
+        }
+        if (enter_branch) {
             branch.second->render(oss, context);
             return;
         }
@@ -1887,7 +1898,7 @@ std::shared_ptr<Value> Value::context(const std::shared_ptr<Value> & values) {
   register_function("tojson", { "value", "indent" }, [&](const Value & args) {
     return Value::make(args.at("value")->dump(args.get<int64_t>("indent", -1)));
   });
-  register_function("strip", { "text" }, [&](const Value & args) {
+  register_function("trim", { "text" }, [&](const Value & args) {
     return Value::make(strip(args.at("text")->get<std::string>()));
   });
   register_function("count", { "items" }, [&](const Value & args) {
