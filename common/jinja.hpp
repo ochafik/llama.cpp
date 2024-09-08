@@ -60,18 +60,19 @@ std::string strip(const std::string & s) {
  */
 class Value : public std::enable_shared_from_this<Value> {
 public:
-  using CallableArgs = std::vector<std::pair<std::string, std::shared_ptr<Value>>>;
-  using CallableType = std::function<std::shared_ptr<Value>(Value &, const CallableArgs &)>;
+  using Ptr = std::shared_ptr<Value>;
+  using CallableArgs = std::vector<std::pair<std::string, Value::Ptr>>;
+  using CallableType = std::function<Value::Ptr(Value &, const CallableArgs &)>;
 
 private:
   // boolean, number, string, null
   json primitive_;
-  std::vector<std::shared_ptr<Value>> array_;
+  std::vector<Value::Ptr> array_;
   // keys must be primitive json values (string, number, boolean)
-  std::unordered_map<json, std::shared_ptr<Value>> object_;
+  std::unordered_map<json, Value::Ptr> object_;
   bool is_callable_;
   CallableType callable_;
-  std::shared_ptr<Value> parent_;
+  Value::Ptr parent_;
 
   enum Type {
     Undefined,
@@ -81,8 +82,8 @@ private:
   };
   Type type;
 
-  Value(const std::unordered_map<json, std::shared_ptr<Value>>& v) : object_(v), type(Object) {}
-  Value(const std::vector<std::shared_ptr<Value>>& v) : array_(v), type(Array) {}
+  Value(const std::unordered_map<json, Value::Ptr>& v) : object_(v), type(Object) {}
+  Value(const std::vector<Value::Ptr>& v) : array_(v), type(Array) {}
 
 public:
   Value() : type(Undefined) {}
@@ -97,7 +98,7 @@ public:
     *this = other;
   }
 
-  Value(const json& v, const std::shared_ptr<Value> parent = nullptr) : parent_(parent) {
+  Value(const json& v, const Value::Ptr parent = nullptr) : parent_(parent) {
     if (v.is_object()) {
       type = Object;
       for (auto it = v.begin(); it != v.end(); ++it) {
@@ -117,7 +118,7 @@ public:
   }
 
   size_t size() const {
-    if (!is_array()) throw std::runtime_error("Value is not an array");
+    if (!is_array()) throw std::runtime_error("Value is not an array: " + dump());
     return array_.size();
   }
 
@@ -131,56 +132,58 @@ public:
     return *this;
   }
 
-  static std::shared_ptr<Value> array(const std::vector<std::shared_ptr<Value>>& v = {}) {
-    return std::shared_ptr<Value>(new Value(v));
+  static Value::Ptr array(const std::vector<Value::Ptr>& v = {}) {
+    return Value::Ptr(new Value(v));
   }
-  static std::shared_ptr<Value> object(const std::unordered_map<json, std::shared_ptr<Value>>& v = {}) {
-    return std::shared_ptr<Value>(new Value(v));
+  static Value::Ptr object(const std::unordered_map<json, Value::Ptr>& v = {}) {
+    return Value::Ptr(new Value(v));
   }
 
-  static std::shared_ptr<Value> callable(const Value::CallableType & callable) {
+  static Value::Ptr callable(const Value::CallableType & callable) {
     return Value::make(callable);
   }
-  static std::shared_ptr<Value> context(const std::shared_ptr<Value> & values = {});
+  static Value::Ptr context(const Value::Ptr & values = {});
   
   template <class... Args>
-  static std::shared_ptr<Value> make(Args &&...args) {
-    return std::shared_ptr<Value>(new Value(std::forward<Args>(args)...));
+  static Value::Ptr make(Args &&...args) {
+    return Value::Ptr(new Value(std::forward<Args>(args)...));
   }
 
-  void push_back(const std::shared_ptr<Value>& v) {
-    if (!is_array()) throw std::runtime_error("Value is not an array");
+  void push_back(const Value::Ptr& v) {
+    if (!is_array()) throw std::runtime_error("Value is not an array: " + dump());
     array_.push_back(v);
   }
 
-  std::shared_ptr<Value>& operator[](const Value& key) {
-    if (!is_object()) throw std::runtime_error("Value is not an object");
-    if (!key.is_hashable()) throw std::runtime_error("Unashable type");
+  Value::Ptr& operator[](const Value& key) {
+    if (!is_object()) throw std::runtime_error("Value is not an object: " + dump());
+    if (!key.is_hashable()) throw std::runtime_error("Unashable type: " + dump());
     return (*this)[key.primitive_];
+    // if (object_.count(key.primitive_) == 0) object_[key.primitive_] = Value::make();
+    // return object_[key.primitive_];
   }
 
-  std::shared_ptr<Value>& operator[](const json& key) {
-    if (!is_object()) throw std::runtime_error("Value is not an object");
+  Value::Ptr& operator[](const json& key) {
+    if (!is_object()) throw std::runtime_error("Value is not an object: " + dump());
     if (object_.count(key) == 0) object_[key] = Value::make();
     return object_[key];
   }
 
-  std::shared_ptr<Value>& operator[](const std::string& key) {
+  Value::Ptr& operator[](const std::string& key) {
     return (*this)[json(key)];
   }
 
-  std::shared_ptr<Value>& operator[](const char * key) {
+  Value::Ptr& operator[](const char * key) {
     return (*this)[json(key)];
   }
 
-  std::shared_ptr<Value>& operator[](const size_t& i) {
+  Value::Ptr& operator[](const size_t& i) {
     if (is_object()) return object_[i];
     if (is_array()) return array_[i];
-    throw std::runtime_error("Value is not an array or object");
+    throw std::runtime_error("Value is not an array or object: " + dump());
   }
 
-  std::shared_ptr<Value> call(Value & context, const CallableArgs & args) const {
-    if (!is_callable()) throw std::runtime_error("Value is not callable");
+  Value::Ptr call(Value & context, const CallableArgs & args) const {
+    if (!is_callable()) throw std::runtime_error("Value is not callable: " + dump());
     return callable_(context, args);
   }
 
@@ -241,17 +244,11 @@ public:
     return !(*this == other);
   }
 
+  bool contains(const char * key) const { return contains(std::string(key)); }
   bool contains(const std::string & key) const {
     if (is_null()) throw std::runtime_error("Undefined value or reference");
-
-    if (is_object()) {
-      return object_.find(key) != object_.end();
-    }
+    if (is_object()) return object_.find(key) != object_.end();
     return false;
-  }
-  void erase(const std::string & key) {
-    if (!is_object()) throw std::runtime_error("Value is not an object");
-    object_.erase(key);
   }
   bool contains(const Value & value) const {
     if (is_null()) throw std::runtime_error("Undefined value or reference");
@@ -264,16 +261,20 @@ public:
         if (*item.second == value) return true;
       }
     }
-    return this->contains(value);
+    return false;
   }
-  const std::shared_ptr<Value>& at(size_t index) const {
+  void erase(const std::string & key) {
+    if (!is_object()) throw std::runtime_error("Value is not an object: " + dump());
+    object_.erase(key);
+  }
+  const Value::Ptr& at(size_t index) const {
     if (is_undefined()) throw std::runtime_error("Undefined value or reference");
     if (is_array()) return array_.at(index);
     if (is_object()) return object_.at(index);
-    throw std::runtime_error("Value is not an array or object");
+    throw std::runtime_error("Value is not an array or object: " + dump());
   }
-  const std::shared_ptr<Value>& at(const Value & index) const {
-    if (!index.is_hashable()) throw std::runtime_error("Unashable type");
+  const Value::Ptr& at(const Value & index) const {
+    if (!index.is_hashable()) throw std::runtime_error("Unashable type: " + dump());
     if (is_array()) return array_.at(index.get<int>());
     if (is_object()) return object_.at(index.primitive_);
     return this->at(index);
@@ -324,24 +325,27 @@ public:
       for (const auto& item : object_) {
         res[item.first.get<std::string>()] = item.second->get<json>();
       }
+      if (is_callable()) {
+        res["__callable__"] = true;
+      }
       return res;
     }
     throw std::runtime_error("Get not defined for this value type");
   }
 
-  std::shared_ptr<Value> operator-() const {
+  Value::Ptr operator-() const {
       if (is_number_integer())
         return Value::make(-get<int64_t>());
       else
         return Value::make(-get<double>());
   }
 
-  std::shared_ptr<Value> operator!() const {
+  Value::Ptr operator!() const {
       bool b = *this;
       return Value::make(!b);
   }
 
-  std::shared_ptr<Value> operator+(const Value& rhs) {
+  Value::Ptr operator+(const Value& rhs) {
       if (is_string() || rhs.is_string())
         return Value::make(get<std::string>() + rhs.get<std::string>());
       else if (is_number_integer() && rhs.is_number_integer())
@@ -350,33 +354,40 @@ public:
         return Value::make(get<double>() + rhs.get<double>());
   }
 
-  std::shared_ptr<Value> operator-(const Value& rhs) {
+  Value::Ptr operator-(const Value& rhs) {
       if (is_number_integer() && rhs.is_number_integer())
         return Value::make(get<int64_t>() - rhs.get<int64_t>());
       else
         return Value::make(get<double>() - rhs.get<double>());
   }
 
-  std::shared_ptr<Value> operator*(const Value& rhs) {
+  Value::Ptr operator*(const Value& rhs) {
       if (is_number_integer() && rhs.is_number_integer())
         return Value::make(get<int64_t>() * rhs.get<int64_t>());
       else
         return Value::make(get<double>() * rhs.get<double>());
   }
 
-  std::shared_ptr<Value> operator/(const Value& rhs) {
+  Value::Ptr operator/(const Value& rhs) {
       if (is_number_integer() && rhs.is_number_integer())
         return Value::make(get<int64_t>() / rhs.get<int64_t>());
       else
         return Value::make(get<double>() / rhs.get<double>());
   }
 
-  std::shared_ptr<Value> operator%(const Value& rhs) {
+  Value::Ptr operator%(const Value& rhs) {
     return Value::make(get<int64_t>() % rhs.get<int64_t>());
   }
 
   std::string dump(int indent=-1) const {
     return get<json>().dump(indent);
+  }
+  json keys() const {
+    auto res = json::array();
+    for (const auto& item : get<json>().items()) {
+      res.push_back(item.key());
+    }
+    return res;
   }
 };
 
@@ -385,14 +396,14 @@ public:
     using CallableArgs = std::vector<std::pair<std::string, std::unique_ptr<Expression>>>;
 
     virtual ~Expression() = default;
-    virtual std::shared_ptr<Value> evaluate(Value & context) const = 0;
+    virtual Value::Ptr evaluate(Value & context) const = 0;
 
-    virtual std::shared_ptr<Value> evaluateAsPipe(Value & context, std::shared_ptr<Value>&) const{
+    virtual Value::Ptr evaluateAsPipe(Value & context, Value::Ptr&) const{
       throw std::runtime_error("This expression cannot be used as a pipe");
     }
 };
 
-static void destructuring_assign(const std::vector<std::string> & var_names, Value & context, const std::shared_ptr<Value>& item) {
+static void destructuring_assign(const std::vector<std::string> & var_names, Value & context, const Value::Ptr& item) {
   if (var_names.size() == 1) {
       context[var_names[0]] = item;
   } else {
@@ -616,14 +627,14 @@ public:
           (*original_vars)[var_name] = context.contains(var_name) ? context[var_name] : Value::make();
       }
 
-      auto loop_iteration = [&](const std::shared_ptr<Value>& item) {
+      auto loop_iteration = [&](const Value::Ptr& item) {
           // auto bindings = Value::object();
           destructuring_assign(var_names, context, item);
           if (!condition || condition->evaluate(context)) {
             body->render(oss, context);
           }
       };
-      std::function<void(const std::shared_ptr<Value>&)> visit = [&](const std::shared_ptr<Value>& iter) {
+      std::function<void(const Value::Ptr&)> visit = [&](const Value::Ptr& iter) {
           for (size_t i = 0, n = iter->size(); i < n; ++i) {
               auto & item = iter->at(i);
               if (item->is_array() && recursive) {
@@ -687,23 +698,23 @@ class IfExpr : public Expression {
 public:
     IfExpr(std::unique_ptr<Expression> && c, std::unique_ptr<Expression> && t, std::unique_ptr<Expression> && e)
         : condition(std::move(c)), then_expr(std::move(t)), else_expr(std::move(e)) {}
-    std::shared_ptr<Value> evaluate(Value & context) const override {
+    Value::Ptr evaluate(Value & context) const override {
         return condition->evaluate(context) ? then_expr->evaluate(context) : else_expr->evaluate(context);
     }
 };
 
 class LiteralExpr : public Expression {
-    std::shared_ptr<Value> value;
+    Value::Ptr value;
 public:
-    LiteralExpr(const std::shared_ptr<Value>& v) : value(v) {}
-    std::shared_ptr<Value> evaluate(Value &) const override { return value; }
+    LiteralExpr(const Value::Ptr& v) : value(v) {}
+    Value::Ptr evaluate(Value &) const override { return value; }
 };
 
 class ArrayExpr : public Expression {
     std::vector<std::unique_ptr<Expression>> elements;
 public:
     ArrayExpr(std::vector<std::unique_ptr<Expression>> && e) : elements(std::move(e)) {}
-    std::shared_ptr<Value> evaluate(Value & context) const override {
+    Value::Ptr evaluate(Value & context) const override {
         auto result = Value::array();
         for (const auto& e : elements) {
             result->push_back(e->evaluate(context));
@@ -716,7 +727,7 @@ class DictExpr : public Expression {
     std::vector<std::pair<std::string, std::unique_ptr<Expression>>> elements;
 public:
     DictExpr(std::vector<std::pair<std::string, std::unique_ptr<Expression>>> && e) : elements(std::move(e)) {}
-    std::shared_ptr<Value> evaluate(Value & context) const override {
+    Value::Ptr evaluate(Value & context) const override {
         auto result = Value::object();
         for (const auto& e : elements) {
             (*result)[e.first] = e.second->evaluate(context);
@@ -730,7 +741,11 @@ class VariableExpr : public Expression {
 public:
     VariableExpr(const std::string& n) : name(n) {}
     std::string get_name() const { return name; }
-    std::shared_ptr<Value> evaluate(Value & context) const override {
+    Value::Ptr evaluate(Value & context) const override {
+        if (!context.contains(name)) {
+            std::cerr << "Failed to find '" << name << " in context (has keys: " << context.keys().dump() << ")" << std::endl;
+            return Value::make();
+        }
         auto res = context[name];
         return res ? res : Value::make(nullptr);
     }
@@ -740,7 +755,7 @@ class SliceExpr : public Expression {
 public:
     std::unique_ptr<Expression> start, end;
     SliceExpr(std::unique_ptr<Expression> && s, std::unique_ptr<Expression> && e) : start(std::move(s)), end(std::move(e)) {}
-    std::shared_ptr<Value> evaluate(Value & context) const override {
+    Value::Ptr evaluate(Value & context) const override {
         throw std::runtime_error("SliceExpr not implemented");
     }
 };
@@ -751,7 +766,7 @@ class SubscriptExpr : public Expression {
 public:
     SubscriptExpr(std::unique_ptr<Expression> && b, std::unique_ptr<Expression> && i)
         : base(std::move(b)), index(std::move(i)) {}
-    std::shared_ptr<Value> evaluate(Value & context) const override {
+    Value::Ptr evaluate(Value & context) const override {
         auto target_value = base->evaluate(context);
         if (auto slice = dynamic_cast<SliceExpr*>(index.get())) {
           if (!target_value->is_array()) throw std::runtime_error("Subscripting non-array");
@@ -794,7 +809,7 @@ private:
     Op op;
 public:
     UnaryOpExpr(std::unique_ptr<Expression> && e, Op o) : expr(std::move(e)), op(o) {}
-    std::shared_ptr<Value> evaluate(Value & context) const override {
+    Value::Ptr evaluate(Value & context) const override {
         auto e = expr->evaluate(context);
         switch (op) {
             case Op::Plus: return e;
@@ -815,7 +830,7 @@ private:
 public:
     BinaryOpExpr(std::unique_ptr<Expression> && l, std::unique_ptr<Expression> && r, Op o)
         : left(std::move(l)), right(std::move(r)), op(o) {}
-    std::shared_ptr<Value> evaluate(Value & context) const override {
+    Value::Ptr evaluate(Value & context) const override {
         auto l = left->evaluate(context);
         
         if (op == Op::Is || op == Op::IsNot) {
@@ -874,7 +889,7 @@ public:
         : object(std::move(obj)), method(m), args(std::move(a)) {}
     // bool is_function_call() const { return object == nullptr; }
     const std::string& get_method() const { return method; }
-    std::shared_ptr<Value> evaluate(Value & context) const override {
+    Value::Ptr evaluate(Value & context) const override {
         auto obj = object->evaluate(context);
         if (method == "append" && obj->is_array()) {
             if (args.size() != 1 || !args[0].first.empty()) throw std::runtime_error("append method must have exactly one unnamed argument");
@@ -886,12 +901,12 @@ public:
 };
 
 class CallExpr : public Expression {
+public:
     std::unique_ptr<Expression> object;
     Expression::CallableArgs args;
-public:
     CallExpr(std::unique_ptr<Expression> && obj, Expression::CallableArgs && a)
         : object(std::move(obj)), args(std::move(a)) {}
-    std::shared_ptr<Value> evaluate(Value & context) const override {
+    Value::Ptr evaluate(Value & context) const override {
         auto obj = object->evaluate(context);
         if (!obj->is_callable()) {
           throw std::runtime_error("Object is not callable: " + obj->dump(2));
@@ -903,7 +918,7 @@ public:
         return obj->call(context, vargs);
     }
 
-    std::shared_ptr<Value> evaluateAsPipe(Value & context, std::shared_ptr<Value>& input) const override {
+    Value::Ptr evaluateAsPipe(Value & context, Value::Ptr& input) const override {
         auto obj = object->evaluate(context);
         if (obj->is_null()) {
           throw std::runtime_error("Object is null, cannot be called");
@@ -924,15 +939,30 @@ class FilterExpr : public Expression {
     std::vector<std::unique_ptr<Expression>> parts;
 public:
     FilterExpr(std::vector<std::unique_ptr<Expression>> && p) : parts(std::move(p)) {}
-    std::shared_ptr<Value> evaluate(Value & context) const override {
-        std::shared_ptr<Value> result;
+    Value::Ptr evaluate(Value & context) const override {
+        Value::Ptr result;
         bool first = true;
         for (const auto& part : parts) {
           if (first) {
             first = false;
             result = part->evaluate(context);
+            std::cerr << "Filter: first = " << result->dump() << std::endl;
           } else {
-            result = part->evaluateAsPipe(context, result);
+            // Value::Ptr callable;
+            if (auto ce = dynamic_cast<CallExpr*>(part.get())) {
+              auto target = ce->object->evaluate(context);
+              Value::CallableArgs vargs;
+              vargs.push_back({"", result});
+              for (const auto& arg : ce->args) {
+                  vargs.push_back({arg.first, arg.second->evaluate(context)});
+              }
+              result = target->call(context, vargs);
+            } else {
+              auto callable = part->evaluate(context);
+              result = callable->call(context, {{"", result}});
+            }
+            // if (!part_result->is_callable()) throw std::runtime_error("Pipe value is not callable!");
+            std::cerr << "Filter: piped = " << result->dump() << std::endl;
           }
         }
         return result;
@@ -1034,7 +1064,7 @@ private:
     }
 
     /** integer, float, bool, string */
-    std::shared_ptr<Value> parseConstant() {
+    Value::Ptr parseConstant() {
       auto start = it;
       consumeSpaces();
       if (it == end) return nullptr;
@@ -1836,61 +1866,82 @@ public:
     }
 };
 
-std::shared_ptr<Value> Value::context(const std::shared_ptr<Value> & values) {
-  std::unordered_map<json, std::shared_ptr<Value>> context;
+Value::Ptr simple_function(const std::string & fn_name, const std::vector<std::string> & params, const std::function<Value::Ptr(Value &, const Value::Ptr & args)> & fn) {
+  std::map<std::string, size_t> named_positions;
+  for (size_t i = 0, n = params.size(); i < n; i++) named_positions[params[i]] = i;
 
-  
-  auto simple_function = [&](const std::string & fn_name, const std::vector<std::string> & params, const std::function<std::shared_ptr<Value>(Value &, const Value & args)> & fn) {
-    std::map<std::string, size_t> named_positions;
-    for (size_t i = 0, n = params.size(); i < n; i++) named_positions[params[i]] = i;
-
-    // for (auto & p : arg_names) {
-    return callable([=](Value & context, const Value::CallableArgs & args) -> std::shared_ptr<Value> {
-      auto args_obj = Value::object();
-      auto positional = true;
-      for (size_t i = 0, n = args.size(); i < n; i++) {
-        auto & arg = args[i];
-        if (positional) {
-          if (arg.first.empty() || (i < params.size() && arg.first == params[i])) {
-            if (i >= params.size()) throw std::runtime_error("Too many positional params for " + fn_name);
-            (*args_obj)[params[i]] = arg.second;
-            continue;
-          } else {
-            positional = false;
-          }
+  // for (auto & p : arg_names) {
+  return Value::callable([=](Value & context, const Value::CallableArgs & args) -> Value::Ptr {
+    auto args_obj = Value::object();
+    auto positional = true;
+    std::vector<bool> provided_args(params.size());
+    for (size_t i = 0, n = args.size(); i < n; i++) {
+      auto & arg = args[i];
+      if (positional) {
+        if (arg.first.empty() || (i < params.size() && arg.first == params[i])) {
+          if (i >= params.size()) throw std::runtime_error("Too many positional params for " + fn_name);
+          (*args_obj)[params[i]] = arg.second;
+          provided_args[i] = true;
+          continue;
+        } else {
+          positional = false;
         }
-        if (named_positions.find(arg.first) == named_positions.end()) {
-          throw std::runtime_error("Unknown argument " + arg.first + " for function " + fn_name);
-        }
-        (*args_obj)[arg.first] = arg.second;
       }
-      return fn(context, *args_obj);
-    });
-  };
-  context["raise_exception"] = simple_function("raise_exception", { "message" }, [&](Value & context, const Value & args) -> std::shared_ptr<Value> {
-    throw std::runtime_error(args.at("message")->get<std::string>());
-  });
-  context["tojson"] = simple_function("tojson", { "value", "indent" }, [&](Value & context, const Value & args) {
-    return Value::make(args.at("value")->dump(args.get<int64_t>("indent", -1)));
-  });
-  context["trim"] = simple_function("trim", { "text" }, [&](Value & context, const Value & args) {
-    return Value::make(strip(args.at("text")->get<std::string>()));
-  });
-  context["count"] = simple_function("count", { "items" }, [&](Value & context, const Value & args) {
-    return Value::make((int64_t) args.at("items")->size());
-  });
-  context["join"] = simple_function("join", { "items", "d" }, [&](Value & context, const Value & args) {
-    auto sep = args.get<std::string>("d", "");
-    std::ostringstream oss;
-    auto first = true;
-    auto & items = args.at("items");
-    if (!items->is_array()) throw std::runtime_error("join expects an array for items, got: " + items->dump());
-    for (size_t i = 0, n = items->size(); i < n; ++i) {
-      if (first) first = false;
-      else oss << sep;
-      oss << items->at(i)->get<std::string>();
+      auto named_pos_it = named_positions.find(arg.first);
+      if (named_pos_it == named_positions.end()) {
+        throw std::runtime_error("Unknown argument " + arg.first + " for function " + fn_name);
+      }
+      if (!positional) {
+        provided_args[named_pos_it->second] = true;
+      }
+      (*args_obj)[arg.first] = arg.second;
     }
-    return Value::make(oss.str());
+    for (size_t i = 0, n = params.size(); i < n; i++) {
+      if (!provided_args[i]) {
+        throw std::runtime_error("Missing argument " + params[i] + " for function " + fn_name);
+      }
+    }
+    return fn(context, args_obj);
+  });
+}
+
+Value::Ptr Value::context(const Value::Ptr & values) {
+  std::unordered_map<json, Value::Ptr> context;
+
+  context["raise_exception"] = simple_function("raise_exception", { "message" }, [](Value & context, const Value::Ptr & args) -> Value::Ptr {
+    throw std::runtime_error(args->at("message")->get<std::string>());
+  });
+  context["tojson"] = simple_function("tojson", { "value", "indent" }, [](Value & context, const Value::Ptr & args) {
+    return Value::make(args->at("value")->dump(args->get<int64_t>("indent", -1)));
+  });
+  context["trim"] = simple_function("trim", { "text" }, [](Value & context, const Value::Ptr & args) {
+    return Value::make(strip(args->at("text")->get<std::string>()));
+  });
+  context["count"] = simple_function("count", { "items" }, [](Value & context, const Value::Ptr & args) {
+    return Value::make((int64_t) args->at("items")->size());
+  });
+  context["join"] = simple_function("join", { "items", "d" }, [](Value & context, const Value::Ptr & args) {
+    auto do_join = [](const Value & items, const std::string & sep) {
+      std::ostringstream oss;
+      auto first = true;
+      for (size_t i = 0, n = items.size(); i < n; ++i) {
+        if (first) first = false;
+        else oss << sep;
+        oss << items.at(i)->get<std::string>();
+      }
+      return Value::make(oss.str());
+    };
+    auto sep = args->get<std::string>("d", "");
+    if (args->contains("items")) {
+        auto & items = args->at("items");
+        return do_join(*items, sep);
+    } else {
+      return simple_function("", {"items"}, [sep, do_join](Value & context, const Value::Ptr & args) {
+        auto & items = args->at("items");
+        if (!items || !items->is_array()) throw std::runtime_error("join expects an array for items, got: " + (items ? items->dump() : "undefined"));
+        return do_join(*items, sep);
+      });
+    }
   });
   context["namespace"] = callable([=](Value & context, const Value::CallableArgs & args) {
     auto ns = Value::object();
@@ -1899,20 +1950,21 @@ std::shared_ptr<Value> Value::context(const std::shared_ptr<Value> & values) {
     }
     return ns;
   });
-  context["equalto"] = simple_function("equalto", { "expected" }, [&](Value & context, const Value & args0) {
-    return simple_function("", { "actual" }, [&](Value & context, const Value & args1) {
-      return Value::make(*args1.at("actual") == *args0.at("expected"));
-    });
+  context["equalto"] = simple_function("equalto", { "expected", "actual" }, [](Value & context, const Value::Ptr & args) {
+      return Value::make(*args->at("actual") == *args->at("expected"));
+    // return simple_function("", { "actual" }, [args0](Value & context, const Value::Ptr & args1) {
+    //   return Value::make(*args1->at("actual") == *args0->at("expected"));
+    // });
   });
-  auto make_filter = [&](Value & filter, Value & extra_args) -> std::shared_ptr<Value> {
-    return simple_function("", { "value" }, [&](Value & context, const Value & args) {
-      auto value = args.at("value");
+  auto make_filter = [](const Value::Ptr & filter, const Value::Ptr & extra_args) -> Value::Ptr {
+    return simple_function("", { "value" }, [=](Value & context, const Value::Ptr & args) {
+      auto value = args->at("value");
       Value::CallableArgs actual_args;
       actual_args.emplace_back("", value);
-      for (size_t i = 0, n = extra_args.size(); i < n; i++) {
-        actual_args.emplace_back("", extra_args.at(i));
+      for (size_t i = 0, n = extra_args->size(); i < n; i++) {
+        actual_args.emplace_back("", extra_args->at(i));
       }
-      return filter.call(context, actual_args);
+      return filter->call(context, actual_args);
     });
   };
   context["reject"] = callable([=](Value & context, const Value::CallableArgs & args) {
@@ -1927,19 +1979,21 @@ std::shared_ptr<Value> Value::context(const std::shared_ptr<Value> & values) {
     for (size_t i = 2, n = args.size(); i < n; i++) {
       filter_args->push_back(args[i].second);
     }
-    auto filter = make_filter(*filter_fn, *filter_args);
+    auto filter = make_filter(filter_fn, filter_args);
 
-    return simple_function("", {"items"}, [&](Value & context, const Value & args) {
-      auto items = args.at("items");
-      auto res = Value::array();
-      for (size_t i = 0, n = items->size(); i < n; i++) {
-        auto res = filter->call(context, { { "", items->at(i) } });
-        if (!(res && *res)) {
-          res->push_back(items->at(i));
-        }
+    // return simple_function("", {"items"}, [&](Value & context, const Value & args) {
+    //   auto items = args.at("items");
+    auto res = Value::array();
+    for (size_t i = 0, n = items->size(); i < n; i++) {
+      auto & item = items->at(i);
+      auto pred_res = filter->call(context, { { "", item } });
+      std::cerr << "Predicate result for " << item->dump() << ": " << (pred_res && *pred_res ? "true" : "false") << std::endl;
+      if (!(pred_res && *pred_res)) {
+        res->push_back(item);
       }
-      return res;
-    });
+    }
+    return res;
+    // });
   });
   context["range"] = callable([=](Value & context, const Value::CallableArgs & args) {
     int64_t start = 0;

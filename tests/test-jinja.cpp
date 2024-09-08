@@ -245,9 +245,6 @@ int main() {
       }
     ])");
 
-//     {{- "Tools: " + builtin_tools | reject('equalto', 'code_interpreter') | join(", ") + "\n\n"}}
-// {%- endif %}
-
     const auto llama3_1_template = read_file("templates/Meta-Llama-3.1-8B-Instruct.jinja");
     test_render(llama3_1_template, json::object({    
         {"messages", simple_messages},
@@ -256,7 +253,8 @@ int main() {
         {"builtin_tools", json::array({"wolfram_alpha", "brave_search"})},
         {"cutting_knowledge_date", "2023-04-01"},
         {"todays_date", "2024-09-03"},
-        {"eos_token", "<|endoftext|>"}
+        {"eos_token", "<|endoftext|>"},
+        {"bos_token", "<|startoftext|>"},
     }),
         "<|start_header_id|>system<|end_header_id|>\n"
         "\n"
