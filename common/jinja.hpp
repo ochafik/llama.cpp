@@ -28,25 +28,10 @@
 
 using json = nlohmann::ordered_json;
 
-/*
-* Backport nonstd_make_unique from C++14.
-*
-* NOTE: This code came up with the following stackoverflow post:
-* https://stackoverflow.com/questions/10149840/c-arrays-and-make-unique
-*
-*/
-
+/* Backport make_unique from C++14. */
 template <class T, class... Args>
-typename std::enable_if<!std::is_array<T>::value, std::unique_ptr<T>>::type
-nonstd_make_unique(Args &&...args) {
+typename std::unique_ptr<T> nonstd_make_unique(Args &&...args) {
   return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
-}
-
-template <class T>
-typename std::enable_if<std::is_array<T>::value, std::unique_ptr<T>>::type
-nonstd_make_unique(std::size_t n) {
-  typedef typename std::remove_extent<T>::type RT;
-  return std::unique_ptr<T>(new RT[n]);
 }
 
 std::string strip(const std::string & s) {
@@ -67,22 +52,10 @@ private:
   using ObjectType = std::unordered_map<json, Value>;
   using ArrayType = std::vector<Value>;
 
-  // Note: can be both object_ and callable_
   std::shared_ptr<ArrayType> array_;
   std::shared_ptr<ObjectType> object_;
   std::shared_ptr<CallableType> callable_;
   json primitive_;
-  
-  // enum Type {
-  //   Undefined,
-  //   Primitive,
-  //   Array,
-  //   Object,
-  // };
-  // Type type;
-
-  // Value(const Value &&) = default;
-  // Value(const Value& other) = default;
 
   Value(const std::shared_ptr<ArrayType> & array) : array_(array) {}
   Value(const std::shared_ptr<ObjectType> & object) : object_(object) {}
@@ -155,27 +128,20 @@ public:
     }
     throw std::runtime_error("Value is not an array or object: " + dump());
   }
+
   void set(const Value& key, const Value& value) {
     if (!is_object()) throw std::runtime_error("Value is not an object: " + dump());
     if (!key.is_hashable()) throw std::runtime_error("Unashable type: " + dump());
     (*object_)[key.primitive_] = value;
   }
 
-  // void set(const json& key, const Value& value) {
-  //   if (!is_object()) throw std::runtime_error("Value is not an object: " + dump());
-  //   (*object_)[key] = value;
-  // }
-
   Value call(const Value & context, const CallableArgs & args) const {
     if (!callable_) throw std::runtime_error("Value is not callable: " + dump());
     return (*callable_)(context, args);
   }
 
-  bool is_undefined() const { return !object_ && !array_ && primitive_.is_null() && !callable_; }
-  bool is_null() const { return is_undefined(); }
-
+  bool is_null() const { return !object_ && !array_ && primitive_.is_null() && !callable_; }
   bool is_callable() const { return !!callable_; }
-
   bool is_boolean() const { return primitive_.is_boolean(); }
   bool is_number_integer() const { return primitive_.is_number_integer(); }
   bool is_number_float() const { return primitive_.is_number_float(); }
@@ -194,7 +160,7 @@ public:
   }
 
   operator bool() const {
-    if (is_undefined()) return false;
+    if (is_null()) return false;
     if (is_boolean()) return get<bool>();
     if (is_number()) return get<double>() != 0;
     if (is_string()) return !get<std::string>().empty();
@@ -260,7 +226,7 @@ public:
     object_->erase(key);
   }
   const Value& at(size_t index) const {
-    if (is_undefined()) throw std::runtime_error("Undefined value or reference");
+    if (is_null()) throw std::runtime_error("Undefined value or reference");
     if (is_array()) return array_->at(index);
     if (is_object()) return object_->at(index);
     throw std::runtime_error("Value is not an array or object: " + dump());
@@ -304,7 +270,7 @@ public:
   template <>
   json get<json>() const {
     if (is_primitive()) return primitive_;
-    if (is_undefined()) return json();
+    if (is_null()) return json();
     if (is_array()) {
       std::vector<json> res;
       for (const auto& item : *array_) {
@@ -612,7 +578,6 @@ public:
       }
 
       auto loop_iteration = [&](const Value& item) {
-          // auto bindings = Value::object();
           destructuring_assign(var_names, context, item);
           if (!condition || condition->evaluate(context)) {
             body->render(oss, context);
@@ -870,7 +835,6 @@ class MethodCallExpr : public Expression {
 public:
     MethodCallExpr(std::unique_ptr<Expression> && obj, const std::string& m, std::vector<std::pair<std::string, std::unique_ptr<Expression>>> && a)
         : object(std::move(obj)), method(m), args(std::move(a)) {}
-    // bool is_function_call() const { return object == nullptr; }
     const std::string& get_method() const { return method; }
     Value evaluate(const Value & context) const override {
         auto obj = object->evaluate(context);
@@ -929,9 +893,7 @@ public:
           if (first) {
             first = false;
             result = part->evaluate(context);
-            // std::cerr << "Filter: first = " << result.dump() << std::endl;
           } else {
-            // Value callable;
             if (auto ce = dynamic_cast<CallExpr*>(part.get())) {
               auto target = ce->object->evaluate(context);
               Value::CallableArgs vargs;
@@ -944,8 +906,6 @@ public:
               auto callable = part->evaluate(context);
               result = callable.call(context, {{"", result}});
             }
-            // if (!part_result->is_callable()) throw std::runtime_error("Pipe value is not callable!");
-            // std::cerr << "Filter: piped = " << result.dump() << std::endl;
           }
         }
         return result;
@@ -993,7 +953,7 @@ private:
           } else if (*it == '\\') {
             escape = true;
           } else if (*it == quote) {
-              ++it; // Move past the closing quote
+              ++it;
             return nonstd_make_unique<std::string>(result);
           } else {
             result += *it;
@@ -1362,7 +1322,6 @@ private:
     }
 
     std::unique_ptr<Expression> parseMathUnaryPlusMinus() {
-        // consumeSpaces();
         static std::regex unary_plus_minus_tok(R"(\+|-(?![}%#]\})|not)");
         auto op_str = consumeToken(unary_plus_minus_tok);
         auto expr = parseValueExpression();
@@ -1576,8 +1535,6 @@ private:
       auto line = std::count(start, it, '\n') + 1;
       auto max_line = std::count(start, end, '\n') + 1;
       auto col = pos - std::string(start, it).rfind('\n');
-      // Get content of line before and after, if any. And show a ^ caret right under the line of the error, at the right col.
-      
       std::ostringstream out;
       out << " at row " << line << ", column " << col << ":\n";
       if (line > 1) out << get_line(line - 1) << "\n";
@@ -1603,7 +1560,6 @@ private:
       
       try {
         while (it != end) {
-          // if (!tokens.empty()) std::cout << "Prev token: " << TemplateToken::typeToString(tokens.back()->getType()) << std::endl;
           auto pos = std::distance(start, it);
       
           if (!(group = consumeTokenGroups(comment_tok, SpaceHandling::Keep)).empty()) {
@@ -1773,9 +1729,8 @@ private:
               }
 
               if (it == end) {
-                // Strip one trailing newline
                 static std::regex r(R"([\n\r]$)");
-                text = std::regex_replace(text, r, "");
+                text = std::regex_replace(text, r, "");  // Strip one trailing newline
               }
               children.emplace_back(nonstd_make_unique<TextNode>(text));
               break;
@@ -1820,7 +1775,7 @@ private:
             throw unexpected(**it);
         }
         if (children.empty()) {
-          return nonstd_make_unique<TextNode>(""); // Empty template!
+          return nonstd_make_unique<TextNode>("");
         } else if (children.size() == 1) {
           return std::move(children[0]);
         } else {
@@ -1853,7 +1808,6 @@ Value simple_function(const std::string & fn_name, const std::vector<std::string
   std::map<std::string, size_t> named_positions;
   for (size_t i = 0, n = params.size(); i < n; i++) named_positions[params[i]] = i;
 
-  // for (auto & p : arg_names) {
   return Value::callable([=](const Value & context, const Value::CallableArgs & args) -> Value {
     auto args_obj = Value::object();
     auto positional = true;
@@ -1889,7 +1843,6 @@ Value simple_function(const std::string & fn_name, const std::vector<std::string
 }
 
 Value Value::context(const Value & values) {
-  // std::unordered_map<json, Value> context;
   auto context = Value::object();
 
   context.set("raise_exception", simple_function("raise_exception", { "message" }, [](const Value & context, const Value & args) -> Value {
@@ -1936,9 +1889,6 @@ Value Value::context(const Value & values) {
   }));
   context.set("equalto", simple_function("equalto", { "expected", "actual" }, [](const Value & context, const Value & args) {
       return Value(args.at("actual") == args.at("expected"));
-    // return simple_function("", { "actual" }, [args0](const Value & context, const Value & args1) {
-    //   return Value(*args1->at("actual") == *args0->at("expected"));
-    // });
   }));
   auto make_filter = [](const Value & filter, const Value & extra_args) -> Value {
     return simple_function("", { "value" }, [=](const Value & context, const Value & args) {
@@ -1951,11 +1901,8 @@ Value Value::context(const Value & values) {
       return filter.call(context, actual_args);
     });
   };
+  // https://jinja.palletsprojects.com/en/3.0.x/templates/#jinja-filters.reject
   context.set("reject", callable([=](const Value & context, const Value::CallableArgs & args) {
-    // https://jinja.palletsprojects.com/en/3.0.x/templates/#jinja-filters.reject
-
-    // {{- "Tools: " + builtin_tools | reject('equalto', 'code_interpreter') | join(", ") + "\n\n"}}
-
     auto & items = args[0].second;
     auto filter_fn = context.get(args[1].second);
     if (!filter_fn) throw std::runtime_error("Function not found " + args[1].second.dump());
@@ -1966,8 +1913,6 @@ Value Value::context(const Value & values) {
     }
     auto filter = make_filter(filter_fn, filter_args);
 
-    // return simple_function("", {"items"}, [&](const Value & context, const Value & args) {
-    //   auto items = args.at("items");
     auto res = Value::array();
     for (size_t i = 0, n = items.size(); i < n; i++) {
       auto & item = items.at(i);
@@ -1978,13 +1923,11 @@ Value Value::context(const Value & values) {
       }
     }
     return res;
-    // });
   }));
   context.set("range", callable([=](const Value & context, const Value::CallableArgs & args) {
     int64_t start = 0;
     int64_t end = 0;
     int64_t step = 1;
-    // auto pos_count = std::count_if(args.begin(), args.end(), [](const auto & arg) { return arg.first.empty(); });
     if (args.size() == 1) {
       if (!args[0].first.empty()) throw std::runtime_error("When range is called with just 1 argument it must be positional");
       end = args[0].second.get<int64_t>();
