@@ -1644,14 +1644,11 @@ private:
           const TemplateTokenIterator & end,
           bool fully = false) const {
         std::vector<std::unique_ptr<TemplateNode>> children;
-        auto done = false;
-        while (it != end && !done) {
+        while (it != end) {
           const auto start = it;
-          switch ((*it)->type) {
-            case TemplateToken::Type::If: {
+          const auto & token = *(it++);
+          if (auto if_token = dynamic_cast<IfTemplateToken*>(token.get())) {
               std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<TemplateNode>>> cascade;
-
-              auto if_token = dynamic_cast<IfTemplateToken*>((*(it++)).get());
               cascade.emplace_back(std::move(if_token->condition), parseTemplate(begin, it, end));
 
               while (it != end && (*it)->type == TemplateToken::Type::Elif) {
@@ -1666,21 +1663,16 @@ private:
                   throw unterminated(**start);
               }
               children.emplace_back(nonstd_make_unique<IfNode>(std::move(cascade)));
-              break;
-            }
-            case TemplateToken::Type::For: {
-              auto for_token = dynamic_cast<ForTemplateToken*>((*it).get());
-              auto body = parseTemplate(begin, ++it, end);
+          } else if (auto for_token = dynamic_cast<ForTemplateToken*>(token.get())) {
+              auto body = parseTemplate(begin, it, end);
               if (it == end || (*(it++))->type != TemplateToken::Type::EndFor) {
                   throw unterminated(**start);
               }
               children.emplace_back(nonstd_make_unique<ForNode>(for_token->var_names, std::move(for_token->iterable), std::move(for_token->condition), std::move(body), for_token->recursive));
-              break;
-            }
-            case TemplateToken::Type::Text: {
-              SpaceHandling pre_space = it != begin ? (*(it - 1))->post_space : SpaceHandling::Keep;
-              SpaceHandling post_space = it + 1 != end ? (*(it + 1))->pre_space : SpaceHandling::Keep;
-              auto text = dynamic_cast<TextTemplateToken*>((*(it++)).get())->text;
+          } else if (auto text_token = dynamic_cast<TextTemplateToken*>(token.get())) {
+              SpaceHandling pre_space = (it - 1) != begin ? (*(it - 2))->post_space : SpaceHandling::Keep;
+              SpaceHandling post_space = it != end ? (*it)->pre_space : SpaceHandling::Keep;
+              auto text = text_token->text;
               if (pre_space == SpaceHandling::Strip) {
                 static std::regex leading_space_regex(R"(^(\s|\r|\n)+)");
                 text = std::regex_replace(text, leading_space_regex, "");
@@ -1689,48 +1681,34 @@ private:
                 static std::regex trailing_space_regex(R"((\s|\r|\n)+$)");
                 text = std::regex_replace(text, trailing_space_regex, "");
               }
-
               if (it == end) {
                 static std::regex r(R"([\n\r]$)");
                 text = std::regex_replace(text, r, "");  // Strip one trailing newline
               }
               children.emplace_back(nonstd_make_unique<TextNode>(text));
-              break;
-            }
-            case TemplateToken::Type::Expression:
-              children.emplace_back(nonstd_make_unique<VariableNode>(std::move(dynamic_cast<ExpressionTemplateToken*>((*(it++)).get())->expr), std::vector<std::string>()));
-              break;
-            case TemplateToken::Type::Set: {
-              auto set_token = dynamic_cast<SetTemplateToken*>((*(it++)).get());
+          } else if (auto expr_token = dynamic_cast<ExpressionTemplateToken*>(token.get())) {
+              children.emplace_back(nonstd_make_unique<VariableNode>(std::move(expr_token->expr), std::vector<std::string>()));
+          } else if (auto set_token = dynamic_cast<SetTemplateToken*>(token.get())) {
               children.emplace_back(nonstd_make_unique<SetNode>(set_token->var_names, std::move(set_token->value)));
-              break;
-            }
-            case TemplateToken::Type::NamespacedSet: {
-              auto set_token = dynamic_cast<NamespacedSetTemplateToken*>((*(it++)).get());
-              children.emplace_back(nonstd_make_unique<NamespacedSetNode>(set_token->ns, set_token->name, std::move(set_token->value)));
-              break;
-            }
-            case TemplateToken::Type::Comment:
-              it++;  // Ignore comments
-              break;
-            case TemplateToken::Type::Block: {
-              auto block_token = dynamic_cast<BlockTemplateToken*>((it++)->get());
+          } else if (auto namespaced_set_token = dynamic_cast<NamespacedSetTemplateToken*>(token.get())) {
+              children.emplace_back(nonstd_make_unique<NamespacedSetNode>(namespaced_set_token->ns, namespaced_set_token->name, std::move(namespaced_set_token->value)));
+          } else if (auto block_token = dynamic_cast<BlockTemplateToken*>(token.get())) {
               auto body = parseTemplate(begin, it, end);
               if (it == end || (*(it++))->type != TemplateToken::Type::EndBlock) {
                   throw unterminated(**start);
               }
               children.emplace_back(nonstd_make_unique<BlockNode>(block_token->name, std::move(body)));
-              break;
-            }
-            case TemplateToken::Type::EndBlock:
-            case TemplateToken::Type::EndFor:
-            case TemplateToken::Type::EndIf:
-            case TemplateToken::Type::Else:
-            case TemplateToken::Type::Elif:
-              done = true;
-              break;
-            default:
-              throw unexpected(**it);
+          } else if (auto comment_token = dynamic_cast<CommentTemplateToken*>(token.get())) {
+              // Ignore comments
+          } else if (dynamic_cast<EndBlockTemplateToken*>(token.get())
+                  || dynamic_cast<EndForTemplateToken*>(token.get())
+                  || dynamic_cast<EndIfTemplateToken*>(token.get())
+                  || dynamic_cast<ElseTemplateToken*>(token.get())
+                  || dynamic_cast<ElifTemplateToken*>(token.get())) {
+              it--;  // unconsume the token
+              break;  // exit the loop
+          } else {
+              throw unexpected(**(it-1));
           }
         }
         if (fully && it != end) {
