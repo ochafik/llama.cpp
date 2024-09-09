@@ -1,6 +1,6 @@
 /*
   The absolute minimum needed to run chat templates.
-  As it turns out, Llama 3.1's template is relatively involved, so we need a proper template engine.CLOCK_MONOTONIC_RAW_APPROX
+  As it turns out, Llama 3.1's template is relatively involved, so we need a proper template engine.
 
   TODO:
   - Add loop.index, .first and friends https://jinja.palletsprojects.com/en/3.0.x/templates/#for
@@ -140,16 +140,18 @@ public:
     return (*callable_)(context, args);
   }
 
-  bool is_null() const { return !object_ && !array_ && primitive_.is_null() && !callable_; }
+  bool is_object() const { return !!object_; }
+  bool is_array() const { return !!array_; }
   bool is_callable() const { return !!callable_; }
+  bool is_null() const { return !object_ && !array_ && primitive_.is_null() && !callable_; }
   bool is_boolean() const { return primitive_.is_boolean(); }
   bool is_number_integer() const { return primitive_.is_number_integer(); }
   bool is_number_float() const { return primitive_.is_number_float(); }
   bool is_number() const { return primitive_.is_number(); }
   bool is_string() const { return primitive_.is_string(); }
 
-  bool is_object() const { return !!object_; }
-  bool is_array() const { return !!array_; }
+  bool is_primitive() const { return !array_ && !object_ && !callable_; }
+  bool is_hashable() const { return is_primitive(); }
 
   bool empty() const {
     if (is_null()) throw std::runtime_error("Undefined value or reference");
@@ -189,10 +191,6 @@ public:
     } else {
       return primitive_ == other.primitive_;
     }
-  }
-
-  bool operator!=(const Value & other) const {
-    return !(*this == other);
   }
 
   bool contains(const char * key) const { return contains(std::string(key)); }
@@ -237,23 +235,17 @@ public:
     if (is_object()) return object_->at(index.primitive_);
     return this->at(index);
   }
-  
-  bool is_primitive() const {
-    return !array_ && !object_ && !callable_;
-  }
-  bool is_hashable() const {
-    return is_primitive();
-  }
-  template <typename T>
-  T get() const {
-    if (is_primitive()) return primitive_.get<T>();
-    throw std::runtime_error("Get not defined for this value type");
-  }
 
   template <typename T>
   T get(const std::string & key, T default_value) const {
     if (!contains(key)) return default_value;
     return at(key).get<T>();
+  }
+  
+  template <typename T>
+  T get() const {
+    if (is_primitive()) return primitive_.get<T>();
+    throw std::runtime_error("Get not defined for this value type");
   }
 
   template <>
@@ -297,12 +289,6 @@ public:
       else
         return -get<double>();
   }
-
-  Value operator!() const {
-      bool b = *this;
-      return !b;
-  }
-
   Value operator+(const Value& rhs) {
       if (is_string() || rhs.is_string())
         return get<std::string>() + rhs.get<std::string>();
@@ -311,28 +297,24 @@ public:
       else
         return get<double>() + rhs.get<double>();
   }
-
   Value operator-(const Value& rhs) {
       if (is_number_integer() && rhs.is_number_integer())
         return get<int64_t>() - rhs.get<int64_t>();
       else
         return get<double>() - rhs.get<double>();
   }
-
   Value operator*(const Value& rhs) {
       if (is_number_integer() && rhs.is_number_integer())
         return get<int64_t>() * rhs.get<int64_t>();
       else
         return get<double>() * rhs.get<double>();
   }
-
   Value operator/(const Value& rhs) {
       if (is_number_integer() && rhs.is_number_integer())
         return get<int64_t>() / rhs.get<int64_t>();
       else
         return get<double>() / rhs.get<double>();
   }
-
   Value operator%(const Value& rhs) {
     return get<int64_t>() % rhs.get<int64_t>();
   }
@@ -348,7 +330,6 @@ public:
 
     virtual ~Expression() = default;
     virtual Value evaluate(const Value & context) const = 0;
-
     virtual Value evaluateAsPipe(const Value & context, Value&) const{
       throw std::runtime_error("This expression cannot be used as a pipe");
     }
@@ -392,10 +373,10 @@ public:
         return "Unknown";
     }
 
-    TemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : pos(pos), pre_space(pre), post_space(post) {}
+    TemplateToken(Type type, size_t pos, SpaceHandling pre, SpaceHandling post) : type(type), pos(pos), pre_space(pre), post_space(post) {}
     virtual ~TemplateToken() = default;
-    virtual TemplateToken::Type getType() const = 0;
 
+    Type type;
     size_t pos;
     SpaceHandling pre_space = SpaceHandling::Keep;
     SpaceHandling post_space = SpaceHandling::Keep;
@@ -403,46 +384,39 @@ public:
 
 struct TextTemplateToken : public TemplateToken {
     std::string text;
-    TextTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::string& t) : TemplateToken(pos, pre, post), text(t) {}
-    Type getType() const override { return Type::Text; }
+    TextTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::string& t) : TemplateToken(Type::Text, pos, pre, post), text(t) {}
 };
 
 struct ExpressionTemplateToken : public TemplateToken {
     std::unique_ptr<Expression> expr;
-    ExpressionTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, std::unique_ptr<Expression> && e) : TemplateToken(pos, pre, post), expr(std::move(e)) {}
-    Type getType() const override { return Type::Expression; }
+    ExpressionTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, std::unique_ptr<Expression> && e) : TemplateToken(Type::Expression, pos, pre, post), expr(std::move(e)) {}
 };
 
 struct IfTemplateToken : public TemplateToken {
     std::unique_ptr<Expression> condition;
-    IfTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, std::unique_ptr<Expression> && c) : TemplateToken(pos, pre, post), condition(std::move(c)) {}
-    Type getType() const override { return Type::If; }
+    IfTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, std::unique_ptr<Expression> && c) : TemplateToken(Type::If, pos, pre, post), condition(std::move(c)) {}
 };
 
-struct ElifTemplateToken : public IfTemplateToken {
-    ElifTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, std::unique_ptr<Expression> && c) : IfTemplateToken(pos, pre, post, std::move(c)) {}
-    Type getType() const override { return Type::Elif; }
+struct ElifTemplateToken : public TemplateToken {
+    std::unique_ptr<Expression> condition;
+    ElifTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, std::unique_ptr<Expression> && c) : TemplateToken(Type::Elif, pos, pre, post), condition(std::move(c)) {}
 };
 
 struct ElseTemplateToken : public TemplateToken {
-  ElseTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : TemplateToken(pos, pre, post) {}
-    Type getType() const override { return Type::Else; }
+    ElseTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : TemplateToken(Type::Else, pos, pre, post) {}
 };
 
 struct EndIfTemplateToken : public TemplateToken {
-  EndIfTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : TemplateToken(pos, pre, post) {}
-    Type getType() const override { return Type::EndIf; }
+   EndIfTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : TemplateToken(Type::EndIf, pos, pre, post) {}
 };
 
 struct BlockTemplateToken : public TemplateToken {
     std::string name;
-    BlockTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::string& n) : TemplateToken(pos, pre, post), name(n) {}
-    Type getType() const override { return Type::Block; }
+    BlockTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::string& n) : TemplateToken(Type::Block, pos, pre, post), name(n) {}
 };
 
 struct EndBlockTemplateToken : public TemplateToken {
-  EndBlockTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : TemplateToken(pos, pre, post) {}
-    Type getType() const override { return Type::EndBlock; }
+    EndBlockTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : TemplateToken(Type::EndBlock, pos, pre, post) {}
 };
 
 struct ForTemplateToken : public TemplateToken {
@@ -452,59 +426,47 @@ struct ForTemplateToken : public TemplateToken {
     bool recursive;
     ForTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::vector<std::string> & vns, std::unique_ptr<Expression> && iter,
       std::unique_ptr<Expression> && c, bool r)
-      : TemplateToken(pos, pre, post), var_names(vns), iterable(std::move(iter)), condition(std::move(c)), recursive(r) {}
-    Type getType() const override { return Type::For; }
+      : TemplateToken(Type::For, pos, pre, post), var_names(vns), iterable(std::move(iter)), condition(std::move(c)), recursive(r) {}
 };
 
 struct EndForTemplateToken : public TemplateToken {
-  EndForTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : TemplateToken(pos, pre, post) {}
-    Type getType() const override { return Type::EndFor; }
+    EndForTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : TemplateToken(Type::EndFor, pos, pre, post) {}
 };
 
 struct SetTemplateToken : public TemplateToken {
     std::vector<std::string> var_names;
     std::unique_ptr<Expression> value;
     SetTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::vector<std::string> & vns, std::unique_ptr<Expression> && v)
-      : TemplateToken(pos, pre, post), var_names(vns), value(std::move(v)) {}
-    Type getType() const override { return Type::Set; }
+      : TemplateToken(Type::Set, pos, pre, post), var_names(vns), value(std::move(v)) {}
 };
 
 struct NamespacedSetTemplateToken : public TemplateToken {
     std::string ns, name;
     std::unique_ptr<Expression> value;
     NamespacedSetTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::string& ns, const std::string& name, std::unique_ptr<Expression> && v)
-      : TemplateToken(pos, pre, post), ns(ns), name(name), value(std::move(v)) {}
-    Type getType() const override { return Type::NamespacedSet; }
+      : TemplateToken(Type::NamespacedSet, pos, pre, post), ns(ns), name(name), value(std::move(v)) {}
 };
 
 struct CommentTemplateToken : public TemplateToken {
     std::string text;
-    CommentTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::string& t) : TemplateToken(pos, pre, post), text(t) {}
-    Type getType() const override { return Type::Comment; }
+    CommentTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::string& t) : TemplateToken(Type::Comment, pos, pre, post), text(t) {}
 };
 
 class TemplateNode {
 public:
-    enum class Type { Sequence, Text, Variable, NamedBlock, If, For, Set, Expression };
     virtual ~TemplateNode() = default;
     virtual void render(std::ostringstream& oss, Value & context) const = 0;
-    Type getType() const { return type; }
-
     std::string render(Value & context) const {
         std::ostringstream oss;
         render(oss, context);
         return oss.str();
     }
-private:
-    Type type;
-protected:
-    TemplateNode(Type t) : type(t) {}
 };
 
 class SequenceNode : public TemplateNode {
     std::vector<std::unique_ptr<TemplateNode>> children;
 public:
-    SequenceNode(std::vector<std::unique_ptr<TemplateNode>> && c) : TemplateNode(Type::Sequence), children(std::move(c)) {}
+    SequenceNode(std::vector<std::unique_ptr<TemplateNode>> && c) : children(std::move(c)) {}
     void render(std::ostringstream& oss, Value & context) const override {
         for (const auto& child : children) child->render(oss, context);
     }
@@ -513,7 +475,7 @@ public:
 class TextNode : public TemplateNode {
     std::string text;
 public:
-    TextNode(const std::string& t) : TemplateNode(Type::Text), text(t) {}
+    TextNode(const std::string& t) : text(t) {}
     void render(std::ostringstream& oss, Value &) const override { oss << text; }
 };
 
@@ -521,7 +483,7 @@ class VariableNode : public TemplateNode {
     std::unique_ptr<Expression> expr;
 public:
     VariableNode(std::unique_ptr<Expression> && e, std::vector<std::string> && f) 
-        : TemplateNode(Type::Variable), expr(std::move(e)) {}
+        : expr(std::move(e)) {}
     void render(std::ostringstream& oss, Value & context) const override {
       auto result = expr->evaluate(context);
       if (result.is_string()) {
@@ -538,7 +500,7 @@ class IfNode : public TemplateNode {
     std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<TemplateNode>>> cascade;
 public:
     IfNode(std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<TemplateNode>>> && c)
-        : TemplateNode(Type::If), cascade(std::move(c)) {}
+        : cascade(std::move(c)) {}
     void render(std::ostringstream& oss, Value & context) const override {
     for (const auto& branch : cascade) {
         auto enter_branch = true;
@@ -563,7 +525,7 @@ public:
     ForNode(const std::vector<std::string> & vns, std::unique_ptr<Expression> && iter,
       std::unique_ptr<Expression> && c,
             std::unique_ptr<TemplateNode> && b, bool r)
-            : TemplateNode(Type::For), var_names(vns), condition(std::move(c)),
+            : var_names(vns), condition(std::move(c)),
             iterable(std::move(iter)), body(std::move(b)), recursive(r) {}
     void render(std::ostringstream& oss, Value & context) const override {
       auto iterable_value = iterable->evaluate(context);
@@ -610,7 +572,7 @@ class BlockNode : public TemplateNode {
     std::unique_ptr<TemplateNode> body;
 public:
     BlockNode(const std::string& n, std::unique_ptr<TemplateNode> && b)
-        : TemplateNode(Type::NamedBlock), name(n), body(std::move(b)) {}
+        : name(n), body(std::move(b)) {}
     void render(std::ostringstream& oss, Value & context) const override {
         body->render(oss, context);
     }
@@ -621,7 +583,7 @@ class SetNode : public TemplateNode {
     std::unique_ptr<Expression> value;
 public:
     SetNode(const std::vector<std::string> & vns, std::unique_ptr<Expression> && v)
-      : TemplateNode(Type::Set), var_names(vns), value(std::move(v)) {}
+      : var_names(vns), value(std::move(v)) {}
     void render(std::ostringstream& oss, Value & context) const override {
         destructuring_assign(var_names, context, value->evaluate(context));
     }
@@ -632,7 +594,7 @@ class NamespacedSetNode : public TemplateNode {
     std::unique_ptr<Expression> value;
 public:
     NamespacedSetNode(const std::string& ns, const std::string& name, std::unique_ptr<Expression> && v)
-      : TemplateNode(Type::Set), ns(ns), name(name), value(std::move(v)) {}
+      : ns(ns), name(name), value(std::move(v)) {}
     void render(std::ostringstream& oss, Value & context) const override {
         auto ns_value = context.get(ns);
         if (!ns_value.is_object()) throw std::runtime_error("Namespace '" + ns + "' is not an object");
@@ -1510,11 +1472,11 @@ private:
     }
 
     std::runtime_error unexpected(const TemplateToken & token) const {
-      return std::runtime_error("Unexpected " + TemplateToken::typeToString(token.getType())
+      return std::runtime_error("Unexpected " + TemplateToken::typeToString(token.type)
         + error_location_suffix(token.pos));
     }
     std::runtime_error unterminated(const TemplateToken & token) const {
-      return std::runtime_error("Unterminated " + TemplateToken::typeToString(token.getType())
+      return std::runtime_error("Unterminated " + TemplateToken::typeToString(token.type)
         + error_location_suffix(token.pos));
     }
 
@@ -1685,22 +1647,22 @@ private:
         auto done = false;
         while (it != end && !done) {
           const auto start = it;
-          switch ((*it)->getType()) {
+          switch ((*it)->type) {
             case TemplateToken::Type::If: {
               std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<TemplateNode>>> cascade;
 
               auto if_token = dynamic_cast<IfTemplateToken*>((*(it++)).get());
               cascade.emplace_back(std::move(if_token->condition), parseTemplate(begin, it, end));
 
-              while (it != end && (*it)->getType() == TemplateToken::Type::Elif) {
+              while (it != end && (*it)->type == TemplateToken::Type::Elif) {
                   auto elif_token = dynamic_cast<ElifTemplateToken*>((*(it++)).get());
                   cascade.emplace_back(std::move(elif_token->condition), parseTemplate(begin, it, end));
               }
 
-              if (it != end && (*it)->getType() == TemplateToken::Type::Else) {
+              if (it != end && (*it)->type == TemplateToken::Type::Else) {
                 cascade.emplace_back(nullptr, parseTemplate(begin, ++it, end));
               }
-              if (it == end || (*(it++))->getType() != TemplateToken::Type::EndIf) {
+              if (it == end || (*(it++))->type != TemplateToken::Type::EndIf) {
                   throw unterminated(**start);
               }
               children.emplace_back(nonstd_make_unique<IfNode>(std::move(cascade)));
@@ -1709,7 +1671,7 @@ private:
             case TemplateToken::Type::For: {
               auto for_token = dynamic_cast<ForTemplateToken*>((*it).get());
               auto body = parseTemplate(begin, ++it, end);
-              if (it == end || (*(it++))->getType() != TemplateToken::Type::EndFor) {
+              if (it == end || (*(it++))->type != TemplateToken::Type::EndFor) {
                   throw unterminated(**start);
               }
               children.emplace_back(nonstd_make_unique<ForNode>(for_token->var_names, std::move(for_token->iterable), std::move(for_token->condition), std::move(body), for_token->recursive));
@@ -1754,7 +1716,7 @@ private:
             case TemplateToken::Type::Block: {
               auto block_token = dynamic_cast<BlockTemplateToken*>((it++)->get());
               auto body = parseTemplate(begin, it, end);
-              if (it == end || (*(it++))->getType() != TemplateToken::Type::EndBlock) {
+              if (it == end || (*(it++))->type != TemplateToken::Type::EndBlock) {
                   throw unterminated(**start);
               }
               children.emplace_back(nonstd_make_unique<BlockNode>(block_token->name, std::move(body)));
