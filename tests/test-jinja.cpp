@@ -9,22 +9,32 @@
 
 void test_render(const std::string & template_str, const json & bindings, const std::string & expected, const json & expected_context = {}) {
     std::cout << "Testing: " << template_str << std::endl;
+    std::cout << std::flush;
     auto root = JinjaParser::parse(template_str);
-    auto context = Value::context(Value::make(bindings));
-    auto actual = root->render(*context);
+    Value values(bindings);
+    auto context = Value::context(values);
+    // std::cout << "Context: " << context.dump() << std::endl;
+    std::string actual;
+    try {
+        actual = root->render(context);
+    } catch (const std::runtime_error & e) {
+        actual = "ERROR: " + std::string(e.what());
+    }
 
     if (expected != actual) {
         std::cerr << "Expected: " << expected << std::endl;
         std::cerr << "Actual: " << actual << std::endl;
+        std::cerr << std::flush;
         throw std::runtime_error("Test failed");
     }
 
     if (!expected_context.is_null()) {
-        auto dump = context->get<json>();
+        auto dump = context.get<json>();
         for (const auto & kv : expected_context.items()) {
             if (dump[kv.key()] != kv.value()) {
                 std::cerr << "Expected context: " << expected_context.dump(2) << std::endl;
                 std::cerr << "Actual context: " << dump.dump(2) << std::endl;
+                std::cerr << std::flush;
                 throw std::runtime_error("Test failed");
             }
         }
@@ -33,17 +43,19 @@ void test_render(const std::string & template_str, const json & bindings, const 
 }
 void test_error_contains(const std::string & template_str, const json & bindings, const std::string & expected) {
     std::cout << "Testing: " << template_str << std::endl;
+    std::cout << std::flush;
     try {
         auto root = JinjaParser::parse(template_str);
-        auto context = Value::context(Value::make(bindings));
+        auto context = Value::context(bindings);
         // auto copy = context.is_null() ? Value::object() : std::make_shared<Value>(context);
-        auto actual = root->render(*context);
+        auto actual = root->render(context);
         throw std::runtime_error("Expected error: " + expected + ", but got successful result instead: "  + actual);
     } catch (const std::runtime_error & e) {
         std::string actual(e.what());
         if (actual.find(expected) == std::string::npos) {
             std::cerr << "Expected: " << expected << std::endl;
             std::cerr << "Actual: " << actual << std::endl;
+            std::cerr << std::flush;
             throw std::runtime_error("Test failed");
         }
     }
@@ -70,7 +82,17 @@ inline std::string read_file(const std::string &path) {
     cmake -B buildDebug -DCMAKE_BUILD_TYPE=Debug && cmake --build buildDebug -t test-jinja -j && ./buildDebug/bin/test-jinja
 */
 int main() {
-    test_render("{{ (a.b.c) }}", {{"a", json({{"b", {{"c", 3}}}})}}, "3");
+    test_render(
+        R"(
+            {%- set n = namespace(value=1, title='') -%}
+            {{- n.value }} "{{ n.title }}",
+            {%- set n.value = 2 -%}
+            {%- set n.title = 'Hello' -%}
+            {{- n.value }} "{{ n.title }}")", {}, R"(1 "",2 "Hello")");
+    test_error_contains(
+        "{{ (a.b.c) }}",
+        {{"a", json({{"b", {{"c", 3}}}})}},
+        "'a' is not defined");
     test_render(
         "{% set _ = a.b.append(c.d.e) %}{{ a.b }}",
         json::parse(R"({
@@ -86,13 +108,6 @@ int main() {
     )", {{"z", json({json({1, 10}), json({2, 20})})}}, "1,10;2,20;");
     
     test_render("a\nb\n", {}, "a\nb");
-    test_render(
-        R"(
-            {%- set n = namespace(value=1, title='') -%}
-            {{- n.value }} "{{ n.title }}",
-            {%- set n.value = 2 -%}
-            {%- set n.title = 'Hello' -%}
-            {{- n.value }} "{{ n.title }}")", {}, R"(1 "",2 "Hello")");
 
     test_render(" a {{  'b' -}} c ", {}, " a bc ");
     test_render(" a {{- 'b'  }} c ", {}, " ab c ");
@@ -256,9 +271,11 @@ int main() {
         {"eos_token", "<|endoftext|>"},
         {"bos_token", "<|startoftext|>"},
     }),
-        "<|start_header_id|>system<|end_header_id|>\n"
+        "<|startoftext|><|start_header_id|>system<|end_header_id|>\n"
         "\n"
         "Environment: ipython\n"
+        "Tools: wolfram_alpha, brave_search\n"
+        "\n"
         "Cutting Knowledge Date: December 2023\n"
         "Today Date: 26 Jul 2024\n"
         "\n"
