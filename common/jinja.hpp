@@ -34,10 +34,7 @@ typename std::unique_ptr<T> nonstd_make_unique(Args &&...args) {
   return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
 }
 
-std::string strip(const std::string & s) {
-  static std::regex trailing_spaces_regex("^\\s+|\\s+$");
-  return std::regex_replace(s, trailing_spaces_regex, "");
-}
+namespace jinja {
 
 /* Values that behave roughly like in Python.
  * jinja templates deal with objects by reference so we can't just json for arrays & objects,
@@ -49,7 +46,7 @@ public:
   using CallableType = std::function<Value(const Value &, const CallableArgs &)>;
 
 private:
-  using ObjectType = std::unordered_map<json, Value>;
+  using ObjectType = std::unordered_map<json, Value>;  // Only contains primitive keys
   using ArrayType = std::vector<Value>;
 
   std::shared_ptr<ArrayType> array_;
@@ -60,6 +57,67 @@ private:
   Value(const std::shared_ptr<ArrayType> & array) : array_(array) {}
   Value(const std::shared_ptr<ObjectType> & object) : object_(object) {}
   Value(const std::shared_ptr<CallableType> & callable) : callable_(callable), object_(std::make_shared<ObjectType>()) {}
+
+  void dump(std::ostringstream & out, int indent = -1, int level = 0) const {
+    auto print_indent = [&](int level) {
+      if (indent > 0) {
+        // out << std::string(level * indent, ' ');
+        for (int i = 0, n = level * indent; i < n; ++i) out << ' ';
+      }
+    };
+    auto print_sub_sep = [&]() {
+      out << ',';
+      if (indent < 0) out << ' ';
+      else {
+        out << '\n';
+        print_indent(level + 1);
+      }
+    };
+
+    if (is_null()) out << "null";
+    else if (array_) {
+      out << "[";
+      if (indent >= 0) {
+        out << "\n";
+        print_indent(level + 1);
+      }
+      for (size_t i = 0; i < array_->size(); ++i) {
+        if (i) print_sub_sep();
+        (*array_)[i].dump(out, indent, level + 1);
+      }
+      if (indent >= 0) {
+        out << "\n";
+        print_indent(level);
+      }
+      out << "]";
+    } else if (object_) {
+      out << "{";
+      if (indent >= 0) {
+        out << "\n";
+        print_indent(level + 1);
+      }
+      for (auto begin = object_->begin(), it = begin; it != object_->end(); ++it) {
+        if (it != begin) print_sub_sep();
+        auto key_dump = it->first.dump();
+        if (it->first.is_string()) {
+          out << key_dump;
+        } else {
+          out << '"' << key_dump << '"';
+        }
+        out << ": ";
+        it->second.dump(out, indent, level + 1);
+      }
+      if (indent >= 0) {
+        out << "\n";
+        print_indent(level);
+      }
+      out << "}";
+    } else if (callable_) {
+      throw std::runtime_error("Cannot dump callable to JSON");
+    } else {
+      out << primitive_.dump();
+    }
+  }
 
 public:
   Value() {}
@@ -259,6 +317,13 @@ public:
     }
     throw std::runtime_error("Get not defined for this value type");
   }
+  std::string dump(int indent=-1) const {
+    // Note: get<json>().dump(indent) would work but [1, 2] would be dumped to [1,2] instead of [1, 2]
+    std::ostringstream out;
+    dump(out, indent);
+    return out.str();
+  }
+
   template <>
   json get<json>() const {
     if (is_primitive()) return primitive_;
@@ -271,9 +336,17 @@ public:
       return res;
     }
     if (is_object()) {
-      json res;
+      json res = json::object();
       for (const auto& item : *object_) {
-        res[item.first.get<std::string>()] = item.second.get<json>();
+        const auto & key = item.first;
+        auto json_value = item.second.get<json>();
+        if (key.is_string()) {
+          res[key.get<std::string>()] = json_value;
+        } else if (key.is_primitive()) {
+          res[key.dump()] = json_value;
+        } else {
+          throw std::runtime_error("Invalid key type for conversion to JSON: " + key.dump());
+        }
       }
       if (is_callable()) {
         res["__callable__"] = true;
@@ -317,10 +390,6 @@ public:
   }
   Value operator%(const Value& rhs) {
     return get<int64_t>() % rhs.get<int64_t>();
-  }
-
-  std::string dump(int indent=-1) const {
-    return get<json>().dump(indent);
   }
 };
 
@@ -635,13 +704,13 @@ public:
 };
 
 class DictExpr : public Expression {
-    std::vector<std::pair<std::string, std::unique_ptr<Expression>>> elements;
+    std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<Expression>>> elements;
 public:
-    DictExpr(std::vector<std::pair<std::string, std::unique_ptr<Expression>>> && e) : elements(std::move(e)) {}
+    DictExpr(std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<Expression>>> && e) : elements(std::move(e)) {}
     Value evaluate(const Value & context) const override {
         auto result = Value::object();
         for (const auto& e : elements) {
-            result.set(e.first, e.second->evaluate(context));
+            result.set(e.first->evaluate(context), e.second->evaluate(context));
         }
         return result;
     }
@@ -878,6 +947,11 @@ public:
     }
 };
 
+std::string strip(const std::string & s) {
+  static std::regex trailing_spaces_regex("^\\s+|\\s+$");
+  return std::regex_replace(s, trailing_spaces_regex, "");
+}
+
 class JinjaParser {
 private:
     using CharIterator = std::string::const_iterator;
@@ -940,17 +1014,21 @@ private:
 
         if (it != end && (*it == '-' || *it == '+')) ++it;
 
-        while (it != end && (std::isdigit(*it) || *it == '.' || *it == 'e' || *it == 'E' || *it == '-' || *it == '+')) {
-            if (*it == '.') {
-                if (hasDecimal) return json(); // Multiple decimal points
-                hasDecimal = true;
-            } else if (*it == 'e' || *it == 'E') {
-                if (hasExponent) return json(); // Multiple exponents
-                hasExponent = true;
-            }
+        while (it != end) {
+          if (std::isdigit(*it)) {
             ++it;
+          } else if (*it == '.') {
+            if (hasDecimal) throw std::runtime_error("Multiple decimal points");
+            hasDecimal = true;
+            ++it;
+          } else if (it != start && (*it == 'e' || *it == 'E')) {
+            if (hasExponent) throw std::runtime_error("Multiple exponents");
+            hasExponent = true;
+            ++it;
+          } else {
+            break;
+          }
         }
-
         if (start == it) {
           it = before;
           return json(); // No valid characters found
@@ -958,13 +1036,10 @@ private:
 
         std::string str(start, it);
         try {
-          return std::stoll(str);
-        } catch (...) {
-          try {
-            return std::stod(str);
-          } catch (...) {
-              return json(); // Invalid number format
-          }
+          return json::parse(str);
+        } catch (json::parse_error& e) {
+          throw std::runtime_error("Failed to parse number: '" + str + "' (" + std::string(e.what()) + ")");
+          return json();
         }
     }
 
@@ -975,19 +1050,19 @@ private:
       if (it == end) return nullptr;
       if (*it == '"' || *it == '\'') {
         auto str = parseString();
-        if (str) return std::unique_ptr<Value>(new Value(*str));
+        if (str) return nonstd_make_unique<Value>(*str);
       }
-      static std::regex prim_tok(R"(true\b|false\b|null\b)");
+      static std::regex prim_tok(R"(true\b|True\b|false\b|False\b|None\b)");
       auto token = consumeToken(prim_tok);
       if (!token.empty()) {
-        if (token == "true") return std::unique_ptr<Value>(new Value(true));
-        if (token == "false") return std::unique_ptr<Value>(new Value(false));
-        if (token == "null") return std::unique_ptr<Value>(new Value(nullptr));
+        if (token == "true" || token == "True") return nonstd_make_unique<Value>(true);
+        if (token == "false" || token == "False") return nonstd_make_unique<Value>(false);
+        if (token == "None") return nonstd_make_unique<Value>(nullptr);
         throw std::runtime_error("Unknown constant token: " + token);
       }
 
       auto number = parseNumber(it, end);
-      if (!number.is_null()) return std::unique_ptr<Value>(new Value(number));
+      if (!number.is_null()) return nonstd_make_unique<Value>(number);
 
       it = start;
       return nullptr;
@@ -1051,11 +1126,11 @@ private:
     }
 
     /**
-      * - FullExpression = LogicalOr ("if" IfExpression)?
-      * - IfExpression = LogicalOr "else" FullExpression
+      * - Expression = LogicalOr ("if" IfExpression)?
+      * - IfExpression = LogicalOr "else" Expression
       * - LogicalOr = LogicalAnd ("or" LogicalOr)? = LogicalAnd ("or" LogicalAnd)*
       * - LogicalAnd = LogicalCompare ("and" LogicalAnd)? = LogicalCompare ("and" LogicalCompare)*
-      * - LogicalCompare = StringConcat ((("==" | "!=" | "<" | ">" | "<=" | ">=" | "in") StringConcat) | "is" identifier CallParams)?
+      * - LogicalCompare = StringConcat ((("==" | "!=" | "<" | ">" | "<=" | ">=" | "in") StringConcat) | "is" identifier)?
       * - StringConcat = MathPow ("~" LogicalAnd)?
       * - MathPow = MathPlusMinus ("**" MathPow)? = MatPlusMinus ("**" MathPlusMinus)*
       * - MathPlusMinus = MathMulDiv (("+" | "-") MathPlusMinus)? = MathMulDiv (("+" | "-") MathMulDiv)*
@@ -1063,13 +1138,13 @@ private:
       * - MathUnaryPlusMinus = ("+" | "-" | "!")? ValueExpression ("|" FilterExpression)?
       * - FilterExpression = identifier CallParams ("|" FilterExpression)? = identifier CallParams ("|" identifier CallParams)*
       * - ValueExpression = (identifier | number | string | bool | BracedExpressionOrArray | Tuple | Dictionary ) SubScript? CallParams?
-      * - BracedExpressionOrArray = "(" FullExpression ("," FullExpression)* ")"
-      * - Tuple = "[" (FullExpression ("," FullExpression)*)? "]"
-      * - Dictionary = "{" (string "=" FullExpression ("," string "=" FullExpression)*)? "}"
-      * - SubScript = ("[" FullExpression "]" | "." identifier CallParams? )+
-      * - CallParams = "(" ((identifier "=")? FullExpression ("," (identifier "=")? FullExpression)*)? ")"
+      * - BracedExpressionOrArray = "(" Expression ("," Expression)* ")"
+      * - Tuple = "[" (Expression ("," Expression)*)? "]"
+      * - Dictionary = "{" (string "=" Expression ("," string "=" Expression)*)? "}"
+      * - SubScript = ("[" Expression "]" | "." identifier CallParams? )+
+      * - CallParams = "(" ((identifier "=")? Expression ("," (identifier "=")? Expression)*)? ")"
       */
-    std::unique_ptr<Expression> parseFullExpression() {
+    std::unique_ptr<Expression> parseExpression() {
         auto left = parseLogicalOr();
         if (it == end) return left;
 
@@ -1089,7 +1164,7 @@ private:
         static std::regex else_tok(R"(else\b)");
         if (consumeToken(else_tok).empty()) throw std::runtime_error("Expected 'else' keyword");
         
-        auto else_expr = parseFullExpression();
+        auto else_expr = parseExpression();
         if (!else_expr) throw std::runtime_error("Expected 'else' expression");
 
         return std::make_pair(std::move(condition), std::move(else_expr));
@@ -1165,12 +1240,12 @@ private:
             if (!consumeToken(")").empty()) {
                 return result;
             }
-            auto expr = parseFullExpression();
+            auto expr = parseExpression();
             if (!expr) throw std::runtime_error("Expected expression in call args");
 
             if (auto ident = dynamic_cast<VariableExpr*>(expr.get())) {
                 if (!consumeToken("=").empty()) {
-                    auto value = parseFullExpression();
+                    auto value = parseExpression();
                     if (!value) throw std::runtime_error("Expected expression in for named arg");
                     result.emplace_back(ident->get_name(), std::move(value));
                 } else {
@@ -1325,16 +1400,16 @@ private:
         if (!consumeToken("[").empty()) {
             std::unique_ptr<Expression> index;
             if (!consumeToken(":").empty()) {
-              auto slice_end = parseFullExpression();
+              auto slice_end = parseExpression();
               index = nonstd_make_unique<SliceExpr>(nullptr, std::move(slice_end));
             } else {
-              auto slice_start = parseFullExpression();
+              auto slice_start = parseExpression();
               if (!consumeToken(":").empty()) {
                 consumeSpaces();
                 if (peekSymbols({ "]" })) {
                   index = nonstd_make_unique<SliceExpr>(std::move(slice_start), nullptr);
                 } else {
-                  auto slice_end = parseFullExpression();
+                  auto slice_end = parseExpression();
                   index = nonstd_make_unique<SliceExpr>(std::move(slice_start), std::move(slice_end));
                 }
               } else {
@@ -1370,7 +1445,7 @@ private:
     std::unique_ptr<Expression> parseBracedExpressionOrArray() {
         if (consumeToken("(").empty()) return nullptr;
         
-        auto expr = parseFullExpression();
+        auto expr = parseExpression();
         if (!expr) throw std::runtime_error("Expected expression in braced expression");
         
         if (!consumeToken(")").empty()) {
@@ -1382,7 +1457,7 @@ private:
 
         while (it != end) {
           if (consumeToken(",").empty()) throw std::runtime_error("Expected comma in tuple");
-          auto next = parseFullExpression();
+          auto next = parseExpression();
           if (!next) throw std::runtime_error("Expected expression in tuple");
           tuple.push_back(std::move(next));
 
@@ -1400,13 +1475,13 @@ private:
         if (!consumeToken("]").empty()) {
             return nonstd_make_unique<ArrayExpr>(std::move(elements));
         }
-        auto first_expr = parseFullExpression();
+        auto first_expr = parseExpression();
         if (!first_expr) throw std::runtime_error("Expected first expression in array");
         elements.push_back(std::move(first_expr));
 
         while (it != end) {
             if (!consumeToken(",").empty()) {
-              auto expr = parseFullExpression();
+              auto expr = parseExpression();
               if (!expr) throw std::runtime_error("Expected expression in array");
               elements.push_back(std::move(expr));
             } else if (!consumeToken("]").empty()) {
@@ -1421,18 +1496,18 @@ private:
     std::unique_ptr<Expression> parseDictionary() {
         if (consumeToken("{").empty()) return nullptr;
         
-        std::vector<std::pair<std::string, std::unique_ptr<Expression>>> elements;
+        std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<Expression>>> elements;
         if (!consumeToken("}").empty()) {
             return nonstd_make_unique<DictExpr>(std::move(elements));
         }
 
         auto parseKeyValuePair = [&]() {
-            auto key = parseString();
+            auto key = parseExpression();
             if (!key) throw std::runtime_error("Expected key in dictionary");
-            if (consumeToken("=").empty()) throw std::runtime_error("Expected equals sign in dictionary");
-            auto value = parseFullExpression();
+            if (consumeToken(":").empty()) throw std::runtime_error("Expected colon betweek key & value in dictionary");
+            auto value = parseExpression();
             if (!value) throw std::runtime_error("Expected value in dictionary");
-            elements.emplace_back(std::make_pair(*key, std::move(value)));
+            elements.emplace_back(std::make_pair(std::move(key), std::move(value)));
         };
 
         parseKeyValuePair();
@@ -1531,7 +1606,7 @@ private:
             tokens.push_back(nonstd_make_unique<CommentTemplateToken>(pos, pre_space, post_space, content));
           } else if (!(group = consumeTokenGroups(expr_open_regex, SpaceHandling::Keep)).empty()) {
             auto pre_space = parseSpaceHandling(group[1]);
-            auto expr = parseFullExpression();
+            auto expr = parseExpression();
 
             if ((group = consumeTokenGroups(expr_close_regex)).empty()) {
               throw std::runtime_error("Expected closing expression tag");
@@ -1552,13 +1627,13 @@ private:
             if ((keyword = consumeToken(block_keyword_tok)).empty()) throw std::runtime_error("Expected block keyword");
             
             if (keyword == "if") {
-              auto condition = parseFullExpression();
+              auto condition = parseExpression();
               if (!condition) throw std::runtime_error("Expected condition in if block");
 
               auto post_space = parseBlockClose();
               tokens.push_back(nonstd_make_unique<IfTemplateToken>(pos, pre_space, post_space, std::move(condition)));
             } else if (keyword == "elif") {
-              auto condition = parseFullExpression();
+              auto condition = parseExpression();
               if (!condition) throw std::runtime_error("Expected condition in elif block");
 
               auto post_space = parseBlockClose();
@@ -1576,12 +1651,12 @@ private:
               auto varnames = parseVarNames();
               static std::regex in_tok(R"(in\b)");
               if (consumeToken(in_tok).empty()) throw std::runtime_error("Expected 'in' keyword in for block");
-              auto iterable = parseFullExpression();
+              auto iterable = parseExpression();
               if (!iterable) throw std::runtime_error("Expected iterable in for block");
 
               std::unique_ptr<Expression> condition;
               if (!consumeToken(if_tok).empty()) {
-                condition = parseFullExpression();
+                condition = parseExpression();
               }
               auto recursive = !consumeToken(recursive_tok).empty();
             
@@ -1598,7 +1673,7 @@ private:
 
                 if (consumeToken("=").empty()) throw std::runtime_error("Expected equals sign in set block");
 
-                auto value = parseFullExpression();
+                auto value = parseExpression();
                 if (!value) throw std::runtime_error("Expected value in set block");
 
                 auto post_space = parseBlockClose();
@@ -1608,7 +1683,7 @@ private:
 
                 if (consumeToken("=").empty()) throw std::runtime_error("Expected equals sign in set block");
 
-                auto value = parseFullExpression();
+                auto value = parseExpression();
                 if (!value) throw std::runtime_error("Expected value in set block");
 
                 auto post_space = parseBlockClose();
@@ -1773,11 +1848,11 @@ Value simple_function(const std::string & fn_name, const std::vector<std::string
       }
       args_obj.set(arg.first, arg.second);
     }
-    for (size_t i = 0, n = params.size(); i < n; i++) {
-      if (!provided_args[i]) {
-        throw std::runtime_error("Missing argument " + params[i] + " for function " + fn_name);
-      }
-    }
+    // for (size_t i = 0, n = params.size(); i < n; i++) {
+    //   if (!provided_args[i]) {
+    //     throw std::runtime_error("Missing argument " + params[i] + " for function " + fn_name);
+    //   }
+    // }
     return fn(context, args_obj);
   });
 }
@@ -1912,3 +1987,5 @@ Value Value::context(const Value & values) {
   }
   return context;
 }
+
+}  // namespace jinja

@@ -10,9 +10,9 @@
 void test_render(const std::string & template_str, const json & bindings, const std::string & expected, const json & expected_context = {}) {
     std::cout << "Testing: " << template_str << std::endl;
     std::cout << std::flush;
-    auto root = JinjaParser::parse(template_str);
-    Value values(bindings);
-    auto context = Value::context(values);
+    auto root = jinja::JinjaParser::parse(template_str);
+    jinja::Value values(bindings);
+    auto context = jinja::Value::context(values);
     // std::cout << "Context: " << context.dump() << std::endl;
     std::string actual;
     try {
@@ -45,8 +45,8 @@ void test_error_contains(const std::string & template_str, const json & bindings
     std::cout << "Testing: " << template_str << std::endl;
     std::cout << std::flush;
     try {
-        auto root = JinjaParser::parse(template_str);
-        auto context = Value::context(bindings);
+        auto root = jinja::JinjaParser::parse(template_str);
+        auto context = jinja::Value::context(bindings);
         // auto copy = context.is_null() ? Value::object() : std::make_shared<Value>(context);
         auto actual = root->render(context);
         throw std::runtime_error("Expected error: " + expected + ", but got successful result instead: "  + actual);
@@ -84,6 +84,13 @@ inline std::string read_file(const std::string &path) {
 int main() {
     test_render(
         R"(
+            {%- for x in [1, 1.2, "a", true, True, false, False, None, [], [1], [1, 2], {}, {"a": 1}, {1: "b"}] -%}
+                {{- x | tojson -}},
+            {%- endfor -%}
+        )", {},
+        R"(1,1.2,"a",true,true,false,false,null,[],[1],[1, 2],{},{"a": 1},{"1": "b"},)");
+    test_render(
+        R"(
             {%- set n = namespace(value=1, title='') -%}
             {{- n.value }} "{{ n.title }}",
             {%- set n.value = 2 -%}
@@ -99,7 +106,7 @@ int main() {
             "a": {"b": [1, 2]},
             "c": {"d": {"e": 3}}
         })"),
-        "[1,2,3]");
+        "[1, 2, 3]");
 
     test_render(R"(
         {%- for x, y in z -%}
@@ -118,9 +125,9 @@ int main() {
     
     test_render("{{ [] is iterable }}", {}, "True");
     test_render("{{ [] is not number }}", {}, "True");
-    test_render("{% set x = [0, 1, 2, 3] %}{{ x[1:] }}{{ x[:2] }}{{ x[1:3] }}", {}, "[1,2,3][0,1][1,2]");
+    test_render("{% set x = [0, 1, 2, 3] %}{{ x[1:] }}{{ x[:2] }}{{ x[1:3] }}", {}, "[1, 2, 3][0, 1][1, 2]");
     test_render("{{ ' a  ' | trim }}", {}, "a");
-    test_render("{{ range(3) }}{{ range(4, 7) }}{{ range(0, 10, step=2) }}", {}, "[0,1,2][4,5,6][0,2,4,6,8]");
+    test_render("{{ range(3) }}{{ range(4, 7) }}{{ range(0, 10, step=2) }}", {}, "[0, 1, 2][4, 5, 6][0, 2, 4, 6, 8]");
 
     // List files
     for (const auto & entry : std::__fs::filesystem::directory_iterator("templates")) {
@@ -130,7 +137,7 @@ int main() {
         std::string text_content = read_file(entry.path());
         std::cout << "# Parsing " << entry.path() << ":" << std::endl;
         std::cout << text_content << std::endl;
-        JinjaParser::parse(text_content);
+        jinja::JinjaParser::parse(text_content);
     }
 
     test_render(
@@ -261,7 +268,7 @@ int main() {
     ])");
 
     const auto llama3_1_template = read_file("templates/Meta-Llama-3.1-8B-Instruct.jinja");
-    test_render(llama3_1_template, json::object({    
+    test_render(llama3_1_template, json::object({
         {"messages", simple_messages},
         {"add_generation_prompt", true},
         {"tools", tools},
