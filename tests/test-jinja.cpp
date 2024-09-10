@@ -81,6 +81,10 @@ inline std::string read_file(const std::string &path) {
 */
 int main() {
     test_render(
+        R"({%- set separator = joiner(' | ') -%}
+           {%- for item in ["a", "b", "c"] %}{{ separator() }}{{ item }}{% endfor -%})",
+        {}, "a | b | c");
+    test_render(
         "{%- for i in range(0) -%}NAH{% else %}OK{% endfor %}",
         {},
         "OK");

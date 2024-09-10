@@ -1,15 +1,14 @@
 /*
-  The absolute minimum needed to run chat templates.
-  As it turns out, Llama 3.1's template is relatively involved, so we need a proper template engine.
+  The absolute minimum needed to run chat templates seen in the wild.
+
+  Models have increasingly complex templates (e.g. Llama 3.1, Hermes 2 Pro w/ tool_use), so we need a proper template engine to get the best out of them.
 
   TODO:
   - Add |dict_update({...})
   - Add {%- if tool.parameters.properties | length == 0 %}
-  - Add more tests
-  - Add more functions
-    - https://jinja.palletsprojects.com/en/3.0.x/templates/#builtin-filters
+  - Add `{% raw %}{{ broken }{% endraw %}` https://jbmoelker.github.io/jinja-compat-tests/tags/raw/
+  - Add more functions https://jinja.palletsprojects.com/en/3.0.x/templates/#builtin-filters
     - https://jbmoelker.github.io/jinja-compat-tests/
-      - `{% raw %}{{ broken }{% endraw %}` https://jbmoelker.github.io/jinja-compat-tests/tags/raw/
 */
 #pragma once
 
@@ -2061,7 +2060,21 @@ Value Value::context(const Value & values) {
   top_level_context.set("trim", simple_function("trim", { "text" }, [](const Value &, const Value & args) {
     return Value(strip(args.at("text").get<std::string>()));
   }));
-  top_level_context.set("e", simple_function("e", { "text" }, [](const Value &, const Value & args) {
+  auto escape = simple_function("escape", { "text" }, [](const Value &, const Value & args) {
+    return Value(html_escape(args.at("text").get<std::string>()));
+  });
+  top_level_context.set("e", escape);
+  top_level_context.set("escape", escape);
+  top_level_context.set("joiner", simple_function("joiner", { "sep" }, [](const Value &, const Value & args) {
+    auto sep = args.get<std::string>("sep", "");
+    auto first = std::make_shared<bool>(true);
+    return simple_function("", {}, [sep, first](const Value &, const Value & args) -> Value {
+      if (*first) {
+        *first = false;
+        return "";
+      }
+      return sep;
+    });
     return Value(html_escape(args.at("text").get<std::string>()));
   }));
   top_level_context.set("count", simple_function("count", { "items" }, [](const Value &, const Value & args) {
