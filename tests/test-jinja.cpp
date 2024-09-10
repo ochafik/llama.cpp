@@ -359,6 +359,17 @@ int main() {
         "\n"
         "\n"
     );
+
+    const auto hermes2_pro_tool_use_template = read_file("templates/Hermes-2-Pro-Llama-3-8B.tool_use.jinja");
+    test_render(hermes2_pro_tool_use_template, json::object({
+        {"messages", simple_messages},
+        {"add_generation_prompt", true},
+        {"tools", tools},
+        {"eos_token", "<|endoftext|>"},
+        {"bos_token", "<|startoftext|>"},
+    }),
+        "TODO"
+    );
         
 
     return 0;
