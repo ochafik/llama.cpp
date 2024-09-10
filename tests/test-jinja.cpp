@@ -81,6 +81,7 @@ inline std::string read_file(const std::string &path) {
 */
 int main() {
     test_render("{{ 'ab' * 3 }}", {}, "ababab");
+    test_render("{{ [1, 2, 3][-1] }}", {}, "3");
     test_render(
         R"({%- set separator = joiner(' | ') -%}
            {%- for item in ["a", "b", "c"] %}{{ separator() }}{{ item }}{% endfor -%})",

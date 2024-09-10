@@ -206,7 +206,8 @@ public:
 
   Value get(const Value& key) const {
     if (array_) {
-      return array_->at(key.get<int>());
+      auto index = key.get<int>();
+      return array_->at(index < 0 ? array_->size() + index : index);
     } else if (object_) {
       if (!key.is_hashable()) throw std::runtime_error("Unashable type: " + dump());
       auto it = object_->find(key.primitive_);
