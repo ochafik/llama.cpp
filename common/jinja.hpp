@@ -3,8 +3,9 @@
   As it turns out, Llama 3.1's template is relatively involved, so we need a proper template engine.
 
   TODO:
-  - Add loop.index, .first and friends https://jinja.palletsprojects.com/en/3.0.x/templates/#for
+  - Add loop.index, .first, .previtem and friends https://jinja.palletsprojects.com/en/3.0.x/templates/#for
   - Add |dict_update({...})
+  - Add {%- if tool.parameters.properties | length == 0 %}
   - Add more tests
   - Add more functions
     - https://jinja.palletsprojects.com/en/3.0.x/templates/#builtin-filters
@@ -238,18 +239,18 @@ public:
   } 
 
   bool operator==(const Value & other) const {
-    if (is_callable() || other.is_callable()) {
+    if (callable_ || other.callable_) {
       if (callable_.get() != other.callable_.get()) return false;
     }
-    if (is_array()) {
-      if (!other.is_array()) return false;
+    if (array_) {
+      if (!other.array_) return false;
       if (array_->size() != other.array_->size()) return false;
       for (size_t i = 0; i < array_->size(); ++i) {
         if (!(*array_)[i] || !(*other.array_)[i] || (*array_)[i] != (*other.array_)[i]) return false;
       }
       return true;
-    } else if (is_object()) {
-      if (!other.is_object()) return false;
+    } else if (object_) {
+      if (!other.object_) return false;
       if (object_->size() != other.object_->size()) return false;
       for (const auto& item : *object_) {
         if (!item.second || !other.object_->count(item.first) || item.second != other.object_->at(item.first)) return false;
@@ -315,7 +316,7 @@ public:
 
   template <>
   std::vector<std::string> get<std::vector<std::string>>() const {
-    if (is_array()) {
+    if (array_) {
       std::vector<std::string> res;
       for (const auto& item : *array_) {
         res.push_back(item.get<std::string>());
@@ -335,14 +336,14 @@ public:
   json get<json>() const {
     if (is_primitive()) return primitive_;
     if (is_null()) return json();
-    if (is_array()) {
+    if (array_) {
       std::vector<json> res;
       for (const auto& item : *array_) {
         res.push_back(item.get<json>());
       }
       return res;
     }
-    if (is_object()) {
+    if (object_) {
       json res = json::object();
       for (const auto& item : *object_) {
         const auto & key = item.first;
@@ -1022,6 +1023,22 @@ public:
 static std::string strip(const std::string & s) {
   static std::regex trailing_spaces_regex("^\\s+|\\s+$");
   return std::regex_replace(s, trailing_spaces_regex, "");
+}
+
+static std::string html_escape(const std::string & s) {
+  std::string result;
+  result.reserve(s.size());
+  for (const auto & c : s) {
+    switch (c) {
+      case '&': result += "&amp;"; break;
+      case '<': result += "&lt;"; break;
+      case '>': result += "&gt;"; break;
+      case '"': result += "&quot;"; break;
+      case '\'': result += "&apos;"; break;
+      default: result += c; break;
+    }
+  }
+  return result;
 }
 
 class Parser {
@@ -1971,6 +1988,9 @@ Value Value::context(const Value & values) {
   }));
   top_level_context.set("trim", simple_function("trim", { "text" }, [](const Value &, const Value & args) {
     return Value(strip(args.at("text").get<std::string>()));
+  }));
+  top_level_context.set("e", simple_function("e", { "text" }, [](const Value &, const Value & args) {
+    return Value(html_escape(args.at("text").get<std::string>()));
   }));
   top_level_context.set("count", simple_function("count", { "items" }, [](const Value &, const Value & args) {
     return Value((int64_t) args.at("items").size());

@@ -84,6 +84,15 @@ inline std::string read_file(const std::string &path) {
 int main() {
     test_render(
         R"(
+            {%- set res = [] -%}
+            {%- for c in ["<", ">", "&", '"'] -%}
+                {%- set _ = res.append(c | e) -%}
+            {%- endfor -%}
+            {{- res | join(", ") -}}
+        )", {},
+        R"(&lt;, &gt;, &amp;, &quot;)");
+    test_render(
+        R"(
             {%- set x = 1 -%}
             {%- set y = 2 -%}
             {%- macro foo(x, z, w=10) -%}
@@ -92,6 +101,18 @@ int main() {
             {{- foo(100, 3) -}}
         )", {},
         R"(x=100, y=2, z=3, w=10)");
+    test_render(
+        R"(
+            {% macro input(name, value='', type='text', size=20) -%}
+                <input type="{{ type }}" name="{{ name }}" value="{{ value|e }}" size="{{ size }}">
+            {%- endmacro -%}
+    
+            <p>{{ input('username') }}</p>
+            <p>{{ input('password', type='password') }}</p>)",
+        {}, R"(
+            <p><input type="text" name="username" value="" size="20"></p>
+            <p><input type="password" name="password" value="" size="20"></p>)");
+
     test_render(R"({{ None | items | tojson }}; {{ {1: 2} | items | tojson }})", {}, "[]; [[1, 2]]");
     test_render(R"({{ {1: 2}.items() }})", {}, "[[1, 2]]");
     test_render(R"({{ {1: 2}.get(1) }}; {{ {}.get(1) }}; {{ {}.get(1, 10) }})", {}, "2; ; 10");
