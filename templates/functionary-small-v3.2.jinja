@@ -1,7 +1,8 @@
-{#- Licensed under MIT: https://huggingface.co/datasets/choosealicense/licenses/blob/main/markdown/mit.md }
+{#- Licensed under MIT: https://huggingface.co/datasets/choosealicense/licenses/blob/main/markdown/mit.md -#}
 {#- https://huggingface.co/meetkai/functionary-small-v3.2/blob/main/tokenizer_config.json -#}
 
-{# version=v3.llama3 #}{%- macro append_new_param_info(param_declaration, comment_info, examples_info, depth) -%}
+{# version=v3.llama3 #}
+{%- macro append_new_param_info(param_declaration, comment_info, examples_info, depth) -%}
     {%- set offset = "" -%}
     {%- if depth >= 1 -%}
         {%- set offset = "    " * depth -%}
