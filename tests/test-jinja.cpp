@@ -112,7 +112,15 @@ int main() {
         {}, R"(
             <p><input type="text" name="username" value="" size="20"></p>
             <p><input type="password" name="password" value="" size="20"></p>)");
-
+    test_render(
+        R"(
+            {#- The values' default array should be created afresh at each call, unlike the equivalent Python function -#}
+            {%- macro foo(values=[]) -%}
+                {%- set _ = values.append(1) -%}
+                {{- values -}}
+            {%- endmacro -%}
+            {{- foo() }} {{ foo() -}})",
+        {}, R"([1] [1])");
     test_render(R"({{ None | items | tojson }}; {{ {1: 2} | items | tojson }})", {}, "[]; [[1, 2]]");
     test_render(R"({{ {1: 2}.items() }})", {}, "[[1, 2]]");
     test_render(R"({{ {1: 2}.get(1) }}; {{ {}.get(1) }}; {{ {}.get(1, 10) }})", {}, "2; ; 10");
