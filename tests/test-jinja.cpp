@@ -83,6 +83,8 @@ inline std::string read_file(const std::string &path) {
 */
 int main() {
     test_render(
+        R"({{ None | items | tojson }}; {{ {1: 2} | items | tojson }})", {}, "[]; [[1, 2]]");
+    test_render(
         R"(
             {%- for x in [1, 1.2, "a", true, True, false, False, None, [], [1], [1, 2], {}, {"a": 1}, {1: "b"}] -%}
                 {{- x | tojson -}},

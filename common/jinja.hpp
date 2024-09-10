@@ -4,7 +4,7 @@
 
   TODO:
   - Add loop.index, .first and friends https://jinja.palletsprojects.com/en/3.0.x/templates/#for
-  - Add list.insert, dict.get(x, default), |dict_update({...}), {% macro foo(args) %}...{% endmacro %}, |items
+  - Add list.insert, dict.get(x, default), |dict_update({...}), {% macro foo(args) %}...{% endmacro %}
   - Add more tests
   - Add more functions
     - https://jinja.palletsprojects.com/en/3.0.x/templates/#builtin-filters
@@ -147,10 +147,10 @@ public:
     }
   }
   
-  Value keys() const {
+  std::vector<Value> keys() const {
     if (!object_) throw std::runtime_error("Value is not an object: " + dump());
 
-    auto res = Value::array();
+    std::vector<Value> res;
     for (const auto& item : *object_) {
       res.push_back(item.first);
     }
@@ -162,7 +162,11 @@ public:
     return array_->size();
   }
 
-  static Value array(const std::shared_ptr<ArrayType> array = std::make_shared<ArrayType>()) {
+  static Value array(const std::vector<Value> values = {}) {
+    auto array = std::make_shared<ArrayType>();
+    for (const auto& item : values) {
+      array->push_back(item);
+    }
     return Value(array);
   }
   static Value object(const std::shared_ptr<ObjectType> object = std::make_shared<ObjectType>()) {
@@ -718,7 +722,7 @@ public:
     std::string get_name() const { return name; }
     Value evaluate(const Value & context) const override {
         if (!context.contains(name)) {
-            std::cerr << "Failed to find '" << name << "' in context (has keys: " << context.keys().dump() << ")" << std::endl;
+            std::cerr << "Failed to find '" << name << "' in context (has keys: " << Value::array(context.keys()).dump() << ")" << std::endl;
             return Value();
         }
         return context.at(name);
@@ -1844,6 +1848,18 @@ Value Value::context(const Value & values) {
   }));
   top_level_context.set("tojson", simple_function("tojson", { "value", "indent" }, [](const Value &, const Value & args) {
     return Value(args.at("value").dump(args.get<int64_t>("indent", -1)));
+  }));
+  top_level_context.set("items", simple_function("items", { "object" }, [](const Value &, const Value & args) {
+    auto items = Value::array();
+    if (args.contains("object")) {
+      auto & obj = args.at("object");
+      if (!obj.is_null()) {
+        for (auto & key : obj.keys()) {
+          items.push_back(Value::array({key, obj.at(key)}));
+        }
+      }
+    }
+    return items;
   }));
   top_level_context.set("trim", simple_function("trim", { "text" }, [](const Value &, const Value & args) {
     return Value(strip(args.at("text").get<std::string>()));
