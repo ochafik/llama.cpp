@@ -4,7 +4,7 @@
 
   TODO:
   - Add loop.index, .first and friends https://jinja.palletsprojects.com/en/3.0.x/templates/#for
-  - Add |dict_update({...}), {% macro foo(args) %}...{% endmacro %}
+  - Add |dict_update({...})
   - Add more tests
   - Add more functions
     - https://jinja.palletsprojects.com/en/3.0.x/templates/#builtin-filters
@@ -425,7 +425,7 @@ enum SpaceHandling { Keep, Strip };
 
 class TemplateToken {
 public:
-    enum class Type { Text, Expression, If, Else, Elif, EndIf, For, EndFor, Set, NamespacedSet, Comment, Block, EndBlock };
+    enum class Type { Text, Expression, If, Else, Elif, EndIf, For, EndFor, Set, NamespacedSet, Comment, Block, EndBlock, Macro, EndMacro };
 
     static std::string typeToString(Type t) {
         switch (t) {
@@ -442,6 +442,8 @@ public:
             case Type::Comment: return "comment";
             case Type::Block: return "block";
             case Type::EndBlock: return "endblock";
+            case Type::Macro: return "macro";
+            case Type::EndMacro: return "endmacro";
         }
         return "Unknown";
     }
@@ -490,6 +492,17 @@ struct BlockTemplateToken : public TemplateToken {
 
 struct EndBlockTemplateToken : public TemplateToken {
     EndBlockTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : TemplateToken(Type::EndBlock, pos, pre, post) {}
+};
+
+struct MacroTemplateToken : public TemplateToken {
+    std::string name;
+    Expression::CallableArgs params;
+    MacroTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::string& n, Expression::CallableArgs && p)
+      : TemplateToken(Type::Macro, pos, pre, post), name(n), params(std::move(p)) {}
+};
+
+struct EndMacroTemplateToken : public TemplateToken {
+    EndMacroTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : TemplateToken(Type::EndMacro, pos, pre, post) {}
 };
 
 struct ForTemplateToken : public TemplateToken {
@@ -645,6 +658,55 @@ public:
         : name(n), body(std::move(b)) {}
     void render(std::ostringstream& oss, Value & context) const override {
         body->render(oss, context);
+    }
+};
+
+class MacroNode : public TemplateNode {
+    std::string name;
+    Expression::CallableArgs params;
+    std::unique_ptr<TemplateNode> body;
+    std::unordered_map<std::string, size_t> named_param_positions;
+public:
+    MacroNode(const std::string& n, Expression::CallableArgs && p, std::unique_ptr<TemplateNode> && b)
+        : name(n), params(std::move(p)), body(std::move(b)) {
+        for (size_t i = 0; i < params.size(); ++i) {
+          const auto & name = params[i].first;
+          if (!name.empty()) {
+            named_param_positions[name] = i;
+          }
+        }
+    }
+    void render(std::ostringstream& oss, Value & macro_context) const override {
+        macro_context.set(name, Value::callable([&](const Value & context, const Value::CallableArgs & args) {
+            auto call_context = macro_context;
+            auto positional = true;
+            std::vector<bool> param_set(params.size(), false);
+            for (size_t i = 0, n = args.size(); i < n; i++) {
+                auto & arg = args[i];
+                auto & arg_name = arg.first;
+                if (arg_name.empty()) {
+                    if (!positional) throw std::runtime_error("Cannot pass positional arguments after named ones");
+                    if (i >= params.size()) throw std::runtime_error("Too many positional arguments for macro " + name);
+                    param_set[i] = true;
+                    auto & param_name = params[i].first;
+                    call_context.set(param_name, arg.second);
+                } else {
+                    positional = false;
+                    auto it = named_param_positions.find(arg_name);
+                    if (it == named_param_positions.end()) throw std::runtime_error("Unknown parameter name for macro " + name + ": " + arg_name);
+                    
+                    call_context.set(arg_name, arg.second);
+                    param_set[it->second] = true;
+                }
+            }
+            // Set default values for parameters that were not passed
+            for (size_t i = 0, n = params.size(); i < n; i++) {
+                if (!param_set[i] && params[i].second != nullptr) {
+                    call_context.set(params[i].first, params[i].second->evaluate(context));
+                }
+            }
+            return body->render(call_context);
+        }));
     }
 };
 
@@ -1248,7 +1310,7 @@ private:
         return left;
     }
 
-    Expression::CallableArgs parseCallParams() {
+    Expression::CallableArgs parseCallParams(bool is_call) {
         consumeSpaces();
         if (consumeToken("(").empty()) throw std::runtime_error("Expected opening parenthesis in call args");
 
@@ -1266,8 +1328,10 @@ private:
                     auto value = parseExpression();
                     if (!value) throw std::runtime_error("Expected expression in for named arg");
                     result.emplace_back(ident->get_name(), std::move(value));
-                } else {
+                } else if (is_call) {
                     result.emplace_back(std::string(), std::move(expr));
+                } else {
+                    result.emplace_back(ident->get_name(), nullptr);
                 }
             } else {
                 result.emplace_back(std::string(), std::move(expr));
@@ -1363,7 +1427,7 @@ private:
             if (identifier.empty()) throw std::runtime_error("Expected identifier in filter expression");
 
             if (peekSymbols({ "(" })) {
-                auto callParams = parseCallParams();
+                auto callParams = parseCallParams(/* is_call = */ true);
                 parts.push_back(call_func(identifier, std::move(callParams)));
             } else {
                 parts.push_back(call_func(identifier, {}));
@@ -1444,7 +1508,7 @@ private:
 
             consumeSpaces();
             if (peekSymbols({ "(" })) {
-              auto callParams = parseCallParams();
+              auto callParams = parseCallParams(/* is_call = */ true);
               value = nonstd_make_unique<MethodCallExpr>(std::move(value), identifier, std::move(callParams));
             } else {
               value = nonstd_make_unique<SubscriptExpr>(std::move(value), nonstd_make_unique<LiteralExpr>(Value(identifier)));
@@ -1454,7 +1518,7 @@ private:
       }
 
       if (peekSymbols({ "(" })) {
-        auto callParams = parseCallParams();
+        auto callParams = parseCallParams(/* is_call = */ true);
         value = nonstd_make_unique<CallExpr>(std::move(value), std::move(callParams));
       }
       return value;
@@ -1604,7 +1668,7 @@ private:
       static std::regex comment_tok(R"(\{#([-~]?)(.*?)([-~]?)#\})");
       static std::regex expr_open_regex(R"(\{\{([-~])?)");
       static std::regex block_open_regex(R"(^\{%([-~])?[\s\n]*)");
-      static std::regex block_keyword_tok(R"((if|else|elif|endif|for|endfor|set|block|endblock)\b)");
+      static std::regex block_keyword_tok(R"((if|else|elif|endif|for|endfor|set|block|endblock|macro|endmacro)\b)");
       static std::regex text_regex(R"([\s\S\n]*?($|(?=\{\{|\{%|\{#)))");
       static std::regex expr_close_regex(R"([\s\n]*([-~])?\}\})");
       static std::regex block_close_regex(R"([\s\n]*([-~])?%\})");
@@ -1716,6 +1780,16 @@ private:
             } else if (keyword == "endblock") {
               auto post_space = parseBlockClose();
               tokens.push_back(nonstd_make_unique<EndBlockTemplateToken>(pos, pre_space, post_space));
+            } else if (keyword == "macro") {
+              auto macroname = parseIdentifier();
+              if (macroname.empty()) throw std::runtime_error("Expected macro name in macro block");
+              auto params = parseCallParams(/* is_call = */ false);
+
+              auto post_space = parseBlockClose();
+              tokens.push_back(nonstd_make_unique<MacroTemplateToken>(pos, pre_space, post_space, macroname, std::move(params)));
+            } else if (keyword == "endmacro") {
+              auto post_space = parseBlockClose();
+              tokens.push_back(nonstd_make_unique<EndMacroTemplateToken>(pos, pre_space, post_space));
             } else {
               throw std::runtime_error("Unexpected block: " + keyword);
             }
@@ -1791,10 +1865,17 @@ private:
                   throw unterminated(**start);
               }
               children.emplace_back(nonstd_make_unique<BlockNode>(block_token->name, std::move(body)));
+          } else if (auto macro_token = dynamic_cast<MacroTemplateToken*>(token.get())) {
+              auto body = parseTemplate(begin, it, end);
+              if (it == end || (*(it++))->type != TemplateToken::Type::EndMacro) {
+                  throw unterminated(**start);
+              }
+              children.emplace_back(nonstd_make_unique<MacroNode>(macro_token->name, std::move(macro_token->params), std::move(body)));
           } else if (auto comment_token = dynamic_cast<CommentTemplateToken*>(token.get())) {
               // Ignore comments
           } else if (dynamic_cast<EndBlockTemplateToken*>(token.get())
                   || dynamic_cast<EndForTemplateToken*>(token.get())
+                  || dynamic_cast<EndMacroTemplateToken*>(token.get())
                   || dynamic_cast<EndIfTemplateToken*>(token.get())
                   || dynamic_cast<ElseTemplateToken*>(token.get())
                   || dynamic_cast<ElifTemplateToken*>(token.get())) {
