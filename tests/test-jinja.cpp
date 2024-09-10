@@ -81,6 +81,10 @@ inline std::string read_file(const std::string &path) {
 */
 int main() {
     test_render(
+        "{%- for i in range(0) -%}NAH{% else %}OK{% endfor %}",
+        {},
+        "OK");
+    test_render(
         R"(
             {%- for i in range(5) -%}
                 ({{ i }}, {{ loop.cycle('odd', 'even') }}),
