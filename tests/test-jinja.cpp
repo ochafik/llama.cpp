@@ -15,8 +15,9 @@ void test_render(const std::string & template_str, const json & bindings, const 
     std::string actual;
     try {
         actual = root->render(context);
-    } catch (const std::runtime_error & e) {
+    } catch (const std::exception & e) {
         actual = "ERROR: " + std::string(e.what());
+        std::cerr << "AST: " << root->dump().dump(2) << std::endl;
     }
 
     if (expected != actual) {
@@ -81,6 +82,7 @@ inline std::string read_file(const std::string &path) {
 */
 int main() {
      test_render("{{ [1, 2, 3] | join(', ') }}", {}, "1, 2, 3");
+     test_render("{{ 'Tools: ' + [1, 2, 3] | reject('equalto', 2) | join(', ') + '...' }}", {}, "Tools: [1, 3]...");
      test_render("{{ [1, False, null, True, 2, '3', 1, '3', False, null, True] | unique }}", {},
         "[1, False, null, True, 2, \"3\"]");
      test_render("{{ range(5) | length % 2 }}", {}, "1");

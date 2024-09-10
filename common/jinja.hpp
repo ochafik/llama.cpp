@@ -464,6 +464,7 @@ public:
 
     virtual ~Expression() = default;
     virtual Value evaluate(const Value & context) const = 0;
+    virtual json dump() const = 0;
 };
 
 static void destructuring_assign(const std::vector<std::string> & var_names, Value & context, const Value& item) {
@@ -605,6 +606,7 @@ public:
         render(oss, context);
         return oss.str();
     }
+    virtual json dump() const = 0;
 };
 
 class SequenceNode : public TemplateNode {
@@ -614,6 +616,13 @@ public:
     void render(std::ostringstream& oss, Value & context) const override {
         for (const auto& child : children) child->render(oss, context);
     }
+    json dump() const override {
+        json res = json::array();
+        for (const auto& child : children) {
+            res.push_back(child->dump());
+        }
+        return {{"sequence", res}};
+    }
 };
 
 class TextNode : public TemplateNode {
@@ -621,6 +630,7 @@ class TextNode : public TemplateNode {
 public:
     TextNode(const std::string& t) : text(t) {}
     void render(std::ostringstream& oss, Value &) const override { oss << text; }
+    json dump() const override { return {{"text", text}}; }
 };
 
 class ExpressionNode : public TemplateNode {
@@ -637,6 +647,7 @@ public:
           oss << result.dump();
       }
   }
+    json dump() const override { return {{"expression", expr->dump()}}; }
 };
 
 class IfNode : public TemplateNode {
@@ -656,6 +667,17 @@ public:
         }
     }
   }
+    json dump() const override {
+        json res = json::array();
+        for (const auto& branch : cascade) {
+            if (branch.first) {
+                res.push_back({{"elif", {{"condition", branch.first->dump()}, {"branch", branch.second->dump()}}}});
+            } else {
+                res.push_back({{"else", branch.second->dump()}});
+            }
+        }
+        return {{"if", res}};
+    }
 };
 
 class ForNode : public TemplateNode {
@@ -753,6 +775,18 @@ public:
           }
       }
   }
+
+    json dump() const override {
+        json res = {{"var_names", var_names}, {"iterable", iterable->dump()}};
+        if (condition) {
+            res["if"] = condition->dump();
+        }
+        res["body"] = body->dump();
+        if (else_body) {
+            res["else"] = else_body->dump();
+        }
+        return {{"for", res}};
+    }
 };
 
 class BlockNode : public TemplateNode {
@@ -763,6 +797,9 @@ public:
         : name(n), body(std::move(b)) {}
     void render(std::ostringstream& oss, Value & context) const override {
         body->render(oss, context);
+    }
+    json dump() const override {
+        return {{"block", {{"name", name}, {"body", body->dump()}}}};
     }
 };
 
@@ -813,6 +850,13 @@ public:
             return body->render(call_context);
         }));
     }
+    json dump() const override {
+        json res = {{"name", name}, {"params", json::array()}};
+        for (const auto& param : params) {
+            res["params"].push_back({{"name", param.first}, {"default", param.second ? param.second->dump() : nullptr}});
+        }
+        return {{"macro", res}};
+    }
 };
 
 class SetNode : public TemplateNode {
@@ -823,6 +867,10 @@ public:
       : var_names(vns), value(std::move(v)) {}
     void render(std::ostringstream &, Value & context) const override {
         destructuring_assign(var_names, context, value->evaluate(context));
+    }
+    json dump() const override {
+        json res = {{"var_names", var_names}, {"value", value->dump()}};
+        return {{"set", res}};
     }
 };
 
@@ -837,6 +885,9 @@ public:
         if (!ns_value.is_object()) throw std::runtime_error("Namespace '" + ns + "' is not an object");
         ns_value.set(name, this->value->evaluate(context));
     }
+    json dump() const override {
+        return {{"set", {{"namespaces", ns}, {"name", name}, {"value", value->dump()}}}};
+    }
 };
 
 class IfExpr : public Expression {
@@ -849,6 +900,9 @@ public:
     Value evaluate(const Value & context) const override {
         return condition->evaluate(context) ? then_expr->evaluate(context) : else_expr->evaluate(context);
     }
+    json dump() const override {
+        return {{"if", condition->dump()}, {"then", then_expr->dump()}, {"else", else_expr->dump()}};
+    }
 };
 
 class LiteralExpr : public Expression {
@@ -856,6 +910,7 @@ class LiteralExpr : public Expression {
 public:
     LiteralExpr(const Value& v) : value(v) {}
     Value evaluate(const Value &) const override { return value; }
+    json dump() const override { return value.dump(); }
 };
 
 class ArrayExpr : public Expression {
@@ -866,6 +921,13 @@ public:
         auto result = Value::array();
         for (const auto& e : elements) {
             result.push_back(e->evaluate(context));
+        }
+        return result;
+    }
+    json dump() const override {
+        json result = json::array();
+        for (const auto& e : elements) {
+            result.push_back(e->dump());
         }
         return result;
     }
@@ -882,6 +944,16 @@ public:
         }
         return result;
     }
+    json dump() const override {
+        json kvs = json::array();
+        for (const auto& e : elements) {
+            kvs.push_back({
+              {"key", e.first->dump()},
+              {"value", e.second->dump()},
+            });
+        }
+        return {{"dict", kvs}};
+    }
 };
 
 class VariableExpr : public Expression {
@@ -896,6 +968,7 @@ public:
         }
         return context.at(name);
     }
+    json dump() const override { return {{"variable", name}}; }
 };
 
 class SliceExpr : public Expression {
@@ -904,6 +977,9 @@ public:
     SliceExpr(std::unique_ptr<Expression> && s, std::unique_ptr<Expression> && e) : start(std::move(s)), end(std::move(e)) {}
     Value evaluate(const Value &) const override {
         throw std::runtime_error("SliceExpr not implemented");
+    }
+    json dump() const override {
+        return {{"slice", {start->dump(), end->dump()}}};
     }
 };
 
@@ -936,6 +1012,9 @@ public:
           return target_value.get(index_value);
         }
     }
+    json dump() const override {
+        return {{"subscript", {{"base", base->dump()}, {"index", index->dump()}}}};
+    }
 };
 
 class UnaryOpExpr : public Expression {
@@ -954,6 +1033,9 @@ public:
             case Op::LogicalNot: return !e;
         }
         throw std::runtime_error("Unknown unary operator");
+    }
+    json dump() const override {
+        return {{"unary", {{"op", (int) op}, {"expr", expr->dump()}}}};
     }
 };
 
@@ -1033,6 +1115,9 @@ public:
           return do_eval(l);
         }
     }
+    json dump() const override {
+        return {{"binary", {{"op", (int) op}, {"left", left->dump()}, {"right", right->dump()}}}};
+    }
 };
 
 class MethodCallExpr : public Expression {
@@ -1087,6 +1172,13 @@ public:
         }
         throw std::runtime_error("Unknown method: " + method);
     }
+    json dump() const override {
+        json result = {{"call", {{"method", method}, {"object", object->dump()}, "args", json::array()}}};
+        for (const auto& arg : args) {
+            result["call"]["args"].push_back({arg.first, arg.second->dump()});
+        }
+        return result;
+    }
 };
 
 class CallExpr : public Expression {
@@ -1105,6 +1197,13 @@ public:
             vargs.push_back({arg.first, arg.second->evaluate(context)});
         }
         return obj.call(context, vargs);
+    }
+    json dump() const override {
+        json result = {{"call", {{"object", object->dump()}, {"args", json::array()}}}};
+        for (const auto& arg : args) {
+            result["call"]["args"].push_back({{"name", arg.first}, {"value", arg.second->dump()}});
+        }
+        return result;
     }
 };
 
@@ -1139,6 +1238,13 @@ public:
 
     void prepend(std::unique_ptr<Expression> && e) {
         parts.insert(parts.begin(), std::move(e));
+    }
+    json dump() const override {
+        json result = {{"filter", json::array()}};
+        for (const auto& part : parts) {
+            result["filter"].push_back(part->dump());
+        }
+        return result;
     }
 };
 
@@ -1445,6 +1551,7 @@ private:
             else if (op_str == "<=") op = BinaryOpExpr::Op::Le;
             else if (op_str == ">=") op = BinaryOpExpr::Op::Ge;
             else if (op_str == "in") op = BinaryOpExpr::Op::In;
+            // if op_str starts with "not" it must be "not in"
             else if (op_str.substr(0, 3) == "not") op = BinaryOpExpr::Op::NotIn;
             else throw std::runtime_error("Unknown comparison operator: " + op_str);
             left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), op);
@@ -2164,7 +2271,6 @@ Value Value::context(const Value & values) {
       for (size_t i = 0, n = items.size(); i < n; ++i) {
         if (first) first = false;
         else oss << sep;
-        oss << items.at(i).get<std::string>();
         oss << items.at(i).to_str();
       }
       return Value(oss.str());
