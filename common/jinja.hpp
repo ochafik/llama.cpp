@@ -959,7 +959,7 @@ public:
 
 class BinaryOpExpr : public Expression {
 public:
-    enum class Op { StrConcat, Add, Sub, Mul, MulMul, Div, DivDiv, Mod, Eq, Ne, Lt, Gt, Le, Ge, And, Or, In, Is, IsNot };
+    enum class Op { StrConcat, Add, Sub, Mul, MulMul, Div, DivDiv, Mod, Eq, Ne, Lt, Gt, Le, Ge, And, Or, In, NotIn, Is, IsNot };
 private:
     std::unique_ptr<Expression> left;
     std::unique_ptr<Expression> right;
@@ -1018,6 +1018,7 @@ public:
               case Op::Le:        return l <= r;
               case Op::Ge:        return l >= r;
               case Op::In:        return r.is_array() && r.contains(l);
+              case Op::NotIn:     return !(r.is_array() && r.contains(l));
               default:            break;
           }
           throw std::runtime_error("Unknown binary operator");
@@ -1420,7 +1421,7 @@ private:
         auto left = parseStringConcat();
         if (!left) throw std::runtime_error("Expected left side of 'logical compare' expression");
 
-        static std::regex compare_tok(R"(==|!=|<=?|>=?|in\b|is\b)");
+        static std::regex compare_tok(R"(==|!=|<=?|>=?|in\b|is\b|not[\n\s]+in\b)");
         static std::regex not_tok(R"(not\b)");
         std::string op_str;
         while (!(op_str = consumeToken(compare_tok)).empty()) {
@@ -1444,6 +1445,7 @@ private:
             else if (op_str == "<=") op = BinaryOpExpr::Op::Le;
             else if (op_str == ">=") op = BinaryOpExpr::Op::Ge;
             else if (op_str == "in") op = BinaryOpExpr::Op::In;
+            else if (op_str.substr(0, 3) == "not") op = BinaryOpExpr::Op::NotIn;
             else throw std::runtime_error("Unknown comparison operator: " + op_str);
             left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), op);
         }
