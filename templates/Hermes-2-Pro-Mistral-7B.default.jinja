@@ -1,3 +1,4 @@
+{#- https://huggingface.co/NousResearch/Hermes-2-Pro-Mistral-7B/blob/main/tokenizer_config.json -#}
 {% for message in messages -%}
     {{- '<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n' -}}
 {%- endfor -%}

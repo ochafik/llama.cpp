@@ -1,3 +1,4 @@
+{#- https://huggingface.co/NousResearch/Hermes-2-Pro-Llama-3-8B/blob/main/tokenizer_config.json -#}
 {{ bos_token -}}
 {%- for message in messages -%}
     {{- '<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n' -}}
