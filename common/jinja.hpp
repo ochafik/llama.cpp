@@ -4,6 +4,11 @@
   Models have increasingly complex templates (e.g. Llama 3.1, Hermes 2 Pro w/ tool_use), so we need a proper template engine to get the best out of them.
 
   TODO:
+  - Functionary 3.2:
+    - selectattr("type", "defined")
+    - list
+    - map(attribute="type")
+    - unique
   - Add |dict_update({...})
   - Add {%- if tool.parameters.properties | length == 0 %}
   - Add `{% raw %}{{ broken }{% endraw %}` https://jbmoelker.github.io/jinja-compat-tests/tags/raw/
