@@ -484,7 +484,7 @@ enum SpaceHandling { Keep, Strip };
 
 class TemplateToken {
 public:
-    enum class Type { Text, Expression, If, Else, Elif, EndIf, For, EndFor, Set, NamespacedSet, Comment, Block, EndBlock, Macro, EndMacro };
+    enum class Type { Text, Expression, If, Else, Elif, EndIf, For, EndFor, Set, EndSet, NamespacedSet, Comment, Block, EndBlock, Macro, EndMacro };
 
     static std::string typeToString(Type t) {
         switch (t) {
@@ -497,6 +497,7 @@ public:
             case Type::For: return "for";
             case Type::EndFor: return "endfor";
             case Type::Set: return "set";
+            case Type::EndSet: return "endset";
             case Type::NamespacedSet: return "namespaced set";
             case Type::Comment: return "comment";
             case Type::Block: return "block";
@@ -583,6 +584,10 @@ struct SetTemplateToken : public TemplateToken {
     std::unique_ptr<Expression> value;
     SetTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::vector<std::string> & vns, std::unique_ptr<Expression> && v)
       : TemplateToken(Type::Set, pos, pre, post), var_names(vns), value(std::move(v)) {}
+};
+
+struct EndSetTemplateToken : public TemplateToken {
+    EndSetTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : TemplateToken(Type::EndSet, pos, pre, post) {}
 };
 
 struct NamespacedSetTemplateToken : public TemplateToken {
@@ -862,14 +867,27 @@ public:
 class SetNode : public TemplateNode {
     std::vector<std::string> var_names;
     std::unique_ptr<Expression> value;
+    std::unique_ptr<TemplateNode> template_value;
 public:
-    SetNode(const std::vector<std::string> & vns, std::unique_ptr<Expression> && v)
-      : var_names(vns), value(std::move(v)) {}
+    SetNode(const std::vector<std::string> & vns, std::unique_ptr<Expression> && v, std::unique_ptr<TemplateNode> && tv)
+        : var_names(vns), value(std::move(v)), template_value(std::move(tv)) {
+          if (value && template_value) {
+            throw std::runtime_error("Cannot have both value and template value in set node");
+          }
+          if (template_value && var_names.size() != 1) {
+            throw std::runtime_error("Destructuring assignment is only supported with a single variable name");
+          }
+        }
     void render(std::ostringstream &, Value & context) const override {
+      if (template_value) {
+        auto value = template_value->render(context);
+        context.set(var_names[0], value);
+      } else {
         destructuring_assign(var_names, context, value->evaluate(context));
+      }
     }
     json dump() const override {
-        json res = {{"var_names", var_names}, {"value", value->dump()}};
+        json res = {{"var_names", var_names}, {"value", value ? value->dump() : "null"}, {"template_value", template_value ? template_value->dump() : "null"}};
         return {{"set", res}};
     }
 };
@@ -1085,7 +1103,7 @@ public:
 
           auto r = right->evaluate(context);
           switch (op) {
-              case Op::StrConcat: return l.get<std::string>() + r.get<std::string>();
+              case Op::StrConcat: return l.to_str() + r.to_str();
               case Op::Add:       return l + r;
               case Op::Sub:       return l - r;
               case Op::Mul:       return l * r;
@@ -1924,7 +1942,7 @@ private:
       static std::regex comment_tok(R"(\{#([-~]?)(.*?)([-~]?)#\})");
       static std::regex expr_open_regex(R"(\{\{([-~])?)");
       static std::regex block_open_regex(R"(^\{%([-~])?[\s\n]*)");
-      static std::regex block_keyword_tok(R"((if|else|elif|endif|for|endfor|set|block|endblock|macro|endmacro)\b)");
+      static std::regex block_keyword_tok(R"((if|else|elif|endif|for|endfor|set|endset|block|endblock|macro|endmacro)\b)");
       static std::regex text_regex(R"([\s\S\n]*?($|(?=\{\{|\{%|\{#)))");
       static std::regex expr_close_regex(R"([\s\n]*([-~])?\}\})");
       static std::regex block_close_regex(R"([\s\n]*([-~])?%\})");
@@ -2019,14 +2037,20 @@ private:
               } else {
                 auto varnames = parseVarNames();
 
-                if (consumeToken("=").empty()) throw std::runtime_error("Expected equals sign in set block");
+                if (!consumeToken("=").empty()) {
+                  auto value = parseExpression();
+                  if (!value) throw std::runtime_error("Expected value in set block");
 
-                auto value = parseExpression();
-                if (!value) throw std::runtime_error("Expected value in set block");
-
-                auto post_space = parseBlockClose();
-                tokens.push_back(nonstd_make_unique<SetTemplateToken>(pos, pre_space, post_space, varnames, std::move(value)));
+                  auto post_space = parseBlockClose();
+                  tokens.push_back(nonstd_make_unique<SetTemplateToken>(pos, pre_space, post_space, varnames, std::move(value)));
+                } else {
+                  auto post_space = parseBlockClose();
+                  tokens.push_back(nonstd_make_unique<SetTemplateToken>(pos, pre_space, post_space, varnames, nullptr));
+                }
               }
+            } else if (keyword == "endset") {
+              auto post_space = parseBlockClose();
+              tokens.push_back(nonstd_make_unique<EndSetTemplateToken>(pos, pre_space, post_space));
             } else if (keyword == "block") {
               auto blockname = parseIdentifier();
               if (blockname.empty()) throw std::runtime_error("Expected block name in block block");
@@ -2116,7 +2140,15 @@ private:
           } else if (auto expr_token = dynamic_cast<ExpressionTemplateToken*>(token.get())) {
               children.emplace_back(nonstd_make_unique<ExpressionNode>(std::move(expr_token->expr)));
           } else if (auto set_token = dynamic_cast<SetTemplateToken*>(token.get())) {
-              children.emplace_back(nonstd_make_unique<SetNode>(set_token->var_names, std::move(set_token->value)));
+            if (set_token->value) {
+              children.emplace_back(nonstd_make_unique<SetNode>(set_token->var_names, std::move(set_token->value), nullptr));
+            } else {
+              auto value_template = parseTemplate(begin, it, end);
+              if (it == end || (*(it++))->type != TemplateToken::Type::EndSet) {
+                  throw unterminated(**start);
+              }
+              children.emplace_back(nonstd_make_unique<SetNode>(set_token->var_names, nullptr, std::move(value_template)));
+            }
           } else if (auto namespaced_set_token = dynamic_cast<NamespacedSetTemplateToken*>(token.get())) {
               children.emplace_back(nonstd_make_unique<NamespacedSetNode>(namespaced_set_token->ns, namespaced_set_token->name, std::move(namespaced_set_token->value)));
           } else if (auto block_token = dynamic_cast<BlockTemplateToken*>(token.get())) {
@@ -2135,6 +2167,7 @@ private:
               // Ignore comments
           } else if (dynamic_cast<EndBlockTemplateToken*>(token.get())
                   || dynamic_cast<EndForTemplateToken*>(token.get())
+                  || dynamic_cast<EndSetTemplateToken*>(token.get())
                   || dynamic_cast<EndMacroTemplateToken*>(token.get())
                   || dynamic_cast<EndIfTemplateToken*>(token.get())
                   || dynamic_cast<ElseTemplateToken*>(token.get())
