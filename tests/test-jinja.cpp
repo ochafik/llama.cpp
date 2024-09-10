@@ -10,7 +10,7 @@
 void test_render(const std::string & template_str, const json & bindings, const std::string & expected, const json & expected_context = {}) {
     std::cout << "Testing: " << template_str << std::endl;
     std::cout << std::flush;
-    auto root = jinja::JinjaParser::parse(template_str);
+    auto root = jinja::Parser::parse(template_str);
     jinja::Value values(bindings);
     auto context = jinja::Value::context(values);
     // std::cout << "Context: " << context.dump() << std::endl;
@@ -45,7 +45,7 @@ void test_error_contains(const std::string & template_str, const json & bindings
     std::cout << "Testing: " << template_str << std::endl;
     std::cout << std::flush;
     try {
-        auto root = jinja::JinjaParser::parse(template_str);
+        auto root = jinja::Parser::parse(template_str);
         auto context = jinja::Value::context(bindings);
         // auto copy = context.is_null() ? Value::object() : std::make_shared<Value>(context);
         auto actual = root->render(context);
@@ -137,7 +137,7 @@ int main() {
         std::string text_content = read_file(entry.path());
         std::cout << "# Parsing " << entry.path() << ":" << std::endl;
         std::cout << text_content << std::endl;
-        jinja::JinjaParser::parse(text_content);
+        jinja::Parser::parse(text_content);
     }
 
     test_render(

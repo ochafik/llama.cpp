@@ -4,6 +4,7 @@
 
   TODO:
   - Add loop.index, .first and friends https://jinja.palletsprojects.com/en/3.0.x/templates/#for
+  - Add list.insert, dict.get(x, default), |dict_update({...}), {% macro foo(args) %}...{% endmacro %}, |items
   - Add more tests
   - Add more functions
     - https://jinja.palletsprojects.com/en/3.0.x/templates/#builtin-filters
@@ -56,7 +57,7 @@ private:
 
   Value(const std::shared_ptr<ArrayType> & array) : array_(array) {}
   Value(const std::shared_ptr<ObjectType> & object) : object_(object) {}
-  Value(const std::shared_ptr<CallableType> & callable) : callable_(callable), object_(std::make_shared<ObjectType>()) {}
+  Value(const std::shared_ptr<CallableType> & callable) : object_(std::make_shared<ObjectType>()), callable_(callable) {}
 
   void dump(std::ostringstream & out, int indent = -1, int level = 0) const {
     auto print_indent = [&](int level) {
@@ -122,13 +123,13 @@ private:
 public:
   Value() {}
   Value(const bool& v) : primitive_(v) {}
-  Value(const int64_t& v) : primitive_(v) {}
+  Value(const int64_t & v) : primitive_(v) {}
   Value(const double& v) : primitive_(v) {}
-  Value(const nullptr_t& v) {}
-  Value(const std::string& v) : primitive_(v) {}
+  Value(const nullptr_t &) {}
+  Value(const std::string & v) : primitive_(v) {}
   Value(const char * v) : primitive_(std::string(v)) {}
 
-  Value(const json& v) {
+  Value(const json & v) {
     if (v.is_object()) {
       auto object = std::make_shared<ObjectType>();
       for (auto it = v.begin(); it != v.end(); ++it) {
@@ -399,9 +400,6 @@ public:
 
     virtual ~Expression() = default;
     virtual Value evaluate(const Value & context) const = 0;
-    virtual Value evaluateAsPipe(const Value & context, Value&) const{
-      throw std::runtime_error("This expression cannot be used as a pipe");
-    }
 };
 
 static void destructuring_assign(const std::vector<std::string> & var_names, Value & context, const Value& item) {
@@ -548,11 +546,10 @@ public:
     void render(std::ostringstream& oss, Value &) const override { oss << text; }
 };
 
-class VariableNode : public TemplateNode {
+class ExpressionNode : public TemplateNode {
     std::unique_ptr<Expression> expr;
 public:
-    VariableNode(std::unique_ptr<Expression> && e, std::vector<std::string> && f) 
-        : expr(std::move(e)) {}
+    ExpressionNode(std::unique_ptr<Expression> && e) : expr(std::move(e)) {}
     void render(std::ostringstream& oss, Value & context) const override {
       auto result = expr->evaluate(context);
       if (result.is_string()) {
@@ -592,10 +589,8 @@ class ForNode : public TemplateNode {
     bool recursive;
 public:
     ForNode(const std::vector<std::string> & vns, std::unique_ptr<Expression> && iter,
-      std::unique_ptr<Expression> && c,
-            std::unique_ptr<TemplateNode> && b, bool r)
-            : var_names(vns), condition(std::move(c)),
-            iterable(std::move(iter)), body(std::move(b)), recursive(r) {}
+      std::unique_ptr<Expression> && c, std::unique_ptr<TemplateNode> && b, bool r)
+            : var_names(vns), iterable(std::move(iter)), condition(std::move(c)), body(std::move(b)), recursive(r) {}
     void render(std::ostringstream& oss, Value & context) const override {
       auto iterable_value = iterable->evaluate(context);
       if (!iterable_value.is_array()) {
@@ -653,7 +648,7 @@ class SetNode : public TemplateNode {
 public:
     SetNode(const std::vector<std::string> & vns, std::unique_ptr<Expression> && v)
       : var_names(vns), value(std::move(v)) {}
-    void render(std::ostringstream& oss, Value & context) const override {
+    void render(std::ostringstream &, Value & context) const override {
         destructuring_assign(var_names, context, value->evaluate(context));
     }
 };
@@ -664,7 +659,7 @@ class NamespacedSetNode : public TemplateNode {
 public:
     NamespacedSetNode(const std::string& ns, const std::string& name, std::unique_ptr<Expression> && v)
       : ns(ns), name(name), value(std::move(v)) {}
-    void render(std::ostringstream& oss, Value & context) const override {
+    void render(std::ostringstream &, Value & context) const override {
         auto ns_value = context.get(ns);
         if (!ns_value.is_object()) throw std::runtime_error("Namespace '" + ns + "' is not an object");
         ns_value.set(name, this->value->evaluate(context));
@@ -734,7 +729,7 @@ class SliceExpr : public Expression {
 public:
     std::unique_ptr<Expression> start, end;
     SliceExpr(std::unique_ptr<Expression> && s, std::unique_ptr<Expression> && e) : start(std::move(s)), end(std::move(e)) {}
-    Value evaluate(const Value & context) const override {
+    Value evaluate(const Value &) const override {
         throw std::runtime_error("SliceExpr not implemented");
     }
 };
@@ -750,10 +745,10 @@ public:
         if (auto slice = dynamic_cast<SliceExpr*>(index.get())) {
           if (!target_value.is_array()) throw std::runtime_error("Subscripting non-array");
 
-          auto start = slice->start ? slice->start->evaluate(context).get<int>() : 0;
-          auto end = slice->end ? slice->end->evaluate(context).get<int>() : target_value.size();
+          auto start = slice->start ? slice->start->evaluate(context).get<size_t>() : 0;
+          auto end = slice->end ? slice->end->evaluate(context).get<size_t>() : target_value.size();
           auto result = Value::array();
-          for (int i = start; i < end; ++i) {
+          for (auto i = start; i < end; ++i) {
             result.push_back(target_value.at(i));
           }
           return result;
@@ -895,22 +890,6 @@ public:
         }
         return obj.call(context, vargs);
     }
-
-    Value evaluateAsPipe(const Value & context, Value& input) const override {
-        auto obj = object->evaluate(context);
-        if (obj.is_null()) {
-          throw std::runtime_error("Object is null, cannot be called");
-        }
-        if (!obj.is_callable()) {
-          throw std::runtime_error("Object is not callable: " + obj.dump(2));
-        }
-        Value::CallableArgs vargs;
-        vargs.push_back({"", input});
-        for (const auto& arg : args) {
-            vargs.push_back({arg.first, arg.second->evaluate(context)});
-        }
-        return obj.call(context, vargs);
-    }
 };
 
 class FilterExpr : public Expression {
@@ -947,14 +926,22 @@ public:
     }
 };
 
-std::string strip(const std::string & s) {
+static std::string strip(const std::string & s) {
   static std::regex trailing_spaces_regex("^\\s+|\\s+$");
   return std::regex_replace(s, trailing_spaces_regex, "");
 }
 
-class JinjaParser {
+class Parser {
 private:
     using CharIterator = std::string::const_iterator;
+
+    std::string template_str;
+    CharIterator start, end, it;
+      
+    Parser(const std::string& template_str) : template_str(template_str) {
+      start = it = this->template_str.begin();
+      end = this->template_str.end();
+    }
 
     bool consumeSpaces(SpaceHandling space_handling = SpaceHandling::Strip) {
       if (space_handling == SpaceHandling::Strip) {
@@ -1762,7 +1749,7 @@ private:
               }
               children.emplace_back(nonstd_make_unique<TextNode>(text));
           } else if (auto expr_token = dynamic_cast<ExpressionTemplateToken*>(token.get())) {
-              children.emplace_back(nonstd_make_unique<VariableNode>(std::move(expr_token->expr), std::vector<std::string>()));
+              children.emplace_back(nonstd_make_unique<ExpressionNode>(std::move(expr_token->expr)));
           } else if (auto set_token = dynamic_cast<SetTemplateToken*>(token.get())) {
               children.emplace_back(nonstd_make_unique<SetNode>(set_token->var_names, std::move(set_token->value)));
           } else if (auto namespaced_set_token = dynamic_cast<NamespacedSetTemplateToken*>(token.get())) {
@@ -1798,18 +1785,10 @@ private:
         }
     }
 
-    std::string template_str;
-    CharIterator start, end, it;
-      
-    JinjaParser(const std::string& template_str) : template_str(template_str) {
-      start = it = this->template_str.begin();
-      end = this->template_str.end();
-    }
-
 public:
 
     static std::unique_ptr<TemplateNode> parse(const std::string& template_str) {
-        JinjaParser parser(template_str);
+        Parser parser(template_str);
 
         auto tokens = parser.tokenize();
         TemplateTokenIterator begin = tokens.begin();
@@ -1819,7 +1798,7 @@ public:
     }
 };
 
-Value simple_function(const std::string & fn_name, const std::vector<std::string> & params, const std::function<Value(const Value &, const Value & args)> & fn) {
+static Value simple_function(const std::string & fn_name, const std::vector<std::string> & params, const std::function<Value(const Value &, const Value & args)> & fn) {
   std::map<std::string, size_t> named_positions;
   for (size_t i = 0, n = params.size(); i < n; i++) named_positions[params[i]] = i;
 
@@ -1858,21 +1837,21 @@ Value simple_function(const std::string & fn_name, const std::vector<std::string
 }
 
 Value Value::context(const Value & values) {
-  auto context = Value::object();
+  auto top_level_context = Value::object();
 
-  context.set("raise_exception", simple_function("raise_exception", { "message" }, [](const Value & context, const Value & args) -> Value {
+  top_level_context.set("raise_exception", simple_function("raise_exception", { "message" }, [](const Value &, const Value & args) -> Value {
     throw std::runtime_error(args.at("message").get<std::string>());
   }));
-  context.set("tojson", simple_function("tojson", { "value", "indent" }, [](const Value & context, const Value & args) {
+  top_level_context.set("tojson", simple_function("tojson", { "value", "indent" }, [](const Value &, const Value & args) {
     return Value(args.at("value").dump(args.get<int64_t>("indent", -1)));
   }));
-  context.set("trim", simple_function("trim", { "text" }, [](const Value & context, const Value & args) {
+  top_level_context.set("trim", simple_function("trim", { "text" }, [](const Value &, const Value & args) {
     return Value(strip(args.at("text").get<std::string>()));
   }));
-  context.set("count", simple_function("count", { "items" }, [](const Value & context, const Value & args) {
+  top_level_context.set("count", simple_function("count", { "items" }, [](const Value &, const Value & args) {
     return Value((int64_t) args.at("items").size());
   }));
-  context.set("join", simple_function("join", { "items", "d" }, [](const Value & context, const Value & args) {
+  top_level_context.set("join", simple_function("join", { "items", "d" }, [](const Value &, const Value & args) {
     auto do_join = [](const Value & items, const std::string & sep) {
       std::ostringstream oss;
       auto first = true;
@@ -1888,21 +1867,21 @@ Value Value::context(const Value & values) {
         auto & items = args.at("items");
         return do_join(items, sep);
     } else {
-      return simple_function("", {"items"}, [sep, do_join](const Value & context, const Value & args) {
+      return simple_function("", {"items"}, [sep, do_join](const Value &, const Value & args) {
         auto & items = args.at("items");
         if (!items || !items.is_array()) throw std::runtime_error("join expects an array for items, got: " + items.dump());
         return do_join(items, sep);
       });
     }
   }));
-  context.set("namespace", callable([=](const Value & context, const Value::CallableArgs & args) {
+  top_level_context.set("namespace", callable([=](const Value &, const Value::CallableArgs & args) {
     auto ns = Value::object();
     for (auto & arg : args) {
       ns.set(arg.first, arg.second);
     }
     return ns;
   }));
-  context.set("equalto", simple_function("equalto", { "expected", "actual" }, [](const Value & context, const Value & args) {
+  top_level_context.set("equalto", simple_function("equalto", { "expected", "actual" }, [](const Value &, const Value & args) {
       return Value(args.at("actual") == args.at("expected"));
   }));
   auto make_filter = [](const Value & filter, const Value & extra_args) -> Value {
@@ -1917,7 +1896,7 @@ Value Value::context(const Value & values) {
     });
   };
   // https://jinja.palletsprojects.com/en/3.0.x/templates/#jinja-filters.reject
-  context.set("reject", callable([=](const Value & context, const Value::CallableArgs & args) {
+  top_level_context.set("reject", callable([=](const Value & context, const Value::CallableArgs & args) {
     auto & items = args[0].second;
     auto filter_fn = context.get(args[1].second);
     if (!filter_fn) throw std::runtime_error("Function not found " + args[1].second.dump());
@@ -1939,7 +1918,7 @@ Value Value::context(const Value & values) {
     }
     return res;
   }));
-  context.set("range", callable([=](const Value & context, const Value::CallableArgs & args) {
+  top_level_context.set("range", callable([=](const Value &, const Value::CallableArgs & args) {
     int64_t start = 0;
     int64_t end = 0;
     int64_t step = 1;
@@ -1982,10 +1961,10 @@ Value Value::context(const Value & values) {
     auto keys = values.keys();
     for (size_t i = 0, n = keys.size(); i < n; i++) {
       auto & key = keys.at(i);
-      context.set(key, values.at(key));
+      top_level_context.set(key, values.at(key));
     }
   }
-  return context;
+  return top_level_context;
 }
 
 }  // namespace jinja

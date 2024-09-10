@@ -3070,7 +3070,13 @@ int main(int argc, char ** argv) {
             res_error(res, format_error_response("This server does not support chat completions. Start it without `--embeddings`", ERROR_TYPE_NOT_SUPPORTED));
             return;
         }
-        json data = oaicompat_completion_params_parse(ctx_server.model, json::parse(req.body), params.chat_template, ctx_server.params.tools_template, ctx_server.params.schema_template);
+        json data = oaicompat_completion_params_parse(
+            ctx_server.model,
+            json::parse(req.body),
+            params.chat_template,
+            ctx_server.chat_handler,
+            ctx_server.params.tools_template,
+            ctx_server.params.schema_template);
 
         const int id_task = ctx_server.queue_tasks.get_new_id();
 
@@ -3430,7 +3436,7 @@ int main(int argc, char ** argv) {
         LOG_INFO("model loaded", {});
 
         auto model_context = ChatHandler::build_model_context(ctx_server.model);
-        ctx_server.chat_handler = std::move(ChatHandler::find(params.chat_handler_name, model_context));
+        ctx_server.chat_handler = ChatHandler::find(params.chat_handler_name, model_context);
 
         // if a custom chat template is not supplied, we will use the one that comes with the model (if any)
         if (params.chat_template.empty()) {
@@ -3442,9 +3448,13 @@ int main(int argc, char ** argv) {
 
         // print sample chat example to make it clear which template is used
         if (ctx_server.chat_handler) {
+            auto context = jinja::Value(json({
+                {"messages", LLAMA_CHAT_EXAMPLE}
+            }));
+            ctx_server.chat_handler->handle(context);
             LOG_INFO("chat template", {
                 {"chat_handler_name", ctx_server.chat_handler->name()},
-                {"chat_example", ctx_server.chat_handler->format_chat(LLAMA_CHAT_EXAMPLE, json(), json())},
+                {"chat_example", context.at("prompt").get<std::string>()},
                 {"built_in",     params.chat_template.empty()},
             });
         } else {

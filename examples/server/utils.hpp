@@ -8,6 +8,7 @@
 #include "json.hpp"
 #include "json-schema-to-grammar.h"
 #include "chat_handler.hpp"
+#include "jinja.hpp"
 
 #include <string>
 #include <vector>
@@ -370,12 +371,33 @@ static json oaicompat_completion_params_parse(
     const struct llama_model * model,
     const json & body, /* openai api json semantics */
     const std::string & chat_template,
+    const std::unique_ptr<ChatHandler> & chat_handler,
     const std::string & tools_template,
     const std::string & schema_template) {
     json llama_params;
 
     llama_params["__oaicompat"] = true;
 
+    if (chat_handler) {
+        // auto context = jinja::Value::context(body);
+        auto context = jinja::Value(json({
+            {"model", json_value(body, "model", json())},
+            {"messages", json_value(body, "messages", json())},
+            {"tools", json_value(body, "tools", json())},
+            {"tool_choice", json_value(body, "tool_choice", std::string("auto"))},
+            {"parallel_tool_calls", json_value(body, "parallel_tool_calls", false)},
+            {"response_format", json_value(body, "response_format", json())},
+            {"grammar", json_value(body, "grammar", std::string())},
+            {"stop", json_value(body, "stop", json())},
+        }));
+        chat_handler->handle(context);
+        llama_params["prompt"] = context.at("prompt").get<std::string>();
+        if (context.contains("grammar")) llama_params["grammar"] = context.get<std::string>("grammar", "");
+        
+        auto stop = context.get<json>("stop", json());
+        llama_params["stop"] = stop.is_string() ? json::array({stop}) : stop.is_array() ? stop : json::array();
+    } else {
+    
     // Handle "stop" field
     if (body.contains("stop") && body.at("stop").is_string()) {
         llama_params["stop"] = json::array({body.at("stop").get<std::string>()});
@@ -432,6 +454,8 @@ static json oaicompat_completion_params_parse(
     auto grammar = json_value(llama_params, "grammar", std::string());
     LOG_INFO("prompt", {{"prompt", prompt}, {"grammar", grammar}, {"extra_system_message", extra_system_message}});
     llama_params["prompt"] = prompt;
+
+    }
 
     // Handle "n" field
     int n_choices = json_value(body, "n", 1);
