@@ -4,7 +4,7 @@
 
   TODO:
   - Add loop.index, .first and friends https://jinja.palletsprojects.com/en/3.0.x/templates/#for
-  - Add list.insert, dict.get(x, default), |dict_update({...}), {% macro foo(args) %}...{% endmacro %}
+  - Add |dict_update({...}), {% macro foo(args) %}...{% endmacro %}
   - Add more tests
   - Add more functions
     - https://jinja.palletsprojects.com/en/3.0.x/templates/#builtin-filters
@@ -177,6 +177,10 @@ public:
   }
   static Value context(const Value & values = {});
 
+  void insert(size_t index, const Value& v) {
+    if (!array_) throw std::runtime_error("Value is not an array: " + dump());
+    array_->insert(array_->begin() + index, v);
+  }
   void push_back(const Value& v) {
     if (!array_) throw std::runtime_error("Value is not an array: " + dump());
     array_->push_back(v);
@@ -274,10 +278,8 @@ public:
       }
       return false;
     } else if (object_) {
-      for (const auto& item : *object_) {
-        if (item.second == value) return true;
-      }
-      return false;
+      if (!value.is_hashable()) throw std::runtime_error("Unashable type: " + value.dump());
+      return object_->find(value.primitive_) != object_->end();
     } else {
       throw std::runtime_error("contains can only be called on arrays and objects: " + dump());
     }
@@ -868,10 +870,35 @@ public:
     const std::string& get_method() const { return method; }
     Value evaluate(const Value & context) const override {
         auto obj = object->evaluate(context);
-        if (method == "append" && obj.is_array()) {
-            if (args.size() != 1 || !args[0].first.empty()) throw std::runtime_error("append method must have exactly one unnamed argument");
-            obj.push_back(args[0].second->evaluate(context));
-            return Value();
+        if (obj.is_array()) {
+          if (method == "append") {
+              if (args.size() != 1 || !args[0].first.empty()) throw std::runtime_error("append method must have exactly one unnamed argument");
+              obj.push_back(args[0].second->evaluate(context));
+              return Value();
+          } else if (method == "insert") {
+              if (args.size() != 2 || !args[0].first.empty() || args[1].first.empty()) throw std::runtime_error("insert method must have exactly two arguments, the first one unnamed");
+              auto index = args[0].second->evaluate(context).get<int>();
+              if (index < 0 || index > obj.size()) throw std::runtime_error("Index out of range for insert method");
+              obj.insert(index, args[1].second->evaluate(context));
+              return Value();
+          }
+        } else if (obj.is_object()) {
+          if (method == "items") {
+            if (args.size() != 0) throw std::runtime_error("items method must have no arguments");
+            auto result = Value::array();
+            for (const auto& key : obj.keys()) {
+              result.push_back(Value::array({key, obj.at(key)}));
+            }
+            return result;
+          } else if (method == "get") {
+            if (args.size() != 1 && args.size() != 2) throw std::runtime_error("get method must have one or two arguments");
+            auto key = args[0].second->evaluate(context);
+            if (args.size() == 1) {
+              return obj.contains(key) ? obj.at(key) : Value();
+            } else {
+              return obj.contains(key) ? obj.at(key) : args[1].second->evaluate(context);
+            }
+          }
         }
         throw std::runtime_error("Unknown method: " + method);
     }

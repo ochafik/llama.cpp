@@ -82,8 +82,9 @@ inline std::string read_file(const std::string &path) {
     cmake -B buildDebug -DCMAKE_BUILD_TYPE=Debug && cmake --build buildDebug -t test-jinja -j && ./buildDebug/bin/test-jinja
 */
 int main() {
-    test_render(
-        R"({{ None | items | tojson }}; {{ {1: 2} | items | tojson }})", {}, "[]; [[1, 2]]");
+    test_render(R"({{ None | items | tojson }}; {{ {1: 2} | items | tojson }})", {}, "[]; [[1, 2]]");
+    test_render(R"({{ {1: 2}.items() }})", {}, "[[1, 2]]");
+    test_render(R"({{ {1: 2}.get(1) }}; {{ {}.get(1) }}; {{ {}.get(1, 10) }})", {}, "2; ; 10");
     test_render(
         R"(
             {%- for x in [1, 1.2, "a", true, True, false, False, None, [], [1], [1, 2], {}, {"a": 1}, {1: "b"}] -%}
