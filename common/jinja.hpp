@@ -193,7 +193,9 @@ public:
       return array_->at(key.get<int>());
     } else if (object_) {
       if (!key.is_hashable()) throw std::runtime_error("Unashable type: " + dump());
-      return object_->at(key.primitive_);
+      auto it = object_->find(key.primitive_);
+      if (it == object_->end()) return Value();
+      return it->second;
     }
     throw std::runtime_error("Value is not an array or object: " + dump());
   }
@@ -378,9 +380,17 @@ public:
       else
         return -get<double>();
   }
+  std::string to_str() const {
+    if (is_string()) return get<std::string>();
+    if (is_number_integer()) return std::to_string(get<int64_t>());
+    if (is_number_float()) return std::to_string(get<double>());
+    if (is_boolean()) return get<bool>() ? "True" : "False";
+    if (is_null()) return "None";
+    return dump();
+  }
   Value operator+(const Value& rhs) {
       if (is_string() || rhs.is_string())
-        return get<std::string>() + rhs.get<std::string>();
+        return to_str() + rhs.to_str();
       else if (is_number_integer() && rhs.is_number_integer())
         return get<int64_t>() + rhs.get<int64_t>();
       else
@@ -884,17 +894,7 @@ public:
             }
             throw std::runtime_error("Trying to access property '" +  index_value.dump() + "' on null!");
           }
-          if (target_value.is_array()) {
-              return target_value.at(index_value.get<int>());
-          } else if (target_value.is_object()) {
-              auto key = index_value.get<std::string>();
-              if (!target_value.contains(key)) {
-                  throw std::runtime_error("'dict object' has no attribute '" + key + "'");
-              }
-              return target_value.at(key);
-          } else {
-              throw std::runtime_error("Subscripting non-array or non-object");
-          }
+          return target_value.get(index_value);
         }
     }
 };
@@ -953,6 +953,14 @@ public:
           return Value(op == Op::Is ? value : !value);
         }
 
+        if (op == Op::And) {
+          if (!l) return Value(false);
+          return !!right->evaluate(context);
+        } else if (op == Op::Or) {
+          if (l) return Value(true);
+          return !!right->evaluate(context);
+        }
+
         auto r = right->evaluate(context);
         switch (op) {
             case Op::StrConcat: return Value(l.get<std::string>() + r.get<std::string>());
@@ -969,8 +977,6 @@ public:
             case Op::Gt:        return Value(l > r);
             case Op::Le:        return Value(l <= r);
             case Op::Ge:        return Value(l >= r);
-            case Op::And:       return Value(l && r);
-            case Op::Or:        return Value(l || r);
             case Op::In:        return Value(r.is_array() && r.contains(l));
             default:            break;
         }
@@ -2058,7 +2064,8 @@ Value Value::context(const Value & values) {
     return items;
   }));
   top_level_context.set("trim", simple_function("trim", { "text" }, [](const Value &, const Value & args) {
-    return Value(strip(args.at("text").get<std::string>()));
+    auto & text = args.at("text");
+    return text.is_null() ? text : Value(strip(text.get<std::string>()));
   }));
   auto escape = simple_function("escape", { "text" }, [](const Value &, const Value & args) {
     return Value(html_escape(args.at("text").get<std::string>()));
