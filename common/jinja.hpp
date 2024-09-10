@@ -13,9 +13,7 @@
       {%- macro get_param_type(param) -%}
         {%- set param_type = "any" -%}
 
-    - list
     - map(attribute="type")
-    - unique
   - Add |dict_update({...})
   - Add {%- if tool.parameters.properties | length == 0 %}
   - Add `{% raw %}{{ broken }{% endraw %}` https://jbmoelker.github.io/jinja-compat-tests/tags/raw/
@@ -36,6 +34,7 @@
 #include <sstream>
 #include <functional>
 #include <unordered_map>
+#include <unordered_set>
 #include <json.hpp>
 
 using json = nlohmann::ordered_json;
@@ -126,6 +125,8 @@ private:
       out << "}";
     } else if (callable_) {
       throw std::runtime_error("Cannot dump callable to JSON");
+    } else if (is_boolean()) {
+      out << (*this ? "True" : "False");
     } else {
       out << primitive_.dump();
     }
@@ -438,6 +439,24 @@ public:
     return get<int64_t>() % rhs.get<int64_t>();
   }
 };
+
+} // namespace jinja
+
+namespace std {
+
+// hash specialization for Value
+template <>
+struct hash<jinja::Value> {
+  size_t operator()(const jinja::Value & v) const {
+    if (!v.is_hashable())
+      throw std::runtime_error("Unsupported type for hashing: " + v.dump());
+    return std::hash<json>()(v.get<json>());
+  }
+};
+
+} // namespace std
+
+namespace jinja {
 
 class Expression {
 public:
@@ -2172,6 +2191,24 @@ Value Value::context(const Value & values) {
   top_level_context.set("length", simple_function("length", { "items" }, [](const Value &, const Value & args) -> Value {
       return (int64_t) args.at("items").size();
   }));
+  top_level_context.set("list", simple_function("list", { "items" }, [](const Value &, const Value & args) -> Value {
+      auto items = args.at("items");
+      if (!items.is_array()) throw std::runtime_error("object is not iterable");
+      return items;
+  }));
+  top_level_context.set("unique", simple_function("unique", { "items" }, [](const Value &, const Value & args) -> Value {
+      auto items = args.at("items");
+      if (!items.is_array()) throw std::runtime_error("object is not iterable");
+      std::unordered_set<Value> seen;
+      auto result = Value::array();
+      for (size_t i = 0, n = items.size(); i < n; i++) {
+        auto pair = seen.insert(items.at(i));
+        if (pair.second) {
+          result.push_back(items.at(i));
+        }
+      }
+      return result;
+  }));
   auto make_filter = [](const Value & filter, const Value & extra_args) -> Value {
     return simple_function("", { "value" }, [=](const Value & context, const Value & args) {
       auto value = args.at("value");
@@ -2199,7 +2236,7 @@ Value Value::context(const Value & values) {
     for (size_t i = 0, n = items.size(); i < n; i++) {
       auto & item = items.at(i);
       auto pred_res = filter.call(context, { { "", item } });
-      std::cerr << "Predicate result for " << item.dump() << ": " << (pred_res ? "true" : "false") << std::endl;
+      // std::cerr << "Predicate result for " << item.dump() << ": " << (pred_res ? "true" : "false") << std::endl;
       if (!pred_res) {
         res.push_back(item);
       }

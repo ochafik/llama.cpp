@@ -80,6 +80,8 @@ inline std::string read_file(const std::string &path) {
     cmake -B buildDebug -DCMAKE_BUILD_TYPE=Debug && cmake --build buildDebug -t test-jinja -j && ./buildDebug/bin/test-jinja
 */
 int main() {
+     test_render("{{ [1, False, null, True, 2, '3', 1, '3', False, null, True] | unique }}", {},
+        "[1, False, null, True, 2, \"3\"]");
      test_render("{{ range(5) | length % 2 }}", {}, "1");
      test_render("{{ range(5) | length % 2 == 1 }},{{ [] | length > 0 }}", {}, "True,False");
      test_render(
@@ -164,7 +166,7 @@ int main() {
                 {{- x | tojson -}},
             {%- endfor -%}
         )", {},
-        R"(1,1.2,"a",true,true,false,false,null,[],[1],[1, 2],{},{"a": 1},{"1": "b"},)");
+        R"(1,1.2,"a",True,True,False,False,null,[],[1],[1, 2],{},{"a": 1},{"1": "b"},)");
     test_render(
         R"(
             {%- set n = namespace(value=1, title='') -%}
