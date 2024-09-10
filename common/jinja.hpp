@@ -1538,6 +1538,7 @@ private:
                 std::vector<std::unique_ptr<Expression>> parts;
                 parts.emplace_back(std::move(left));
                 parts.emplace_back(std::move(expr));
+                return nonstd_make_unique<FilterExpr>(std::move(parts));
             }
         }
         return left;
