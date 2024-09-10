@@ -3,7 +3,6 @@
   As it turns out, Llama 3.1's template is relatively involved, so we need a proper template engine.
 
   TODO:
-  - Add loop.index, .first, .previtem and friends https://jinja.palletsprojects.com/en/3.0.x/templates/#for
   - Add |dict_update({...})
   - Add {%- if tool.parameters.properties | length == 0 %}
   - Add more tests
@@ -159,8 +158,9 @@ public:
   }
 
   size_t size() const {
-    if (!is_array()) throw std::runtime_error("Value is not an array: " + dump());
-    return array_->size();
+    if (is_object()) return object_->size();
+    if (is_array()) return array_->size();
+    throw std::runtime_error("Value is not an array or object: " + dump());
   }
 
   static Value array(const std::vector<Value> values = {}) {
@@ -179,11 +179,13 @@ public:
   static Value context(const Value & values = {});
 
   void insert(size_t index, const Value& v) {
-    if (!array_) throw std::runtime_error("Value is not an array: " + dump());
+    if (!array_)
+      throw std::runtime_error("Value is not an array: " + dump());
     array_->insert(array_->begin() + index, v);
   }
   void push_back(const Value& v) {
-    if (!array_) throw std::runtime_error("Value is not an array: " + dump());
+    if (!array_)
+      throw std::runtime_error("Value is not an array: " + dump());
     array_->push_back(v);
   }
 
@@ -237,6 +239,13 @@ public:
     if (is_array()) return !empty();
     return true;
   } 
+
+  bool operator<(const Value & other) const {
+    if (is_null()) throw std::runtime_error("Undefined value or reference");
+    if (is_number() && other.is_number()) return get<double>() < other.get<double>();
+    if (is_string() && other.is_string()) return get<std::string>() < other.get<std::string>();
+    throw std::runtime_error("Cannot compare values: " + dump() + " < " + other.dump());
+  }
 
   bool operator==(const Value & other) const {
     if (callable_ || other.callable_) {
@@ -606,12 +615,15 @@ class ForNode : public TemplateNode {
     std::unique_ptr<Expression> iterable;
     std::unique_ptr<Expression> condition;
     std::unique_ptr<TemplateNode> body;
+    std::unique_ptr<TemplateNode> else_body;
     bool recursive;
 public:
     ForNode(const std::vector<std::string> & vns, std::unique_ptr<Expression> && iter,
-      std::unique_ptr<Expression> && c, std::unique_ptr<TemplateNode> && b, bool r)
-            : var_names(vns), iterable(std::move(iter)), condition(std::move(c)), body(std::move(b)), recursive(r) {}
+      std::unique_ptr<Expression> && c, std::unique_ptr<TemplateNode> && b, bool r, std::unique_ptr<TemplateNode> && eb)
+            : var_names(vns), iterable(std::move(iter)), condition(std::move(c)), body(std::move(b)), recursive(r), else_body(std::move(eb)) {}
     void render(std::ostringstream& oss, Value & context) const override {
+      // https://jinja.palletsprojects.com/en/3.0.x/templates/#for
+
       auto iterable_value = iterable->evaluate(context);
       if (!iterable_value.is_array()) {
         throw std::runtime_error("For loop iterable must be iterable");
@@ -622,23 +634,67 @@ public:
       for (const auto& var_name : var_names) {
           original_vars.set(var_name, context.contains(var_name) ? context.at(var_name) : Value());
       }
+      if (original_vars.contains("loop")) {
+          original_vars.set("loop", context.at("loop"));
+      }
 
-      auto loop_iteration = [&](const Value& item) {
-          destructuring_assign(var_names, context, item);
-          if (!condition || condition->evaluate(context)) {
-            body->render(oss, context);
-          }
-      };
+      Value::CallableType loop_function;
+
       std::function<void(const Value&)> visit = [&](const Value& iter) {
+          auto filtered_items = Value::array();
           for (size_t i = 0, n = iter.size(); i < n; ++i) {
-              auto & item = iter.at(i);
-              if (item.is_array() && recursive) {
-                  visit(item);
-              } else {
-                  loop_iteration(item);
+              auto item = iter.at(i);
+              destructuring_assign(var_names, context, item);
+              if (!condition || condition->evaluate(context)) {
+                filtered_items.push_back(item);
+              }
+          }
+          if (filtered_items.empty()) {
+            if (else_body) {
+              else_body->render(oss, context);
+            }
+          } else {
+              auto loop = recursive ? Value::callable(loop_function) : Value::object();
+              loop.set("length", (int64_t) filtered_items.size());
+
+              size_t cycle_index = 0;
+              loop.set("cycle", Value::callable([&](const Value & context, const Value::CallableArgs & args) {
+                  if (args.empty()) {
+                      throw std::runtime_error("cycle() expects at least 1 positional argument");
+                  }
+                  auto item = args[cycle_index].second;
+                  cycle_index = (cycle_index + 1) % args.size();
+                  return item;
+              }));
+              context.set("loop", loop);
+              for (size_t i = 0, n = filtered_items.size(); i < n; ++i) {
+                  auto & item = filtered_items.at(i);
+                  destructuring_assign(var_names, context, item);
+                  loop.set("index", (int64_t) i + 1);
+                  loop.set("index0", (int64_t) i);
+                  loop.set("revindex", (int64_t) (n - i));
+                  loop.set("revindex0", (int64_t) (n - i - 1));
+                  loop.set("length", (int64_t) n);
+                  loop.set("first", i == 0);
+                  loop.set("last", i == n - 1);
+                  loop.set("previtem", i > 0 ? filtered_items.at(i - 1) : Value());
+                  loop.set("nextitem", i < n - 1 ? filtered_items.at(i + 1) : Value());
+                  body->render(oss, context);
               }
           }
       };
+
+      if (recursive) {
+        loop_function = [&](const Value & context, const Value::CallableArgs & args) {
+            if (args.size() != 1 || !args[0].first.empty() || !args[0].second.is_array()) {
+                throw std::runtime_error("loop() expects exactly 1 positional iterable argument");
+            }
+            auto & items = args[0].second;
+            visit(items);
+            return Value();
+        };
+      }
+
       visit(iterable_value);
       
       for (const auto& var_name : var_names) {
@@ -961,6 +1017,16 @@ public:
             } else {
               return obj.contains(key) ? obj.at(key) : args[1].second->evaluate(context);
             }
+          } else if (obj.contains(method)) {
+            auto callable = obj.at(method);
+            if (!callable.is_callable()) {
+              throw std::runtime_error("Property '" + method + "' is not callable");
+            }
+            Value::CallableArgs vargs;
+            for (const auto& arg : args) {
+                vargs.push_back({arg.first, arg.second->evaluate(context)});
+            }
+            return callable.call(context, vargs);
           }
         }
         throw std::runtime_error("Unknown method: " + method);
@@ -1241,9 +1307,11 @@ private:
       * - SubScript = ("[" Expression "]" | "." identifier CallParams? )+
       * - CallParams = "(" ((identifier "=")? Expression ("," (identifier "=")? Expression)*)? ")"
       */
-    std::unique_ptr<Expression> parseExpression() {
+    std::unique_ptr<Expression> parseExpression(bool allow_if_expr = true) {
         auto left = parseLogicalOr();
         if (it == end) return left;
+
+        if (!allow_if_expr) return left;
 
         static std::regex if_tok(R"(if\b)");
         if (consumeToken(if_tok).empty()) {
@@ -1750,7 +1818,7 @@ private:
               auto varnames = parseVarNames();
               static std::regex in_tok(R"(in\b)");
               if (consumeToken(in_tok).empty()) throw std::runtime_error("Expected 'in' keyword in for block");
-              auto iterable = parseExpression();
+              auto iterable = parseExpression(/* allow_if_expr = */ false);
               if (!iterable) throw std::runtime_error("Expected iterable in for block");
 
               std::unique_ptr<Expression> condition;
@@ -1849,10 +1917,14 @@ private:
               children.emplace_back(nonstd_make_unique<IfNode>(std::move(cascade)));
           } else if (auto for_token = dynamic_cast<ForTemplateToken*>(token.get())) {
               auto body = parseTemplate(begin, it, end);
+              auto else_body = std::unique_ptr<TemplateNode>();
+              if (it != end && (*it)->type == TemplateToken::Type::Else) {
+                else_body = parseTemplate(begin, ++it, end);
+              }
               if (it == end || (*(it++))->type != TemplateToken::Type::EndFor) {
                   throw unterminated(**start);
               }
-              children.emplace_back(nonstd_make_unique<ForNode>(for_token->var_names, std::move(for_token->iterable), std::move(for_token->condition), std::move(body), for_token->recursive));
+              children.emplace_back(nonstd_make_unique<ForNode>(for_token->var_names, std::move(for_token->iterable), std::move(for_token->condition), std::move(body), for_token->recursive, std::move(else_body)));
           } else if (auto text_token = dynamic_cast<TextTemplateToken*>(token.get())) {
               SpaceHandling pre_space = (it - 1) != begin ? (*(it - 2))->post_space : SpaceHandling::Keep;
               SpaceHandling post_space = it != end ? (*it)->pre_space : SpaceHandling::Keep;
@@ -1994,6 +2066,17 @@ Value Value::context(const Value & values) {
   }));
   top_level_context.set("count", simple_function("count", { "items" }, [](const Value &, const Value & args) {
     return Value((int64_t) args.at("items").size());
+  }));
+  top_level_context.set("dictsort", simple_function("dictsort", { "value" }, [](const Value &, const Value & args) {
+    if (args.size() != 1) throw std::runtime_error("dictsort expects exactly 1 argument (TODO: fix implementation)");
+    auto & value = args.at("value");
+    auto keys = value.keys();
+    std::sort(keys.begin(), keys.end());
+    auto res = Value::array();
+    for (auto & key : keys) {
+      res.push_back(Value::array({key, value.at(key)}));
+    }
+    return res;
   }));
   top_level_context.set("join", simple_function("join", { "items", "d" }, [](const Value &, const Value & args) {
     auto do_join = [](const Value & items, const std::string & sep) {

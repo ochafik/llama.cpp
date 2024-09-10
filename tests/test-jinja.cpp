@@ -5,8 +5,6 @@
 #include <string>
 #include <json.hpp>
 
-// using json = nlohmann::json;
-
 void test_render(const std::string & template_str, const json & bindings, const std::string & expected, const json & expected_context = {}) {
     std::cout << "Testing: " << template_str << std::endl;
     std::cout << std::flush;
@@ -84,6 +82,22 @@ inline std::string read_file(const std::string &path) {
 int main() {
     test_render(
         R"(
+            {%- for i in range(5) -%}
+                ({{ i }}, {{ loop.cycle('odd', 'even') }}),
+            {%- endfor -%}
+        )", {}, "(0, odd),(1, even),(2, odd),(3, even),(4, odd),");
+    
+    test_render(
+        "{%- for i in range(5) if i % 2 == 0 -%}\n"
+        "{{ i }}, first={{ loop.first }}, last={{ loop.last }}, index={{ loop.index }}, index0={{ loop.index0 }}, revindex={{ loop.revindex }}, revindex0={{ loop.revindex0 }}, prev={{ loop.previtem }}, next={{ loop.nextitem }},\n"
+        "{% endfor -%}",
+        {},
+        "0, first=True, last=False, index=1, index0=0, revindex=3, revindex0=2, prev=, next=2,\n"
+        "2, first=False, last=False, index=2, index0=1, revindex=2, revindex0=1, prev=0, next=4,\n"
+        "4, first=False, last=True, index=3, index0=2, revindex=1, revindex0=0, prev=2, next=,\n");
+    
+    test_render(
+        R"(
             {%- set res = [] -%}
             {%- for c in ["<", ">", "&", '"'] -%}
                 {%- set _ = res.append(c | e) -%}
@@ -122,6 +136,7 @@ int main() {
             {{- foo() }} {{ foo() -}})",
         {}, R"([1] [1])");
     test_render(R"({{ None | items | tojson }}; {{ {1: 2} | items | tojson }})", {}, "[]; [[1, 2]]");
+    test_render(R"({{ {1: 2, 3: 4, 5: 7} | dictsort | tojson }})", {}, "[[1, 2], [3, 4], [5, 7]]");
     test_render(R"({{ {1: 2}.items() }})", {}, "[[1, 2]]");
     test_render(R"({{ {1: 2}.get(1) }}; {{ {}.get(1) }}; {{ {}.get(1, 10) }})", {}, "2; ; 10");
     test_render(
