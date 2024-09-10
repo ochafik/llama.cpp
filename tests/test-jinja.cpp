@@ -80,6 +80,7 @@ inline std::string read_file(const std::string &path) {
     cmake -B buildDebug -DCMAKE_BUILD_TYPE=Debug && cmake --build buildDebug -t test-jinja -j && ./buildDebug/bin/test-jinja
 */
 int main() {
+     test_render("{{ [1, 2, 3] | join(', ') }}", {}, "1, 2, 3");
      test_render("{{ [1, False, null, True, 2, '3', 1, '3', False, null, True] | unique }}", {},
         "[1, False, null, True, 2, \"3\"]");
      test_render("{{ range(5) | length % 2 }}", {}, "1");

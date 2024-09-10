@@ -2165,6 +2165,7 @@ Value Value::context(const Value & values) {
         if (first) first = false;
         else oss << sep;
         oss << items.at(i).get<std::string>();
+        oss << items.at(i).to_str();
       }
       return Value(oss.str());
     };
