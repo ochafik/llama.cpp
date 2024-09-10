@@ -80,6 +80,15 @@ inline std::string read_file(const std::string &path) {
     cmake -B buildDebug -DCMAKE_BUILD_TYPE=Debug && cmake --build buildDebug -t test-jinja -j && ./buildDebug/bin/test-jinja
 */
 int main() {
+     test_render("{{ range(5) | length % 2 }}", {}, "1");
+     test_render("{{ range(5) | length % 2 == 1 }},{{ [] | length > 0 }}", {}, "True,False");
+     test_render(
+        R"(
+            {%- for x, y in [("a", "b"), ("c", "d")] -%}
+                {{- x }},{{ y -}};
+            {%- endfor -%}
+        )", {}, "a,b;c,d;");
+    test_render("{{ 1 is not string }}", {}, "True");
     test_render("{{ 'ab' * 3 }}", {}, "ababab");
     test_render("{{ [1, 2, 3][-1] }}", {}, "3");
     test_render(

@@ -5,17 +5,13 @@
 
   TODO:
   - Functionary 3.2:
-    - `list | length > 0`
     - selectattr("type", "defined")
       {{ users|selectattr("is_active") }}
       {{ users|selectattr("email", "none") }}
       {{ data | selectattr('name', '==', 'Jinja') | list | last }}
-    - `{%- for field, field_name in [("maximum", "Maximum"), ("minimum", "Minimum"), ("maxLength", "Maximum length"), ("minLength", "Minimum length")] -%}`
-    - `x[-1]`
     - Macro nested set scope = global?
       {%- macro get_param_type(param) -%}
         {%- set param_type = "any" -%}
-    - `x is not string`
 
     - list
     - map(attribute="type")
@@ -338,7 +334,7 @@ public:
   template <typename T>
   T get() const {
     if (is_primitive()) return primitive_.get<T>();
-    throw std::runtime_error("Get not defined for this value type");
+    throw std::runtime_error("get<T> not defined for this value type: " + dump());
   }
 
   template <>
@@ -350,7 +346,7 @@ public:
       }
       return res;
     }
-    throw std::runtime_error("Get not defined for this value type");
+    throw std::runtime_error("get<string> not defined for this value type: " + dump());
   }
   std::string dump(int indent=-1) const {
     // Note: get<json>().dump(indent) would work but [1, 2] would be dumped to [1,2] instead of [1, 2]
@@ -388,7 +384,7 @@ public:
       }
       return res;
     }
-    throw std::runtime_error("Get not defined for this value type");
+    throw std::runtime_error("get<json> not defined for this value type: " + dump());
   }
 
   Value operator-() const {
@@ -405,7 +401,7 @@ public:
     if (is_null()) return "None";
     return dump();
   }
-  Value operator+(const Value& rhs) {
+  Value operator+(const Value& rhs) const {
       if (is_string() || rhs.is_string())
         return to_str() + rhs.to_str();
       else if (is_number_integer() && rhs.is_number_integer())
@@ -413,13 +409,13 @@ public:
       else
         return get<double>() + rhs.get<double>();
   }
-  Value operator-(const Value& rhs) {
+  Value operator-(const Value& rhs) const {
       if (is_number_integer() && rhs.is_number_integer())
         return get<int64_t>() - rhs.get<int64_t>();
       else
         return get<double>() - rhs.get<double>();
   }
-  Value operator*(const Value& rhs) {
+  Value operator*(const Value& rhs) const {
       if (is_string() && rhs.is_number_integer()) {
         std::ostringstream out;
         for (int i = 0, n = rhs.get<int64_t>(); i < n; ++i) {
@@ -432,13 +428,13 @@ public:
       else
         return get<double>() * rhs.get<double>();
   }
-  Value operator/(const Value& rhs) {
+  Value operator/(const Value& rhs) const {
       if (is_number_integer() && rhs.is_number_integer())
         return get<int64_t>() / rhs.get<int64_t>();
       else
         return get<double>() / rhs.get<double>();
   }
-  Value operator%(const Value& rhs) {
+  Value operator%(const Value& rhs) const {
     return get<int64_t>() % rhs.get<int64_t>();
   }
 };
@@ -955,56 +951,67 @@ public:
     Value evaluate(const Value & context) const override {
         auto l = left->evaluate(context);
         
-        if (op == Op::Is || op == Op::IsNot) {
-          auto t = dynamic_cast<VariableExpr*>(right.get());
-          if (!t) throw std::runtime_error("Right side of 'is' operator must be a variable");
+        auto do_eval = [&](const Value & l) -> Value {
+          if (op == Op::Is || op == Op::IsNot) {
+            auto t = dynamic_cast<VariableExpr*>(right.get());
+            if (!t) throw std::runtime_error("Right side of 'is' operator must be a variable");
 
-          auto eval = [&]() {
-            const auto & name = t->get_name();
-            if (name == "none") return l.is_null();
-            if (name == "boolean") return l.is_boolean();
-            if (name == "integer") return l.is_number_integer();
-            if (name == "float") return l.is_number_float();
-            if (name == "number") return l.is_number();
-            if (name == "string") return l.is_string();
-            if (name == "mapping") return l.is_object();
-            if (name == "iterable") return l.is_array();
-            if (name == "sequence") return l.is_array();
-            if (name == "defined") return !l.is_null();
-            throw std::runtime_error("Unknown type for 'is' operator: " + name);
-          };
-          auto value = eval();
-          return Value(op == Op::Is ? value : !value);
-        }
+            auto eval = [&]() {
+              const auto & name = t->get_name();
+              if (name == "none") return l.is_null();
+              if (name == "boolean") return l.is_boolean();
+              if (name == "integer") return l.is_number_integer();
+              if (name == "float") return l.is_number_float();
+              if (name == "number") return l.is_number();
+              if (name == "string") return l.is_string();
+              if (name == "mapping") return l.is_object();
+              if (name == "iterable") return l.is_array();
+              if (name == "sequence") return l.is_array();
+              if (name == "defined") return !l.is_null();
+              throw std::runtime_error("Unknown type for 'is' operator: " + name);
+            };
+            auto value = eval();
+            return Value(op == Op::Is ? value : !value);
+          }
 
-        if (op == Op::And) {
-          if (!l) return Value(false);
-          return !!right->evaluate(context);
-        } else if (op == Op::Or) {
-          if (l) return Value(true);
-          return !!right->evaluate(context);
-        }
+          if (op == Op::And) {
+            if (!l) return Value(false);
+            return !!right->evaluate(context);
+          } else if (op == Op::Or) {
+            if (l) return Value(true);
+            return !!right->evaluate(context);
+          }
 
-        auto r = right->evaluate(context);
-        switch (op) {
-            case Op::StrConcat: return Value(l.get<std::string>() + r.get<std::string>());
-            case Op::Add:       return l + r;
-            case Op::Sub:       return l - r;
-            case Op::Mul:       return l * r;
-            case Op::Div:       return l / r;
-            case Op::MulMul:    return Value(std::pow(l.get<double>(), r.get<double>()));
-            case Op::DivDiv:    return Value(l.get<int64_t>() / r.get<int64_t>());
-            case Op::Mod:       return Value(l.get<int64_t>() % r.get<int64_t>());
-            case Op::Eq:        return Value(l == r);
-            case Op::Ne:        return Value(l != r);
-            case Op::Lt:        return Value(l < r);
-            case Op::Gt:        return Value(l > r);
-            case Op::Le:        return Value(l <= r);
-            case Op::Ge:        return Value(l >= r);
-            case Op::In:        return Value(r.is_array() && r.contains(l));
-            default:            break;
+          auto r = right->evaluate(context);
+          switch (op) {
+              case Op::StrConcat: return l.get<std::string>() + r.get<std::string>();
+              case Op::Add:       return l + r;
+              case Op::Sub:       return l - r;
+              case Op::Mul:       return l * r;
+              case Op::Div:       return l / r;
+              case Op::MulMul:    return std::pow(l.get<double>(), r.get<double>());
+              case Op::DivDiv:    return l.get<int64_t>() / r.get<int64_t>();
+              case Op::Mod:       return l.get<int64_t>() % r.get<int64_t>();
+              case Op::Eq:        return l == r;
+              case Op::Ne:        return l != r;
+              case Op::Lt:        return l < r;
+              case Op::Gt:        return l > r;
+              case Op::Le:        return l <= r;
+              case Op::Ge:        return l >= r;
+              case Op::In:        return r.is_array() && r.contains(l);
+              default:            break;
+          }
+          throw std::runtime_error("Unknown binary operator");
+        };
+
+        if (l.is_callable()) {
+          return Value::callable([l, do_eval](const Value & context, const Value::CallableArgs & args) {
+            auto ll = l.call(context, args);
+            return do_eval(ll); //args[0].second);
+          });
+        } else {
+          return do_eval(l);
         }
-        throw std::runtime_error("Unknown binary operator");
     }
 };
 
@@ -1523,9 +1530,15 @@ private:
         }
 
         if (!consumeToken("|").empty()) {
-            auto filter = parseFilterExpression();
-            filter->prepend(std::move(left));
-            return filter;
+            auto expr = parseExpression();
+            if (auto filter = dynamic_cast<FilterExpr*>(expr.get())) {
+                filter->prepend(std::move(left));
+                return expr;
+            } else {
+                std::vector<std::unique_ptr<Expression>> parts;
+                parts.emplace_back(std::move(left));
+                parts.emplace_back(std::move(expr));
+            }
         }
         return left;
     }
@@ -2152,8 +2165,11 @@ Value Value::context(const Value & values) {
     }
     return ns;
   }));
-  top_level_context.set("equalto", simple_function("equalto", { "expected", "actual" }, [](const Value &, const Value & args) {
-      return Value(args.at("actual") == args.at("expected"));
+  top_level_context.set("equalto", simple_function("equalto", { "expected", "actual" }, [](const Value &, const Value & args) -> Value {
+      return args.at("actual") == args.at("expected");
+  }));
+  top_level_context.set("length", simple_function("length", { "items" }, [](const Value &, const Value & args) -> Value {
+      return (int64_t) args.at("items").size();
   }));
   auto make_filter = [](const Value & filter, const Value & extra_args) -> Value {
     return simple_function("", { "value" }, [=](const Value & context, const Value & args) {
