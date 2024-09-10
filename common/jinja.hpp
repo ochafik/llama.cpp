@@ -5,7 +5,18 @@
 
   TODO:
   - Functionary 3.2:
+    - `list | length > 0`
     - selectattr("type", "defined")
+      {{ users|selectattr("is_active") }}
+      {{ users|selectattr("email", "none") }}
+      {{ data | selectattr('name', '==', 'Jinja') | list | last }}
+    - `{%- for field, field_name in [("maximum", "Maximum"), ("minimum", "Minimum"), ("maxLength", "Maximum length"), ("minLength", "Minimum length")] -%}`
+    - `x[-1]`
+    - Macro nested set scope = global?
+      {%- macro get_param_type(param) -%}
+        {%- set param_type = "any" -%}
+    - `x is not string`
+
     - list
     - map(attribute="type")
     - unique
@@ -408,7 +419,14 @@ public:
         return get<double>() - rhs.get<double>();
   }
   Value operator*(const Value& rhs) {
-      if (is_number_integer() && rhs.is_number_integer())
+      if (is_string() && rhs.is_number_integer()) {
+        std::ostringstream out;
+        for (int i = 0, n = rhs.get<int64_t>(); i < n; ++i) {
+          out << to_str();
+        }
+        return out.str();
+      }
+      else if (is_number_integer() && rhs.is_number_integer())
         return get<int64_t>() * rhs.get<int64_t>();
       else
         return get<double>() * rhs.get<double>();
