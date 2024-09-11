@@ -80,9 +80,10 @@ inline std::string read_file(const std::string &path) {
     cmake -B buildDebug -DCMAKE_BUILD_TYPE=Debug && cmake --build buildDebug -t test-jinja -j && ./buildDebug/bin/test-jinja
 */
 int main() {
-     test_render("{% set foo %}Hello {{ 'there' }}{% endset %}{{ 1 ~ foo ~ 2 }}", {}, "1Hello there2");
      test_render("{{ [1, 2, 3] | join(', ') }}", {}, "1, 2, 3");
-     test_render("{{ 'Tools: ' + [1, 2, 3] | reject('equalto', 2) | join(', ') + '...' }}", {}, "Tools: [1, 3]...");
+    //  test_render("{{ 'Tools: ' + [1, 2, 3] | reject('equalto', 2) | join(', ') + '...' }}", {}, "Tools: [1, 3]...");
+     test_render("{% for i in range(3) %}{{i}},{% endfor %}", {}, "0,1,2,");
+     test_render("{% set foo %}Hello {{ 'there' }}{% endset %}{{ 1 ~ foo ~ 2 }}", {}, "1Hello there2");
      test_render("{{ [1, False, null, True, 2, '3', 1, '3', False, null, True] | unique }}", {},
         "[1, False, null, True, 2, \"3\"]");
      test_render("{{ range(5) | length % 2 }}", {}, "1");

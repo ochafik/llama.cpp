@@ -1333,11 +1333,13 @@ public:
           } else {
             if (auto ce = dynamic_cast<CallExpr*>(part.get())) {
               auto target = ce->object->evaluate(context);
-              result = target.call(context, ce->args.evaluate(context));
+              Value::CallableArgs args = ce->args.evaluate(context);
+              args.args.insert(args.args.begin(), result);
+              result = target.call(context, args);
             } else {
               auto callable = part->evaluate(context);
               Value::CallableArgs args;
-              args.args.push_back(result);
+              args.args.insert(args.args.begin(), result);
               result = callable.call(context, args);
             }
           }
@@ -2494,7 +2496,9 @@ std::shared_ptr<Context> Context::builtins() {
     auto res = Value::array();
     for (size_t i = 0, n = items.size(); i < n; i++) {
       auto & item = items.at(i);
-      auto pred_res = filter.call(context, { { "", item } });
+      Value::CallableArgs filter_args;
+      filter_args.args.emplace_back(item);
+      auto pred_res = filter.call(context, filter_args);
       if (!pred_res) {
         res.push_back(item);
       }
