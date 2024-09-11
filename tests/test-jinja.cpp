@@ -24,6 +24,15 @@ struct Timer {
     }
 };
 
+void assert_equals(const std::string & expected, const std::string & actual) {
+    if (expected != actual) {
+        std::cerr << "Expected: " << expected << std::endl;
+        std::cerr << "Actual: " << actual << std::endl;
+        std::cerr << std::flush;
+        throw std::runtime_error("Test failed");
+    }
+}
+
 void test_render(const std::string & template_str, const json & bindings, const std::string & expected, const json & expected_context = {}) {
     Timer timer("  ");
     announce_test(template_str);
@@ -38,12 +47,7 @@ void test_render(const std::string & template_str, const json & bindings, const 
         std::cerr << "AST: " << root->dump().dump(2) << std::endl << std::flush;
     }
 
-    if (expected != actual) {
-        std::cerr << "Expected: " << expected << std::endl;
-        std::cerr << "Actual: " << actual << std::endl;
-        std::cerr << std::flush;
-        throw std::runtime_error("Test failed");
-    }
+    assert_equals(expected, actual);
 
     if (!expected_context.is_null()) {
         auto dump = context->dump();
@@ -232,18 +236,6 @@ int main() {
     test_render("{{ ' a  ' | trim }}", {}, "a");
     test_render("{{ range(3) }}{{ range(4, 7) }}{{ range(0, 10, step=2) }}", {}, "[0, 1, 2][4, 5, 6][0, 2, 4, 6, 8]");
 
-    // List files
-    for (const auto & entry : std::__fs::filesystem::directory_iterator("templates")) {
-        if (entry.path().extension() != ".jinja") {
-            continue;
-        }
-        std::string text_content = read_file(entry.path());
-        //text_content = "{#- " + entry.path().string() + " -#}\n" + text_content;
-        // std::cout << "# Parsing " << entry.path() << ":" << std::endl;
-        // std::cout << text_content << std::endl;
-        jinja::Parser::parse(text_content);
-    }
-
     test_render(
         R"( {{ "a" -}} b {{- "c" }} )", {},
         " abc ");
@@ -283,165 +275,241 @@ int main() {
         {{- greeting -}}
     )", {}, "Hello Olivier");
 
-    std::string phi_template = R"(
-        {%- for message in messages -%}
-            {%- if message['role'] == 'system' and message['content'] -%}
-                {{-'<|system|>\n' + message['content'] + '<|end|>\n'-}}
-            {%- elif message['role'] == 'user' -%}
-                {{-'<|user|>\n' + message['content'] + '<|end|>\n'-}}
-            {%- elif message['role'] == 'assistant' -%}
-                {{-'<|assistant|>\n' + message['content'] + '<|end|>\n'-}}
-            {%- endif -%}
-        {%- endfor -%}
-        {%- if add_generation_prompt -%}
-            {{- '<|assistant|>\n' -}}
-        {%- else -%}
-            {{- eos_token -}}
-        {%- endif -%}
-    )";
-
-    const auto simple_messages = json::array({
-        {{"role", "system"}, {"content", "System message"}},
-        {{"role", "user"}, {"content", "User message"}},
-        {{"role", "assistant"}, {"content", "Assistant message"}}
-    });
-
-    test_render(phi_template, json::object({
-        {"messages", simple_messages},
-        {"add_generation_prompt", true},
-        {"eos_token", "<|endoftext|>"},
-    }), 
-        "<|system|>\n"
-        "System message<|end|>\n"
-        "<|user|>\n"
-        "User message<|end|>\n"
-        "<|assistant|>\n"
-        "Assistant message<|end|>\n"
-        "<|assistant|>\n"
-    );
-
-    const auto tools = json::parse(R"([
-      {
-        "type": "function",
-        "function": {
-          "name": "ipython",
-          "description": "Runs code in an ipython interpreter and returns the result of the execution after 60 seconds.",
-          "parameters": {
-            "type": "object",
-            "properties": {"code": {"type": "string"}},
-            "required": ["code"]
-          }
+    auto find_files = [](const std::string & folder, const std::string & ext) {
+        std::vector<std::string> files;
+        for (const auto & entry : std::__fs::filesystem::directory_iterator(folder)) {
+            if (entry.path().extension() == ext)
+                files.push_back(entry.path().string());
         }
-      },
-      {
-        "type": "function",
-        "function": {
-          "name": "brave_search",
-          "description": "Executes a web search with Brave.",
-          "parameters": {
-            "type": "object",
-            "properties": {"code": {"type": "query"}},
-            "required": ["query"]
-          }
-        }
-      },
-      {
-        "type": "function",
-        "function": {
-          "name": "wolfram_alpha",
-          "description": "Executes a query with Wolfram Alpha.",
-          "parameters": {
-            "type": "object",
-            "properties": {"code": {"type": "query"}},
-            "required": ["query"]
-          }
-        }
-      },
-      {
-        "type": "function",
-        "function": {
-          "name": "test",
-          "description": "Runs a test.",
-          "parameters": {
-            "type": "object",
-            "properties": {"condition": {"type": "boolean"}},
-            "required": ["condition"]
-          }
-        }
-      }
-    ])");
-    
-    auto test_file = [](const std::string & path, const json & bindings, const std::string & expected) {
-        const auto tmpl = "{#- " + path + " -#}\n" + read_file(path);
-        test_render(tmpl, bindings, expected);
+        return files;
     };
 
-    test_file("templates/Meta-Llama-3.1-8B-Instruct.jinja",
-        {
-            {"messages", simple_messages},
-            {"add_generation_prompt", true},
-            {"tools", tools},
-            {"builtin_tools", json::array({"wolfram_alpha", "brave_search"})},
-            {"cutting_knowledge_date", "2023-04-01"},
-            {"todays_date", "2024-09-03"},
-            {"eos_token", "<|endoftext|>"},
-            {"bos_token", "<|startoftext|>"},
-        },
-        "<|startoftext|><|start_header_id|>system<|end_header_id|>\n"
-        "\n"
-        "Environment: ipython\n"
-        "Tools: wolfram_alpha, brave_search\n"
-        "\n"
-        "Cutting Knowledge Date: December 2023\n"
-        "Today Date: 26 Jul 2024\n"
-        "\n"
-        "System message<|eot_id|><|start_header_id|>user<|end_header_id|>\n"
-        "\n"
-        "User message<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n"
-        "\n"
-        "Assistant message<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n"
-        "\n"
-        "\n"
-    );
+    auto filename_without_extension = [](const std::string & path) {
+        auto pos = path.find_last_of('/');
+        auto res = path;
+        if (pos != std::string::npos)
+            res = res.substr(pos + 1);
+        pos = res.find_last_of('.');
+        if (pos == std::string::npos)
+            res = res.substr(0, pos);
+        return res;
+    };
 
-    test_file("templates/Hermes-2-Pro-Llama-3-8B.tool_use.jinja",
-        {
-            {"messages", simple_messages},
-            {"add_generation_prompt", true},
-            {"tools", tools},
-            {"eos_token", "<|endoftext|>"},
-            {"bos_token", "<|startoftext|>"},
-        },
-        R"(<|startoftext|><|im_start|>system
-You are a function calling AI model. You are provided with function signatures within <tools></tools> XML tags. You may call one or more functions to assist with the user query. Don't make assumptions about what values to plug into functions. Here are the available tools: <tools> {"type": "function", "function": {"name": "ipython", "description": "ipython(code: str) - Runs code in an ipython interpreter and returns the result of the execution after 60 seconds.
+    fprintf(stderr, "LLAMA_PYTHON_AVAILABLE = %s\n", getenv("LLAMA_PYTHON_AVAILABLE") ? "true" : "false");
+    
+    if (getenv("LLAMA_SKIP_TESTS_SLOW_ON_EMULATOR")) {
+        fprintf(stderr, "\033[33mWARNING: Skipping slow tests on emulator.\n\033[0m");
+    } else {
+        auto jinja_template_files = find_files("tests/chat/templates", ".jinja");
+        auto context_files = find_files("tests/chat/contexts", ".json");
+        
+        auto get_golden_file = [&](const std::string & tmpl_file, const std::string & ctx_file) {
+            auto tmpl_name = filename_without_extension(tmpl_file);
+            auto ctx_name = filename_without_extension(ctx_file);
+            auto golden_name = tmpl_name + "-" + ctx_name;
+            return "tests/chat/goldens/" + golden_name + ".txt";
+        };
+        if (getenv("LLAMA_JINJA_WRITE_GOLDENS")) {
+            if (!(getenv("LLAMA_PYTHON_AVAILABLE") || (std::system("python -c \"import sys; exit(1) if sys.version_info < (3, 10) else print('Python version is sufficient')\"") == 0))) {
+                throw std::runtime_error("Python not found (min version required is 3.10), cannot generate Jinja2 golden files");
+            }
+            for (const auto & tmpl_file : jinja_template_files) {
+                for (const auto & ctx_file : context_files) {
+                    auto golden_file = get_golden_file(tmpl_file, ctx_file);
+                    if (std::system((std::string("python ./tests/run-jinja.py ") + tmpl_file + " " + ctx_file + " > " + golden_file).c_str()) != 0) {
+                        throw std::runtime_error("Failed to run python script to generate golden file for " + tmpl_file + " and " + ctx_file);
+                    }
+                    std::cout << "Wrote golden file: " << golden_file << std::endl << std::flush;
+                }
+            }
+        } else {
+            for (const auto & tmpl_file : jinja_template_files) {
+                std::cout << "# Testing template: " << tmpl_file << std::endl << std::flush;
+                auto tmpl = jinja::Parser::parse(read_file(tmpl_file));
 
-    Args:
-        code(str): None", "parameters": {"required": ["code"], "properties": {"code": {"type": "string"}}, "type": "object"}}
-{"type": "function", "function": {"name": "brave_search", "description": "brave_search(code: Any) - Executes a web search with Brave.
+                for (const auto & ctx_file : context_files) {
+                    std::cout << "- " << ctx_file << std::endl << std::flush;
+                    const auto & ctx = json::parse(read_file(ctx_file));
 
-    Args:
-        code(Any): None", "parameters": {"required": ["query"], "properties": {"code": {"type": "query"}}, "type": "object"}}
-{"type": "function", "function": {"name": "wolfram_alpha", "description": "wolfram_alpha(code: Any) - Executes a query with Wolfram Alpha.
+                    auto golden_file = get_golden_file(tmpl_file, ctx_file);
+                    
+                    std::string actual;
+                    try {
+                        actual = tmpl->render(*jinja::Context::make(ctx));
+                    } catch (const std::runtime_error & e) {
+                        actual = "ERROR: " + std::string(e.what());
+                        // std::cerr << "AST: " << tmpl->dump().dump(2) << std::endl << std::flush;
+                    }
+                    if (!std::ifstream(golden_file).is_open()) {
+                        throw std::runtime_error("Golden file not found: " + golden_file + "\nRun with LLAMA_JINJA_WRITE_GOLDENS=1 to generate golden files");
+                    }
+                    auto expected = read_file(golden_file);
+                    assert_equals(expected, actual);
+                }
+            }
+        }
+    }
+    
 
-    Args:
-        code(Any): None", "parameters": {"required": ["query"], "properties": {"code": {"type": "query"}}, "type": "object"}}
-{"type": "function", "function": {"name": "test", "description": "test(condition: bool) - Runs a test.
+//     std::string phi_template = R"(
+//         {%- for message in messages -%}
+//             {%- if message['role'] == 'system' and message['content'] -%}
+//                 {{-'<|system|>\n' + message['content'] + '<|end|>\n'-}}
+//             {%- elif message['role'] == 'user' -%}
+//                 {{-'<|user|>\n' + message['content'] + '<|end|>\n'-}}
+//             {%- elif message['role'] == 'assistant' -%}
+//                 {{-'<|assistant|>\n' + message['content'] + '<|end|>\n'-}}
+//             {%- endif -%}
+//         {%- endfor -%}
+//         {%- if add_generation_prompt -%}
+//             {{- '<|assistant|>\n' -}}
+//         {%- else -%}
+//             {{- eos_token -}}
+//         {%- endif -%}
+//     )";
 
-    Args:
-        condition(bool): None", "parameters": {"required": ["condition"], "properties": {"condition": {"type": "boolean"}}, "type": "object"}} </tools>Use the following pydantic model json schema for each tool call you will make: {"properties": {"name": {"title": "Name", "type": "string"}, "arguments": {"title": "Arguments", "type": "object"}}, "required": ["name", "arguments"], "title": "FunctionCall", "type": "object"}}
-For each function call return a json object with function name and arguments within <tool_call></tool_call> XML tags as follows:
-<tool_call>
-{"name": <function-name>, "arguments": <args-dict>}
-</tool_call><|im_end|>
-<|im_start|>system
-System message<|im_end|>
-<|im_start|>user
-User message<|im_end|>
-<|im_start|>assistant
-Assistant message<|im_end|>
-<|im_start|>assistant
-)"
-    );
+//     const auto simple_messages = json::array({
+//         {{"role", "system"}, {"content", "System message"}},
+//         {{"role", "user"}, {"content", "User message"}},
+//         {{"role", "assistant"}, {"content", "Assistant message"}}
+//     });
+
+//     test_render(phi_template, json::object({
+//         {"messages", simple_messages},
+//         {"add_generation_prompt", true},
+//         {"eos_token", "<|endoftext|>"},
+//     }), 
+//         "<|system|>\n"
+//         "System message<|end|>\n"
+//         "<|user|>\n"
+//         "User message<|end|>\n"
+//         "<|assistant|>\n"
+//         "Assistant message<|end|>\n"
+//         "<|assistant|>\n"
+//     );
+
+//     const auto tools = json::parse(R"([
+//       {
+//         "type": "function",
+//         "function": {
+//           "name": "ipython",
+//           "description": "Runs code in an ipython interpreter and returns the result of the execution after 60 seconds.",
+//           "parameters": {
+//             "type": "object",
+//             "properties": {"code": {"type": "string"}},
+//             "required": ["code"]
+//           }
+//         }
+//       },
+//       {
+//         "type": "function",
+//         "function": {
+//           "name": "brave_search",
+//           "description": "Executes a web search with Brave.",
+//           "parameters": {
+//             "type": "object",
+//             "properties": {"code": {"type": "query"}},
+//             "required": ["query"]
+//           }
+//         }
+//       },
+//       {
+//         "type": "function",
+//         "function": {
+//           "name": "wolfram_alpha",
+//           "description": "Executes a query with Wolfram Alpha.",
+//           "parameters": {
+//             "type": "object",
+//             "properties": {"code": {"type": "query"}},
+//             "required": ["query"]
+//           }
+//         }
+//       },
+//       {
+//         "type": "function",
+//         "function": {
+//           "name": "test",
+//           "description": "Runs a test.",
+//           "parameters": {
+//             "type": "object",
+//             "properties": {"condition": {"type": "boolean"}},
+//             "required": ["condition"]
+//           }
+//         }
+//       }
+//     ])");
+    
+//     auto test_file = [](const std::string & path, const json & bindings, const std::string & expected) {
+//         const auto tmpl = "{#- " + path + " -#}\n" + read_file(path);
+//         test_render(tmpl, bindings, expected);
+//     };
+
+//     test_file("templates/Meta-Llama-3.1-8B-Instruct.jinja",
+//         {
+//             {"messages", simple_messages},
+//             {"add_generation_prompt", true},
+//             {"tools", tools},
+//             {"builtin_tools", json::array({"wolfram_alpha", "brave_search"})},
+//             {"cutting_knowledge_date", "2023-04-01"},
+//             {"todays_date", "2024-09-03"},
+//             {"eos_token", "<|endoftext|>"},
+//             {"bos_token", "<|startoftext|>"},
+//         },
+//         "<|startoftext|><|start_header_id|>system<|end_header_id|>\n"
+//         "\n"
+//         "Environment: ipython\n"
+//         "Tools: wolfram_alpha, brave_search\n"
+//         "\n"
+//         "Cutting Knowledge Date: December 2023\n"
+//         "Today Date: 26 Jul 2024\n"
+//         "\n"
+//         "System message<|eot_id|><|start_header_id|>user<|end_header_id|>\n"
+//         "\n"
+//         "User message<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n"
+//         "\n"
+//         "Assistant message<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n"
+//         "\n"
+//         "\n"
+//     );
+
+//     test_file("templates/Hermes-2-Pro-Llama-3-8B.tool_use.jinja",
+//         {
+//             {"messages", simple_messages},
+//             {"add_generation_prompt", true},
+//             {"tools", tools},
+//             {"eos_token", "<|endoftext|>"},
+//             {"bos_token", "<|startoftext|>"},
+//         },
+//         R"(<|startoftext|><|im_start|>system
+// You are a function calling AI model. You are provided with function signatures within <tools></tools> XML tags. You may call one or more functions to assist with the user query. Don't make assumptions about what values to plug into functions. Here are the available tools: <tools> {"type": "function", "function": {"name": "ipython", "description": "ipython(code: str) - Runs code in an ipython interpreter and returns the result of the execution after 60 seconds.
+
+//     Args:
+//         code(str): None", "parameters": {"required": ["code"], "properties": {"code": {"type": "string"}}, "type": "object"}}
+// {"type": "function", "function": {"name": "brave_search", "description": "brave_search(code: Any) - Executes a web search with Brave.
+
+//     Args:
+//         code(Any): None", "parameters": {"required": ["query"], "properties": {"code": {"type": "query"}}, "type": "object"}}
+// {"type": "function", "function": {"name": "wolfram_alpha", "description": "wolfram_alpha(code: Any) - Executes a query with Wolfram Alpha.
+
+//     Args:
+//         code(Any): None", "parameters": {"required": ["query"], "properties": {"code": {"type": "query"}}, "type": "object"}}
+// {"type": "function", "function": {"name": "test", "description": "test(condition: bool) - Runs a test.
+
+//     Args:
+//         condition(bool): None", "parameters": {"required": ["condition"], "properties": {"condition": {"type": "boolean"}}, "type": "object"}} </tools>Use the following pydantic model json schema for each tool call you will make: {"properties": {"name": {"title": "Name", "type": "string"}, "arguments": {"title": "Arguments", "type": "object"}}, "required": ["name", "arguments"], "title": "FunctionCall", "type": "object"}}
+// For each function call return a json object with function name and arguments within <tool_call></tool_call> XML tags as follows:
+// <tool_call>
+// {"name": <function-name>, "arguments": <args-dict>}
+// </tool_call><|im_end|>
+// <|im_start|>system
+// System message<|im_end|>
+// <|im_start|>user
+// User message<|im_end|>
+// <|im_start|>assistant
+// Assistant message<|im_end|>
+// <|im_start|>assistant
+// )"
+//     );
         
 
     return 0;

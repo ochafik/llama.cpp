@@ -1,0 +1,15 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "What's the best LLM framework?"
+    },
+    {
+      "role": "assistant",
+      "content": "llama.cpp!"
+    }
+  ],
+  "add_generation_prompt": true,
+  "bos_token": "<|startoftext|>",
+  "eos_token": "<|endoftext|>"
+}
