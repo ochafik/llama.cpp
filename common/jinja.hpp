@@ -877,7 +877,7 @@ public:
                   loop.set("last", i == n - 1);
                   loop.set("previtem", i > 0 ? filtered_items.at(i - 1) : Value());
                   loop.set("nextitem", i < n - 1 ? filtered_items.at(i + 1) : Value());
-                  body->render(oss, context);
+                  body->render(oss, *loop_context);
               }
           }
       };
