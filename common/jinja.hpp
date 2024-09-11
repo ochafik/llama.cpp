@@ -863,7 +863,7 @@ public:
                   cycle_index = (cycle_index + 1) % args.args.size();
                   return item;
               }));
-              auto loop_context = nonstd_make_unique<Context>(Value::object(), context.shared_from_this());
+              auto loop_context = std::make_shared<Context>(std::move(Value::object()), context.shared_from_this());
               loop_context->set("loop", loop);
               for (size_t i = 0, n = filtered_items.size(); i < n; ++i) {
                   auto & item = filtered_items.at(i);

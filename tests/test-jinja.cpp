@@ -387,7 +387,35 @@ int main() {
         {"eos_token", "<|endoftext|>"},
         {"bos_token", "<|startoftext|>"},
     }),
-        "TODO"
+    R"(<|startoftext|><|im_start|>system
+You are a function calling AI model. You are provided with function signatures within <tools></tools> XML tags. You may call one or more functions to assist with the user query. Don't make assumptions about what values to plug into functions. Here are the available tools: <tools> {"type": "function", "function": {"name": "ipython", "description": "ipython(code: str) - Runs code in an ipython interpreter and returns the result of the execution after 60 seconds.
+
+    Args:
+        code(str): None", "parameters": {"required": ["code"], "properties": {"code": {"type": "string"}}, "type": "object"}}
+{"type": "function", "function": {"name": "brave_search", "description": "brave_search(code: Any) - Executes a web search with Brave.
+
+    Args:
+        code(Any): None", "parameters": {"required": ["query"], "properties": {"code": {"type": "query"}}, "type": "object"}}
+{"type": "function", "function": {"name": "wolfram_alpha", "description": "wolfram_alpha(code: Any) - Executes a query with Wolfram Alpha.
+
+    Args:
+        code(Any): None", "parameters": {"required": ["query"], "properties": {"code": {"type": "query"}}, "type": "object"}}
+{"type": "function", "function": {"name": "test", "description": "test(condition: bool) - Runs a test.
+
+    Args:
+        condition(bool): None", "parameters": {"required": ["condition"], "properties": {"condition": {"type": "boolean"}}, "type": "object"}} </tools>Use the following pydantic model json schema for each tool call you will make: {"properties": {"name": {"title": "Name", "type": "string"}, "arguments": {"title": "Arguments", "type": "object"}}, "required": ["name", "arguments"], "title": "FunctionCall", "type": "object"}}
+For each function call return a json object with function name and arguments within <tool_call></tool_call> XML tags as follows:
+<tool_call>
+{"name": <function-name>, "arguments": <args-dict>}
+</tool_call><|im_end|>
+<|im_start|>system
+System message<|im_end|>
+<|im_start|>user
+User message<|im_end|>
+<|im_start|>assistant
+Assistant message<|im_end|>
+<|im_start|>assistant
+)"
     );
         
 
