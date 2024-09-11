@@ -1105,7 +1105,7 @@ public:
         throw std::runtime_error("SliceExpr not implemented");
     }
     json dump() const override {
-        return {{"slice", {start->dump(), end->dump()}}};
+        return {{"slice", {{"start", start ? start->dump() : "null"}, {"end", end ? end->dump() : "null"}}}};
     }
 };
 
@@ -1801,7 +1801,7 @@ private:
         }
 
         if (!consumeToken("|").empty()) {
-            auto expr = parseExpression();
+            auto expr = parseMathMulDiv();
             if (auto filter = dynamic_cast<FilterExpr*>(expr.get())) {
                 filter->prepend(std::move(left));
                 return expr;
@@ -1817,26 +1817,6 @@ private:
 
     std::unique_ptr<Expression> call_func(const std::string & name, Expression::CallableArgs && args) const {
         return nonstd_make_unique<CallExpr>(nonstd_make_unique<VariableExpr>(name), std::move(args));
-    }
-
-    std::unique_ptr<FilterExpr> parseFilterExpression() {
-        std::vector<std::unique_ptr<Expression>> parts;
-        auto parseFunctionCall = [&]() {
-            auto identifier = parseIdentifier();
-            if (identifier.empty()) throw std::runtime_error("Expected identifier in filter expression");
-
-            if (peekSymbols({ "(" })) {
-                auto callParams = parseCallArgs();
-                parts.push_back(call_func(identifier, std::move(callParams)));
-            } else {
-                parts.push_back(call_func(identifier, {}));
-            }
-        };
-        parseFunctionCall();
-        while (it != end && !consumeToken("|").empty()) {
-            parseFunctionCall();
-        }
-        return nonstd_make_unique<FilterExpr>(std::move(parts));
     }
 
     std::unique_ptr<Expression> parseMathUnaryPlusMinus() {
