@@ -9,12 +9,11 @@ void test_render(const std::string & template_str, const json & bindings, const 
     std::cout << "Testing: " << template_str << std::endl;
     std::cout << std::flush;
     auto root = jinja::Parser::parse(template_str);
-    jinja::Value values(bindings);
-    auto context = jinja::Value::context(values);
+    auto context = jinja::Context::make(bindings);
     // std::cout << "Context: " << context.dump() << std::endl;
     std::string actual;
     try {
-        actual = root->render(context);
+        actual = root->render(*context);
     } catch (const std::runtime_error & e) {
         actual = "ERROR: " + std::string(e.what());
         std::cerr << "AST: " << root->dump().dump(2) << std::endl;
@@ -28,7 +27,7 @@ void test_render(const std::string & template_str, const json & bindings, const 
     }
 
     if (!expected_context.is_null()) {
-        auto dump = context.get<json>();
+        auto dump = context->dump();
         for (const auto & kv : expected_context.items()) {
             if (dump[kv.key()] != kv.value()) {
                 std::cerr << "Expected context: " << expected_context.dump(2) << std::endl;
@@ -45,9 +44,9 @@ void test_error_contains(const std::string & template_str, const json & bindings
     std::cout << std::flush;
     try {
         auto root = jinja::Parser::parse(template_str);
-        auto context = jinja::Value::context(bindings);
+        auto context = jinja::Context::make(bindings);
         // auto copy = context.is_null() ? Value::object() : std::make_shared<Value>(context);
-        auto actual = root->render(context);
+        auto actual = root->render(*context);
         throw std::runtime_error("Expected error: " + expected + ", but got successful result instead: "  + actual);
     } catch (const std::runtime_error & e) {
         std::string actual(e.what());

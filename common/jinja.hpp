@@ -47,14 +47,49 @@ typename std::unique_ptr<T> nonstd_make_unique(Args &&...args) {
 
 namespace jinja {
 
+class Context;
+
 /* Values that behave roughly like in Python.
  * jinja templates deal with objects by reference so we can't just json for arrays & objects,
  * but we do for primitives.
  */
 class Value : public std::enable_shared_from_this<Value> {
 public:
-  using CallableArgs = std::vector<std::pair<std::string, Value>>;
-  using CallableType = std::function<Value(const Value &, const CallableArgs &)>;
+  struct CallableArgs {
+    std::vector<Value> args;
+    std::vector<std::pair<std::string, Value>> kwargs;
+
+    bool empty() const {
+      return args.empty() && kwargs.empty();
+    }
+
+    void expectArgs(const std::string & method_name, const std::pair<size_t, size_t> & pos_count, const std::pair<size_t, size_t> & kw_count) const {
+      if (args.size() < pos_count.first || args.size() > pos_count.second || kwargs.size() < kw_count.first || kwargs.size() > kw_count.second) {
+        std::ostringstream out;
+        out << method_name << " must have between " << pos_count.first << " and " << pos_count.second << " positional arguments and between " << kw_count.first << " and " << kw_count.second << " keyword arguments";
+        throw std::runtime_error(out.str());
+      }
+    }
+
+
+    json dump() const {
+      json res = json::array();
+      for (const auto & arg : args) {
+        res.push_back(arg.dump());
+      }
+      for (const auto & kwarg : kwargs) {
+        res.push_back({kwarg.first, kwarg.second.dump()});
+      }
+      return res;
+    }
+  };
+  // struct FilterArgs : CallableArgs {
+  //   Value value;
+  // };
+  // using CallableArgs = std::vector<std::pair<std::string, Value>>;
+  
+  using CallableType = std::function<Value(Context &, const CallableArgs &)>;
+  using FilterType = std::function<Value(Context &, const CallableArgs &)>;
 
 private:
   using ObjectType = std::unordered_map<json, Value>;  // Only contains primitive keys
@@ -220,7 +255,7 @@ public:
     (*object_)[key.primitive_] = value;
   }
 
-  Value call(const Value & context, const CallableArgs & args) const {
+  Value call(Context & context, const Value::CallableArgs & args) const {
     if (!callable_) throw std::runtime_error("Value is not callable: " + dump());
     return (*callable_)(context, args);
   }
@@ -239,7 +274,8 @@ public:
   bool is_hashable() const { return is_primitive(); }
 
   bool empty() const {
-    if (is_null()) throw std::runtime_error("Undefined value or reference");
+    if (is_null())
+      throw std::runtime_error("Undefined value or reference");
     if (is_string()) return primitive_.empty();
     if (is_array()) return array_->empty();
     if (is_object()) return object_->empty();
@@ -256,7 +292,8 @@ public:
   } 
 
   bool operator<(const Value & other) const {
-    if (is_null()) throw std::runtime_error("Undefined value or reference");
+    if (is_null())
+      throw std::runtime_error("Undefined value or reference");
     if (is_number() && other.is_number()) return get<double>() < other.get<double>();
     if (is_string() && other.is_string()) return get<std::string>() < other.get<std::string>();
     throw std::runtime_error("Cannot compare values: " + dump() + " < " + other.dump());
@@ -296,7 +333,8 @@ public:
     }
   }
   bool contains(const Value & value) const {
-    if (is_null()) throw std::runtime_error("Undefined value or reference");
+    if (is_null())
+      throw std::runtime_error("Undefined value or reference");
     if (array_) {
       for (const auto& item : *array_) {
         if (item && item == value) return true;
@@ -314,7 +352,8 @@ public:
     object_->erase(key);
   }
   const Value& at(size_t index) const {
-    if (is_null()) throw std::runtime_error("Undefined value or reference");
+    if (is_null())
+      throw std::runtime_error("Undefined value or reference");
     if (is_array()) return array_->at(index);
     if (is_object()) return object_->at(index);
     throw std::runtime_error("Value is not an array or object: " + dump());
@@ -458,16 +497,115 @@ struct hash<jinja::Value> {
 
 namespace jinja {
 
+class Context : public std::enable_shared_from_this<Context> {
+ protected:
+  Value values_;
+  std::shared_ptr<Context> parent_;
+public:
+  Context(Value && values = Value::object(), const std::shared_ptr<Context> & parent = nullptr) : values_(std::move(values)), parent_(parent) {
+    if (!values_.is_object())
+      throw std::runtime_error("Context values must be an object: " + values_.dump());
+  }
+
+  static std::shared_ptr<Context> builtins();
+  static std::shared_ptr<Context> make(Value && values);
+
+  json dump() const;
+
+  std::vector<Value> keys() const {
+    return values_.keys();
+  }
+  virtual Value get(const Value & key) const {
+    if (values_.contains(key)) return values_.at(key);
+    if (parent_) return parent_->get(key);
+    return Value();
+  }
+  virtual const Value & at(const Value & key) const {
+    if (values_.contains(key)) return values_.at(key);
+    if (parent_) return parent_->at(key);
+    throw std::runtime_error("Undefined variable: " + key.dump());
+  }
+  bool contains(const std::string & key) const {
+    return contains(Value(key));
+  }
+  virtual bool contains(const Value & key) const {
+    if (values_.contains(key)) return true;
+    if (parent_) return parent_->contains(key);
+    return false;
+  }
+  virtual void set(const Value & key, const Value & value) {
+    values_.set(key, value);
+  }
+};
+
+class MacroContext : public Context {
+public:
+  MacroContext(Value && arg_values = Value(), const std::shared_ptr<Context> & parent = nullptr) 
+    : Context(std::move(arg_values), parent) {}
+  void set(const Value & key, const Value & value) override {
+    if (values_.contains(key)) {
+      values_.set(key, value);
+    } else if (parent_) {
+      parent_->set(key, value);
+    } else {
+      throw std::runtime_error("Undefined variable: " + key.dump());
+    }
+  }
+};
+
 class Expression {
 public:
-    using CallableArgs = std::vector<std::pair<std::string, std::unique_ptr<Expression>>>;
+    struct CallableArgs {
+        std::vector<std::unique_ptr<Expression>> args;
+        std::vector<std::pair<std::string, std::unique_ptr<Expression>>> kwargs;
+
+        void expectArgs(const std::string & method_name, const std::pair<size_t, size_t> & pos_count, const std::pair<size_t, size_t> & kw_count) const {
+          if (args.size() < pos_count.first || args.size() > pos_count.second || kwargs.size() < kw_count.first || kwargs.size() > kw_count.second) {
+            std::ostringstream out;
+            out << method_name << " must have between " << pos_count.first << " and " << pos_count.second << " positional arguments and between " << kw_count.first << " and " << kw_count.second << " keyword arguments";
+            throw std::runtime_error(out.str());
+          }
+        }
+
+        json dump() const {
+          json res = json::array();
+          for (const auto & arg : args) {
+            res.push_back(arg->dump());
+          }
+          for (const auto & kwarg : kwargs) {
+            res.push_back(json::object({{"name", kwarg.first}, {"value", kwarg.second->dump()}}));
+          }
+          return res;
+        }
+
+        Value::CallableArgs evaluate(Context & context) const {
+            Value::CallableArgs vargs;
+            for (const auto& arg : this->args) {
+                vargs.args.push_back(arg->evaluate(context));
+            }
+            for (const auto& arg : this->kwargs) {
+                vargs.kwargs.push_back({arg.first, arg.second->evaluate(context)});
+            }
+            return vargs;
+        }
+    };
+
+    using CallableParams = std::vector<std::pair<std::string, std::unique_ptr<Expression>>>;
 
     virtual ~Expression() = default;
-    virtual Value evaluate(const Value & context) const = 0;
+    virtual Value evaluate(Context & context) const = 0;
     virtual json dump() const = 0;
 };
 
-static void destructuring_assign(const std::vector<std::string> & var_names, Value & context, const Value& item) {
+json dumpParams(const Expression::CallableParams & params) {
+  json res = json::array();
+  for (const auto & param : params) {
+    res.push_back(json::object({{"name", param.first}, {"value", param.second->dump()}}));
+  }
+  return res;
+}
+
+static void destructuring_assign(const std::vector<std::string> & var_names, Context & context, const Value& item) {
   if (var_names.size() == 1) {
       context.set(var_names[0], item);
   } else {
@@ -556,8 +694,8 @@ struct EndBlockTemplateToken : public TemplateToken {
 
 struct MacroTemplateToken : public TemplateToken {
     std::string name;
-    Expression::CallableArgs params;
-    MacroTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::string& n, Expression::CallableArgs && p)
+    Expression::CallableParams params;
+    MacroTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::string& n, Expression::CallableParams && p)
       : TemplateToken(Type::Macro, pos, pre, post), name(n), params(std::move(p)) {}
 };
 
@@ -605,8 +743,8 @@ struct CommentTemplateToken : public TemplateToken {
 class TemplateNode {
 public:
     virtual ~TemplateNode() = default;
-    virtual void render(std::ostringstream& oss, Value & context) const = 0;
-    std::string render(Value & context) const {
+    virtual void render(std::ostringstream& oss, Context & context) const = 0;
+    std::string render(Context & context) const {
         std::ostringstream oss;
         render(oss, context);
         return oss.str();
@@ -618,7 +756,7 @@ class SequenceNode : public TemplateNode {
     std::vector<std::unique_ptr<TemplateNode>> children;
 public:
     SequenceNode(std::vector<std::unique_ptr<TemplateNode>> && c) : children(std::move(c)) {}
-    void render(std::ostringstream& oss, Value & context) const override {
+    void render(std::ostringstream& oss, Context & context) const override {
         for (const auto& child : children) child->render(oss, context);
     }
     json dump() const override {
@@ -634,7 +772,7 @@ class TextNode : public TemplateNode {
     std::string text;
 public:
     TextNode(const std::string& t) : text(t) {}
-    void render(std::ostringstream& oss, Value &) const override { oss << text; }
+    void render(std::ostringstream& oss, Context &) const override { oss << text; }
     json dump() const override { return {{"text", text}}; }
 };
 
@@ -642,7 +780,7 @@ class ExpressionNode : public TemplateNode {
     std::unique_ptr<Expression> expr;
 public:
     ExpressionNode(std::unique_ptr<Expression> && e) : expr(std::move(e)) {}
-    void render(std::ostringstream& oss, Value & context) const override {
+    void render(std::ostringstream& oss, Context & context) const override {
       auto result = expr->evaluate(context);
       if (result.is_string()) {
           oss << result.get<std::string>();
@@ -660,7 +798,7 @@ class IfNode : public TemplateNode {
 public:
     IfNode(std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<TemplateNode>>> && c)
         : cascade(std::move(c)) {}
-    void render(std::ostringstream& oss, Value & context) const override {
+    void render(std::ostringstream& oss, Context & context) const override {
     for (const auto& branch : cascade) {
         auto enter_branch = true;
         if (branch.first) {
@@ -696,7 +834,7 @@ public:
     ForNode(const std::vector<std::string> & vns, std::unique_ptr<Expression> && iter,
       std::unique_ptr<Expression> && c, std::unique_ptr<TemplateNode> && b, bool r, std::unique_ptr<TemplateNode> && eb)
             : var_names(vns), iterable(std::move(iter)), condition(std::move(c)), body(std::move(b)), recursive(r), else_body(std::move(eb)) {}
-    void render(std::ostringstream& oss, Value & context) const override {
+    void render(std::ostringstream& oss, Context & context) const override {
       // https://jinja.palletsprojects.com/en/3.0.x/templates/#for
 
       auto iterable_value = iterable->evaluate(context);
@@ -704,14 +842,14 @@ public:
         throw std::runtime_error("For loop iterable must be iterable");
       }
 
-      auto original_context = context;
-      auto original_vars = Value::object();
-      for (const auto& var_name : var_names) {
-          original_vars.set(var_name, context.contains(var_name) ? context.at(var_name) : Value());
-      }
-      if (original_vars.contains("loop")) {
-          original_vars.set("loop", context.at("loop"));
-      }
+      // auto original_context = context;
+      // auto original_vars = Value::object();
+      // for (const auto& var_name : var_names) {
+      //     original_vars.set(var_name, context.contains(var_name) ? context.at(var_name) : Value());
+      // }
+      // if (original_vars.contains("loop")) {
+      //     original_vars.set("loop", context.at("loop"));
+      // }
 
       Value::CallableType loop_function;
 
@@ -733,18 +871,19 @@ public:
               loop.set("length", (int64_t) filtered_items.size());
 
               size_t cycle_index = 0;
-              loop.set("cycle", Value::callable([&](const Value & context, const Value::CallableArgs & args) {
-                  if (args.empty()) {
-                      throw std::runtime_error("cycle() expects at least 1 positional argument");
+              loop.set("cycle", Value::callable([&](Context & context, const Value::CallableArgs & args) {
+                  if (args.args.empty() || !args.kwargs.empty()) {
+                      throw std::runtime_error("cycle() expects at least 1 positional argument and no named arg");
                   }
-                  auto item = args[cycle_index].second;
-                  cycle_index = (cycle_index + 1) % args.size();
+                  auto item = args.args[cycle_index];
+                  cycle_index = (cycle_index + 1) % args.args.size();
                   return item;
               }));
-              context.set("loop", loop);
+              auto loop_context = nonstd_make_unique<Context>(Value::object(), context.shared_from_this());
+              loop_context->set("loop", loop);
               for (size_t i = 0, n = filtered_items.size(); i < n; ++i) {
                   auto & item = filtered_items.at(i);
-                  destructuring_assign(var_names, context, item);
+                  destructuring_assign(var_names, *loop_context, item);
                   loop.set("index", (int64_t) i + 1);
                   loop.set("index0", (int64_t) i);
                   loop.set("revindex", (int64_t) (n - i));
@@ -760,11 +899,11 @@ public:
       };
 
       if (recursive) {
-        loop_function = [&](const Value & context, const Value::CallableArgs & args) {
-            if (args.size() != 1 || !args[0].first.empty() || !args[0].second.is_array()) {
+        loop_function = [&](Context & context, const Value::CallableArgs & args) {
+            if (args.args.size() != 1 || !args.kwargs.empty() || !args.args[0].is_array()) {
                 throw std::runtime_error("loop() expects exactly 1 positional iterable argument");
             }
-            auto & items = args[0].second;
+            auto & items = args.args[0];
             visit(items);
             return Value();
         };
@@ -772,13 +911,13 @@ public:
 
       visit(iterable_value);
       
-      for (const auto& var_name : var_names) {
-          if (original_vars.contains(var_name)) {
-              context.set(var_name, original_vars.at(var_name));
-          } else {
-              context.erase(var_name);
-          }
-      }
+      // for (const auto& var_name : var_names) {
+      //     if (original_vars.contains(var_name)) {
+      //         context.set(var_name, original_vars.at(var_name));
+      //     } else {
+      //         context.erase(var_name);
+      //     }
+      // }
   }
 
     json dump() const override {
@@ -800,7 +939,7 @@ class BlockNode : public TemplateNode {
 public:
     BlockNode(const std::string& n, std::unique_ptr<TemplateNode> && b)
         : name(n), body(std::move(b)) {}
-    void render(std::ostringstream& oss, Value & context) const override {
+    void render(std::ostringstream& oss, Context & context) const override {
         body->render(oss, context);
     }
     json dump() const override {
@@ -810,11 +949,11 @@ public:
 
 class MacroNode : public TemplateNode {
     std::string name;
-    Expression::CallableArgs params;
+    Expression::CallableParams params;
     std::unique_ptr<TemplateNode> body;
     std::unordered_map<std::string, size_t> named_param_positions;
 public:
-    MacroNode(const std::string& n, Expression::CallableArgs && p, std::unique_ptr<TemplateNode> && b)
+    MacroNode(const std::string& n, Expression::CallableParams && p, std::unique_ptr<TemplateNode> && b)
         : name(n), params(std::move(p)), body(std::move(b)) {
         for (size_t i = 0; i < params.size(); ++i) {
           const auto & name = params[i].first;
@@ -823,28 +962,25 @@ public:
           }
         }
     }
-    void render(std::ostringstream& oss, Value & macro_context) const override {
-        macro_context.set(name, Value::callable([&](const Value & context, const Value::CallableArgs & args) {
+    void render(std::ostringstream& oss, Context & macro_context) const override {
+        macro_context.set(name, Value::callable([&](Context & context, const Value::CallableArgs & args) {
             auto call_context = macro_context;
-            auto positional = true;
             std::vector<bool> param_set(params.size(), false);
-            for (size_t i = 0, n = args.size(); i < n; i++) {
-                auto & arg = args[i];
+            for (size_t i = 0, n = args.args.size(); i < n; i++) {
+                auto & arg = args.args[i];
+                if (i >= params.size()) throw std::runtime_error("Too many positional arguments for macro " + name);
+                param_set[i] = true;
+                auto & param_name = params[i].first;
+                call_context.set(param_name, arg);
+            }
+            for (size_t i = 0, n = args.kwargs.size(); i < n; i++) {
+                auto & arg = args.kwargs[i];
                 auto & arg_name = arg.first;
-                if (arg_name.empty()) {
-                    if (!positional) throw std::runtime_error("Cannot pass positional arguments after named ones");
-                    if (i >= params.size()) throw std::runtime_error("Too many positional arguments for macro " + name);
-                    param_set[i] = true;
-                    auto & param_name = params[i].first;
-                    call_context.set(param_name, arg.second);
-                } else {
-                    positional = false;
-                    auto it = named_param_positions.find(arg_name);
-                    if (it == named_param_positions.end()) throw std::runtime_error("Unknown parameter name for macro " + name + ": " + arg_name);
-                    
-                    call_context.set(arg_name, arg.second);
-                    param_set[it->second] = true;
-                }
+                auto it = named_param_positions.find(arg_name);
+                if (it == named_param_positions.end()) throw std::runtime_error("Unknown parameter name for macro " + name + ": " + arg_name);
+                
+                call_context.set(arg_name, arg.second);
+                param_set[it->second] = true;
             }
             // Set default values for parameters that were not passed
             for (size_t i = 0, n = params.size(); i < n; i++) {
@@ -856,11 +992,7 @@ public:
         }));
     }
     json dump() const override {
-        json res = {{"name", name}, {"params", json::array()}};
-        for (const auto& param : params) {
-            res["params"].push_back({{"name", param.first}, {"default", param.second ? param.second->dump() : nullptr}});
-        }
-        return {{"macro", res}};
+        return {{"macro", {{"name", name}, {"params", dumpParams(params)}, {"body", body->dump()}}}};
     }
 };
 
@@ -878,7 +1010,7 @@ public:
             throw std::runtime_error("Destructuring assignment is only supported with a single variable name");
           }
         }
-    void render(std::ostringstream &, Value & context) const override {
+    void render(std::ostringstream &, Context & context) const override {
       if (template_value) {
         auto value = template_value->render(context);
         context.set(var_names[0], value);
@@ -898,7 +1030,7 @@ class NamespacedSetNode : public TemplateNode {
 public:
     NamespacedSetNode(const std::string& ns, const std::string& name, std::unique_ptr<Expression> && v)
       : ns(ns), name(name), value(std::move(v)) {}
-    void render(std::ostringstream &, Value & context) const override {
+    void render(std::ostringstream &, Context & context) const override {
         auto ns_value = context.get(ns);
         if (!ns_value.is_object()) throw std::runtime_error("Namespace '" + ns + "' is not an object");
         ns_value.set(name, this->value->evaluate(context));
@@ -915,7 +1047,7 @@ class IfExpr : public Expression {
 public:
     IfExpr(std::unique_ptr<Expression> && c, std::unique_ptr<Expression> && t, std::unique_ptr<Expression> && e)
         : condition(std::move(c)), then_expr(std::move(t)), else_expr(std::move(e)) {}
-    Value evaluate(const Value & context) const override {
+    Value evaluate(Context & context) const override {
         return condition->evaluate(context) ? then_expr->evaluate(context) : else_expr->evaluate(context);
     }
     json dump() const override {
@@ -927,7 +1059,7 @@ class LiteralExpr : public Expression {
     Value value;
 public:
     LiteralExpr(const Value& v) : value(v) {}
-    Value evaluate(const Value &) const override { return value; }
+    Value evaluate(Context &) const override { return value; }
     json dump() const override { return value.dump(); }
 };
 
@@ -935,7 +1067,7 @@ class ArrayExpr : public Expression {
     std::vector<std::unique_ptr<Expression>> elements;
 public:
     ArrayExpr(std::vector<std::unique_ptr<Expression>> && e) : elements(std::move(e)) {}
-    Value evaluate(const Value & context) const override {
+    Value evaluate(Context & context) const override {
         auto result = Value::array();
         for (const auto& e : elements) {
             result.push_back(e->evaluate(context));
@@ -955,7 +1087,7 @@ class DictExpr : public Expression {
     std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<Expression>>> elements;
 public:
     DictExpr(std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<Expression>>> && e) : elements(std::move(e)) {}
-    Value evaluate(const Value & context) const override {
+    Value evaluate(Context & context) const override {
         auto result = Value::object();
         for (const auto& e : elements) {
             result.set(e.first->evaluate(context), e.second->evaluate(context));
@@ -979,7 +1111,7 @@ class VariableExpr : public Expression {
 public:
     VariableExpr(const std::string& n) : name(n) {}
     std::string get_name() const { return name; }
-    Value evaluate(const Value & context) const override {
+    Value evaluate(Context & context) const override {
         if (!context.contains(name)) {
             std::cerr << "Failed to find '" << name << "' in context (has keys: " << Value::array(context.keys()).dump() << ")" << std::endl;
             return Value();
@@ -993,7 +1125,7 @@ class SliceExpr : public Expression {
 public:
     std::unique_ptr<Expression> start, end;
     SliceExpr(std::unique_ptr<Expression> && s, std::unique_ptr<Expression> && e) : start(std::move(s)), end(std::move(e)) {}
-    Value evaluate(const Value &) const override {
+    Value evaluate(Context &) const override {
         throw std::runtime_error("SliceExpr not implemented");
     }
     json dump() const override {
@@ -1007,7 +1139,7 @@ class SubscriptExpr : public Expression {
 public:
     SubscriptExpr(std::unique_ptr<Expression> && b, std::unique_ptr<Expression> && i)
         : base(std::move(b)), index(std::move(i)) {}
-    Value evaluate(const Value & context) const override {
+    Value evaluate(Context & context) const override {
         auto target_value = base->evaluate(context);
         if (auto slice = dynamic_cast<SliceExpr*>(index.get())) {
           if (!target_value.is_array()) throw std::runtime_error("Subscripting non-array");
@@ -1043,7 +1175,7 @@ private:
     Op op;
 public:
     UnaryOpExpr(std::unique_ptr<Expression> && e, Op o) : expr(std::move(e)), op(o) {}
-    Value evaluate(const Value & context) const override {
+    Value evaluate(Context & context) const override {
         auto e = expr->evaluate(context);
         switch (op) {
             case Op::Plus: return e;
@@ -1067,7 +1199,7 @@ private:
 public:
     BinaryOpExpr(std::unique_ptr<Expression> && l, std::unique_ptr<Expression> && r, Op o)
         : left(std::move(l)), right(std::move(r)), op(o) {}
-    Value evaluate(const Value & context) const override {
+    Value evaluate(Context & context) const override {
         auto l = left->evaluate(context);
         
         auto do_eval = [&](const Value & l) -> Value {
@@ -1125,7 +1257,7 @@ public:
         };
 
         if (l.is_callable()) {
-          return Value::callable([l, do_eval](const Value & context, const Value::CallableArgs & args) {
+          return Value::callable([l, do_eval](Context & context, const Value::CallableArgs & args) {
             auto ll = l.call(context, args);
             return do_eval(ll); //args[0].second);
           });
@@ -1141,61 +1273,55 @@ public:
 class MethodCallExpr : public Expression {
     std::unique_ptr<Expression> object;
     std::string method;
-    std::vector<std::pair<std::string, std::unique_ptr<Expression>>> args;
+    Expression::CallableArgs args;
+    // std::vector<std::pair<std::string, std::unique_ptr<Expression>>> args;
 public:
-    MethodCallExpr(std::unique_ptr<Expression> && obj, const std::string& m, std::vector<std::pair<std::string, std::unique_ptr<Expression>>> && a)
+    MethodCallExpr(std::unique_ptr<Expression> && obj, const std::string& m, Expression::CallableArgs && a)
         : object(std::move(obj)), method(m), args(std::move(a)) {}
     const std::string& get_method() const { return method; }
-    Value evaluate(const Value & context) const override {
+    Value evaluate(Context & context) const override {
         auto obj = object->evaluate(context);
         if (obj.is_array()) {
           if (method == "append") {
-              if (args.size() != 1 || !args[0].first.empty()) throw std::runtime_error("append method must have exactly one unnamed argument");
-              obj.push_back(args[0].second->evaluate(context));
+              args.expectArgs("append method", {1, 1}, {0, 0});
+              obj.push_back(args.args[0]->evaluate(context));
               return Value();
           } else if (method == "insert") {
-              if (args.size() != 2 || !args[0].first.empty() || args[1].first.empty()) throw std::runtime_error("insert method must have exactly two arguments, the first one unnamed");
-              auto index = args[0].second->evaluate(context).get<int>();
+              args.expectArgs("insert method", {2, 2}, {0, 0});
+              auto index = args.args[0]->evaluate(context).get<int>();
               if (index < 0 || index > obj.size()) throw std::runtime_error("Index out of range for insert method");
-              obj.insert(index, args[1].second->evaluate(context));
+              obj.insert(index, args.args[1]->evaluate(context));
               return Value();
           }
         } else if (obj.is_object()) {
           if (method == "items") {
-            if (args.size() != 0) throw std::runtime_error("items method must have no arguments");
+            args.expectArgs("items method", {0, 0}, {0, 0});
             auto result = Value::array();
             for (const auto& key : obj.keys()) {
               result.push_back(Value::array({key, obj.at(key)}));
             }
             return result;
           } else if (method == "get") {
-            if (args.size() != 1 && args.size() != 2) throw std::runtime_error("get method must have one or two arguments");
-            auto key = args[0].second->evaluate(context);
-            if (args.size() == 1) {
+            args.expectArgs("get method", {1, 2}, {0, 0});
+            auto key = args.args[0]->evaluate(context);
+            if (args.args.size() == 1) {
               return obj.contains(key) ? obj.at(key) : Value();
             } else {
-              return obj.contains(key) ? obj.at(key) : args[1].second->evaluate(context);
+              return obj.contains(key) ? obj.at(key) : args.args[1]->evaluate(context);
             }
           } else if (obj.contains(method)) {
             auto callable = obj.at(method);
             if (!callable.is_callable()) {
               throw std::runtime_error("Property '" + method + "' is not callable");
             }
-            Value::CallableArgs vargs;
-            for (const auto& arg : args) {
-                vargs.push_back({arg.first, arg.second->evaluate(context)});
-            }
+            Value::CallableArgs vargs = args.evaluate(context);
             return callable.call(context, vargs);
           }
         }
         throw std::runtime_error("Unknown method: " + method);
     }
     json dump() const override {
-        json result = {{"call", {{"method", method}, {"object", object->dump()}, "args", json::array()}}};
-        for (const auto& arg : args) {
-            result["call"]["args"].push_back({arg.first, arg.second->dump()});
-        }
-        return result;
+        return {{"call", {{"method", method}, {"object", object->dump()}, "args", args.dump()}}};
     }
 };
 
@@ -1205,23 +1331,15 @@ public:
     Expression::CallableArgs args;
     CallExpr(std::unique_ptr<Expression> && obj, Expression::CallableArgs && a)
         : object(std::move(obj)), args(std::move(a)) {}
-    Value evaluate(const Value & context) const override {
+    Value evaluate(Context & context) const override {
         auto obj = object->evaluate(context);
         if (!obj.is_callable()) {
           throw std::runtime_error("Object is not callable: " + obj.dump(2));
         }
-        Value::CallableArgs vargs;
-        for (const auto& arg : args) {
-            vargs.push_back({arg.first, arg.second->evaluate(context)});
-        }
-        return obj.call(context, vargs);
+        return obj.call(context, args.evaluate(context));
     }
     json dump() const override {
-        json result = {{"call", {{"object", object->dump()}, {"args", json::array()}}}};
-        for (const auto& arg : args) {
-            result["call"]["args"].push_back({{"name", arg.first}, {"value", arg.second->dump()}});
-        }
-        return result;
+        return {{"call", {{"object", object->dump()}, {"args", args.dump()}}}};
     }
 };
 
@@ -1229,7 +1347,7 @@ class FilterExpr : public Expression {
     std::vector<std::unique_ptr<Expression>> parts;
 public:
     FilterExpr(std::vector<std::unique_ptr<Expression>> && p) : parts(std::move(p)) {}
-    Value evaluate(const Value & context) const override {
+    Value evaluate(Context & context) const override {
         Value result;
         bool first = true;
         for (const auto& part : parts) {
@@ -1239,15 +1357,12 @@ public:
           } else {
             if (auto ce = dynamic_cast<CallExpr*>(part.get())) {
               auto target = ce->object->evaluate(context);
-              Value::CallableArgs vargs;
-              vargs.push_back({"", result});
-              for (const auto& arg : ce->args) {
-                  vargs.push_back({arg.first, arg.second->evaluate(context)});
-              }
-              result = target.call(context, vargs);
+              result = target.call(context, ce->args.evaluate(context));
             } else {
               auto callable = part->evaluate(context);
-              result = callable.call(context, {{"", result}});
+              Value::CallableArgs args;
+              args.args.push_back(result);
+              result = callable.call(context, args);
             }
           }
         }
@@ -1577,7 +1692,41 @@ private:
         return left;
     }
 
-    Expression::CallableArgs parseCallParams(bool is_call) {
+    Expression::CallableParams parseParameters() {
+        consumeSpaces();
+        if (consumeToken("(").empty()) throw std::runtime_error("Expected opening parenthesis in param list");
+
+        Expression::CallableParams result;
+        
+        while (it != end) {
+            if (!consumeToken(")").empty()) {
+                return result;
+            }
+            auto expr = parseExpression();
+            if (!expr) throw std::runtime_error("Expected expression in call args");
+
+            if (auto ident = dynamic_cast<VariableExpr*>(expr.get())) {
+                if (!consumeToken("=").empty()) {
+                    auto value = parseExpression();
+                    if (!value) throw std::runtime_error("Expected expression in for named arg");
+                    result.emplace_back(ident->get_name(), std::move(value));
+                } else {
+                    result.emplace_back(ident->get_name(), nullptr);
+                }
+            } else {
+                result.emplace_back(std::string(), std::move(expr));
+            }
+            if (consumeToken(",").empty()) {
+              if (consumeToken(")").empty()) {
+                throw std::runtime_error("Expected closing parenthesis in call args");
+              }
+              return result;
+            }
+        }
+        throw std::runtime_error("Expected closing parenthesis in call args");
+    }
+
+    Expression::CallableArgs parseCallArgs() {
         consumeSpaces();
         if (consumeToken("(").empty()) throw std::runtime_error("Expected opening parenthesis in call args");
 
@@ -1594,14 +1743,12 @@ private:
                 if (!consumeToken("=").empty()) {
                     auto value = parseExpression();
                     if (!value) throw std::runtime_error("Expected expression in for named arg");
-                    result.emplace_back(ident->get_name(), std::move(value));
-                } else if (is_call) {
-                    result.emplace_back(std::string(), std::move(expr));
+                    result.kwargs.emplace_back(ident->get_name(), std::move(value));
                 } else {
-                    result.emplace_back(ident->get_name(), nullptr);
+                    result.args.emplace_back(std::move(expr));
                 }
             } else {
-                result.emplace_back(std::string(), std::move(expr));
+                result.args.emplace_back(std::move(expr));
             }
             if (consumeToken(",").empty()) {
               if (consumeToken(")").empty()) {
@@ -1701,7 +1848,7 @@ private:
             if (identifier.empty()) throw std::runtime_error("Expected identifier in filter expression");
 
             if (peekSymbols({ "(" })) {
-                auto callParams = parseCallParams(/* is_call = */ true);
+                auto callParams = parseCallArgs();
                 parts.push_back(call_func(identifier, std::move(callParams)));
             } else {
                 parts.push_back(call_func(identifier, {}));
@@ -1782,7 +1929,7 @@ private:
 
             consumeSpaces();
             if (peekSymbols({ "(" })) {
-              auto callParams = parseCallParams(/* is_call = */ true);
+              auto callParams = parseCallArgs();
               value = nonstd_make_unique<MethodCallExpr>(std::move(value), identifier, std::move(callParams));
             } else {
               value = nonstd_make_unique<SubscriptExpr>(std::move(value), nonstd_make_unique<LiteralExpr>(Value(identifier)));
@@ -1792,7 +1939,7 @@ private:
       }
 
       if (peekSymbols({ "(" })) {
-        auto callParams = parseCallParams(/* is_call = */ true);
+        auto callParams = parseCallArgs();
         value = nonstd_make_unique<CallExpr>(std::move(value), std::move(callParams));
       }
       return value;
@@ -2063,7 +2210,7 @@ private:
             } else if (keyword == "macro") {
               auto macroname = parseIdentifier();
               if (macroname.empty()) throw std::runtime_error("Expected macro name in macro block");
-              auto params = parseCallParams(/* is_call = */ false);
+              auto params = parseParameters();
 
               auto post_space = parseBlockClose();
               tokens.push_back(nonstd_make_unique<MacroTemplateToken>(pos, pre_space, post_space, macroname, std::move(params)));
@@ -2203,54 +2350,46 @@ public:
     }
 };
 
-static Value simple_function(const std::string & fn_name, const std::vector<std::string> & params, const std::function<Value(const Value &, const Value & args)> & fn) {
+static Value simple_function(const std::string & fn_name, const std::vector<std::string> & params, const std::function<Value(Context &, const Value & args)> & fn) {
   std::map<std::string, size_t> named_positions;
   for (size_t i = 0, n = params.size(); i < n; i++) named_positions[params[i]] = i;
 
-  return Value::callable([=](const Value & context, const Value::CallableArgs & args) -> Value {
+  return Value::callable([=](Context & context, const Value::CallableArgs & args) -> Value {
     auto args_obj = Value::object();
     auto positional = true;
     std::vector<bool> provided_args(params.size());
-    for (size_t i = 0, n = args.size(); i < n; i++) {
-      auto & arg = args[i];
-      if (positional) {
-        if (arg.first.empty() || (i < params.size() && arg.first == params[i])) {
-          if (i >= params.size()) throw std::runtime_error("Too many positional params for " + fn_name);
-          args_obj.set(params[i], arg.second);
-          provided_args[i] = true;
-          continue;
-        } else {
-          positional = false;
-        }
+    for (size_t i = 0, n = args.args.size(); i < n; i++) {
+      auto & arg = args.args[i];
+      if (i < params.size()) {
+        args_obj.set(params[i], arg);
+        provided_args[i] = true;
+      } else {
+        throw std::runtime_error(("Too many positional params for " + fn_name + ": ") + args.dump().dump());
       }
+    }
+    for (size_t i = 0, n = args.kwargs.size(); i < n; i++) {
+      auto & arg = args.kwargs[i];
       auto named_pos_it = named_positions.find(arg.first);
       if (named_pos_it == named_positions.end()) {
         throw std::runtime_error("Unknown argument " + arg.first + " for function " + fn_name);
       }
-      if (!positional) {
-        provided_args[named_pos_it->second] = true;
-      }
+      provided_args[named_pos_it->second] = true;
       args_obj.set(arg.first, arg.second);
     }
-    // for (size_t i = 0, n = params.size(); i < n; i++) {
-    //   if (!provided_args[i]) {
-    //     throw std::runtime_error("Missing argument " + params[i] + " for function " + fn_name);
-    //   }
-    // }
     return fn(context, args_obj);
   });
 }
 
-Value Value::context(const Value & values) {
-  auto top_level_context = Value::object();
+std::shared_ptr<Context> Context::builtins() {
+  auto top_level_values = Value::object();
 
-  top_level_context.set("raise_exception", simple_function("raise_exception", { "message" }, [](const Value &, const Value & args) -> Value {
+  top_level_values.set("raise_exception", simple_function("raise_exception", { "message" }, [](Context &, const Value & args) -> Value {
     throw std::runtime_error(args.at("message").get<std::string>());
   }));
-  top_level_context.set("tojson", simple_function("tojson", { "value", "indent" }, [](const Value &, const Value & args) {
+  top_level_values.set("tojson", simple_function("tojson", { "value", "indent" }, [](Context &, const Value & args) {
     return Value(args.at("value").dump(args.get<int64_t>("indent", -1)));
   }));
-  top_level_context.set("items", simple_function("items", { "object" }, [](const Value &, const Value & args) {
+  top_level_values.set("items", simple_function("items", { "object" }, [](Context &, const Value & args) {
     auto items = Value::array();
     if (args.contains("object")) {
       auto & obj = args.at("object");
@@ -2262,19 +2401,19 @@ Value Value::context(const Value & values) {
     }
     return items;
   }));
-  top_level_context.set("trim", simple_function("trim", { "text" }, [](const Value &, const Value & args) {
+  top_level_values.set("trim", simple_function("trim", { "text" }, [](Context &, const Value & args) {
     auto & text = args.at("text");
     return text.is_null() ? text : Value(strip(text.get<std::string>()));
   }));
-  auto escape = simple_function("escape", { "text" }, [](const Value &, const Value & args) {
+  auto escape = simple_function("escape", { "text" }, [](Context &, const Value & args) {
     return Value(html_escape(args.at("text").get<std::string>()));
   });
-  top_level_context.set("e", escape);
-  top_level_context.set("escape", escape);
-  top_level_context.set("joiner", simple_function("joiner", { "sep" }, [](const Value &, const Value & args) {
+  top_level_values.set("e", escape);
+  top_level_values.set("escape", escape);
+  top_level_values.set("joiner", simple_function("joiner", { "sep" }, [](Context &, const Value & args) {
     auto sep = args.get<std::string>("sep", "");
     auto first = std::make_shared<bool>(true);
-    return simple_function("", {}, [sep, first](const Value &, const Value & args) -> Value {
+    return simple_function("", {}, [sep, first](Context &, const Value & args) -> Value {
       if (*first) {
         *first = false;
         return "";
@@ -2283,10 +2422,10 @@ Value Value::context(const Value & values) {
     });
     return Value(html_escape(args.at("text").get<std::string>()));
   }));
-  top_level_context.set("count", simple_function("count", { "items" }, [](const Value &, const Value & args) {
+  top_level_values.set("count", simple_function("count", { "items" }, [](Context &, const Value & args) {
     return Value((int64_t) args.at("items").size());
   }));
-  top_level_context.set("dictsort", simple_function("dictsort", { "value" }, [](const Value &, const Value & args) {
+  top_level_values.set("dictsort", simple_function("dictsort", { "value" }, [](Context &, const Value & args) {
     if (args.size() != 1) throw std::runtime_error("dictsort expects exactly 1 argument (TODO: fix implementation)");
     auto & value = args.at("value");
     auto keys = value.keys();
@@ -2297,7 +2436,7 @@ Value Value::context(const Value & values) {
     }
     return res;
   }));
-  top_level_context.set("join", simple_function("join", { "items", "d" }, [](const Value &, const Value & args) {
+  top_level_values.set("join", simple_function("join", { "items", "d" }, [](Context &, const Value & args) {
     auto do_join = [](const Value & items, const std::string & sep) {
       std::ostringstream oss;
       auto first = true;
@@ -2313,32 +2452,33 @@ Value Value::context(const Value & values) {
         auto & items = args.at("items");
         return do_join(items, sep);
     } else {
-      return simple_function("", {"items"}, [sep, do_join](const Value &, const Value & args) {
+      return simple_function("", {"items"}, [sep, do_join](Context &, const Value & args) {
         auto & items = args.at("items");
         if (!items || !items.is_array()) throw std::runtime_error("join expects an array for items, got: " + items.dump());
         return do_join(items, sep);
       });
     }
   }));
-  top_level_context.set("namespace", callable([=](const Value &, const Value::CallableArgs & args) {
+  top_level_values.set("namespace", Value::callable([=](Context &, const Value::CallableArgs & args) {
     auto ns = Value::object();
-    for (auto & arg : args) {
+    args.expectArgs("namespace", {0, 0}, {0, std::numeric_limits<size_t>::max()});
+    for (auto & arg : args.kwargs) {
       ns.set(arg.first, arg.second);
     }
     return ns;
   }));
-  top_level_context.set("equalto", simple_function("equalto", { "expected", "actual" }, [](const Value &, const Value & args) -> Value {
+  top_level_values.set("equalto", simple_function("equalto", { "expected", "actual" }, [](Context &, const Value & args) -> Value {
       return args.at("actual") == args.at("expected");
   }));
-  top_level_context.set("length", simple_function("length", { "items" }, [](const Value &, const Value & args) -> Value {
+  top_level_values.set("length", simple_function("length", { "items" }, [](Context &, const Value & args) -> Value {
       return (int64_t) args.at("items").size();
   }));
-  top_level_context.set("list", simple_function("list", { "items" }, [](const Value &, const Value & args) -> Value {
+  top_level_values.set("list", simple_function("list", { "items" }, [](Context &, const Value & args) -> Value {
       auto items = args.at("items");
       if (!items.is_array()) throw std::runtime_error("object is not iterable");
       return items;
   }));
-  top_level_context.set("unique", simple_function("unique", { "items" }, [](const Value &, const Value & args) -> Value {
+  top_level_values.set("unique", simple_function("unique", { "items" }, [](Context &, const Value & args) -> Value {
       auto items = args.at("items");
       if (!items.is_array()) throw std::runtime_error("object is not iterable");
       std::unordered_set<Value> seen;
@@ -2352,25 +2492,26 @@ Value Value::context(const Value & values) {
       return result;
   }));
   auto make_filter = [](const Value & filter, const Value & extra_args) -> Value {
-    return simple_function("", { "value" }, [=](const Value & context, const Value & args) {
+    return simple_function("", { "value" }, [=](Context & context, const Value & args) {
       auto value = args.at("value");
       Value::CallableArgs actual_args;
-      actual_args.emplace_back("", value);
+      actual_args.args.emplace_back(value);
       for (size_t i = 0, n = extra_args.size(); i < n; i++) {
-        actual_args.emplace_back("", extra_args.at(i));
+        actual_args.args.emplace_back(extra_args.at(i));
       }
       return filter.call(context, actual_args);
     });
   };
   // https://jinja.palletsprojects.com/en/3.0.x/templates/#jinja-filters.reject
-  top_level_context.set("reject", callable([=](const Value & context, const Value::CallableArgs & args) {
-    auto & items = args[0].second;
-    auto filter_fn = context.get(args[1].second);
-    if (!filter_fn) throw std::runtime_error("Function not found " + args[1].second.dump());
+  top_level_values.set("reject", Value::callable([=](Context & context, const Value::CallableArgs & args) {
+    args.expectArgs("reject", {2, std::numeric_limits<size_t>::max()}, {0, 0});
+    auto & items = args.args[0];
+    auto filter_fn = context.get(args.args[1]);
+    if (!filter_fn) throw std::runtime_error("Function not found " + args.args[1].dump());
 
     auto filter_args = Value::array();
-    for (size_t i = 2, n = args.size(); i < n; i++) {
-      filter_args.push_back(args[i].second);
+    for (size_t i = 2, n = args.args.size(); i < n; i++) {
+      filter_args.push_back(args.args[i]);
     }
     auto filter = make_filter(filter_fn, filter_args);
 
@@ -2385,29 +2526,48 @@ Value Value::context(const Value & values) {
     }
     return res;
   }));
-  top_level_context.set("range", callable([=](const Value &, const Value::CallableArgs & args) {
-    int64_t start = 0;
-    int64_t end = 0;
-    int64_t step = 1;
-    if (args.size() == 1) {
-      if (!args[0].first.empty()) throw std::runtime_error("When range is called with just 1 argument it must be positional");
-      end = args[0].second.get<int64_t>();
+  top_level_values.set("range", Value::callable([=](Context &, const Value::CallableArgs & args) {
+    std::vector<int64_t> startEndStep(3);
+    std::vector<bool> param_set(3);
+    // TODO: handle kwargs again!
+    // args.expectArgs("range", {1, 3}, {0, 0});
+    if (args.args.size() == 1) {
+      startEndStep[1] = args.args[0].get<int64_t>();
+      param_set[1] = true;
     } else {
-      auto positional = true;
-      for (size_t i = 0; i < args.size(); i++) {
-        auto & arg = args[i];
-        auto v = arg.second.get<int64_t>();
-        if (positional && i < 3 && arg.first.empty()) {
-          (i == 0 ? start : i == 1 ? end : step) = v;
-        } else {
-          positional = false;
-          if (arg.first == "start") start = v;
-          else if (arg.first == "end") end = v;
-          else if (arg.first == "step") step = v;
-          else throw std::runtime_error("Unknown argument " + arg.first + " for function range");
+      for (size_t i = 0; i < args.args.size(); i++) {
+        auto & arg = args.args[i];
+        auto v = arg.get<int64_t>();
+        startEndStep[i] = v;
+        param_set[i] = true;
+        // } else {
+        //   positional = false;
+        //   if (arg.first == "start") start = v;
+        //   else if (arg.first == "end") end = v;
+        //   else if (arg.first == "step") step = v;
+        //   else throw std::runtime_error("Unknown argument " + arg.first + " for function range");
         }
       }
+      for (auto & arg : args.kwargs) {
+        size_t i;
+        if (arg.first == "start") i = 0;
+        else if (arg.first == "end") i = 1;
+        else if (arg.first == "step") i = 2;
+        else throw std::runtime_error("Unknown argument " + arg.first + " for function range");
+
+        if (param_set[i]) {
+          throw std::runtime_error("Duplicate argument " + arg.first + " for function range");
+        }
+        startEndStep[i] = arg.second.get<int64_t>();
+        param_set[i] = true;
     }
+    if (!param_set[1]) {
+      throw std::runtime_error("Missing required argument 'end' for function range");
+    }
+    int64_t start = param_set[0] ? startEndStep[0] : 0;
+    int64_t end = startEndStep[1];
+    int64_t step = param_set[2] ? startEndStep[2] : 1;
+    
     auto res = Value::array();
     if (step > 0) {
       for (int64_t i = start; i < end; i += step) {
@@ -2421,17 +2581,19 @@ Value Value::context(const Value & values) {
     return res;
   }));
 
-  if (values && !values.is_null()) {
-    if (!values.is_object()) {
-      throw std::runtime_error("Values must be an object");
-    }
-    auto keys = values.keys();
-    for (size_t i = 0, n = keys.size(); i < n; i++) {
-      auto & key = keys.at(i);
-      top_level_context.set(key, values.at(key));
-    }
+  return std::make_shared<Context>(std::move(top_level_values));
+}
+
+std::shared_ptr<Context> Context::make(Value && values) {
+  return std::make_shared<Context>(values.is_null() ? Value::object() : std::move(values), builtins());
+}
+
+json Context::dump() const {
+  json res = parent_ ? parent_->dump() : json::object();
+  for (auto & key : values_.keys()) {
+    res[key.get<std::string>()] = values_.at(key).get<json>();
   }
-  return top_level_context;
+  return res;
 }
 
 }  // namespace jinja
