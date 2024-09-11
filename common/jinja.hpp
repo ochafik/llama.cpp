@@ -83,10 +83,6 @@ public:
       return res;
     }
   };
-  // struct FilterArgs : CallableArgs {
-  //   Value value;
-  // };
-  // using CallableArgs = std::vector<std::pair<std::string, Value>>;
   
   using CallableType = std::function<Value(Context &, const CallableArgs &)>;
   using FilterType = std::function<Value(Context &, const CallableArgs &)>;
@@ -106,10 +102,7 @@ private:
 
   void dump(std::ostringstream & out, int indent = -1, int level = 0) const {
     auto print_indent = [&](int level) {
-      if (indent > 0) {
-        // out << std::string(level * indent, ' ');
-        for (int i = 0, n = level * indent; i < n; ++i) out << ' ';
-      }
+      if (indent > 0) for (int i = 0, n = level * indent; i < n; ++i) out << ' ';
     };
     auto print_sub_sep = [&]() {
       out << ',';
@@ -842,15 +835,6 @@ public:
         throw std::runtime_error("For loop iterable must be iterable");
       }
 
-      // auto original_context = context;
-      // auto original_vars = Value::object();
-      // for (const auto& var_name : var_names) {
-      //     original_vars.set(var_name, context.contains(var_name) ? context.at(var_name) : Value());
-      // }
-      // if (original_vars.contains("loop")) {
-      //     original_vars.set("loop", context.at("loop"));
-      // }
-
       Value::CallableType loop_function;
 
       std::function<void(const Value&)> visit = [&](const Value& iter) {
@@ -910,14 +894,6 @@ public:
       }
 
       visit(iterable_value);
-      
-      // for (const auto& var_name : var_names) {
-      //     if (original_vars.contains(var_name)) {
-      //         context.set(var_name, original_vars.at(var_name));
-      //     } else {
-      //         context.erase(var_name);
-      //     }
-      // }
   }
 
     json dump() const override {
@@ -2519,7 +2495,6 @@ std::shared_ptr<Context> Context::builtins() {
     for (size_t i = 0, n = items.size(); i < n; i++) {
       auto & item = items.at(i);
       auto pred_res = filter.call(context, { { "", item } });
-      // std::cerr << "Predicate result for " << item.dump() << ": " << (pred_res ? "true" : "false") << std::endl;
       if (!pred_res) {
         res.push_back(item);
       }
@@ -2529,8 +2504,6 @@ std::shared_ptr<Context> Context::builtins() {
   top_level_values.set("range", Value::callable([=](Context &, const Value::CallableArgs & args) {
     std::vector<int64_t> startEndStep(3);
     std::vector<bool> param_set(3);
-    // TODO: handle kwargs again!
-    // args.expectArgs("range", {1, 3}, {0, 0});
     if (args.args.size() == 1) {
       startEndStep[1] = args.args[0].get<int64_t>();
       param_set[1] = true;
@@ -2540,12 +2513,6 @@ std::shared_ptr<Context> Context::builtins() {
         auto v = arg.get<int64_t>();
         startEndStep[i] = v;
         param_set[i] = true;
-        // } else {
-        //   positional = false;
-        //   if (arg.first == "start") start = v;
-        //   else if (arg.first == "end") end = v;
-        //   else if (arg.first == "step") step = v;
-        //   else throw std::runtime_error("Unknown argument " + arg.first + " for function range");
         }
       }
       for (auto & arg : args.kwargs) {
