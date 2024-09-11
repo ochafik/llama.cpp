@@ -5,9 +5,28 @@
 #include <string>
 #include <json.hpp>
 
+void announce_test(const std::string & name) {
+    auto len = name.size();
+    auto extract = jinja::strip(name);
+    extract = json(name.substr(0, std::min<size_t>(len, 50)) + (len > 50 ? " [...]" : "")).dump();
+    extract = extract.substr(1, extract.size() - 2);
+    std::cout << "Testing: " << extract << std::endl << std::flush;
+}
+
+struct Timer {
+    std::string name;
+    std::chrono::time_point<std::chrono::high_resolution_clock> start;
+    Timer(const std::string & name) : name(name), start(std::chrono::high_resolution_clock::now()) {}
+    ~Timer() {
+        auto end = std::chrono::high_resolution_clock::now();
+        auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        std::cout << name << "  took " << duration_ms.count() << "ms" << std::endl << std::flush;
+    }
+};
+
 void test_render(const std::string & template_str, const json & bindings, const std::string & expected, const json & expected_context = {}) {
-    std::cout << "Testing: " << template_str << std::endl;
-    std::cout << std::flush;
+    Timer timer("  ");
+    announce_test(template_str);
     auto root = jinja::Parser::parse(template_str);
     auto context = jinja::Context::make(bindings);
     // std::cout << "Context: " << context.dump() << std::endl;
@@ -16,7 +35,7 @@ void test_render(const std::string & template_str, const json & bindings, const 
         actual = root->render(*context);
     } catch (const std::runtime_error & e) {
         actual = "ERROR: " + std::string(e.what());
-        std::cerr << "AST: " << root->dump().dump(2) << std::endl;
+        std::cerr << "AST: " << root->dump().dump(2) << std::endl << std::flush;
     }
 
     if (expected != actual) {
@@ -37,11 +56,11 @@ void test_render(const std::string & template_str, const json & bindings, const 
             }
         }
     }
-    std::cout << "Test passed: " << template_str << std::endl;
+    std::cout << "Test passed!" << std::endl << std::flush;
 }
 void test_error_contains(const std::string & template_str, const json & bindings, const std::string & expected) {
-    std::cout << "Testing: " << template_str << std::endl;
-    std::cout << std::flush;
+    Timer timer("  ");
+    announce_test(template_str);
     try {
         auto root = jinja::Parser::parse(template_str);
         auto context = jinja::Context::make(bindings);
@@ -57,7 +76,7 @@ void test_error_contains(const std::string & template_str, const json & bindings
             throw std::runtime_error("Test failed");
         }
     }
-    std::cout << "Test passed: " << template_str << std::endl;
+    std::cout << "  passed!" << std::endl << std::flush;
 }
 
 inline std::string read_file(const std::string &path) {
@@ -219,8 +238,9 @@ int main() {
             continue;
         }
         std::string text_content = read_file(entry.path());
-        std::cout << "# Parsing " << entry.path() << ":" << std::endl;
-        std::cout << text_content << std::endl;
+        //text_content = "{#- " + entry.path().string() + " -#}\n" + text_content;
+        // std::cout << "# Parsing " << entry.path() << ":" << std::endl;
+        // std::cout << text_content << std::endl;
         jinja::Parser::parse(text_content);
     }
 
@@ -350,18 +370,23 @@ int main() {
         }
       }
     ])");
+    
+    auto test_file = [](const std::string & path, const json & bindings, const std::string & expected) {
+        const auto tmpl = "{#- " + path + " -#}\n" + read_file(path);
+        test_render(tmpl, bindings, expected);
+    };
 
-    const auto llama3_1_template = read_file("templates/Meta-Llama-3.1-8B-Instruct.jinja");
-    test_render(llama3_1_template, json::object({
-        {"messages", simple_messages},
-        {"add_generation_prompt", true},
-        {"tools", tools},
-        {"builtin_tools", json::array({"wolfram_alpha", "brave_search"})},
-        {"cutting_knowledge_date", "2023-04-01"},
-        {"todays_date", "2024-09-03"},
-        {"eos_token", "<|endoftext|>"},
-        {"bos_token", "<|startoftext|>"},
-    }),
+    test_file("templates/Meta-Llama-3.1-8B-Instruct.jinja",
+        {
+            {"messages", simple_messages},
+            {"add_generation_prompt", true},
+            {"tools", tools},
+            {"builtin_tools", json::array({"wolfram_alpha", "brave_search"})},
+            {"cutting_knowledge_date", "2023-04-01"},
+            {"todays_date", "2024-09-03"},
+            {"eos_token", "<|endoftext|>"},
+            {"bos_token", "<|startoftext|>"},
+        },
         "<|startoftext|><|start_header_id|>system<|end_header_id|>\n"
         "\n"
         "Environment: ipython\n"
@@ -379,15 +404,15 @@ int main() {
         "\n"
     );
 
-    const auto hermes2_pro_tool_use_template = read_file("templates/Hermes-2-Pro-Llama-3-8B.tool_use.jinja");
-    test_render(hermes2_pro_tool_use_template, json::object({
-        {"messages", simple_messages},
-        {"add_generation_prompt", true},
-        {"tools", tools},
-        {"eos_token", "<|endoftext|>"},
-        {"bos_token", "<|startoftext|>"},
-    }),
-    R"(<|startoftext|><|im_start|>system
+    test_file("templates/Hermes-2-Pro-Llama-3-8B.tool_use.jinja",
+        {
+            {"messages", simple_messages},
+            {"add_generation_prompt", true},
+            {"tools", tools},
+            {"eos_token", "<|endoftext|>"},
+            {"bos_token", "<|startoftext|>"},
+        },
+        R"(<|startoftext|><|im_start|>system
 You are a function calling AI model. You are provided with function signatures within <tools></tools> XML tags. You may call one or more functions to assist with the user query. Don't make assumptions about what values to plug into functions. Here are the available tools: <tools> {"type": "function", "function": {"name": "ipython", "description": "ipython(code: str) - Runs code in an ipython interpreter and returns the result of the execution after 60 seconds.
 
     Args:
