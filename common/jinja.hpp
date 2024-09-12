@@ -75,6 +75,12 @@ namespace jinja {
 
 class Context;
 
+struct Options {
+    bool trim_blocks;
+    bool lstrip_blocks;
+    bool keep_trailing_newline;
+};
+
 /* Values that behave roughly like in Python.
  * jinja templates deal with objects by reference so we can't just json for arrays & objects,
  * but we do for primitives.
@@ -559,14 +565,19 @@ class Context : public std::enable_shared_from_this<Context> {
  protected:
   Value values_;
   std::shared_ptr<Context> parent_;
+  std::shared_ptr<const Options> options_;
 public:
-  Context(Value && values = Value::object(), const std::shared_ptr<Context> & parent = nullptr) : values_(std::move(values)), parent_(parent) {
+  Context(Value && values, 
+          const std::shared_ptr<const Options> & options,
+          const std::shared_ptr<Context> & parent = nullptr)
+    : values_(std::move(values)), options_(options), parent_(parent) {
     if (!values_.is_object())
       throw std::runtime_error("Context values must be an object: " + values_.dump());
   }
 
-  static std::shared_ptr<Context> builtins();
-  static std::shared_ptr<Context> make(Value && values);
+  const std::shared_ptr<const Options> & options() const { return options_; }
+  static std::shared_ptr<Context> builtins(const std::shared_ptr<const Options> & options);
+  static std::shared_ptr<Context> make(Value && values, const Options & options);
 
   json debug_dump() const;
 
@@ -598,8 +609,10 @@ public:
 
 class MacroContext : public Context {
 public:
-  MacroContext(Value && arg_values = Value(), const std::shared_ptr<Context> & parent = nullptr) 
-    : Context(std::move(arg_values), parent) {}
+  MacroContext(Value && arg_values, 
+    const std::shared_ptr<const Options> & options,
+    const std::shared_ptr<Context> & parent = nullptr) 
+    : Context(std::move(arg_values), options, parent) {}
   void set(const Value & key, const Value & value) override {
     if (values_.contains(key)) {
       values_.set(key, value);
@@ -715,7 +728,7 @@ static void destructuring_assign(const std::vector<std::string> & var_names, Con
   }
 }
 
-enum SpaceHandling { Keep, Strip };
+enum SpaceHandling { Keep, Strip, StripSpaces, StripNewline };
 
 class TemplateToken {
 public:
@@ -838,13 +851,50 @@ struct CommentTemplateToken : public TemplateToken {
 };
 
 class TemplateNode {
+protected:
+    struct Fragment {
+      enum Origin { Text, Block, Expression };
+      SpaceHandling pre_space, post_space;
+      std::string text;
+      Origin origin;
+    };
+    
 public:
-    virtual void render(std::ostringstream& oss, Context & context) const = 0;
+    virtual void render(std::vector<Fragment> & out, Context & context) const = 0;
     virtual ~TemplateNode() = default;
     std::string render(Context & context) const {
+        std::vector<Fragment> out;
+        render(out, context);
         std::ostringstream oss;
-        render(oss, context);
-        return oss.str();
+        const auto & options = *context.options();
+        for (size_t i = 0, n = out.size(); i < n; ++i) {
+          const auto & frag = out[i];
+          auto text = frag.text;
+          if (frag.pre_space == SpaceHandling::Strip) {
+            static std::regex leading_space_regex(R"(^(\s|\r|\n)+)");
+            text = std::regex_replace(text, leading_space_regex, "");
+          // } else if ((it - 1) != begin) {
+          } else if (options.trim_blocks && i > 0) {
+            static std::regex leading_line(R"(^[ \t]*\n)");
+            // static std::regex leading_line(R"(^\n)");
+            text = std::regex_replace(text, leading_line, "");
+          }
+          if (frag.post_space == SpaceHandling::Strip) {
+            static std::regex trailing_space_regex(R"((\s|\r|\n)+$)");
+            text = std::regex_replace(text, trailing_space_regex, "");
+          } else if (options.lstrip_blocks && i != n - 1) {
+          // } else if (options.lstrip_blocks && it != end) {
+            static std::regex trailing_last_line_space_regex(R"((^|\n)[ \t]*$)");
+            text = std::regex_replace(text, trailing_last_line_space_regex, "$1");
+          }
+          if (i == n - 1 && !options.keep_trailing_newline && frag.origin == Fragment::Origin::Text) {
+            static std::regex r(R"([\n\r]$)");
+            text = std::regex_replace(text, r, "");  // Strip one trailing newline
+          }
+          oss << text;
+        }
+        auto result = oss.str();
+        return result;
     }
     virtual json debug_dump() const = 0;
 };
@@ -853,8 +903,8 @@ class SequenceNode : public TemplateNode {
     std::vector<std::unique_ptr<TemplateNode>> children;
 public:
     SequenceNode(std::vector<std::unique_ptr<TemplateNode>> && c) : children(std::move(c)) {}
-    void render(std::ostringstream& oss, Context & context) const override {
-        for (const auto& child : children) child->render(oss, context);
+    void render(std::vector<Fragment> & out, Context & context) const override {
+        for (const auto& child : children) child->render(out, context);
     }
     json debug_dump() const override {
         json res = json::array();
@@ -867,24 +917,50 @@ public:
 
 class TextNode : public TemplateNode {
     std::string text;
+    SpaceHandling pre_space, post_space;
 public:
-    TextNode(const std::string& t) : text(t) {}
-    void render(std::ostringstream& oss, Context &) const override { oss << text; }
+    // TextNode(const std::string& t) : text(t) {}
+    TextNode(const std::string& t, SpaceHandling pre_space, SpaceHandling post_space) : text(t), pre_space(pre_space), post_space(post_space) {}
+    void render(std::vector<Fragment> & out, Context &) const override {
+      out.push_back({
+        .pre_space = pre_space,
+        .post_space = post_space,
+        .text = text,
+        .origin = Fragment::Origin::Text,
+      });
+    }
     json debug_dump() const override { return {{"text", text}}; }
 };
 
 class ExpressionNode : public TemplateNode {
     std::unique_ptr<Expression> expr;
+    SpaceHandling pre_space, post_space;
 public:
-    ExpressionNode(std::unique_ptr<Expression> && e) : expr(std::move(e)) {}
-    void render(std::ostringstream& oss, Context & context) const override {
+    ExpressionNode(std::unique_ptr<Expression> && e, SpaceHandling pre_space, SpaceHandling post_space)
+      : expr(std::move(e)), pre_space(pre_space), post_space(post_space) {}
+    void render(std::vector<Fragment> & out, Context & context) const override {
       auto result = expr->evaluate(context);
       if (result.is_string()) {
-          oss << result.get<std::string>();
+          out.push_back({
+            .pre_space = pre_space,
+            .post_space = post_space,
+            .text = result.get<std::string>(),
+            .origin = Fragment::Origin::Expression,
+          });
       } else if (result.is_boolean()) {
-          oss << (result.get<bool>() ? "True" : "False");
+          out.push_back({
+            .pre_space = pre_space,
+            .post_space = post_space,
+            .text = result.get<bool>() ? "True" : "False",
+            .origin = Fragment::Origin::Expression,
+          });
       } else if (!result.is_null()) {
-          oss << result.dump();
+          out.push_back({
+            .pre_space = pre_space,
+            .post_space = post_space,
+            .text = result.dump(),
+            .origin = Fragment::Origin::Expression,
+          });
       }
   }
     json debug_dump() const override { return {{"expression", expr->debug_dump()}}; }
@@ -895,14 +971,14 @@ class IfNode : public TemplateNode {
 public:
     IfNode(std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<TemplateNode>>> && c)
         : cascade(std::move(c)) {}
-    void render(std::ostringstream& oss, Context & context) const override {
+    void render(std::vector<Fragment> & out, Context & context) const override {
       for (const auto& branch : cascade) {
           auto enter_branch = true;
           if (branch.first) {
             enter_branch = branch.first->evaluate(context).to_bool();
           }
           if (enter_branch) {
-              branch.second->render(oss, context);
+              branch.second->render(out, context);
               return;
           }
       }
@@ -931,7 +1007,7 @@ public:
     ForNode(const std::vector<std::string> & vns, std::unique_ptr<Expression> && iter,
       std::unique_ptr<Expression> && c, std::unique_ptr<TemplateNode> && b, bool r, std::unique_ptr<TemplateNode> && eb)
             : var_names(vns), iterable(std::move(iter)), condition(std::move(c)), body(std::move(b)), recursive(r), else_body(std::move(eb)) {}
-    void render(std::ostringstream& oss, Context & context) const override {
+    void render(std::vector<Fragment> & out, Context & context) const override {
       // https://jinja.palletsprojects.com/en/3.0.x/templates/#for
 
       auto iterable_value = iterable->evaluate(context);
@@ -952,7 +1028,7 @@ public:
           }
           if (filtered_items.empty()) {
             if (else_body) {
-              else_body->render(oss, context);
+              else_body->render(out, context);
             }
           } else {
               auto loop = recursive ? Value::callable(loop_function) : Value::object();
@@ -967,7 +1043,7 @@ public:
                   cycle_index = (cycle_index + 1) % args.args.size();
                   return item;
               }));
-              auto loop_context = std::make_shared<Context>(std::move(Value::object()), context.shared_from_this());
+              auto loop_context = std::make_shared<Context>(std::move(Value::object()), context.options(), context.shared_from_this());
               loop_context->set("loop", loop);
               for (size_t i = 0, n = filtered_items.size(); i < n; ++i) {
                   auto & item = filtered_items.at(i);
@@ -981,7 +1057,7 @@ public:
                   loop.set("last", i == (n - 1));
                   loop.set("previtem", i > 0 ? filtered_items.at(i - 1) : Value());
                   loop.set("nextitem", i < n - 1 ? filtered_items.at(i + 1) : Value());
-                  body->render(oss, *loop_context);
+                  body->render(out, *loop_context);
               }
           }
       };
@@ -1019,8 +1095,8 @@ class BlockNode : public TemplateNode {
 public:
     BlockNode(std::unique_ptr<VariableExpr> && n, std::unique_ptr<TemplateNode> && b)
         : name(std::move(n)), body(std::move(b)) {}
-    void render(std::ostringstream& oss, Context & context) const override {
-        body->render(oss, context);
+    void render(std::vector<Fragment> & out, Context & context) const override {
+        body->render(out, context);
     }
     json debug_dump() const override {
         return {{"block", {{"name", name->get_name()}, {"body", body->debug_dump()}}}};
@@ -1042,7 +1118,7 @@ public:
           }
         }
     }
-    void render(std::ostringstream& oss, Context & macro_context) const override {
+    void render(std::vector<Fragment> & out, Context & macro_context) const override {
         macro_context.set(name->get_name(), Value::callable([&](Context & context, const Value::CallableArgs & args) {
             auto call_context = macro_context;
             std::vector<bool> param_set(params.size(), false);
@@ -1090,7 +1166,7 @@ public:
             throw std::runtime_error("Destructuring assignment is only supported with a single variable name");
           }
         }
-    void render(std::ostringstream &, Context & context) const override {
+    void render(std::vector<Fragment> &, Context & context) const override {
       if (template_value) {
         auto value = template_value->render(context);
         context.set(var_names[0], value);
@@ -1110,7 +1186,7 @@ class NamespacedSetNode : public TemplateNode {
 public:
     NamespacedSetNode(const std::string& ns, const std::string& name, std::unique_ptr<Expression> && v)
       : ns(ns), name(name), value(std::move(v)) {}
-    void render(std::ostringstream &, Context & context) const override {
+    void render(std::vector<Fragment> &, Context & context) const override {
         auto ns_value = context.get(ns);
         if (!ns_value.is_object()) throw std::runtime_error("Namespace '" + ns + "' is not an object");
         ns_value.set(name, this->value->evaluate(context));
@@ -1481,19 +1557,13 @@ static std::string html_escape(const std::string & s) {
 }
 
 class Parser {
-public:
-    struct Options {
-        bool trim_blocks;
-        bool lstrip_blocks;
-    };
 private:
     using CharIterator = std::string::const_iterator;
 
     std::shared_ptr<std::string> template_str;
     CharIterator start, end, it;
-    Options options;
       
-    Parser(const std::shared_ptr<std::string>& template_str, const Options & options = {}) : template_str(template_str), options(options) {
+    Parser(const std::shared_ptr<std::string>& template_str) : template_str(template_str) {
       if (!template_str) throw std::runtime_error("Template string is null");
       start = it = this->template_str->begin();
       end = this->template_str->end();
@@ -2111,8 +2181,6 @@ private:
     SpaceHandling parsePreSpace(const std::string& s) const {
         if (s == "-")
           return SpaceHandling::Strip;
-        // if (options.lstrip_blocks)
-        //   return SpaceHandling::Strip;
         return SpaceHandling::Keep;
     }
 
@@ -2334,28 +2402,9 @@ private:
               SpaceHandling post_space = it != end ? (*it)->pre_space : SpaceHandling::Keep;
 
               auto text = text_token->text;
-              if (pre_space == SpaceHandling::Strip) {
-                static std::regex leading_space_regex(R"(^(\s|\r|\n)+)");
-                text = std::regex_replace(text, leading_space_regex, "");
-              } else if (options.trim_blocks && (it - 1) != begin) {
-                static std::regex leading_line(R"(^[ \t]*\n)");
-                // static std::regex leading_line(R"(^\n)");
-                text = std::regex_replace(text, leading_line, "");
-              }
-              if (post_space == SpaceHandling::Strip) {
-                static std::regex trailing_space_regex(R"((\s|\r|\n)+$)");
-                text = std::regex_replace(text, trailing_space_regex, "");
-              } else if (options.lstrip_blocks && it != end) {
-                static std::regex trailing_last_line_space_regex(R"((^|\n)[ \t]*$)");
-                text = std::regex_replace(text, trailing_last_line_space_regex, "$1");
-              }
-              if (it == end) {
-                static std::regex r(R"([\n\r]$)");
-                text = std::regex_replace(text, r, "");  // Strip one trailing newline
-              }
-              children.emplace_back(nonstd_make_unique<TextNode>(text));
+              children.emplace_back(nonstd_make_unique<TextNode>(text, pre_space, post_space));
           } else if (auto expr_token = dynamic_cast<ExpressionTemplateToken*>(token.get())) {
-              children.emplace_back(nonstd_make_unique<ExpressionNode>(std::move(expr_token->expr)));
+              children.emplace_back(nonstd_make_unique<ExpressionNode>(std::move(expr_token->expr), expr_token->pre_space, expr_token->post_space));
           } else if (auto set_token = dynamic_cast<SetTemplateToken*>(token.get())) {
             if (set_token->value) {
               children.emplace_back(nonstd_make_unique<SetNode>(set_token->var_names, std::move(set_token->value), nullptr));
@@ -2399,7 +2448,7 @@ private:
             throw unexpected(**it);
         }
         if (children.empty()) {
-          return nonstd_make_unique<TextNode>("");
+          return nonstd_make_unique<TextNode>("", SpaceHandling::Keep, SpaceHandling::Keep);
         } else if (children.size() == 1) {
           return std::move(children[0]);
         } else {
@@ -2409,8 +2458,8 @@ private:
 
 public:
 
-    static std::unique_ptr<TemplateNode> parse(const std::string& template_str, const Options& options = {}) {
-        Parser parser(std::make_shared<std::string>(template_str), options);
+    static std::unique_ptr<TemplateNode> parse(const std::string& template_str) {
+        Parser parser(std::make_shared<std::string>(template_str));
 
         auto tokens = parser.tokenize();
         TemplateTokenIterator begin = tokens.begin();
@@ -2450,7 +2499,7 @@ static Value simple_function(const std::string & fn_name, const std::vector<std:
   });
 }
 
-std::shared_ptr<Context> Context::builtins() {
+std::shared_ptr<Context> Context::builtins(const std::shared_ptr<const Options> & options) {
   auto top_level_values = Value::object();
 
   top_level_values.set("raise_exception", simple_function("raise_exception", { "message" }, [](Context &, const Value & args) -> Value {
@@ -2644,11 +2693,15 @@ std::shared_ptr<Context> Context::builtins() {
     return res;
   }));
 
-  return std::make_shared<Context>(std::move(top_level_values));
+  return std::make_shared<Context>(std::move(top_level_values), options);
 }
 
-std::shared_ptr<Context> Context::make(Value && values) {
-  return std::make_shared<Context>(values.is_null() ? Value::object() : std::move(values), builtins());
+std::shared_ptr<Context> Context::make(Value && values, const Options & options) {
+  auto opts = std::make_shared<const Options>(options);
+  return std::make_shared<Context>(
+    values.is_null() ? Value::object() : std::move(values),
+    opts,
+    builtins(opts));
 }
 
 json Context::debug_dump() const {

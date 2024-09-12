@@ -5,13 +5,13 @@
 #include <string>
 #include <json.hpp>
 
-void announce_test(const std::string & name, const jinja::Parser::Options & options) {
+void announce_test(const std::string & name, const jinja::Options & options) {
     auto len = name.size();
     auto extract = jinja::strip(name);
     extract = json(name.substr(0, std::min<size_t>(len, 50)) + (len > 50 ? " [...]" : "")).dump();
     extract = extract.substr(1, extract.size() - 2);
     std::cout << "Testing: " << extract;
-    static const jinja::Parser::Options default_options {};
+    static const jinja::Options default_options {};
     if (options.lstrip_blocks != default_options.lstrip_blocks)
         std::cout << " lstrip_blocks=" << options.lstrip_blocks;
     if (options.trim_blocks != default_options.trim_blocks)
@@ -39,11 +39,11 @@ void assert_equals(const std::string & expected, const std::string & actual) {
     }
 }
 
-void test_render(const std::string & template_str, const json & bindings, const jinja::Parser::Options & options, const std::string & expected, const json & expected_context = {}) {
+void test_render(const std::string & template_str, const json & bindings, const jinja::Options & options, const std::string & expected, const json & expected_context = {}) {
     Timer timer("  ");
     announce_test(template_str, options);
-    auto root = jinja::Parser::parse(template_str, options);
-    auto context = jinja::Context::make(bindings);
+    auto root = jinja::Parser::parse(template_str);
+    auto context = jinja::Context::make(bindings, options);
     // std::cout << "Context: " << context.dump() << std::endl;
     std::string actual;
     try {
@@ -68,12 +68,12 @@ void test_render(const std::string & template_str, const json & bindings, const 
     }
     std::cout << "Test passed!" << std::endl << std::flush;
 }
-void test_error_contains(const std::string & template_str, const json & bindings, const jinja::Parser::Options & options, const std::string & expected) {
+void test_error_contains(const std::string & template_str, const json & bindings, const jinja::Options & options, const std::string & expected) {
     Timer timer("  ");
     announce_test(template_str, options);
     try {
         auto root = jinja::Parser::parse(template_str);
-        auto context = jinja::Context::make(bindings);
+        auto context = jinja::Context::make(bindings, options);
         // auto copy = context.is_null() ? Value::object() : std::make_shared<Value>(context);
         auto actual = root->render(*context);
         throw std::runtime_error("Expected error: " + expected + ", but got successful result instead: "  + actual);
@@ -109,7 +109,20 @@ inline std::string read_file(const std::string &path) {
     cmake -B buildDebug -DCMAKE_BUILD_TYPE=Debug && cmake --build buildDebug -t test-jinja -j && ./buildDebug/bin/test-jinja
 */
 int main() {
-     test_render(
+    // test_render(read_file("tests/chat/templates/Qwen-Qwen2-7B-Instruct.jinja"), {
+    //     {"messages", json::array({
+    //         {{"role", "user"}, {"content", "Hello"}}
+    //     })},
+    //     {"add_generation_prompt", false},
+    // }, {.trim_blocks = true, .lstrip_blocks = true},
+    //     "<|im_start|>system\n"
+    //     "You are a helpful assistant.<|im_end|>\n"
+    //     "<|im_start|>user\n"
+    //     "Hello<|im_end|>\n"
+    // );
+    test_render("a\nb\n", {}, {}, "a\nb");
+
+    test_render(
         R"(
             {%- for x in range(3) -%}
                 {%- if loop.first -%}
@@ -119,16 +132,16 @@ int main() {
             {%- endfor -%}
         )", {}, {}, "but first, mojitos!1,2,3");
     test_render("{{ 'a' + [] | length + 'b' }}", {}, {}, "a0b");
-     test_render("{{ [1, 2, 3] | join(', ') + '...' }}", {}, {}, "1, 2, 3...");
-     test_render("{{ 'Tools: ' + [1, 2, 3] | reject('equalto', 2) | join(', ') + '...' }}", {}, {}, "Tools: 1, 3...");
-     test_render("{{ [1, 2, 3] | join(', ') }}", {}, {}, "1, 2, 3");
-     test_render("{% for i in range(3) %}{{i}},{% endfor %}", {}, {}, "0,1,2,");
-     test_render("{% set foo %}Hello {{ 'there' }}{% endset %}{{ 1 ~ foo ~ 2 }}", {}, {}, "1Hello there2");
-     test_render("{{ [1, False, null, True, 2, '3', 1, '3', False, null, True] | unique }}", {}, {},
+    test_render("{{ [1, 2, 3] | join(', ') + '...' }}", {}, {}, "1, 2, 3...");
+    test_render("{{ 'Tools: ' + [1, 2, 3] | reject('equalto', 2) | join(', ') + '...' }}", {}, {}, "Tools: 1, 3...");
+    test_render("{{ [1, 2, 3] | join(', ') }}", {}, {}, "1, 2, 3");
+    test_render("{% for i in range(3) %}{{i}},{% endfor %}", {}, {}, "0,1,2,");
+    test_render("{% set foo %}Hello {{ 'there' }}{% endset %}{{ 1 ~ foo ~ 2 }}", {}, {}, "1Hello there2");
+    test_render("{{ [1, False, null, True, 2, '3', 1, '3', False, null, True] | unique }}", {}, {},
         "[1, False, null, True, 2, \"3\"]");
-     test_render("{{ range(5) | length % 2 }}", {}, {}, "1");
-     test_render("{{ range(5) | length % 2 == 1 }},{{ [] | length > 0 }}", {}, {}, "True,False");
-     test_render(
+    test_render("{{ range(5) | length % 2 }}", {}, {}, "1");
+    test_render("{{ range(5) | length % 2 == 1 }},{{ [] | length > 0 }}", {}, {}, "True,False");
+    test_render(
         "{{ messages[0]['role'] != 'system' }}",
         {{"messages", json::array({json({{"role", "system"}})})}},
         {},
@@ -164,7 +177,7 @@ int main() {
         {}, {},
         "0, first=True, last=False, index=1, index0=0, revindex=3, revindex0=2, prev=, next=2,\n"
         "2, first=False, last=False, index=2, index0=1, revindex=2, revindex0=1, prev=0, next=4,\n"
-        "4, first=False, last=True, index=3, index0=2, revindex=1, revindex0=0, prev=2, next=,\n");
+        "4, first=False, last=True, index=3, index0=2, revindex=1, revindex0=0, prev=2, next=,");
     
     test_render(
         R"(
@@ -243,8 +256,6 @@ int main() {
         {%- endfor -%}
     )", {{"z", json({json({1, 10}), json({2, 20})})}}, {}, "1,10;2,20;");
     
-    test_render("a\nb\n", {}, {}, "a\nb");
-
     test_render(" a {{  'b' -}} c ", {}, {}, " a bc ");
     test_render(" a {{- 'b'  }} c ", {}, {}, " ab c ");
     test_render("a\n{{- 'b'  }}\nc", {}, {}, "ab\nc");
@@ -363,31 +374,40 @@ int main() {
         }
         for (const auto & tmpl_file : jinja_template_files) {
             std::cout << "# Testing template: " << tmpl_file << std::endl << std::flush;
-            auto tmpl = jinja::Parser::parse(read_file(tmpl_file), { 
-                .trim_blocks = true,
-                .lstrip_blocks = true,
-            });
+            auto tmpl_str = read_file(tmpl_file);
+            auto tmpl = jinja::Parser::parse(tmpl_str);
+
+            auto found_goldens = false;
 
             for (const auto & ctx_file : context_files) {
-                auto golden_file = get_golden_file(tmpl_file, ctx_file);
-                std::cout << "- " << golden_file << std::endl << std::flush;
-                const auto & ctx = json::parse(read_file(ctx_file));
+                auto ctx = json::parse(read_file(ctx_file));
 
+                auto golden_file = get_golden_file(tmpl_file, ctx_file);
+                // Test if file exists
+                if (!std::ifstream(golden_file).is_open()) {
+                    continue;
+                }
+                found_goldens = true;
+                std::cout << "- " << golden_file << std::endl << std::flush;
 
                 std::string actual;
                 try {
-                    actual = tmpl->render(*jinja::Context::make(ctx));
+                    actual = tmpl->render(*jinja::Context::make(ctx, { 
+                        .trim_blocks = true,
+                        .lstrip_blocks = true,
+                    }));
                 } catch (const std::runtime_error & e) {
                     actual = "ERROR: " + std::string(e.what());
                     // std::cerr << "AST: " << tmpl->dump().dump(2) << std::endl << std::flush;
                 }
-                if (!std::ifstream(golden_file).is_open()) {
-                    std::cerr << "Golden file not found: " << golden_file << std::endl;
-                    print_golden_instructions();
-                    return 1;
-                }
                 auto expected = read_file(golden_file);
                 assert_equals(expected, actual);
+            }
+
+            if (!found_goldens) {
+                std::cerr << "No golden files found for " << tmpl_file << std::endl;
+                print_golden_instructions();
+                return 1;
             }
         }
     }

@@ -7,16 +7,10 @@
 # ]
 # ///
 '''
-  Executes a Jinja2 template (read from CLI arg) with a given context (read from JSON file as CLI arg)
+  Fetches the Jinja2 templates of a few known models and use them to generate prompt goldens for a few predefined chat contexts.
   
   Examples:
-    python ./tests/get-jinja-goldens.py
-    python ./tests/run-jinja.py NousResearch/Hermes-2-Pro-Llama-3-8B  tests/chat/contexts/simple.json
-    
-    python ./tests/run-jinja.py tests/chat/templates/Meta-Llama-3.1-8B-Instruct.jinja tests/chat/contexts/simple.json
-    python ./tests/run-jinja.py tests/chat/templates/Meta-Llama-3.1-8B-Instruct.jinja tests/chat/contexts/tooling.json
-
-  This will automatically be run by tests/test-jinja.cpp to generate goldens against which the C++ jinja implementation will be tested.
+    python ./tests/update_jinja_goldens.py
   
   https://github.com/huggingface/transformers/blob/main/src/transformers/utils/chat_template_utils.py
 '''
@@ -66,6 +60,7 @@ def handle_chat_template(model_id, variant, template_src):
     env = jinja2.Environment(
       trim_blocks=True,
       lstrip_blocks=True,
+      # keep_trailing_newline=False,
       extensions=[
         jinja2.ext.loopcontrols
       ])
@@ -73,6 +68,9 @@ def handle_chat_template(model_id, variant, template_src):
     env.globals['raise_exception'] = raise_exception
     env.globals['strftime_now'] = strftime_now
 
+    template_handles_tools = 'tools' in template_src
+    template_hates_the_system = 'System role not supported' in template_src
+    
     template = env.from_string(template_src)
     
     context_files = glob.glob('tests/chat/contexts/*.json')
@@ -81,6 +79,12 @@ def handle_chat_template(model_id, variant, template_src):
         with open(context_file, 'r') as f:
             context = json.load(f)
     
+        if not template_handles_tools and 'tools' in context:
+            continue
+        
+        if template_hates_the_system and any(m['role'] == 'system' for m in context['messages']):
+            continue
+        
         output_file = f'tests/chat/goldens/{base_name}-{context_name}.txt'
         print(f"- {output_file}")
         try:
