@@ -44,13 +44,13 @@ void test_render(const std::string & template_str, const json & bindings, const 
         actual = root->render(*context);
     } catch (const std::runtime_error & e) {
         actual = "ERROR: " + std::string(e.what());
-        std::cerr << "AST: " << root->dump().dump(2) << std::endl << std::flush;
+        std::cerr << "AST: " << root->debug_dump().dump(2) << std::endl << std::flush;
     }
 
     assert_equals(expected, actual);
 
     if (!expected_context.is_null()) {
-        auto dump = context->dump();
+        auto dump = context->debug_dump();
         for (const auto & kv : expected_context.items()) {
             if (dump[kv.key()] != kv.value()) {
                 std::cerr << "Expected context: " << expected_context.dump(2) << std::endl;
@@ -103,6 +103,15 @@ inline std::string read_file(const std::string &path) {
     cmake -B buildDebug -DCMAKE_BUILD_TYPE=Debug && cmake --build buildDebug -t test-jinja -j && ./buildDebug/bin/test-jinja
 */
 int main() {
+     test_render(
+        R"(
+            {%- for x in range(3) -%}
+                {%- if loop.first -%}
+                    but first, mojitos!
+                {%- endif -%}
+                {{ loop.index }}{{ "," if not loop.last -}}
+            {%- endfor -%}
+        )", {}, "but first, mojitos!1,2,3");
     test_render("{{ 'a' + [] | length + 'b' }}", {}, "a0b");
      test_render("{{ [1, 2, 3] | join(', ') + '...' }}", {}, "1, 2, 3...");
      test_render("{{ 'Tools: ' + [1, 2, 3] | reject('equalto', 2) | join(', ') + '...' }}", {}, "Tools: 1, 3...");
@@ -114,6 +123,10 @@ int main() {
      test_render("{{ range(5) | length % 2 }}", {}, "1");
      test_render("{{ range(5) | length % 2 == 1 }},{{ [] | length > 0 }}", {}, "True,False");
      test_render(
+        "{{ messages[0]['role'] != 'system' }}",
+        {{"messages", json::array({json({{"role", "system"}})})}},
+        "False");
+    test_render(
         R"(
             {%- for x, y in [("a", "b"), ("c", "d")] -%}
                 {{- x }},{{ y -}};
@@ -285,12 +298,12 @@ int main() {
     };
 
     auto filename_without_extension = [](const std::string & path) {
-        auto pos = path.find_last_of('/');
         auto res = path;
+        auto pos = res.find_last_of('/');
         if (pos != std::string::npos)
             res = res.substr(pos + 1);
         pos = res.find_last_of('.');
-        if (pos == std::string::npos)
+        if (pos != std::string::npos)
             res = res.substr(0, pos);
         return res;
     };
@@ -309,43 +322,38 @@ int main() {
             auto golden_name = tmpl_name + "-" + ctx_name;
             return "tests/chat/goldens/" + golden_name + ".txt";
         };
-        if (getenv("LLAMA_JINJA_WRITE_GOLDENS")) {
-            if (!(getenv("LLAMA_PYTHON_AVAILABLE") || (std::system("python -c \"import sys; exit(1) if sys.version_info < (3, 10) else print('Python version is sufficient')\"") == 0))) {
-                throw std::runtime_error("Python not found (min version required is 3.10), cannot generate Jinja2 golden files");
-            }
-            for (const auto & tmpl_file : jinja_template_files) {
-                for (const auto & ctx_file : context_files) {
-                    auto golden_file = get_golden_file(tmpl_file, ctx_file);
-                    if (std::system((std::string("python ./tests/run-jinja.py ") + tmpl_file + " " + ctx_file + " > " + golden_file).c_str()) != 0) {
-                        throw std::runtime_error("Failed to run python script to generate golden file for " + tmpl_file + " and " + ctx_file);
-                    }
-                    std::cout << "Wrote golden file: " << golden_file << std::endl << std::flush;
-                }
-            }
-        } else {
-            for (const auto & tmpl_file : jinja_template_files) {
-                std::cout << "# Testing template: " << tmpl_file << std::endl << std::flush;
-                auto tmpl = jinja::Parser::parse(read_file(tmpl_file));
+        auto print_golden_instructions = [&]() {
+            std::cerr << "To fetch templates and generate golden files, run `python tests/update_jinja_goldens.py`" << std::endl;
+        };
+        if (jinja_template_files.empty()) {
+            std::cerr << "No Jinja templates found in tests/chat/templates" << std::endl;
+            print_golden_instructions();
+            return 1;
+        }
+        for (const auto & tmpl_file : jinja_template_files) {
+            std::cout << "# Testing template: " << tmpl_file << std::endl << std::flush;
+            auto tmpl = jinja::Parser::parse(read_file(tmpl_file));
 
-                for (const auto & ctx_file : context_files) {
-                    std::cout << "- " << ctx_file << std::endl << std::flush;
-                    const auto & ctx = json::parse(read_file(ctx_file));
+            for (const auto & ctx_file : context_files) {
+                auto golden_file = get_golden_file(tmpl_file, ctx_file);
+                std::cout << "- " << golden_file << std::endl << std::flush;
+                const auto & ctx = json::parse(read_file(ctx_file));
 
-                    auto golden_file = get_golden_file(tmpl_file, ctx_file);
-                    
-                    std::string actual;
-                    try {
-                        actual = tmpl->render(*jinja::Context::make(ctx));
-                    } catch (const std::runtime_error & e) {
-                        actual = "ERROR: " + std::string(e.what());
-                        // std::cerr << "AST: " << tmpl->dump().dump(2) << std::endl << std::flush;
-                    }
-                    if (!std::ifstream(golden_file).is_open()) {
-                        throw std::runtime_error("Golden file not found: " + golden_file + "\nRun with LLAMA_JINJA_WRITE_GOLDENS=1 to generate golden files");
-                    }
-                    auto expected = read_file(golden_file);
-                    assert_equals(expected, actual);
+
+                std::string actual;
+                try {
+                    actual = tmpl->render(*jinja::Context::make(ctx));
+                } catch (const std::runtime_error & e) {
+                    actual = "ERROR: " + std::string(e.what());
+                    // std::cerr << "AST: " << tmpl->dump().dump(2) << std::endl << std::flush;
                 }
+                if (!std::ifstream(golden_file).is_open()) {
+                    std::cerr << "Golden file not found: " << golden_file << std::endl;
+                    print_golden_instructions();
+                    return 1;
+                }
+                auto expected = read_file(golden_file);
+                assert_equals(expected, actual);
             }
         }
     }

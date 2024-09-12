@@ -98,7 +98,7 @@ public:
     }
 
 
-    json dump() const {
+    json debug_dump() const {
       json res = json::array();
       for (const auto & arg : args) {
         res.push_back(arg.dump());
@@ -556,7 +556,7 @@ public:
   static std::shared_ptr<Context> builtins();
   static std::shared_ptr<Context> make(Value && values);
 
-  json dump() const;
+  json debug_dump() const;
 
   std::vector<Value> keys() const {
     return values_.keys();
@@ -620,13 +620,13 @@ public:
           }
         }
 
-        json dump() const {
+        json debug_dump() const {
           json res = json::array();
           for (const auto & arg : args) {
-            res.push_back(arg->dump());
+            res.push_back(arg->debug_dump());
           }
           for (const auto & kwarg : kwargs) {
-            res.push_back(json::object({{"name", kwarg.first}, {"value", kwarg.second->dump()}}));
+            res.push_back(json::object({{"name", kwarg.first}, {"value", kwarg.second->debug_dump()}}));
           }
           return res;
         }
@@ -649,7 +649,10 @@ public:
 
     Expression(const Location & location) : location(location) {}
     virtual ~Expression() = default;
-    virtual json dump() const = 0;
+    virtual json debug_dump() const = 0;
+    std::string dump(int indent = -1) const {
+      return debug_dump().dump(indent);
+    }
 
     Value evaluate(Context & context) const {
         try {
@@ -657,7 +660,7 @@ public:
         } catch (const std::runtime_error & e) {
             std::ostringstream out;
             out << e.what();
-            if (location.source) out << " " << error_location_suffix(*location.source, location.pos);
+            if (location.source) out << error_location_suffix(*location.source, location.pos);
             throw std::runtime_error(out.str());
         }
     }
@@ -676,13 +679,13 @@ public:
         }
         return context.at(name);
     }
-    json dump() const override { return {{"variable", name}}; }
+    json debug_dump() const override { return {{"variable", name}}; }
 };
 
 json dumpParams(const Expression::CallableParams & params) {
   json res = json::array();
   for (const auto & param : params) {
-    res.push_back(json::object({{"name", param.first}, {"value", param.second->dump()}}));
+    res.push_back(json::object({{"name", param.first}, {"value", param.second->debug_dump()}}));
   }
   return res;
 }
@@ -831,7 +834,7 @@ public:
         render(oss, context);
         return oss.str();
     }
-    virtual json dump() const = 0;
+    virtual json debug_dump() const = 0;
 };
 
 class SequenceNode : public TemplateNode {
@@ -841,10 +844,10 @@ public:
     void render(std::ostringstream& oss, Context & context) const override {
         for (const auto& child : children) child->render(oss, context);
     }
-    json dump() const override {
+    json debug_dump() const override {
         json res = json::array();
         for (const auto& child : children) {
-            res.push_back(child->dump());
+            res.push_back(child->debug_dump());
         }
         return {{"sequence", res}};
     }
@@ -855,7 +858,7 @@ class TextNode : public TemplateNode {
 public:
     TextNode(const std::string& t) : text(t) {}
     void render(std::ostringstream& oss, Context &) const override { oss << text; }
-    json dump() const override { return {{"text", text}}; }
+    json debug_dump() const override { return {{"text", text}}; }
 };
 
 class ExpressionNode : public TemplateNode {
@@ -872,7 +875,7 @@ public:
           oss << result.dump();
       }
   }
-    json dump() const override { return {{"expression", expr->dump()}}; }
+    json debug_dump() const override { return {{"expression", expr->debug_dump()}}; }
 };
 
 class IfNode : public TemplateNode {
@@ -892,13 +895,13 @@ public:
           }
       }
     }
-    json dump() const override {
+    json debug_dump() const override {
         json res = json::array();
         for (const auto& branch : cascade) {
             if (branch.first) {
-                res.push_back({{"elif", {{"condition", branch.first->dump()}, {"branch", branch.second->dump()}}}});
+                res.push_back({{"elif", {{"condition", branch.first->debug_dump()}, {"branch", branch.second->debug_dump()}}}});
             } else {
-                res.push_back({{"else", branch.second->dump()}});
+                res.push_back({{"else", branch.second->debug_dump()}});
             }
         }
         return {{"if", res}};
@@ -963,7 +966,7 @@ public:
                   loop.set("revindex0", (int64_t) (n - i - 1));
                   loop.set("length", (int64_t) n);
                   loop.set("first", i == 0);
-                  loop.set("last", i == n - 1);
+                  loop.set("last", i == (n - 1));
                   loop.set("previtem", i > 0 ? filtered_items.at(i - 1) : Value());
                   loop.set("nextitem", i < n - 1 ? filtered_items.at(i + 1) : Value());
                   body->render(oss, *loop_context);
@@ -985,14 +988,14 @@ public:
       visit(iterable_value);
   }
 
-    json dump() const override {
-        json res = {{"var_names", var_names}, {"iterable", iterable->dump()}};
+    json debug_dump() const override {
+        json res = {{"var_names", var_names}, {"iterable", iterable->debug_dump()}};
         if (condition) {
-            res["if"] = condition->dump();
+            res["if"] = condition->debug_dump();
         }
-        res["body"] = body->dump();
+        res["body"] = body->debug_dump();
         if (else_body) {
-            res["else"] = else_body->dump();
+            res["else"] = else_body->debug_dump();
         }
         return {{"for", res}};
     }
@@ -1007,8 +1010,8 @@ public:
     void render(std::ostringstream& oss, Context & context) const override {
         body->render(oss, context);
     }
-    json dump() const override {
-        return {{"block", {{"name", name->get_name()}, {"body", body->dump()}}}};
+    json debug_dump() const override {
+        return {{"block", {{"name", name->get_name()}, {"body", body->debug_dump()}}}};
     }
 };
 
@@ -1056,8 +1059,8 @@ public:
             return body->render(call_context);
         }));
     }
-    json dump() const override {
-        return {{"macro", {{"name", name->get_name()}, {"params", dumpParams(params)}, {"body", body->dump()}}}};
+    json debug_dump() const override {
+        return {{"macro", {{"name", name->get_name()}, {"params", dumpParams(params)}, {"body", body->debug_dump()}}}};
     }
 };
 
@@ -1083,8 +1086,8 @@ public:
         destructuring_assign(var_names, context, value->evaluate(context));
       }
     }
-    json dump() const override {
-        json res = {{"var_names", var_names}, {"value", value ? value->dump() : "null"}, {"template_value", template_value ? template_value->dump() : "null"}};
+    json debug_dump() const override {
+        json res = {{"var_names", var_names}, {"value", value ? value->debug_dump() : "null"}, {"template_value", template_value ? template_value->debug_dump() : "null"}};
         return {{"set", res}};
     }
 };
@@ -1100,8 +1103,8 @@ public:
         if (!ns_value.is_object()) throw std::runtime_error("Namespace '" + ns + "' is not an object");
         ns_value.set(name, this->value->evaluate(context));
     }
-    json dump() const override {
-        return {{"set", {{"namespaces", ns}, {"name", name}, {"value", value->dump()}}}};
+    json debug_dump() const override {
+        return {{"set", {{"namespaces", ns}, {"name", name}, {"value", value->debug_dump()}}}};
     }
 };
 
@@ -1113,10 +1116,16 @@ public:
     IfExpr(const Location & location, std::unique_ptr<Expression> && c, std::unique_ptr<Expression> && t, std::unique_ptr<Expression> && e)
         : Expression(location), condition(std::move(c)), then_expr(std::move(t)), else_expr(std::move(e)) {}
     Value do_evaluate(Context & context) const override {
-        return condition->evaluate(context) ? then_expr->evaluate(context) : else_expr->evaluate(context);
+      if (condition->evaluate(context)) {
+        return then_expr->evaluate(context);
+      }
+      if (else_expr) {
+        return else_expr->evaluate(context);
+      }
+      return nullptr;
     }
-    json dump() const override {
-        return {{"if", condition->dump()}, {"then", then_expr->dump()}, {"else", else_expr->dump()}};
+    json debug_dump() const override {
+        return {{"if", condition->debug_dump()}, {"then", then_expr->debug_dump()}, {"else", else_expr ? else_expr->debug_dump() : "null"}};
     }
 };
 
@@ -1126,7 +1135,7 @@ public:
     LiteralExpr(const Location & location, const Value& v)
       : Expression(location), value(v) {}
     Value do_evaluate(Context &) const override { return value; }
-    json dump() const override { return value.dump(); }
+    json debug_dump() const override { return value.dump(); }
 };
 
 class ArrayExpr : public Expression {
@@ -1141,10 +1150,10 @@ public:
         }
         return result;
     }
-    json dump() const override {
+    json debug_dump() const override {
         json result = json::array();
         for (const auto& e : elements) {
-            result.push_back(e->dump());
+            result.push_back(e->debug_dump());
         }
         return result;
     }
@@ -1162,12 +1171,12 @@ public:
         }
         return result;
     }
-    json dump() const override {
+    json debug_dump() const override {
         json kvs = json::array();
         for (const auto& e : elements) {
             kvs.push_back({
-              {"key", e.first->dump()},
-              {"value", e.second->dump()},
+              {"key", e.first->debug_dump()},
+              {"value", e.second->debug_dump()},
             });
         }
         return {{"dict", kvs}};
@@ -1182,8 +1191,8 @@ public:
     Value do_evaluate(Context &) const override {
         throw std::runtime_error("SliceExpr not implemented");
     }
-    json dump() const override {
-        return {{"slice", {{"start", start ? start->dump() : "null"}, {"end", end ? end->dump() : "null"}}}};
+    json debug_dump() const override {
+        return {{"slice", {{"start", start ? start->debug_dump() : "null"}, {"end", end ? end->debug_dump() : "null"}}}};
     }
 };
 
@@ -1216,8 +1225,8 @@ public:
           return target_value.get(index_value);
         }
     }
-    json dump() const override {
-        return {{"subscript", {{"base", base->dump()}, {"index", index->dump()}}}};
+    json debug_dump() const override {
+        return {{"subscript", {{"base", base->debug_dump()}, {"index", index->debug_dump()}}}};
     }
 };
 
@@ -1239,8 +1248,8 @@ public:
         }
         throw std::runtime_error("Unknown unary operator");
     }
-    json dump() const override {
-        return {{"unary", {{"op", (int) op}, {"expr", expr->dump()}}}};
+    json debug_dump() const override {
+        return {{"unary", {{"op", (int) op}, {"expr", expr->debug_dump()}}}};
     }
 };
 
@@ -1320,8 +1329,8 @@ public:
           return do_eval(l);
         }
     }
-    json dump() const override {
-        return {{"binary", {{"op", (int) op}, {"left", left->dump()}, {"right", right->dump()}}}};
+    json debug_dump() const override {
+        return {{"binary", {{"op", (int) op}, {"left", left->debug_dump()}, {"right", right->debug_dump()}}}};
     }
 };
 
@@ -1374,8 +1383,8 @@ public:
         }
         throw std::runtime_error("Unknown method: " + method->get_name());
     }
-    json dump() const override {
-        return {{"call", {{"method", method->get_name()}, {"object", object->dump()}, "args", args.dump()}}};
+    json debug_dump() const override {
+        return {{"call", {{"method", method->get_name()}, {"object", object->debug_dump()}, "args", args.debug_dump()}}};
     }
 };
 
@@ -1392,8 +1401,8 @@ public:
         }
         return obj.call(context, args.evaluate(context));
     }
-    json dump() const override {
-        return {{"call", {{"object", object->dump()}, {"args", args.dump()}}}};
+    json debug_dump() const override {
+        return {{"call", {{"object", object->debug_dump()}, {"args", args.debug_dump()}}}};
     }
 };
 
@@ -1429,10 +1438,10 @@ public:
     void prepend(std::unique_ptr<Expression> && e) {
         parts.insert(parts.begin(), std::move(e));
     }
-    json dump() const override {
+    json debug_dump() const override {
         json result = {{"filter", json::array()}};
         for (const auto& part : parts) {
-            result["filter"].push_back(part->dump());
+            result["filter"].push_back(part->debug_dump());
         }
         return result;
     }
@@ -1673,7 +1682,7 @@ private:
 
         auto location = get_location();
         auto if_expr = parseIfExpression();
-        return nonstd_make_unique<IfExpr>(location, std::move(left), std::move(if_expr.first), std::move(if_expr.second));
+        return nonstd_make_unique<IfExpr>(location, std::move(if_expr.first), std::move(left), std::move(if_expr.second));
     }
 
     Location get_location() const {
@@ -1685,11 +1694,11 @@ private:
         if (!condition) throw std::runtime_error("Expected condition expression");
 
         static std::regex else_tok(R"(else\b)");
-        if (consumeToken(else_tok).empty()) throw std::runtime_error("Expected 'else' keyword");
-        
-        auto else_expr = parseExpression();
-        if (!else_expr) throw std::runtime_error("Expected 'else' expression");
-
+        std::unique_ptr<Expression> else_expr;
+        if (!consumeToken(else_tok).empty()) {
+          else_expr = parseExpression();
+          if (!else_expr) throw std::runtime_error("Expected 'else' expression");
+        }
         return std::make_pair(std::move(condition), std::move(else_expr));
     }
 
@@ -2391,7 +2400,7 @@ static Value simple_function(const std::string & fn_name, const std::vector<std:
         args_obj.set(params[i], arg);
         provided_args[i] = true;
       } else {
-        throw std::runtime_error(("Too many positional params for " + fn_name + ": ") + args.dump().dump());
+        throw std::runtime_error(("Too many positional params for " + fn_name + ": ") + args.debug_dump().dump());
       }
     }
     for (size_t i = 0, n = args.kwargs.size(); i < n; i++) {
@@ -2608,8 +2617,8 @@ std::shared_ptr<Context> Context::make(Value && values) {
   return std::make_shared<Context>(values.is_null() ? Value::object() : std::move(values), builtins());
 }
 
-json Context::dump() const {
-  json res = parent_ ? parent_->dump() : json::object();
+json Context::debug_dump() const {
+  json res = parent_ ? parent_->debug_dump() : json::object();
   for (auto & key : values_.keys()) {
     res[key.get<std::string>()] = values_.at(key).get<json>();
   }
