@@ -31,13 +31,17 @@ import re
 # import requests
 
 model_ids = [
+    "NousResearch/Hermes-3-Llama-3.1-70B",
     "NousResearch/Hermes-2-Pro-Llama-3-8B",
+    "NousResearch/Hermes-2-Pro-Mistral-7B",
     "meetkai/functionary-medium-v3.2",
+    "Qwen/Qwen2-7B-Instruct",
     "Qwen/Qwen2-VL-7B-Instruct",
+    "microsoft/Phi-3.5-mini-instruct",
 
     # Gated models:
-    # "google/gemma-2-2b-it",
-    # "mistralai/Mixtral-8x7B-Instruct-v0.1",
+    "google/gemma-2-2b-it",
+    "mistralai/Mixtral-8x7B-Instruct-v0.1",
 ]
 
 def raise_exception(message: str):

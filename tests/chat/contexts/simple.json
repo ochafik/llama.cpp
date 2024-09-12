@@ -2,7 +2,7 @@
   "messages": [
     {
       "role": "user",
-      "content": "What's the best LLM framework?"
+      "content": "What's your favourite LLM framework?"
     },
     {
       "role": "assistant",

@@ -1,10 +1,6 @@
 {
   "messages": [
     {
-      "role": "system",
-      "content": "System message"
-    },
-    {
       "role": "user",
       "content": "Print a hello world message with python."
     },
@@ -16,9 +12,7 @@
           "id": "call_1",
           "type": "function",
           "function": {
-            "arguments": {
-              "code": "print('Hello, World!')"
-            },
+            "arguments": "{\"code\": \"print('Hello, World!')\"}",
             "name": "ipython"
           }
         }
@@ -47,9 +41,7 @@
           "id": "call_2",
           "type": "function",
           "function": {
-            "arguments": {
-              "condition": true
-            },
+            "arguments": "{\"condition\":true}",
             "name": "test"
           }
         }
@@ -76,9 +68,7 @@
           "id": "call_3",
           "type": "function",
           "function": {
-            "arguments": {
-              "query": "what is truth anyway?"
-            },
+            "arguments": "{\"query\": \"what is truth anyway am I right?\"}",
             "name": "brave_search"
           }
         }
