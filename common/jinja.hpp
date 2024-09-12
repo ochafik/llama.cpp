@@ -180,7 +180,7 @@ private:
     } else if (callable_) {
       throw std::runtime_error("Cannot dump callable to JSON");
     } else if (is_boolean()) {
-      out << (*this ? "True" : "False");
+      out << (this->to_bool() ? "True" : "False");
     } else {
       out << primitive_.dump();
     }
@@ -301,7 +301,8 @@ public:
     return false;
   }
 
-  operator bool() const {
+  // operator bool() const {
+  bool to_bool() const {
     if (is_null()) return false;
     if (is_boolean()) return get<bool>();
     if (is_number()) return get<double>() != 0;
@@ -317,6 +318,16 @@ public:
     if (is_string() && other.is_string()) return get<std::string>() < other.get<std::string>();
     throw std::runtime_error("Cannot compare values: " + dump() + " < " + other.dump());
   }
+  bool operator>=(const Value & other) const { return !(*this < other); }
+
+  bool operator>(const Value & other) const {
+    if (is_null())
+      throw std::runtime_error("Undefined value or reference");
+    if (is_number() && other.is_number()) return get<double>() > other.get<double>();
+    if (is_string() && other.is_string()) return get<std::string>() > other.get<std::string>();
+    throw std::runtime_error("Cannot compare values: " + dump() + " > " + other.dump());
+  }
+  bool operator<=(const Value & other) const { return !(*this > other); }
 
   bool operator==(const Value & other) const {
     if (callable_ || other.callable_) {
@@ -326,20 +337,21 @@ public:
       if (!other.array_) return false;
       if (array_->size() != other.array_->size()) return false;
       for (size_t i = 0; i < array_->size(); ++i) {
-        if (!(*array_)[i] || !(*other.array_)[i] || (*array_)[i] != (*other.array_)[i]) return false;
+        if (!(*array_)[i].to_bool() || !(*other.array_)[i].to_bool() || (*array_)[i] != (*other.array_)[i]) return false;
       }
       return true;
     } else if (object_) {
       if (!other.object_) return false;
       if (object_->size() != other.object_->size()) return false;
       for (const auto& item : *object_) {
-        if (!item.second || !other.object_->count(item.first) || item.second != other.object_->at(item.first)) return false;
+        if (!item.second.to_bool() || !other.object_->count(item.first) || item.second != other.object_->at(item.first)) return false;
       }
       return true;
     } else {
       return primitive_ == other.primitive_;
     }
   }
+  bool operator!=(const Value & other) const { return !(*this == other); }
 
   bool contains(const char * key) const { return contains(std::string(key)); }
   bool contains(const std::string & key) const {
@@ -356,7 +368,7 @@ public:
       throw std::runtime_error("Undefined value or reference");
     if (array_) {
       for (const auto& item : *array_) {
-        if (item && item == value) return true;
+        if (item.to_bool() && item == value) return true;
       }
       return false;
     } else if (object_) {
@@ -887,7 +899,7 @@ public:
       for (const auto& branch : cascade) {
           auto enter_branch = true;
           if (branch.first) {
-            enter_branch = !!branch.first->evaluate(context);
+            enter_branch = branch.first->evaluate(context).to_bool();
           }
           if (enter_branch) {
               branch.second->render(oss, context);
@@ -934,7 +946,7 @@ public:
           for (size_t i = 0, n = iter.size(); i < n; ++i) {
               auto item = iter.at(i);
               destructuring_assign(var_names, context, item);
-              if (!condition || condition->evaluate(context)) {
+              if (!condition || condition->evaluate(context).to_bool()) {
                 filtered_items.push_back(item);
               }
           }
@@ -1116,7 +1128,7 @@ public:
     IfExpr(const Location & location, std::unique_ptr<Expression> && c, std::unique_ptr<Expression> && t, std::unique_ptr<Expression> && e)
         : Expression(location), condition(std::move(c)), then_expr(std::move(t)), else_expr(std::move(e)) {}
     Value do_evaluate(Context & context) const override {
-      if (condition->evaluate(context)) {
+      if (condition->evaluate(context).to_bool()) {
         return then_expr->evaluate(context);
       }
       if (else_expr) {
@@ -1244,7 +1256,7 @@ public:
         switch (op) {
             case Op::Plus: return e;
             case Op::Minus: return -e;
-            case Op::LogicalNot: return !e;
+            case Op::LogicalNot: return !e.to_bool();
         }
         throw std::runtime_error("Unknown unary operator");
     }
@@ -1290,11 +1302,11 @@ public:
           }
 
           if (op == Op::And) {
-            if (!l) return Value(false);
-            return !!right->evaluate(context);
+            if (!l.to_bool()) return Value(false);
+            return right->evaluate(context).to_bool();
           } else if (op == Op::Or) {
-            if (l) return Value(true);
-            return !!right->evaluate(context);
+            if (l.to_bool()) return Value(true);
+            return right->evaluate(context).to_bool();
           }
 
           auto r = right->evaluate(context);
@@ -1469,13 +1481,19 @@ static std::string html_escape(const std::string & s) {
 }
 
 class Parser {
+public:
+    struct Options {
+        bool trim_blocks;
+        bool lstrip_blocks;
+    };
 private:
     using CharIterator = std::string::const_iterator;
 
     std::shared_ptr<std::string> template_str;
     CharIterator start, end, it;
+    Options options;
       
-    Parser(const std::shared_ptr<std::string>& template_str) : template_str(template_str) {
+    Parser(const std::shared_ptr<std::string>& template_str, const Options & options = {}) : template_str(template_str), options(options) {
       if (!template_str) throw std::runtime_error("Template string is null");
       start = it = this->template_str->begin();
       end = this->template_str->end();
@@ -2090,7 +2108,15 @@ private:
         throw std::runtime_error("Expected closing brace");
     }
 
-    static SpaceHandling parseSpaceHandling(const std::string& s) {
+    SpaceHandling parsePreSpace(const std::string& s) const {
+        if (s == "-")
+          return SpaceHandling::Strip;
+        // if (options.lstrip_blocks)
+        //   return SpaceHandling::Strip;
+        return SpaceHandling::Keep;
+    }
+
+    SpaceHandling parsePostSpace(const std::string& s) const {
         if (s == "-") return SpaceHandling::Strip;
         return SpaceHandling::Keep;
     }
@@ -2139,28 +2165,28 @@ private:
           auto location = get_location();
       
           if (!(group = consumeTokenGroups(comment_tok, SpaceHandling::Keep)).empty()) {
-            auto pre_space = parseSpaceHandling(group[1]);
+            auto pre_space = parsePreSpace(group[1]);
             auto content = group[2];
-            auto post_space = parseSpaceHandling(group[3]);
+            auto post_space = parsePostSpace(group[3]);
             tokens.push_back(nonstd_make_unique<CommentTemplateToken>(location, pre_space, post_space, content));
           } else if (!(group = consumeTokenGroups(expr_open_regex, SpaceHandling::Keep)).empty()) {
-            auto pre_space = parseSpaceHandling(group[1]);
+            auto pre_space = parsePreSpace(group[1]);
             auto expr = parseExpression();
 
             if ((group = consumeTokenGroups(expr_close_regex)).empty()) {
               throw std::runtime_error("Expected closing expression tag");
             }
 
-            auto post_space = parseSpaceHandling(group[1]);
+            auto post_space = parsePostSpace(group[1]);
             tokens.push_back(nonstd_make_unique<ExpressionTemplateToken>(location, pre_space, post_space, std::move(expr)));
           } else if (!(group = consumeTokenGroups(block_open_regex, SpaceHandling::Keep)).empty()) {
-            auto pre_space = parseSpaceHandling(group[1]);
+            auto pre_space = parsePreSpace(group[1]);
 
             std::string keyword;
 
             auto parseBlockClose = [&]() -> SpaceHandling {
               if ((group = consumeTokenGroups(block_close_regex)).empty()) throw std::runtime_error("Expected closing block tag");
-              return parseSpaceHandling(group[1]);
+              return parsePostSpace(group[1]);
             };
 
             if ((keyword = consumeToken(block_keyword_tok)).empty()) throw std::runtime_error("Expected block keyword");
@@ -2306,14 +2332,22 @@ private:
           } else if (auto text_token = dynamic_cast<TextTemplateToken*>(token.get())) {
               SpaceHandling pre_space = (it - 1) != begin ? (*(it - 2))->post_space : SpaceHandling::Keep;
               SpaceHandling post_space = it != end ? (*it)->pre_space : SpaceHandling::Keep;
+
               auto text = text_token->text;
               if (pre_space == SpaceHandling::Strip) {
                 static std::regex leading_space_regex(R"(^(\s|\r|\n)+)");
                 text = std::regex_replace(text, leading_space_regex, "");
+              } else if (options.trim_blocks && (it - 1) != begin) {
+                static std::regex leading_line(R"(^[ \t]*\n)");
+                // static std::regex leading_line(R"(^\n)");
+                text = std::regex_replace(text, leading_line, "");
               }
               if (post_space == SpaceHandling::Strip) {
                 static std::regex trailing_space_regex(R"((\s|\r|\n)+$)");
                 text = std::regex_replace(text, trailing_space_regex, "");
+              } else if (options.lstrip_blocks && it != end) {
+                static std::regex trailing_last_line_space_regex(R"((^|\n)[ \t]*$)");
+                text = std::regex_replace(text, trailing_last_line_space_regex, "$1");
               }
               if (it == end) {
                 static std::regex r(R"([\n\r]$)");
@@ -2375,8 +2409,8 @@ private:
 
 public:
 
-    static std::unique_ptr<TemplateNode> parse(const std::string& template_str) {
-        Parser parser(std::make_shared<std::string>(template_str));
+    static std::unique_ptr<TemplateNode> parse(const std::string& template_str, const Options& options = {}) {
+        Parser parser(std::make_shared<std::string>(template_str), options);
 
         auto tokens = parser.tokenize();
         TemplateTokenIterator begin = tokens.begin();
@@ -2490,7 +2524,7 @@ std::shared_ptr<Context> Context::builtins() {
     } else {
       return simple_function("", {"items"}, [sep, do_join](Context &, const Value & args) {
         auto & items = args.at("items");
-        if (!items || !items.is_array()) throw std::runtime_error("join expects an array for items, got: " + items.dump());
+        if (!items.to_bool() || !items.is_array()) throw std::runtime_error("join expects an array for items, got: " + items.dump());
         return do_join(items, sep);
       });
     }
@@ -2543,7 +2577,7 @@ std::shared_ptr<Context> Context::builtins() {
     args.expectArgs("reject", {2, std::numeric_limits<size_t>::max()}, {0, 0});
     auto & items = args.args[0];
     auto filter_fn = context.get(args.args[1]);
-    if (!filter_fn) throw std::runtime_error("Function not found " + args.args[1].dump());
+    if (!filter_fn.to_bool()) throw std::runtime_error("Function not found " + args.args[1].dump());
 
     auto filter_args = Value::array();
     for (size_t i = 2, n = args.args.size(); i < n; i++) {
@@ -2557,7 +2591,7 @@ std::shared_ptr<Context> Context::builtins() {
       Value::CallableArgs filter_args;
       filter_args.args.emplace_back(item);
       auto pred_res = filter.call(context, filter_args);
-      if (!pred_res) {
+      if (!pred_res.to_bool()) {
         res.push_back(item);
       }
     }

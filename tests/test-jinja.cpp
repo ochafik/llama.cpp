@@ -5,12 +5,18 @@
 #include <string>
 #include <json.hpp>
 
-void announce_test(const std::string & name) {
+void announce_test(const std::string & name, const jinja::Parser::Options & options) {
     auto len = name.size();
     auto extract = jinja::strip(name);
     extract = json(name.substr(0, std::min<size_t>(len, 50)) + (len > 50 ? " [...]" : "")).dump();
     extract = extract.substr(1, extract.size() - 2);
-    std::cout << "Testing: " << extract << std::endl << std::flush;
+    std::cout << "Testing: " << extract;
+    static const jinja::Parser::Options default_options {};
+    if (options.lstrip_blocks != default_options.lstrip_blocks)
+        std::cout << " lstrip_blocks=" << options.lstrip_blocks;
+    if (options.trim_blocks != default_options.trim_blocks)
+        std::cout << " trim_blocks=" << options.trim_blocks;
+    std::cout << std::endl << std::flush;
 }
 
 struct Timer {
@@ -33,10 +39,10 @@ void assert_equals(const std::string & expected, const std::string & actual) {
     }
 }
 
-void test_render(const std::string & template_str, const json & bindings, const std::string & expected, const json & expected_context = {}) {
+void test_render(const std::string & template_str, const json & bindings, const jinja::Parser::Options & options, const std::string & expected, const json & expected_context = {}) {
     Timer timer("  ");
-    announce_test(template_str);
-    auto root = jinja::Parser::parse(template_str);
+    announce_test(template_str, options);
+    auto root = jinja::Parser::parse(template_str, options);
     auto context = jinja::Context::make(bindings);
     // std::cout << "Context: " << context.dump() << std::endl;
     std::string actual;
@@ -62,9 +68,9 @@ void test_render(const std::string & template_str, const json & bindings, const 
     }
     std::cout << "Test passed!" << std::endl << std::flush;
 }
-void test_error_contains(const std::string & template_str, const json & bindings, const std::string & expected) {
+void test_error_contains(const std::string & template_str, const json & bindings, const jinja::Parser::Options & options, const std::string & expected) {
     Timer timer("  ");
-    announce_test(template_str);
+    announce_test(template_str, options);
     try {
         auto root = jinja::Parser::parse(template_str);
         auto context = jinja::Context::make(bindings);
@@ -111,50 +117,51 @@ int main() {
                 {%- endif -%}
                 {{ loop.index }}{{ "," if not loop.last -}}
             {%- endfor -%}
-        )", {}, "but first, mojitos!1,2,3");
-    test_render("{{ 'a' + [] | length + 'b' }}", {}, "a0b");
-     test_render("{{ [1, 2, 3] | join(', ') + '...' }}", {}, "1, 2, 3...");
-     test_render("{{ 'Tools: ' + [1, 2, 3] | reject('equalto', 2) | join(', ') + '...' }}", {}, "Tools: 1, 3...");
-     test_render("{{ [1, 2, 3] | join(', ') }}", {}, "1, 2, 3");
-     test_render("{% for i in range(3) %}{{i}},{% endfor %}", {}, "0,1,2,");
-     test_render("{% set foo %}Hello {{ 'there' }}{% endset %}{{ 1 ~ foo ~ 2 }}", {}, "1Hello there2");
-     test_render("{{ [1, False, null, True, 2, '3', 1, '3', False, null, True] | unique }}", {},
+        )", {}, {}, "but first, mojitos!1,2,3");
+    test_render("{{ 'a' + [] | length + 'b' }}", {}, {}, "a0b");
+     test_render("{{ [1, 2, 3] | join(', ') + '...' }}", {}, {}, "1, 2, 3...");
+     test_render("{{ 'Tools: ' + [1, 2, 3] | reject('equalto', 2) | join(', ') + '...' }}", {}, {}, "Tools: 1, 3...");
+     test_render("{{ [1, 2, 3] | join(', ') }}", {}, {}, "1, 2, 3");
+     test_render("{% for i in range(3) %}{{i}},{% endfor %}", {}, {}, "0,1,2,");
+     test_render("{% set foo %}Hello {{ 'there' }}{% endset %}{{ 1 ~ foo ~ 2 }}", {}, {}, "1Hello there2");
+     test_render("{{ [1, False, null, True, 2, '3', 1, '3', False, null, True] | unique }}", {}, {},
         "[1, False, null, True, 2, \"3\"]");
-     test_render("{{ range(5) | length % 2 }}", {}, "1");
-     test_render("{{ range(5) | length % 2 == 1 }},{{ [] | length > 0 }}", {}, "True,False");
+     test_render("{{ range(5) | length % 2 }}", {}, {}, "1");
+     test_render("{{ range(5) | length % 2 == 1 }},{{ [] | length > 0 }}", {}, {}, "True,False");
      test_render(
         "{{ messages[0]['role'] != 'system' }}",
         {{"messages", json::array({json({{"role", "system"}})})}},
+        {},
         "False");
     test_render(
         R"(
             {%- for x, y in [("a", "b"), ("c", "d")] -%}
                 {{- x }},{{ y -}};
             {%- endfor -%}
-        )", {}, "a,b;c,d;");
-    test_render("{{ 1 is not string }}", {}, "True");
-    test_render("{{ 'ab' * 3 }}", {}, "ababab");
-    test_render("{{ [1, 2, 3][-1] }}", {}, "3");
+        )", {}, {}, "a,b;c,d;");
+    test_render("{{ 1 is not string }}", {}, {}, "True");
+    test_render("{{ 'ab' * 3 }}", {}, {}, "ababab");
+    test_render("{{ [1, 2, 3][-1] }}", {}, {}, "3");
     test_render(
         R"({%- set separator = joiner(' | ') -%}
            {%- for item in ["a", "b", "c"] %}{{ separator() }}{{ item }}{% endfor -%})",
-        {}, "a | b | c");
+        {}, {}, "a | b | c");
     test_render(
         "{%- for i in range(0) -%}NAH{% else %}OK{% endfor %}",
-        {},
+        {}, {},
         "OK");
     test_render(
         R"(
             {%- for i in range(5) -%}
                 ({{ i }}, {{ loop.cycle('odd', 'even') }}),
             {%- endfor -%}
-        )", {}, "(0, odd),(1, even),(2, odd),(3, even),(4, odd),");
+        )", {}, {}, "(0, odd),(1, even),(2, odd),(3, even),(4, odd),");
     
     test_render(
         "{%- for i in range(5) if i % 2 == 0 -%}\n"
         "{{ i }}, first={{ loop.first }}, last={{ loop.last }}, index={{ loop.index }}, index0={{ loop.index0 }}, revindex={{ loop.revindex }}, revindex0={{ loop.revindex0 }}, prev={{ loop.previtem }}, next={{ loop.nextitem }},\n"
         "{% endfor -%}",
-        {},
+        {}, {},
         "0, first=True, last=False, index=1, index0=0, revindex=3, revindex0=2, prev=, next=2,\n"
         "2, first=False, last=False, index=2, index0=1, revindex=2, revindex0=1, prev=0, next=4,\n"
         "4, first=False, last=True, index=3, index0=2, revindex=1, revindex0=0, prev=2, next=,\n");
@@ -166,7 +173,7 @@ int main() {
                 {%- set _ = res.append(c | e) -%}
             {%- endfor -%}
             {{- res | join(", ") -}}
-        )", {},
+        )", {}, {},
         R"(&lt;, &gt;, &amp;, &quot;)");
     test_render(
         R"(
@@ -176,7 +183,7 @@ int main() {
                 x={{ x }}, y={{ y }}, z={{ z }}, w={{ w -}}
             {%- endmacro -%}
             {{- foo(100, 3) -}}
-        )", {},
+        )", {}, {},
         R"(x=100, y=2, z=3, w=10)");
     test_render(
         R"(
@@ -186,7 +193,7 @@ int main() {
     
             <p>{{ input('username') }}</p>
             <p>{{ input('password', type='password') }}</p>)",
-        {}, R"(
+        {}, {}, R"(
             <p><input type="text" name="username" value="" size="20"></p>
             <p><input type="password" name="password" value="" size="20"></p>)");
     test_render(
@@ -197,17 +204,17 @@ int main() {
                 {{- values -}}
             {%- endmacro -%}
             {{- foo() }} {{ foo() -}})",
-        {}, R"([1] [1])");
-    test_render(R"({{ None | items | tojson }}; {{ {1: 2} | items | tojson }})", {}, "[]; [[1, 2]]");
-    test_render(R"({{ {1: 2, 3: 4, 5: 7} | dictsort | tojson }})", {}, "[[1, 2], [3, 4], [5, 7]]");
-    test_render(R"({{ {1: 2}.items() }})", {}, "[[1, 2]]");
-    test_render(R"({{ {1: 2}.get(1) }}; {{ {}.get(1) }}; {{ {}.get(1, 10) }})", {}, "2; ; 10");
+        {}, {}, R"([1] [1])");
+    test_render(R"({{ None | items | tojson }}; {{ {1: 2} | items | tojson }})", {}, {}, "[]; [[1, 2]]");
+    test_render(R"({{ {1: 2, 3: 4, 5: 7} | dictsort | tojson }})", {}, {}, "[[1, 2], [3, 4], [5, 7]]");
+    test_render(R"({{ {1: 2}.items() }})", {}, {}, "[[1, 2]]");
+    test_render(R"({{ {1: 2}.get(1) }}; {{ {}.get(1) }}; {{ {}.get(1, 10) }})", {}, {}, "2; ; 10");
     test_render(
         R"(
             {%- for x in [1, 1.2, "a", true, True, false, False, None, [], [1], [1, 2], {}, {"a": 1}, {1: "b"}] -%}
                 {{- x | tojson -}},
             {%- endfor -%}
-        )", {},
+        )", {}, {},
         R"(1,1.2,"a",True,True,False,False,null,[],[1],[1, 2],{},{"a": 1},{"1": "b"},)");
     test_render(
         R"(
@@ -215,10 +222,11 @@ int main() {
             {{- n.value }} "{{ n.title }}",
             {%- set n.value = 2 -%}
             {%- set n.title = 'Hello' -%}
-            {{- n.value }} "{{ n.title }}")", {}, R"(1 "",2 "Hello")");
+            {{- n.value }} "{{ n.title }}")", {}, {}, R"(1 "",2 "Hello")");
     test_error_contains(
         "{{ (a.b.c) }}",
         {{"a", json({{"b", {{"c", 3}}}})}},
+        {},
         "'a' is not defined");
     test_render(
         "{% set _ = a.b.append(c.d.e) %}{{ a.b }}",
@@ -226,67 +234,90 @@ int main() {
             "a": {"b": [1, 2]},
             "c": {"d": {"e": 3}}
         })"),
+        {},
         "[1, 2, 3]");
 
     test_render(R"(
         {%- for x, y in z -%}
             {{- x }},{{ y -}};
         {%- endfor -%}
-    )", {{"z", json({json({1, 10}), json({2, 20})})}}, "1,10;2,20;");
+    )", {{"z", json({json({1, 10}), json({2, 20})})}}, {}, "1,10;2,20;");
     
-    test_render("a\nb\n", {}, "a\nb");
+    test_render("a\nb\n", {}, {}, "a\nb");
 
-    test_render(" a {{  'b' -}} c ", {}, " a bc ");
-    test_render(" a {{- 'b'  }} c ", {}, " ab c ");
-    test_render("a\n{{- 'b'  }}\nc", {}, "ab\nc");
-    test_render("a\n{{  'b' -}}\nc", {}, "a\nbc");
+    test_render(" a {{  'b' -}} c ", {}, {}, " a bc ");
+    test_render(" a {{- 'b'  }} c ", {}, {}, " ab c ");
+    test_render("a\n{{- 'b'  }}\nc", {}, {}, "ab\nc");
+    test_render("a\n{{  'b' -}}\nc", {}, {}, "a\nbc");
 
-    test_error_contains("{{ raise_exception('hey') }}", {}, "hey");
+    test_error_contains("{{ raise_exception('hey') }}", {}, {}, "hey");
     
-    test_render("{{ [] is iterable }}", {}, "True");
-    test_render("{{ [] is not number }}", {}, "True");
-    test_render("{% set x = [0, 1, 2, 3] %}{{ x[1:] }}{{ x[:2] }}{{ x[1:3] }}", {}, "[1, 2, 3][0, 1][1, 2]");
-    test_render("{{ ' a  ' | trim }}", {}, "a");
-    test_render("{{ range(3) }}{{ range(4, 7) }}{{ range(0, 10, step=2) }}", {}, "[0, 1, 2][4, 5, 6][0, 2, 4, 6, 8]");
+    test_render("{{ [] is iterable }}", {}, {}, "True");
+    test_render("{{ [] is not number }}", {}, {}, "True");
+    test_render("{% set x = [0, 1, 2, 3] %}{{ x[1:] }}{{ x[:2] }}{{ x[1:3] }}", {}, {}, "[1, 2, 3][0, 1][1, 2]");
+    test_render("{{ ' a  ' | trim }}", {}, {}, "a");
+    test_render("{{ range(3) }}{{ range(4, 7) }}{{ range(0, 10, step=2) }}", {}, {}, "[0, 1, 2][4, 5, 6][0, 2, 4, 6, 8]");
 
     test_render(
-        R"( {{ "a" -}} b {{- "c" }} )", {},
+        R"( {{ "a" -}} b {{- "c" }} )", {}, {},
         " abc ");
 
-    test_error_contains("{% else %}", {}, "Unexpected else");
-    test_error_contains("{% endif %}", {}, "Unexpected endif");
-    test_error_contains("{% elif 1 %}", {}, "Unexpected elif");
-    test_error_contains("{% endblock %}", {}, "Unexpected endblock");
-    test_error_contains("{% endfor %}", {}, "Unexpected endfor");
+    test_error_contains("{% else %}", {}, {}, "Unexpected else");
+    test_error_contains("{% endif %}", {}, {}, "Unexpected endif");
+    test_error_contains("{% elif 1 %}", {}, {}, "Unexpected elif");
+    test_error_contains("{% endblock %}", {}, {}, "Unexpected endblock");
+    test_error_contains("{% endfor %}", {}, {}, "Unexpected endfor");
 
-    test_error_contains("{% if 1 %}", {}, "Unterminated if");
-    test_error_contains("{% block foo %}", {}, "Unterminated block");
-    test_error_contains("{% for x in 1 %}", {}, "Unterminated for");
-    test_error_contains("{% if 1 %}{% else %}", {}, "Unterminated if");
-    test_error_contains("{% if 1 %}{% else %}{% elif 1 %}{% endif %}", {}, "Unterminated if");
+    test_error_contains("{% if 1 %}", {}, {}, "Unterminated if");
+    test_error_contains("{% block foo %}", {}, {}, "Unterminated block");
+    test_error_contains("{% for x in 1 %}", {}, {}, "Unterminated for");
+    test_error_contains("{% if 1 %}{% else %}", {}, {}, "Unterminated if");
+    test_error_contains("{% if 1 %}{% else %}{% elif 1 %}{% endif %}", {}, {}, "Unterminated if");
 
 
-    test_render("{% if 1 %}{% elif 1 %}{% else %}{% endif %}", {}, "");
+    test_render("{% if 1 %}{% elif 1 %}{% else %}{% endif %}", {}, {}, "");
     
     test_render(
-        "{% set x = [] %}{% set _ = x.append(1) %}{{ x | tojson(indent=2) }}", {}, 
+        "{% set x = [] %}{% set _ = x.append(1) %}{{ x | tojson(indent=2) }}", {}, {}, 
         "[\n  1\n]");
 
     test_render(
-        "{{ not [] }}", {}, 
+        "{{ not [] }}", {}, {}, 
         "True");
     
     test_render("{{ tool.function.name == 'ipython' }}", 
         json({{"tool", json({
             {"function", {{"name", "ipython"}}}
         })}}),
+        {},
         "True");
 
     test_render(R"(
         {%- set user = "Olivier" -%}
         {%- set greeting = "Hello " ~ user -%}
         {{- greeting -}}
-    )", {}, "Hello Olivier");
+    )", {}, {}, "Hello Olivier");
+
+    // Test options
+    // - trim_blocks: removes the first newline after a block
+    // - lstrip_blocks: removes leading whitespace on the line of the block
+    std::string trim_tmpl = 
+        "\n"
+        "  {% if true %}Hello{% endif %}  \n"
+        "...\n"
+        "\n";
+     test_render(
+        trim_tmpl,
+        {}, { .trim_blocks = true }, "\n  Hello...\n");
+     test_render(
+        trim_tmpl,
+        {}, {}, "\n  Hello  \n...\n");
+     test_render(
+        trim_tmpl,
+        {}, { .lstrip_blocks = true }, "\nHello  \n...\n");
+     test_render(
+        trim_tmpl,
+        {}, { .trim_blocks = true, .lstrip_blocks = true }, "\nHello...\n");
 
     auto find_files = [](const std::string & folder, const std::string & ext) {
         std::vector<std::string> files;
@@ -332,7 +363,10 @@ int main() {
         }
         for (const auto & tmpl_file : jinja_template_files) {
             std::cout << "# Testing template: " << tmpl_file << std::endl << std::flush;
-            auto tmpl = jinja::Parser::parse(read_file(tmpl_file));
+            auto tmpl = jinja::Parser::parse(read_file(tmpl_file), { 
+                .trim_blocks = true,
+                .lstrip_blocks = true,
+            });
 
             for (const auto & ctx_file : context_files) {
                 auto golden_file = get_golden_file(tmpl_file, ctx_file);
