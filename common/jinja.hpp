@@ -1,10 +1,36 @@
 /*
-  The absolute minimum needed to run chat templates seen in the wild.
-
+  Minimalistic Jinja templating engine for llama.cpp. C++11, no deps (single-header), decent language support but very few functions (easy to extend), just what’s needed for actual prompt templates.
+  
   Models have increasingly complex templates (e.g. Llama 3.1, Hermes 2 Pro w/ tool_use), so we need a proper template engine to get the best out of them.
+
+  Supports:
+  - Statements `{{% … %}}`, variable sections `{{ … }}`, and comments `{# … #}` with pre/post space elision `{%- … -%}` / `{{- … -}}` / `{#- … -#}`
+  - `set` w/ namespaces & destructuring
+  - `if` / `elif` / `else` / `endif`
+  - `for` (`recursive`) (`if`) / `else` / `endfor` w/ `loop.*` (including `loop.cycle`) and destructuring
+  - `macro` / `endmacro`
+  - Extensible filters collection: `count`, `dictsort`, `equalto`, `e` / `escape`, `items`, `join`, `joiner`, `namespace`, `raise_exception`, `range`, `reject`, `tojson`, `trim`
+  - Full expression syntax
+
+  Not supported:
+  - Most filters & pipes
+  - No difference between none and undefined
+  - Tuples
+  - `if` expressions w/o `else` (but `if` statements are fine)
+  - `{% raw %}`
+  - `{% include … %}`, `{% extends …%},
+  
+  Model templates verified to work:
+  - Meta-Llama-3.1-8B-Instruct
+  - Phi-3.5-mini-instruct
+  - Hermes-2-Pro-Llama-3-8B (default & tool_use variants)
+  - Qwen2-VL-7B-Instruct, Qwen2-7B-Instruct
+  - Mixtral-8x7B-Instruct-v0.1
 
   TODO:
   - Functionary 3.2:
+      https://huggingface.co/meetkai/functionary-small-v3.2
+      https://huggingface.co/meetkai/functionary-medium-v3.2 
     - selectattr("type", "defined")
       {{ users|selectattr("is_active") }}
       {{ users|selectattr("email", "none") }}
@@ -490,6 +516,33 @@ struct hash<jinja::Value> {
 
 namespace jinja {
 
+/** Helper to get the n-th line (1-based) */
+std::string get_line(const std::string & source, size_t line) {
+  auto start = source.begin();
+  for (size_t i = 1; i < line; ++i) {
+    start = std::find(start, source.end(), '\n') + 1;
+  }
+  auto end = std::find(start, source.end(), '\n');
+  return std::string(start, end);
+}
+
+static std::string error_location_suffix(const std::string & source, size_t pos) {
+  auto start = source.begin();
+  auto end = source.end();
+  auto it = start + pos;
+  auto line = std::count(start, it, '\n') + 1;
+  auto max_line = std::count(start, end, '\n') + 1;
+  auto col = pos - std::string(start, it).rfind('\n');
+  std::ostringstream out;
+  out << " at row " << line << ", column " << col << ":\n";
+  if (line > 1) out << get_line(source, line - 1) << "\n";
+  out << get_line(source, line) << "\n";
+  out << std::string(col - 1, ' ') << "^" << "\n";
+  if (line < max_line) out << get_line(source, line + 1) << "\n";
+
+  return out.str();
+}
+
 class Context : public std::enable_shared_from_this<Context> {
  protected:
   Value values_;
@@ -546,7 +599,14 @@ public:
   }
 };
 
+struct Location {
+  std::shared_ptr<std::string> source;
+  size_t pos;
+};
+
 class Expression {
+protected:
+    virtual Value do_evaluate(Context & context) const = 0;
 public:
     struct CallableArgs {
         std::vector<std::unique_ptr<Expression>> args;
@@ -585,9 +645,38 @@ public:
 
     using CallableParams = std::vector<std::pair<std::string, std::unique_ptr<Expression>>>;
 
+    Location location;
+
+    Expression(const Location & location) : location(location) {}
     virtual ~Expression() = default;
-    virtual Value evaluate(Context & context) const = 0;
     virtual json dump() const = 0;
+
+    Value evaluate(Context & context) const {
+        try {
+            return do_evaluate(context);
+        } catch (const std::runtime_error & e) {
+            std::ostringstream out;
+            out << e.what();
+            if (location.source) out << " " << error_location_suffix(*location.source, location.pos);
+            throw std::runtime_error(out.str());
+        }
+    }
+};
+
+class VariableExpr : public Expression {
+    std::string name;
+public:
+    VariableExpr(const Location & location, const std::string& n)
+      : Expression(location), name(n) {}
+    std::string get_name() const { return name; }
+    Value do_evaluate(Context & context) const override {
+        if (!context.contains(name)) {
+            std::cerr << "Failed to find '" << name << "' in context (has keys: " << Value::array(context.keys()).dump() << ")" << std::endl;
+            return Value();
+        }
+        return context.at(name);
+    }
+    json dump() const override { return {{"variable", name}}; }
 };
 
 json dumpParams(const Expression::CallableParams & params) {
@@ -639,61 +728,61 @@ public:
         return "Unknown";
     }
 
-    TemplateToken(Type type, size_t pos, SpaceHandling pre, SpaceHandling post) : type(type), pos(pos), pre_space(pre), post_space(post) {}
+    TemplateToken(Type type, const Location & location, SpaceHandling pre, SpaceHandling post) : type(type), location(location), pre_space(pre), post_space(post) {}
     virtual ~TemplateToken() = default;
 
     Type type;
-    size_t pos;
+    Location location;
     SpaceHandling pre_space = SpaceHandling::Keep;
     SpaceHandling post_space = SpaceHandling::Keep;
 };
 
 struct TextTemplateToken : public TemplateToken {
     std::string text;
-    TextTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::string& t) : TemplateToken(Type::Text, pos, pre, post), text(t) {}
+    TextTemplateToken(const Location & location, SpaceHandling pre, SpaceHandling post, const std::string& t) : TemplateToken(Type::Text, location, pre, post), text(t) {}
 };
 
 struct ExpressionTemplateToken : public TemplateToken {
     std::unique_ptr<Expression> expr;
-    ExpressionTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, std::unique_ptr<Expression> && e) : TemplateToken(Type::Expression, pos, pre, post), expr(std::move(e)) {}
+    ExpressionTemplateToken(const Location & location, SpaceHandling pre, SpaceHandling post, std::unique_ptr<Expression> && e) : TemplateToken(Type::Expression, location, pre, post), expr(std::move(e)) {}
 };
 
 struct IfTemplateToken : public TemplateToken {
     std::unique_ptr<Expression> condition;
-    IfTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, std::unique_ptr<Expression> && c) : TemplateToken(Type::If, pos, pre, post), condition(std::move(c)) {}
+    IfTemplateToken(const Location & location, SpaceHandling pre, SpaceHandling post, std::unique_ptr<Expression> && c) : TemplateToken(Type::If, location, pre, post), condition(std::move(c)) {}
 };
 
 struct ElifTemplateToken : public TemplateToken {
     std::unique_ptr<Expression> condition;
-    ElifTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, std::unique_ptr<Expression> && c) : TemplateToken(Type::Elif, pos, pre, post), condition(std::move(c)) {}
+    ElifTemplateToken(const Location & location, SpaceHandling pre, SpaceHandling post, std::unique_ptr<Expression> && c) : TemplateToken(Type::Elif, location, pre, post), condition(std::move(c)) {}
 };
 
 struct ElseTemplateToken : public TemplateToken {
-    ElseTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : TemplateToken(Type::Else, pos, pre, post) {}
+    ElseTemplateToken(const Location & location, SpaceHandling pre, SpaceHandling post) : TemplateToken(Type::Else, location, pre, post) {}
 };
 
 struct EndIfTemplateToken : public TemplateToken {
-   EndIfTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : TemplateToken(Type::EndIf, pos, pre, post) {}
+   EndIfTemplateToken(const Location & location, SpaceHandling pre, SpaceHandling post) : TemplateToken(Type::EndIf, location, pre, post) {}
 };
 
 struct BlockTemplateToken : public TemplateToken {
-    std::string name;
-    BlockTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::string& n) : TemplateToken(Type::Block, pos, pre, post), name(n) {}
+    std::unique_ptr<VariableExpr> name;
+    BlockTemplateToken(const Location & location, SpaceHandling pre, SpaceHandling post, std::unique_ptr<VariableExpr> && n) : TemplateToken(Type::Block, location, pre, post), name(std::move(n)) {}
 };
 
 struct EndBlockTemplateToken : public TemplateToken {
-    EndBlockTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : TemplateToken(Type::EndBlock, pos, pre, post) {}
+    EndBlockTemplateToken(const Location & location, SpaceHandling pre, SpaceHandling post) : TemplateToken(Type::EndBlock, location, pre, post) {}
 };
 
 struct MacroTemplateToken : public TemplateToken {
-    std::string name;
+    std::unique_ptr<VariableExpr> name;
     Expression::CallableParams params;
-    MacroTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::string& n, Expression::CallableParams && p)
-      : TemplateToken(Type::Macro, pos, pre, post), name(n), params(std::move(p)) {}
+    MacroTemplateToken(const Location & location, SpaceHandling pre, SpaceHandling post, std::unique_ptr<VariableExpr> && n, Expression::CallableParams && p)
+      : TemplateToken(Type::Macro, location, pre, post), name(std::move(n)), params(std::move(p)) {}
 };
 
 struct EndMacroTemplateToken : public TemplateToken {
-    EndMacroTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : TemplateToken(Type::EndMacro, pos, pre, post) {}
+    EndMacroTemplateToken(const Location & location, SpaceHandling pre, SpaceHandling post) : TemplateToken(Type::EndMacro, location, pre, post) {}
 };
 
 struct ForTemplateToken : public TemplateToken {
@@ -701,42 +790,42 @@ struct ForTemplateToken : public TemplateToken {
     std::unique_ptr<Expression> iterable;
     std::unique_ptr<Expression> condition;
     bool recursive;
-    ForTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::vector<std::string> & vns, std::unique_ptr<Expression> && iter,
+    ForTemplateToken(const Location & location, SpaceHandling pre, SpaceHandling post, const std::vector<std::string> & vns, std::unique_ptr<Expression> && iter,
       std::unique_ptr<Expression> && c, bool r)
-      : TemplateToken(Type::For, pos, pre, post), var_names(vns), iterable(std::move(iter)), condition(std::move(c)), recursive(r) {}
+      : TemplateToken(Type::For, location, pre, post), var_names(vns), iterable(std::move(iter)), condition(std::move(c)), recursive(r) {}
 };
 
 struct EndForTemplateToken : public TemplateToken {
-    EndForTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : TemplateToken(Type::EndFor, pos, pre, post) {}
+    EndForTemplateToken(const Location & location, SpaceHandling pre, SpaceHandling post) : TemplateToken(Type::EndFor, location, pre, post) {}
 };
 
 struct SetTemplateToken : public TemplateToken {
     std::vector<std::string> var_names;
     std::unique_ptr<Expression> value;
-    SetTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::vector<std::string> & vns, std::unique_ptr<Expression> && v)
-      : TemplateToken(Type::Set, pos, pre, post), var_names(vns), value(std::move(v)) {}
+    SetTemplateToken(const Location & location, SpaceHandling pre, SpaceHandling post, const std::vector<std::string> & vns, std::unique_ptr<Expression> && v)
+      : TemplateToken(Type::Set, location, pre, post), var_names(vns), value(std::move(v)) {}
 };
 
 struct EndSetTemplateToken : public TemplateToken {
-    EndSetTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post) : TemplateToken(Type::EndSet, pos, pre, post) {}
+    EndSetTemplateToken(const Location & location, SpaceHandling pre, SpaceHandling post) : TemplateToken(Type::EndSet, location, pre, post) {}
 };
 
 struct NamespacedSetTemplateToken : public TemplateToken {
     std::string ns, name;
     std::unique_ptr<Expression> value;
-    NamespacedSetTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::string& ns, const std::string& name, std::unique_ptr<Expression> && v)
-      : TemplateToken(Type::NamespacedSet, pos, pre, post), ns(ns), name(name), value(std::move(v)) {}
+    NamespacedSetTemplateToken(const Location & location, SpaceHandling pre, SpaceHandling post, const std::string& ns, const std::string& name, std::unique_ptr<Expression> && v)
+      : TemplateToken(Type::NamespacedSet, location, pre, post), ns(ns), name(name), value(std::move(v)) {}
 };
 
 struct CommentTemplateToken : public TemplateToken {
     std::string text;
-    CommentTemplateToken(size_t pos, SpaceHandling pre, SpaceHandling post, const std::string& t) : TemplateToken(Type::Comment, pos, pre, post), text(t) {}
+    CommentTemplateToken(const Location & location, SpaceHandling pre, SpaceHandling post, const std::string& t) : TemplateToken(Type::Comment, location, pre, post), text(t) {}
 };
 
 class TemplateNode {
 public:
-    virtual ~TemplateNode() = default;
     virtual void render(std::ostringstream& oss, Context & context) const = 0;
+    virtual ~TemplateNode() = default;
     std::string render(Context & context) const {
         std::ostringstream oss;
         render(oss, context);
@@ -792,17 +881,17 @@ public:
     IfNode(std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<TemplateNode>>> && c)
         : cascade(std::move(c)) {}
     void render(std::ostringstream& oss, Context & context) const override {
-    for (const auto& branch : cascade) {
-        auto enter_branch = true;
-        if (branch.first) {
-          enter_branch = !!branch.first->evaluate(context);
-        }
-        if (enter_branch) {
-            branch.second->render(oss, context);
-            return;
-        }
+      for (const auto& branch : cascade) {
+          auto enter_branch = true;
+          if (branch.first) {
+            enter_branch = !!branch.first->evaluate(context);
+          }
+          if (enter_branch) {
+              branch.second->render(oss, context);
+              return;
+          }
+      }
     }
-  }
     json dump() const override {
         json res = json::array();
         for (const auto& branch : cascade) {
@@ -910,27 +999,27 @@ public:
 };
 
 class BlockNode : public TemplateNode {
-    std::string name;
+    std::unique_ptr<VariableExpr> name;
     std::unique_ptr<TemplateNode> body;
 public:
-    BlockNode(const std::string& n, std::unique_ptr<TemplateNode> && b)
-        : name(n), body(std::move(b)) {}
+    BlockNode(std::unique_ptr<VariableExpr> && n, std::unique_ptr<TemplateNode> && b)
+        : name(std::move(n)), body(std::move(b)) {}
     void render(std::ostringstream& oss, Context & context) const override {
         body->render(oss, context);
     }
     json dump() const override {
-        return {{"block", {{"name", name}, {"body", body->dump()}}}};
+        return {{"block", {{"name", name->get_name()}, {"body", body->dump()}}}};
     }
 };
 
 class MacroNode : public TemplateNode {
-    std::string name;
+    std::unique_ptr<VariableExpr> name;
     Expression::CallableParams params;
     std::unique_ptr<TemplateNode> body;
     std::unordered_map<std::string, size_t> named_param_positions;
 public:
-    MacroNode(const std::string& n, Expression::CallableParams && p, std::unique_ptr<TemplateNode> && b)
-        : name(n), params(std::move(p)), body(std::move(b)) {
+    MacroNode(std::unique_ptr<VariableExpr> && n, Expression::CallableParams && p, std::unique_ptr<TemplateNode> && b)
+        : name(std::move(n)), params(std::move(p)), body(std::move(b)) {
         for (size_t i = 0; i < params.size(); ++i) {
           const auto & name = params[i].first;
           if (!name.empty()) {
@@ -939,12 +1028,12 @@ public:
         }
     }
     void render(std::ostringstream& oss, Context & macro_context) const override {
-        macro_context.set(name, Value::callable([&](Context & context, const Value::CallableArgs & args) {
+        macro_context.set(name->get_name(), Value::callable([&](Context & context, const Value::CallableArgs & args) {
             auto call_context = macro_context;
             std::vector<bool> param_set(params.size(), false);
             for (size_t i = 0, n = args.args.size(); i < n; i++) {
                 auto & arg = args.args[i];
-                if (i >= params.size()) throw std::runtime_error("Too many positional arguments for macro " + name);
+                if (i >= params.size()) throw std::runtime_error("Too many positional arguments for macro " + name->get_name());
                 param_set[i] = true;
                 auto & param_name = params[i].first;
                 call_context.set(param_name, arg);
@@ -953,7 +1042,7 @@ public:
                 auto & arg = args.kwargs[i];
                 auto & arg_name = arg.first;
                 auto it = named_param_positions.find(arg_name);
-                if (it == named_param_positions.end()) throw std::runtime_error("Unknown parameter name for macro " + name + ": " + arg_name);
+                if (it == named_param_positions.end()) throw std::runtime_error("Unknown parameter name for macro " + name->get_name() + ": " + arg_name);
                 
                 call_context.set(arg_name, arg.second);
                 param_set[it->second] = true;
@@ -968,7 +1057,7 @@ public:
         }));
     }
     json dump() const override {
-        return {{"macro", {{"name", name}, {"params", dumpParams(params)}, {"body", body->dump()}}}};
+        return {{"macro", {{"name", name->get_name()}, {"params", dumpParams(params)}, {"body", body->dump()}}}};
     }
 };
 
@@ -1021,9 +1110,9 @@ class IfExpr : public Expression {
     std::unique_ptr<Expression> then_expr;
     std::unique_ptr<Expression> else_expr;
 public:
-    IfExpr(std::unique_ptr<Expression> && c, std::unique_ptr<Expression> && t, std::unique_ptr<Expression> && e)
-        : condition(std::move(c)), then_expr(std::move(t)), else_expr(std::move(e)) {}
-    Value evaluate(Context & context) const override {
+    IfExpr(const Location & location, std::unique_ptr<Expression> && c, std::unique_ptr<Expression> && t, std::unique_ptr<Expression> && e)
+        : Expression(location), condition(std::move(c)), then_expr(std::move(t)), else_expr(std::move(e)) {}
+    Value do_evaluate(Context & context) const override {
         return condition->evaluate(context) ? then_expr->evaluate(context) : else_expr->evaluate(context);
     }
     json dump() const override {
@@ -1034,16 +1123,18 @@ public:
 class LiteralExpr : public Expression {
     Value value;
 public:
-    LiteralExpr(const Value& v) : value(v) {}
-    Value evaluate(Context &) const override { return value; }
+    LiteralExpr(const Location & location, const Value& v)
+      : Expression(location), value(v) {}
+    Value do_evaluate(Context &) const override { return value; }
     json dump() const override { return value.dump(); }
 };
 
 class ArrayExpr : public Expression {
     std::vector<std::unique_ptr<Expression>> elements;
 public:
-    ArrayExpr(std::vector<std::unique_ptr<Expression>> && e) : elements(std::move(e)) {}
-    Value evaluate(Context & context) const override {
+    ArrayExpr(const Location & location, std::vector<std::unique_ptr<Expression>> && e)
+      : Expression(location), elements(std::move(e)) {}
+    Value do_evaluate(Context & context) const override {
         auto result = Value::array();
         for (const auto& e : elements) {
             result.push_back(e->evaluate(context));
@@ -1062,8 +1153,9 @@ public:
 class DictExpr : public Expression {
     std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<Expression>>> elements;
 public:
-    DictExpr(std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<Expression>>> && e) : elements(std::move(e)) {}
-    Value evaluate(Context & context) const override {
+    DictExpr(const Location & location, std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<Expression>>> && e)
+      : Expression(location), elements(std::move(e)) {}
+    Value do_evaluate(Context & context) const override {
         auto result = Value::object();
         for (const auto& e : elements) {
             result.set(e.first->evaluate(context), e.second->evaluate(context));
@@ -1082,26 +1174,12 @@ public:
     }
 };
 
-class VariableExpr : public Expression {
-    std::string name;
-public:
-    VariableExpr(const std::string& n) : name(n) {}
-    std::string get_name() const { return name; }
-    Value evaluate(Context & context) const override {
-        if (!context.contains(name)) {
-            std::cerr << "Failed to find '" << name << "' in context (has keys: " << Value::array(context.keys()).dump() << ")" << std::endl;
-            return Value();
-        }
-        return context.at(name);
-    }
-    json dump() const override { return {{"variable", name}}; }
-};
-
 class SliceExpr : public Expression {
 public:
     std::unique_ptr<Expression> start, end;
-    SliceExpr(std::unique_ptr<Expression> && s, std::unique_ptr<Expression> && e) : start(std::move(s)), end(std::move(e)) {}
-    Value evaluate(Context &) const override {
+    SliceExpr(const Location & location, std::unique_ptr<Expression> && s, std::unique_ptr<Expression> && e)
+      : Expression(location), start(std::move(s)), end(std::move(e)) {}
+    Value do_evaluate(Context &) const override {
         throw std::runtime_error("SliceExpr not implemented");
     }
     json dump() const override {
@@ -1113,9 +1191,9 @@ class SubscriptExpr : public Expression {
     std::unique_ptr<Expression> base;
     std::unique_ptr<Expression> index;
 public:
-    SubscriptExpr(std::unique_ptr<Expression> && b, std::unique_ptr<Expression> && i)
-        : base(std::move(b)), index(std::move(i)) {}
-    Value evaluate(Context & context) const override {
+    SubscriptExpr(const Location & location, std::unique_ptr<Expression> && b, std::unique_ptr<Expression> && i)
+        : Expression(location), base(std::move(b)), index(std::move(i)) {}
+    Value do_evaluate(Context & context) const override {
         auto target_value = base->evaluate(context);
         if (auto slice = dynamic_cast<SliceExpr*>(index.get())) {
           if (!target_value.is_array()) throw std::runtime_error("Subscripting non-array");
@@ -1150,8 +1228,9 @@ private:
     std::unique_ptr<Expression> expr;
     Op op;
 public:
-    UnaryOpExpr(std::unique_ptr<Expression> && e, Op o) : expr(std::move(e)), op(o) {}
-    Value evaluate(Context & context) const override {
+    UnaryOpExpr(const Location & location, std::unique_ptr<Expression> && e, Op o)
+      : Expression(location), expr(std::move(e)), op(o) {}
+    Value do_evaluate(Context & context) const override {
         auto e = expr->evaluate(context);
         switch (op) {
             case Op::Plus: return e;
@@ -1173,9 +1252,9 @@ private:
     std::unique_ptr<Expression> right;
     Op op;
 public:
-    BinaryOpExpr(std::unique_ptr<Expression> && l, std::unique_ptr<Expression> && r, Op o)
-        : left(std::move(l)), right(std::move(r)), op(o) {}
-    Value evaluate(Context & context) const override {
+    BinaryOpExpr(const Location & location, std::unique_ptr<Expression> && l, std::unique_ptr<Expression> && r, Op o)
+        : Expression(location), left(std::move(l)), right(std::move(r)), op(o) {}
+    Value do_evaluate(Context & context) const override {
         auto l = left->evaluate(context);
         
         auto do_eval = [&](const Value & l) -> Value {
@@ -1248,21 +1327,20 @@ public:
 
 class MethodCallExpr : public Expression {
     std::unique_ptr<Expression> object;
-    std::string method;
+    std::unique_ptr<VariableExpr> method;
     Expression::CallableArgs args;
     // std::vector<std::pair<std::string, std::unique_ptr<Expression>>> args;
 public:
-    MethodCallExpr(std::unique_ptr<Expression> && obj, const std::string& m, Expression::CallableArgs && a)
-        : object(std::move(obj)), method(m), args(std::move(a)) {}
-    const std::string& get_method() const { return method; }
-    Value evaluate(Context & context) const override {
+    MethodCallExpr(const Location & location, std::unique_ptr<Expression> && obj, std::unique_ptr<VariableExpr> && m, Expression::CallableArgs && a)
+        : Expression(location), object(std::move(obj)), method(std::move(m)), args(std::move(a)) {}
+    Value do_evaluate(Context & context) const override {
         auto obj = object->evaluate(context);
         if (obj.is_array()) {
-          if (method == "append") {
+          if (method->get_name() == "append") {
               args.expectArgs("append method", {1, 1}, {0, 0});
               obj.push_back(args.args[0]->evaluate(context));
               return Value();
-          } else if (method == "insert") {
+          } else if (method->get_name() == "insert") {
               args.expectArgs("insert method", {2, 2}, {0, 0});
               auto index = args.args[0]->evaluate(context).get<int>();
               if (index < 0 || index > obj.size()) throw std::runtime_error("Index out of range for insert method");
@@ -1270,14 +1348,14 @@ public:
               return Value();
           }
         } else if (obj.is_object()) {
-          if (method == "items") {
+          if (method->get_name() == "items") {
             args.expectArgs("items method", {0, 0}, {0, 0});
             auto result = Value::array();
             for (const auto& key : obj.keys()) {
               result.push_back(Value::array({key, obj.at(key)}));
             }
             return result;
-          } else if (method == "get") {
+          } else if (method->get_name() == "get") {
             args.expectArgs("get method", {1, 2}, {0, 0});
             auto key = args.args[0]->evaluate(context);
             if (args.args.size() == 1) {
@@ -1285,19 +1363,19 @@ public:
             } else {
               return obj.contains(key) ? obj.at(key) : args.args[1]->evaluate(context);
             }
-          } else if (obj.contains(method)) {
-            auto callable = obj.at(method);
+          } else if (obj.contains(method->get_name())) {
+            auto callable = obj.at(method->get_name());
             if (!callable.is_callable()) {
-              throw std::runtime_error("Property '" + method + "' is not callable");
+              throw std::runtime_error("Property '" + method->get_name() + "' is not callable");
             }
             Value::CallableArgs vargs = args.evaluate(context);
             return callable.call(context, vargs);
           }
         }
-        throw std::runtime_error("Unknown method: " + method);
+        throw std::runtime_error("Unknown method: " + method->get_name());
     }
     json dump() const override {
-        return {{"call", {{"method", method}, {"object", object->dump()}, "args", args.dump()}}};
+        return {{"call", {{"method", method->get_name()}, {"object", object->dump()}, "args", args.dump()}}};
     }
 };
 
@@ -1305,9 +1383,9 @@ class CallExpr : public Expression {
 public:
     std::unique_ptr<Expression> object;
     Expression::CallableArgs args;
-    CallExpr(std::unique_ptr<Expression> && obj, Expression::CallableArgs && a)
-        : object(std::move(obj)), args(std::move(a)) {}
-    Value evaluate(Context & context) const override {
+    CallExpr(const Location & location, std::unique_ptr<Expression> && obj, Expression::CallableArgs && a)
+        : Expression(location), object(std::move(obj)), args(std::move(a)) {}
+    Value do_evaluate(Context & context) const override {
         auto obj = object->evaluate(context);
         if (!obj.is_callable()) {
           throw std::runtime_error("Object is not callable: " + obj.dump(2));
@@ -1322,8 +1400,9 @@ public:
 class FilterExpr : public Expression {
     std::vector<std::unique_ptr<Expression>> parts;
 public:
-    FilterExpr(std::vector<std::unique_ptr<Expression>> && p) : parts(std::move(p)) {}
-    Value evaluate(Context & context) const override {
+    FilterExpr(const Location & location, std::vector<std::unique_ptr<Expression>> && p)
+      : Expression(location), parts(std::move(p)) {}
+    Value do_evaluate(Context & context) const override {
         Value result;
         bool first = true;
         for (const auto& part : parts) {
@@ -1384,12 +1463,13 @@ class Parser {
 private:
     using CharIterator = std::string::const_iterator;
 
-    std::string template_str;
+    std::shared_ptr<std::string> template_str;
     CharIterator start, end, it;
       
-    Parser(const std::string& template_str) : template_str(template_str) {
-      start = it = this->template_str.begin();
-      end = this->template_str.end();
+    Parser(const std::shared_ptr<std::string>& template_str) : template_str(template_str) {
+      if (!template_str) throw std::runtime_error("Template string is null");
+      start = it = this->template_str->begin();
+      end = this->template_str->end();
     }
 
     bool consumeSpaces(SpaceHandling space_handling = SpaceHandling::Strip) {
@@ -1591,8 +1671,13 @@ private:
           return left;
         }
 
+        auto location = get_location();
         auto if_expr = parseIfExpression();
-        return nonstd_make_unique<IfExpr>(std::move(left), std::move(if_expr.first), std::move(if_expr.second));
+        return nonstd_make_unique<IfExpr>(location, std::move(left), std::move(if_expr.first), std::move(if_expr.second));
+    }
+
+    Location get_location() const {
+        return {template_str, (size_t) std::distance(start, it)};
     }
 
     std::pair<std::unique_ptr<Expression>, std::unique_ptr<Expression>> parseIfExpression() {
@@ -1613,10 +1698,11 @@ private:
         if (!left) throw std::runtime_error("Expected left side of 'logical or' expression");
 
         static std::regex or_tok(R"(or\b)");
+        auto location = get_location();
         while (!consumeToken(or_tok).empty()) {
             auto right = parseLogicalAnd();
             if (!right) throw std::runtime_error("Expected right side of 'or' expression");
-            left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), BinaryOpExpr::Op::Or);
+            left = nonstd_make_unique<BinaryOpExpr>(location, std::move(left), std::move(right), BinaryOpExpr::Op::Or);
         }
         return left;
     }
@@ -1626,10 +1712,11 @@ private:
         if (!left) throw std::runtime_error("Expected left side of 'logical and' expression");
 
         static std::regex and_tok(R"(and\b)");
+        auto location = get_location();
         while (!consumeToken(and_tok).empty()) {
             auto right = parseLogicalCompare();
             if (!right) throw std::runtime_error("Expected right side of 'and' expression");
-            left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), BinaryOpExpr::Op::And);
+            left = nonstd_make_unique<BinaryOpExpr>(location, std::move(left), std::move(right), BinaryOpExpr::Op::And);
         }
         return left;
     }
@@ -1642,14 +1729,16 @@ private:
         static std::regex not_tok(R"(not\b)");
         std::string op_str;
         while (!(op_str = consumeToken(compare_tok)).empty()) {
+            auto location = get_location();
             if (op_str == "is") {
               auto negated = !consumeToken(not_tok).empty();
 
               auto identifier = parseIdentifier();
-              if (identifier.empty()) throw std::runtime_error("Expected identifier after 'is' keyword");
+              if (!identifier) throw std::runtime_error("Expected identifier after 'is' keyword");
 
               return nonstd_make_unique<BinaryOpExpr>(
-                  std::move(left), nonstd_make_unique<VariableExpr>(identifier),
+                  left->location, 
+                  std::move(left), std::move(identifier),
                   negated ? BinaryOpExpr::Op::IsNot : BinaryOpExpr::Op::Is);
             }
             auto right = parseStringConcat();
@@ -1665,7 +1754,7 @@ private:
             // if op_str starts with "not" it must be "not in"
             else if (op_str.substr(0, 3) == "not") op = BinaryOpExpr::Op::NotIn;
             else throw std::runtime_error("Unknown comparison operator: " + op_str);
-            left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), op);
+            left = nonstd_make_unique<BinaryOpExpr>(get_location(), std::move(left), std::move(right), op);
         }
         return left;
     }
@@ -1738,9 +1827,13 @@ private:
         throw std::runtime_error("Expected closing parenthesis in call args");
     }
 
-    std::string parseIdentifier() {
+    std::unique_ptr<VariableExpr> parseIdentifier() {
         static std::regex ident_regex(R"((?!not|is|and|or|del)[a-zA-Z_]\w*)");
-        return consumeToken(ident_regex);
+        auto location = get_location();
+        auto ident = consumeToken(ident_regex);
+        if (ident.empty()) 
+          return nullptr;
+        return nonstd_make_unique<VariableExpr>(location, ident);
     }
 
     std::unique_ptr<Expression> parseStringConcat() {
@@ -1751,7 +1844,7 @@ private:
         if (!consumeToken(concat_tok).empty()) {
             auto right = parseLogicalAnd();
             if (!right) throw std::runtime_error("Expected right side of 'string concat' expression");
-            left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), BinaryOpExpr::Op::StrConcat);
+            left = nonstd_make_unique<BinaryOpExpr>(get_location(), std::move(left), std::move(right), BinaryOpExpr::Op::StrConcat);
         }
         return left;
     }
@@ -1763,7 +1856,7 @@ private:
         while (!consumeToken("**").empty()) {
             auto right = parseMathPlusMinus();
             if (!right) throw std::runtime_error("Expected right side of 'math pow' expression");
-            left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), BinaryOpExpr::Op::MulMul);
+            left = nonstd_make_unique<BinaryOpExpr>(get_location(), std::move(left), std::move(right), BinaryOpExpr::Op::MulMul);
         }
         return left;
     }
@@ -1778,7 +1871,7 @@ private:
             auto right = parseMathMulDiv();
             if (!right) throw std::runtime_error("Expected right side of 'math plus/minus' expression");
             auto op = op_str == "+" ? BinaryOpExpr::Op::Add : BinaryOpExpr::Op::Sub;
-            left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), op);
+            left = nonstd_make_unique<BinaryOpExpr>(get_location(), std::move(left), std::move(right), op);
         }
         return left;
     }
@@ -1797,7 +1890,7 @@ private:
                 : op_str == "/" ? BinaryOpExpr::Op::Div 
                 : op_str == "//" ? BinaryOpExpr::Op::DivDiv
                 : BinaryOpExpr::Op::Mod;
-            left = nonstd_make_unique<BinaryOpExpr>(std::move(left), std::move(right), op);
+            left = nonstd_make_unique<BinaryOpExpr>(get_location(), std::move(left), std::move(right), op);
         }
 
         if (!consumeToken("|").empty()) {
@@ -1809,14 +1902,14 @@ private:
                 std::vector<std::unique_ptr<Expression>> parts;
                 parts.emplace_back(std::move(left));
                 parts.emplace_back(std::move(expr));
-                return nonstd_make_unique<FilterExpr>(std::move(parts));
+                return nonstd_make_unique<FilterExpr>(get_location(), std::move(parts));
             }
         }
         return left;
     }
 
     std::unique_ptr<Expression> call_func(const std::string & name, Expression::CallableArgs && args) const {
-        return nonstd_make_unique<CallExpr>(nonstd_make_unique<VariableExpr>(name), std::move(args));
+        return nonstd_make_unique<CallExpr>(get_location(), nonstd_make_unique<VariableExpr>(get_location(), name), std::move(args));
     }
 
     std::unique_ptr<Expression> parseMathUnaryPlusMinus() {
@@ -1827,21 +1920,22 @@ private:
         
         if (!op_str.empty()) {
             auto op = op_str == "+" ? UnaryOpExpr::Op::Plus : op_str == "-" ? UnaryOpExpr::Op::Minus : UnaryOpExpr::Op::LogicalNot;
-            return nonstd_make_unique<UnaryOpExpr>(std::move(expr), op);
+            return nonstd_make_unique<UnaryOpExpr>(get_location(), std::move(expr), op);
         }
         return expr;
     }
         
     std::unique_ptr<Expression> parseValueExpression() {
       auto parseValue = [&]() -> std::unique_ptr<Expression> {
+        auto location = get_location();
         auto constant = parseConstant();
-        if (constant) return nonstd_make_unique<LiteralExpr>(*constant);
+        if (constant) return nonstd_make_unique<LiteralExpr>(location, *constant);
 
         static std::regex null_regex(R"(null\b)");
-        if (!consumeToken(null_regex).empty()) return nonstd_make_unique<LiteralExpr>(Value());
+        if (!consumeToken(null_regex).empty()) return nonstd_make_unique<LiteralExpr>(location, Value());
 
         auto identifier = parseIdentifier();
-        if (!identifier.empty()) return nonstd_make_unique<VariableExpr>(identifier);
+        if (identifier) return identifier;
 
         auto braced = parseBracedExpressionOrArray();
         if (braced) return braced;
@@ -1862,16 +1956,16 @@ private:
             std::unique_ptr<Expression> index;
             if (!consumeToken(":").empty()) {
               auto slice_end = parseExpression();
-              index = nonstd_make_unique<SliceExpr>(nullptr, std::move(slice_end));
+              index = nonstd_make_unique<SliceExpr>(slice_end->location, nullptr, std::move(slice_end));
             } else {
               auto slice_start = parseExpression();
               if (!consumeToken(":").empty()) {
                 consumeSpaces();
                 if (peekSymbols({ "]" })) {
-                  index = nonstd_make_unique<SliceExpr>(std::move(slice_start), nullptr);
+                  index = nonstd_make_unique<SliceExpr>(slice_start->location, std::move(slice_start), nullptr);
                 } else {
                   auto slice_end = parseExpression();
-                  index = nonstd_make_unique<SliceExpr>(std::move(slice_start), std::move(slice_end));
+                  index = nonstd_make_unique<SliceExpr>(slice_start->location, std::move(slice_start), std::move(slice_end));
                 }
               } else {
                 index = std::move(slice_start);
@@ -1880,25 +1974,27 @@ private:
             if (!index) throw std::runtime_error("Empty index in subscript");
             if (consumeToken("]").empty()) throw std::runtime_error("Expected closing bracket in subscript");
             
-            value = nonstd_make_unique<SubscriptExpr>(std::move(value), std::move(index));
+            value = nonstd_make_unique<SubscriptExpr>(value->location, std::move(value), std::move(index));
         } else if (!consumeToken(".").empty()) {
             auto identifier = parseIdentifier();
-            if (identifier.empty()) throw std::runtime_error("Expected identifier in subscript");
+            if (!identifier) throw std::runtime_error("Expected identifier in subscript");
 
             consumeSpaces();
             if (peekSymbols({ "(" })) {
               auto callParams = parseCallArgs();
-              value = nonstd_make_unique<MethodCallExpr>(std::move(value), identifier, std::move(callParams));
+              value = nonstd_make_unique<MethodCallExpr>(identifier->location, std::move(value), std::move(identifier), std::move(callParams));
             } else {
-              value = nonstd_make_unique<SubscriptExpr>(std::move(value), nonstd_make_unique<LiteralExpr>(Value(identifier)));
+              auto key = nonstd_make_unique<LiteralExpr>(identifier->location, Value(identifier->get_name()));
+              value = nonstd_make_unique<SubscriptExpr>(identifier->location, std::move(value), std::move(key));
             }
         }
         consumeSpaces();
       }
 
       if (peekSymbols({ "(" })) {
+        auto location = get_location();
         auto callParams = parseCallArgs();
-        value = nonstd_make_unique<CallExpr>(std::move(value), std::move(callParams));
+        value = nonstd_make_unique<CallExpr>(location, std::move(value), std::move(callParams));
       }
       return value;
     }
@@ -1923,7 +2019,7 @@ private:
           tuple.push_back(std::move(next));
 
           if (!consumeToken(")").empty()) {
-              return nonstd_make_unique<ArrayExpr>(std::move(tuple));
+              return nonstd_make_unique<ArrayExpr>(get_location(), std::move(tuple));
           }
         }
         throw std::runtime_error("Expected closing parenthesis");
@@ -1934,7 +2030,7 @@ private:
         
         std::vector<std::unique_ptr<Expression>> elements;
         if (!consumeToken("]").empty()) {
-            return nonstd_make_unique<ArrayExpr>(std::move(elements));
+            return nonstd_make_unique<ArrayExpr>(get_location(), std::move(elements));
         }
         auto first_expr = parseExpression();
         if (!first_expr) throw std::runtime_error("Expected first expression in array");
@@ -1946,7 +2042,7 @@ private:
               if (!expr) throw std::runtime_error("Expected expression in array");
               elements.push_back(std::move(expr));
             } else if (!consumeToken("]").empty()) {
-                return nonstd_make_unique<ArrayExpr>(std::move(elements));
+                return nonstd_make_unique<ArrayExpr>(get_location(), std::move(elements));
             } else {
                 throw std::runtime_error("Expected comma or closing bracket in array");
             }
@@ -1959,7 +2055,7 @@ private:
         
         std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<Expression>>> elements;
         if (!consumeToken("}").empty()) {
-            return nonstd_make_unique<DictExpr>(std::move(elements));
+            return nonstd_make_unique<DictExpr>(get_location(), std::move(elements));
         }
 
         auto parseKeyValuePair = [&]() {
@@ -1977,7 +2073,7 @@ private:
             if (!consumeToken(",").empty()) {
                 parseKeyValuePair();
             } else if (!consumeToken("}").empty()) {
-                return nonstd_make_unique<DictExpr>(std::move(elements));
+                return nonstd_make_unique<DictExpr>(get_location(), std::move(elements));
             } else {
                 throw std::runtime_error("Expected comma or closing brace in dictionary");
             }
@@ -2009,38 +2105,11 @@ private:
 
     std::runtime_error unexpected(const TemplateToken & token) const {
       return std::runtime_error("Unexpected " + TemplateToken::typeToString(token.type)
-        + error_location_suffix(token.pos));
+        + error_location_suffix(*template_str, token.location.pos));
     }
     std::runtime_error unterminated(const TemplateToken & token) const {
       return std::runtime_error("Unterminated " + TemplateToken::typeToString(token.type)
-        + error_location_suffix(token.pos));
-    }
-
-    /** Helper to get the n-th line (1-based) */
-    std::string get_line(size_t line) const {
-      auto start = template_str.begin();
-      for (size_t i = 1; i < line; ++i) {
-        start = std::find(start, template_str.end(), '\n') + 1;
-      }
-      auto end = std::find(start, template_str.end(), '\n');
-      return std::string(start, end);
-    }
-
-    std::string error_location_suffix(size_t pos) const {
-      auto start = template_str.begin();
-      auto end = template_str.end();
-      auto it = start + pos;
-      auto line = std::count(start, it, '\n') + 1;
-      auto max_line = std::count(start, end, '\n') + 1;
-      auto col = pos - std::string(start, it).rfind('\n');
-      std::ostringstream out;
-      out << " at row " << line << ", column " << col << ":\n";
-      if (line > 1) out << get_line(line - 1) << "\n";
-      out << get_line(line) << "\n";
-      out << std::string(col - 1, ' ') << "^" << "\n";
-      if (line < max_line) out << get_line(line + 1) << "\n";
-
-      return out.str();
+        + error_location_suffix(*template_str, token.location.pos));
     }
 
     TemplateTokenVector tokenize() {
@@ -2058,13 +2127,13 @@ private:
       
       try {
         while (it != end) {
-          auto pos = std::distance(start, it);
+          auto location = get_location();
       
           if (!(group = consumeTokenGroups(comment_tok, SpaceHandling::Keep)).empty()) {
             auto pre_space = parseSpaceHandling(group[1]);
             auto content = group[2];
             auto post_space = parseSpaceHandling(group[3]);
-            tokens.push_back(nonstd_make_unique<CommentTemplateToken>(pos, pre_space, post_space, content));
+            tokens.push_back(nonstd_make_unique<CommentTemplateToken>(location, pre_space, post_space, content));
           } else if (!(group = consumeTokenGroups(expr_open_regex, SpaceHandling::Keep)).empty()) {
             auto pre_space = parseSpaceHandling(group[1]);
             auto expr = parseExpression();
@@ -2074,7 +2143,7 @@ private:
             }
 
             auto post_space = parseSpaceHandling(group[1]);
-            tokens.push_back(nonstd_make_unique<ExpressionTemplateToken>(pos, pre_space, post_space, std::move(expr)));
+            tokens.push_back(nonstd_make_unique<ExpressionTemplateToken>(location, pre_space, post_space, std::move(expr)));
           } else if (!(group = consumeTokenGroups(block_open_regex, SpaceHandling::Keep)).empty()) {
             auto pre_space = parseSpaceHandling(group[1]);
 
@@ -2092,19 +2161,19 @@ private:
               if (!condition) throw std::runtime_error("Expected condition in if block");
 
               auto post_space = parseBlockClose();
-              tokens.push_back(nonstd_make_unique<IfTemplateToken>(pos, pre_space, post_space, std::move(condition)));
+              tokens.push_back(nonstd_make_unique<IfTemplateToken>(location, pre_space, post_space, std::move(condition)));
             } else if (keyword == "elif") {
               auto condition = parseExpression();
               if (!condition) throw std::runtime_error("Expected condition in elif block");
 
               auto post_space = parseBlockClose();
-              tokens.push_back(nonstd_make_unique<ElifTemplateToken>(pos, pre_space, post_space, std::move(condition)));
+              tokens.push_back(nonstd_make_unique<ElifTemplateToken>(location, pre_space, post_space, std::move(condition)));
             } else if (keyword == "else") {
               auto post_space = parseBlockClose();
-              tokens.push_back(nonstd_make_unique<ElseTemplateToken>(pos, pre_space, post_space));
+              tokens.push_back(nonstd_make_unique<ElseTemplateToken>(location, pre_space, post_space));
             } else if (keyword == "endif") {
               auto post_space = parseBlockClose();
-              tokens.push_back(nonstd_make_unique<EndIfTemplateToken>(pos, pre_space, post_space));
+              tokens.push_back(nonstd_make_unique<EndIfTemplateToken>(location, pre_space, post_space));
             } else if (keyword == "for") {
               static std::regex recursive_tok(R"(recursive\b)");
               static std::regex if_tok(R"(if\b)");
@@ -2122,10 +2191,10 @@ private:
               auto recursive = !consumeToken(recursive_tok).empty();
             
               auto post_space = parseBlockClose();
-              tokens.push_back(nonstd_make_unique<ForTemplateToken>(pos, pre_space, post_space, std::move(varnames), std::move(iterable), std::move(condition), recursive));
+              tokens.push_back(nonstd_make_unique<ForTemplateToken>(location, pre_space, post_space, std::move(varnames), std::move(iterable), std::move(condition), recursive));
             } else if (keyword == "endfor") {
               auto post_space = parseBlockClose();
-              tokens.push_back(nonstd_make_unique<EndForTemplateToken>(pos, pre_space, post_space));
+              tokens.push_back(nonstd_make_unique<EndForTemplateToken>(location, pre_space, post_space));
             } else if (keyword == "set") {
               static std::regex namespaced_var_regex(R"((\w+)[\s\n]*\.[\s\n]*(\w+))");
               if (!(group = consumeTokenGroups(namespaced_var_regex)).empty()) {
@@ -2138,7 +2207,7 @@ private:
                 if (!value) throw std::runtime_error("Expected value in set block");
 
                 auto post_space = parseBlockClose();
-                tokens.push_back(nonstd_make_unique<NamespacedSetTemplateToken>(pos, pre_space, post_space, ns, var, std::move(value)));
+                tokens.push_back(nonstd_make_unique<NamespacedSetTemplateToken>(location, pre_space, post_space, ns, var, std::move(value)));
               } else {
                 auto varnames = parseVarNames();
 
@@ -2147,46 +2216,46 @@ private:
                   if (!value) throw std::runtime_error("Expected value in set block");
 
                   auto post_space = parseBlockClose();
-                  tokens.push_back(nonstd_make_unique<SetTemplateToken>(pos, pre_space, post_space, varnames, std::move(value)));
+                  tokens.push_back(nonstd_make_unique<SetTemplateToken>(location, pre_space, post_space, varnames, std::move(value)));
                 } else {
                   auto post_space = parseBlockClose();
-                  tokens.push_back(nonstd_make_unique<SetTemplateToken>(pos, pre_space, post_space, varnames, nullptr));
+                  tokens.push_back(nonstd_make_unique<SetTemplateToken>(location, pre_space, post_space, varnames, nullptr));
                 }
               }
             } else if (keyword == "endset") {
               auto post_space = parseBlockClose();
-              tokens.push_back(nonstd_make_unique<EndSetTemplateToken>(pos, pre_space, post_space));
+              tokens.push_back(nonstd_make_unique<EndSetTemplateToken>(location, pre_space, post_space));
             } else if (keyword == "block") {
               auto blockname = parseIdentifier();
-              if (blockname.empty()) throw std::runtime_error("Expected block name in block block");
+              if (!blockname) throw std::runtime_error("Expected block name in block block");
 
               auto post_space = parseBlockClose();
-              tokens.push_back(nonstd_make_unique<BlockTemplateToken>(pos, pre_space, post_space, blockname));
+              tokens.push_back(nonstd_make_unique<BlockTemplateToken>(location, pre_space, post_space, std::move(blockname)));
             } else if (keyword == "endblock") {
               auto post_space = parseBlockClose();
-              tokens.push_back(nonstd_make_unique<EndBlockTemplateToken>(pos, pre_space, post_space));
+              tokens.push_back(nonstd_make_unique<EndBlockTemplateToken>(location, pre_space, post_space));
             } else if (keyword == "macro") {
               auto macroname = parseIdentifier();
-              if (macroname.empty()) throw std::runtime_error("Expected macro name in macro block");
+              if (!macroname) throw std::runtime_error("Expected macro name in macro block");
               auto params = parseParameters();
 
               auto post_space = parseBlockClose();
-              tokens.push_back(nonstd_make_unique<MacroTemplateToken>(pos, pre_space, post_space, macroname, std::move(params)));
+              tokens.push_back(nonstd_make_unique<MacroTemplateToken>(location, pre_space, post_space, std::move(macroname), std::move(params)));
             } else if (keyword == "endmacro") {
               auto post_space = parseBlockClose();
-              tokens.push_back(nonstd_make_unique<EndMacroTemplateToken>(pos, pre_space, post_space));
+              tokens.push_back(nonstd_make_unique<EndMacroTemplateToken>(location, pre_space, post_space));
             } else {
               throw std::runtime_error("Unexpected block: " + keyword);
             }
           } else if (!(text = consumeToken(text_regex, SpaceHandling::Keep)).empty()) {
-            tokens.push_back(nonstd_make_unique<TextTemplateToken>(pos, SpaceHandling::Keep, SpaceHandling::Keep, text));
+            tokens.push_back(nonstd_make_unique<TextTemplateToken>(location, SpaceHandling::Keep, SpaceHandling::Keep, text));
           } else {
             if (it != end) throw std::runtime_error("Unexpected character");
           }
         }
         return tokens;
       } catch (const std::runtime_error & e) {
-        throw std::runtime_error(e.what() + error_location_suffix(std::distance(start, it)));
+        throw std::runtime_error(e.what() + error_location_suffix(*template_str, std::distance(start, it)));
       }
     }
 
@@ -2261,13 +2330,13 @@ private:
               if (it == end || (*(it++))->type != TemplateToken::Type::EndBlock) {
                   throw unterminated(**start);
               }
-              children.emplace_back(nonstd_make_unique<BlockNode>(block_token->name, std::move(body)));
+              children.emplace_back(nonstd_make_unique<BlockNode>(std::move(block_token->name), std::move(body)));
           } else if (auto macro_token = dynamic_cast<MacroTemplateToken*>(token.get())) {
               auto body = parseTemplate(begin, it, end);
               if (it == end || (*(it++))->type != TemplateToken::Type::EndMacro) {
                   throw unterminated(**start);
               }
-              children.emplace_back(nonstd_make_unique<MacroNode>(macro_token->name, std::move(macro_token->params), std::move(body)));
+              children.emplace_back(nonstd_make_unique<MacroNode>(std::move(macro_token->name), std::move(macro_token->params), std::move(body)));
           } else if (auto comment_token = dynamic_cast<CommentTemplateToken*>(token.get())) {
               // Ignore comments
           } else if (dynamic_cast<EndBlockTemplateToken*>(token.get())
@@ -2298,7 +2367,7 @@ private:
 public:
 
     static std::unique_ptr<TemplateNode> parse(const std::string& template_str) {
-        Parser parser(template_str);
+        Parser parser(std::make_shared<std::string>(template_str));
 
         auto tokens = parser.tokenize();
         TemplateTokenIterator begin = tokens.begin();
