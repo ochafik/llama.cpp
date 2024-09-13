@@ -69,6 +69,7 @@ private:
   Value(const std::shared_ptr<ObjectType> & object) : object_(object) {}
   Value(const std::shared_ptr<CallableType> & callable) : object_(std::make_shared<ObjectType>()), callable_(callable) {}
 
+  /* Python-style string repr */
   static void dump_string(const json & primitive, std::ostringstream & out, char string_quote = '\'') {
     if (!primitive.is_string()) throw std::runtime_error("Value is not a string: " + primitive.dump());
     auto s = primitive.dump();
@@ -76,7 +77,7 @@ private:
       out << s;
       return;
     }
-    // Rework json dump to change string quotes
+    // Reuse json dump, just changing string quotes
     out << string_quote;
     for (size_t i = 1, n = s.size() - 1; i < n; ++i) {
       if (s[i] == '\\' && s[i + 1] == '"') {
@@ -459,19 +460,13 @@ class Context : public std::enable_shared_from_this<Context> {
  protected:
   Value values_;
   std::shared_ptr<Context> parent_;
-  Options options_;
 public:
-  Context(Value && values, 
-          const Options & options,
-          const std::shared_ptr<Context> & parent = nullptr)
-    : values_(std::move(values)), options_(options), parent_(parent) {
-    if (!values_.is_object())
-      throw std::runtime_error("Context values must be an object: " + values_.dump());
+  Context(Value && values, const std::shared_ptr<Context> & parent = nullptr) : values_(std::move(values)), parent_(parent) {
+    if (!values_.is_object()) throw std::runtime_error("Context values must be an object: " + values_.dump());
   }
 
-  const Options & options() const { return options_; }
-  static std::shared_ptr<Context> builtins(const Options & options);
-  static std::shared_ptr<Context> make(Value && values, const Options & options);
+  static std::shared_ptr<Context> builtins();
+  static std::shared_ptr<Context> make(Value && values);
 
   std::vector<Value> keys() const {
     return values_.keys();
@@ -501,10 +496,7 @@ public:
 
 class MacroContext : public Context {
 public:
-  MacroContext(Value && arg_values, 
-    const Options & options,
-    const std::shared_ptr<Context> & parent = nullptr) 
-    : Context(std::move(arg_values), options, parent) {}
+  MacroContext(Value && arg_values, const std::shared_ptr<Context> & parent = nullptr) : Context(std::move(arg_values), parent) {}
   void set(const Value & key, const Value & value) override {
     if (values_.contains(key)) {
       values_.set(key, value);
@@ -701,7 +693,7 @@ struct CommentTemplateToken : public TemplateToken {
 
 class TemplateNode {
     Location location_;
-  protected:
+protected:
     virtual void do_render(std::ostringstream & out, Context & context) const = 0;
     
 public:
@@ -790,6 +782,7 @@ public:
     ForNode(const Location & location, std::vector<std::string> && var_names, std::unique_ptr<Expression> && iterable,
       std::unique_ptr<Expression> && condition, std::unique_ptr<TemplateNode> && body, bool recursive, std::unique_ptr<TemplateNode> && else_body)
             : TemplateNode(location), var_names(var_names), iterable(std::move(iterable)), condition(std::move(condition)), body(std::move(body)), recursive(recursive), else_body(std::move(else_body)) {}
+      
     void do_render(std::ostringstream & out, Context & context) const override {
       // https://jinja.palletsprojects.com/en/3.0.x/templates/#for
 
@@ -827,7 +820,7 @@ public:
                   cycle_index = (cycle_index + 1) % args.args.size();
                   return item;
               }));
-              auto loop_context = std::make_shared<Context>(std::move(Value::object()), context.options(), context.shared_from_this());
+              auto loop_context = std::make_shared<Context>(std::move(Value::object()), context.shared_from_this());
               loop_context->set("loop", loop);
               for (size_t i = 0, n = filtered_items.size(); i < n; ++i) {
                   auto & item = filtered_items.at(i);
@@ -2086,7 +2079,7 @@ private:
                 text = std::regex_replace(text, trailing_last_line_space_regex, "$1");
               }
               
-              if (it == end) {
+              if (it == end && !options.keep_trailing_newline) {
                 static std::regex r(R"([\n\r]$)");
                 text = std::regex_replace(text, r, "");  // Strip one trailing newline
               }
@@ -2177,7 +2170,7 @@ static Value simple_function(const std::string & fn_name, const std::vector<std:
   });
 }
 
-std::shared_ptr<Context> Context::builtins(const Options & options) {
+std::shared_ptr<Context> Context::builtins() {
   auto top_level_values = Value::object();
 
   top_level_values.set("raise_exception", simple_function("raise_exception", { "message" }, [](Context &, const Value & args) -> Value {
@@ -2371,14 +2364,11 @@ std::shared_ptr<Context> Context::builtins(const Options & options) {
     return res;
   }));
 
-  return std::make_shared<Context>(std::move(top_level_values), options);
+  return std::make_shared<Context>(std::move(top_level_values));
 }
 
-std::shared_ptr<Context> Context::make(Value && values, const Options & options) {
-  return std::make_shared<Context>(
-    values.is_null() ? Value::object() : std::move(values),
-    options,
-    builtins(options));
+std::shared_ptr<Context> Context::make(Value && values) {
+  return std::make_shared<Context>(values.is_null() ? Value::object() : std::move(values), builtins());
 }
 
 }  // namespace jinja
