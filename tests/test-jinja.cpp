@@ -121,6 +121,9 @@ int main() {
     //     "Hello<|im_end|>\n"
     // );
 
+    test_render(R"({{ {"a": 1} | tojson }})", {}, {}, R"({"a": 1})");
+    test_render(R"({{ {"a": 1} }})", {}, {}, R"({'a': 1})");
+
     // Test options
     // - trim_blocks: removes the first newline after a block
     // - lstrip_blocks: removes leading whitespace on the line of the block
@@ -166,7 +169,7 @@ int main() {
     test_render("{% for i in range(3) %}{{i}},{% endfor %}", {}, {}, "0,1,2,");
     test_render("{% set foo %}Hello {{ 'there' }}{% endset %}{{ 1 ~ foo ~ 2 }}", {}, {}, "1Hello there2");
     test_render("{{ [1, False, null, True, 2, '3', 1, '3', False, null, True] | unique }}", {}, {},
-        "[1, False, null, True, 2, \"3\"]");
+        "[1, False, null, True, 2, '3']");
     test_render("{{ range(5) | length % 2 }}", {}, {}, "1");
     test_render("{{ range(5) | length % 2 == 1 }},{{ [] | length > 0 }}", {}, {}, "True,False");
     test_render(

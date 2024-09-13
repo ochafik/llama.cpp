@@ -136,7 +136,24 @@ private:
   Value(const std::shared_ptr<ObjectType> & object) : object_(object) {}
   Value(const std::shared_ptr<CallableType> & callable) : object_(std::make_shared<ObjectType>()), callable_(callable) {}
 
-  void dump(std::ostringstream & out, int indent = -1, int level = 0) const {
+  static void dump_string(const json & primitive, std::ostringstream & out, char string_quote = '\'') {
+    if (!primitive.is_string()) throw std::runtime_error("Value is not a string: " + primitive.dump());
+    // Rework json dump to change string quotes
+    auto s = primitive.dump();
+    out << string_quote;
+    for (size_t i = 1, n = s.size() - 1; i < n; ++i) {
+      if (s[i] == '\\' && s[i + 1] == '"') {
+        out << '"';
+        i++;
+      } else if (s[i] == string_quote) {
+        out << '\\' << string_quote;
+      } else {
+        out << s[i];
+      }
+    }
+    out << string_quote;
+  }
+  void dump(std::ostringstream & out, int indent = -1, int level = 0, char string_quote = '\'') const {
     auto print_indent = [&](int level) {
       if (indent > 0) for (int i = 0, n = level * indent; i < n; ++i) out << ' ';
     };
@@ -158,7 +175,7 @@ private:
       }
       for (size_t i = 0; i < array_->size(); ++i) {
         if (i) print_sub_sep();
-        (*array_)[i].dump(out, indent, level + 1);
+        (*array_)[i].dump(out, indent, level + 1, string_quote);
       }
       if (indent >= 0) {
         out << "\n";
@@ -173,14 +190,13 @@ private:
       }
       for (auto begin = object_->begin(), it = begin; it != object_->end(); ++it) {
         if (it != begin) print_sub_sep();
-        auto key_dump = it->first.dump();
         if (it->first.is_string()) {
-          out << key_dump;
+          dump_string(it->first, out, string_quote);
         } else {
-          out << '"' << key_dump << '"';
+          out << string_quote << it->first.dump() << string_quote;
         }
         out << ": ";
-        it->second.dump(out, indent, level + 1);
+        it->second.dump(out, indent, level + 1, string_quote);
       }
       if (indent >= 0) {
         out << "\n";
@@ -191,6 +207,8 @@ private:
       throw std::runtime_error("Cannot dump callable to JSON");
     } else if (is_boolean()) {
       out << (this->to_bool() ? "True" : "False");
+    } else if (is_string() && string_quote != '"') {
+      dump_string(primitive_, out, string_quote);  
     } else {
       out << primitive_.dump();
     }
@@ -429,10 +447,10 @@ public:
     }
     throw std::runtime_error("get<string> not defined for this value type: " + dump());
   }
-  std::string dump(int indent=-1) const {
+  std::string dump(int indent=-1, bool to_json=false) const {
     // Note: get<json>().dump(indent) would work but [1, 2] would be dumped to [1,2] instead of [1, 2]
     std::ostringstream out;
-    dump(out, indent);
+    dump(out, indent, 0, to_json ? '"' : '\'');
     return out.str();
   }
 
@@ -855,8 +873,23 @@ struct CommentTemplateToken : public TemplateToken {
 };
 
 class TemplateNode {
+    Location location_;
+  protected:
+    virtual void do_render(std::ostringstream & out, Context & context) const = 0;
+    
 public:
-    virtual void render(std::ostringstream & out, Context & context) const = 0;
+    TemplateNode(const Location & location) : location_(location) {}
+    void render(std::ostringstream & out, Context & context) const {
+        try {
+            do_render(out, context);
+        } catch (const std::runtime_error & e) {
+            std::ostringstream err;
+            err << e.what();
+            if (location_.source) err << error_location_suffix(*location_.source, location_.pos);
+            throw std::runtime_error(err.str());
+        }
+    }
+    const Location & location() const { return location_; }
     virtual ~TemplateNode() = default;
     std::string render(Context & context) const {
         std::ostringstream out;
@@ -869,8 +902,9 @@ public:
 class SequenceNode : public TemplateNode {
     std::vector<std::unique_ptr<TemplateNode>> children;
 public:
-    SequenceNode(std::vector<std::unique_ptr<TemplateNode>> && c) : children(std::move(c)) {}
-    void render(std::ostringstream & out, Context & context) const override {
+    SequenceNode(const Location & location, std::vector<std::unique_ptr<TemplateNode>> && c)
+      : TemplateNode(location), children(std::move(c)) {}
+    void do_render(std::ostringstream & out, Context & context) const override {
         for (const auto& child : children) child->render(out, context);
     }
     json debug_dump() const override {
@@ -884,10 +918,9 @@ public:
 
 class TextNode : public TemplateNode {
     std::string text;
-    // SpaceHandling pre_space, post_space;
 public:
-    TextNode(const std::string& t) : text(t) {}
-    void render(std::ostringstream & out, Context &) const override {
+    TextNode(const Location & location, const std::string& t) : TemplateNode(location), text(t) {}
+    void do_render(std::ostringstream & out, Context &) const override {
       out << text;
     }
     json debug_dump() const override { return {{"text", text}}; }
@@ -895,10 +928,9 @@ public:
 
 class ExpressionNode : public TemplateNode {
     std::unique_ptr<Expression> expr;
-    // SpaceHandling pre_space, post_space;
 public:
-    ExpressionNode(std::unique_ptr<Expression> && e) : expr(std::move(e)) {}
-    void render(std::ostringstream & out, Context & context) const override {
+    ExpressionNode(const Location & location, std::unique_ptr<Expression> && e) : TemplateNode(location), expr(std::move(e)) {}
+    void do_render(std::ostringstream & out, Context & context) const override {
       auto result = expr->evaluate(context);
       if (result.is_string()) {
           out << result.get<std::string>();
@@ -914,9 +946,9 @@ public:
 class IfNode : public TemplateNode {
     std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<TemplateNode>>> cascade;
 public:
-    IfNode(std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<TemplateNode>>> && c)
-        : cascade(std::move(c)) {}
-    void render(std::ostringstream & out, Context & context) const override {
+    IfNode(const Location & location, std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<TemplateNode>>> && c)
+        : TemplateNode(location), cascade(std::move(c)) {}
+    void do_render(std::ostringstream & out, Context & context) const override {
       for (const auto& branch : cascade) {
           auto enter_branch = true;
           if (branch.first) {
@@ -949,27 +981,28 @@ class ForNode : public TemplateNode {
     std::unique_ptr<TemplateNode> else_body;
     bool recursive;
 public:
-    ForNode(const std::vector<std::string> & vns, std::unique_ptr<Expression> && iter,
-      std::unique_ptr<Expression> && c, std::unique_ptr<TemplateNode> && b, bool r, std::unique_ptr<TemplateNode> && eb)
-            : var_names(vns), iterable(std::move(iter)), condition(std::move(c)), body(std::move(b)), recursive(r), else_body(std::move(eb)) {}
-    void render(std::ostringstream & out, Context & context) const override {
+    ForNode(const Location & location, std::vector<std::string> && var_names, std::unique_ptr<Expression> && iterable,
+      std::unique_ptr<Expression> && condition, std::unique_ptr<TemplateNode> && body, bool recursive, std::unique_ptr<TemplateNode> && else_body)
+            : TemplateNode(location), var_names(var_names), iterable(std::move(iterable)), condition(std::move(condition)), body(std::move(body)), recursive(recursive), else_body(std::move(else_body)) {}
+    void do_render(std::ostringstream & out, Context & context) const override {
       // https://jinja.palletsprojects.com/en/3.0.x/templates/#for
 
       auto iterable_value = iterable->evaluate(context);
-      if (!iterable_value.is_array()) {
-        throw std::runtime_error("For loop iterable must be iterable");
-      }
-
       Value::CallableType loop_function;
 
       std::function<void(const Value&)> visit = [&](const Value& iter) {
           auto filtered_items = Value::array();
-          for (size_t i = 0, n = iter.size(); i < n; ++i) {
-              auto item = iter.at(i);
-              destructuring_assign(var_names, context, item);
-              if (!condition || condition->evaluate(context).to_bool()) {
-                filtered_items.push_back(item);
-              }
+          if (!iter.is_null()) {
+            if (!iterable_value.is_array()) {
+              throw std::runtime_error("For loop iterable must be iterable: " + iterable_value.dump());
+            }
+            for (size_t i = 0, n = iter.size(); i < n; ++i) {
+                auto item = iter.at(i);
+                destructuring_assign(var_names, context, item);
+                if (!condition || condition->evaluate(context).to_bool()) {
+                  filtered_items.push_back(item);
+                }
+            }
           }
           if (filtered_items.empty()) {
             if (else_body) {
@@ -1038,9 +1071,9 @@ class BlockNode : public TemplateNode {
     std::unique_ptr<VariableExpr> name;
     std::unique_ptr<TemplateNode> body;
 public:
-    BlockNode(std::unique_ptr<VariableExpr> && n, std::unique_ptr<TemplateNode> && b)
-        : name(std::move(n)), body(std::move(b)) {}
-    void render(std::ostringstream & out, Context & context) const override {
+    BlockNode(const Location & location, std::unique_ptr<VariableExpr> && n, std::unique_ptr<TemplateNode> && b)
+        : TemplateNode(location), name(std::move(n)), body(std::move(b)) {}
+    void do_render(std::ostringstream & out, Context & context) const override {
 
       body->render(out, context);
     }
@@ -1055,8 +1088,8 @@ class MacroNode : public TemplateNode {
     std::unique_ptr<TemplateNode> body;
     std::unordered_map<std::string, size_t> named_param_positions;
 public:
-    MacroNode(std::unique_ptr<VariableExpr> && n, Expression::CallableParams && p, std::unique_ptr<TemplateNode> && b)
-        : name(std::move(n)), params(std::move(p)), body(std::move(b)) {
+    MacroNode(const Location & location, std::unique_ptr<VariableExpr> && n, Expression::CallableParams && p, std::unique_ptr<TemplateNode> && b)
+        : TemplateNode(location), name(std::move(n)), params(std::move(p)), body(std::move(b)) {
         for (size_t i = 0; i < params.size(); ++i) {
           const auto & name = params[i].first;
           if (!name.empty()) {
@@ -1064,7 +1097,7 @@ public:
           }
         }
     }
-    void render(std::ostringstream & out, Context & macro_context) const override {
+    void do_render(std::ostringstream & out, Context & macro_context) const override {
         macro_context.set(name->get_name(), Value::callable([&](Context & context, const Value::CallableArgs & args) {
             auto call_context = macro_context;
             std::vector<bool> param_set(params.size(), false);
@@ -1103,8 +1136,8 @@ class SetNode : public TemplateNode {
     std::unique_ptr<Expression> value;
     std::unique_ptr<TemplateNode> template_value;
 public:
-    SetNode(const std::vector<std::string> & vns, std::unique_ptr<Expression> && v, std::unique_ptr<TemplateNode> && tv)
-        : var_names(vns), value(std::move(v)), template_value(std::move(tv)) {
+    SetNode(const Location & location, const std::vector<std::string> & vns, std::unique_ptr<Expression> && v, std::unique_ptr<TemplateNode> && tv)
+        : TemplateNode(location), var_names(vns), value(std::move(v)), template_value(std::move(tv)) {
           if (value && template_value) {
             throw std::runtime_error("Cannot have both value and template value in set node");
           }
@@ -1112,7 +1145,7 @@ public:
             throw std::runtime_error("Destructuring assignment is only supported with a single variable name");
           }
         }
-    void render(std::ostringstream & out, Context & context) const override {
+    void do_render(std::ostringstream & out, Context & context) const override {
       if (template_value) {
         auto value = template_value->render(context);
         context.set(var_names[0], value);
@@ -1130,9 +1163,9 @@ class NamespacedSetNode : public TemplateNode {
     std::string ns, name;
     std::unique_ptr<Expression> value;
 public:
-    NamespacedSetNode(const std::string& ns, const std::string& name, std::unique_ptr<Expression> && v)
-      : ns(ns), name(name), value(std::move(v)) {}
-    void render(std::ostringstream & out, Context & context) const override {
+    NamespacedSetNode(const Location & location, const std::string& ns, const std::string& name, std::unique_ptr<Expression> && v)
+      : TemplateNode(location), ns(ns), name(name), value(std::move(v)) {}
+    void do_render(std::ostringstream & out, Context & context) const override {
       auto ns_value = context.get(ns);
       if (!ns_value.is_object()) throw std::runtime_error("Namespace '" + ns + "' is not an object");
       ns_value.set(name, this->value->evaluate(context));
@@ -2334,7 +2367,7 @@ private:
               if (it == end || (*(it++))->type != TemplateToken::Type::EndIf) {
                   throw unterminated(**start);
               }
-              children.emplace_back(nonstd_make_unique<IfNode>(std::move(cascade)));
+              children.emplace_back(nonstd_make_unique<IfNode>(token->location, std::move(cascade)));
           } else if (auto for_token = dynamic_cast<ForTemplateToken*>(token.get())) {
               auto body = parseTemplate(begin, it, end);
               auto else_body = std::unique_ptr<TemplateNode>();
@@ -2344,7 +2377,7 @@ private:
               if (it == end || (*(it++))->type != TemplateToken::Type::EndFor) {
                   throw unterminated(**start);
               }
-              children.emplace_back(nonstd_make_unique<ForNode>(for_token->var_names, std::move(for_token->iterable), std::move(for_token->condition), std::move(body), for_token->recursive, std::move(else_body)));
+              children.emplace_back(nonstd_make_unique<ForNode>(token->location, std::move(for_token->var_names), std::move(for_token->iterable), std::move(for_token->condition), std::move(body), for_token->recursive, std::move(else_body)));
           } else if (auto text_token = dynamic_cast<TextTemplateToken*>(token.get())) {
               SpaceHandling pre_space = (it - 1) != begin ? (*(it - 2))->post_space : SpaceHandling::Keep;
               SpaceHandling post_space = it != end ? (*it)->pre_space : SpaceHandling::Keep;
@@ -2370,33 +2403,33 @@ private:
                 static std::regex r(R"([\n\r]$)");
                 text = std::regex_replace(text, r, "");  // Strip one trailing newline
               }
-              children.emplace_back(nonstd_make_unique<TextNode>(text));
+              children.emplace_back(nonstd_make_unique<TextNode>(token->location, text));
           } else if (auto expr_token = dynamic_cast<ExpressionTemplateToken*>(token.get())) {
-              children.emplace_back(nonstd_make_unique<ExpressionNode>(std::move(expr_token->expr)));
+              children.emplace_back(nonstd_make_unique<ExpressionNode>(token->location, std::move(expr_token->expr)));
           } else if (auto set_token = dynamic_cast<SetTemplateToken*>(token.get())) {
             if (set_token->value) {
-              children.emplace_back(nonstd_make_unique<SetNode>(set_token->var_names, std::move(set_token->value), nullptr));
+              children.emplace_back(nonstd_make_unique<SetNode>(token->location, set_token->var_names, std::move(set_token->value), nullptr));
             } else {
               auto value_template = parseTemplate(begin, it, end);
               if (it == end || (*(it++))->type != TemplateToken::Type::EndSet) {
                   throw unterminated(**start);
               }
-              children.emplace_back(nonstd_make_unique<SetNode>(set_token->var_names, nullptr, std::move(value_template)));
+              children.emplace_back(nonstd_make_unique<SetNode>(token->location, set_token->var_names, nullptr, std::move(value_template)));
             }
           } else if (auto namespaced_set_token = dynamic_cast<NamespacedSetTemplateToken*>(token.get())) {
-              children.emplace_back(nonstd_make_unique<NamespacedSetNode>(namespaced_set_token->ns, namespaced_set_token->name, std::move(namespaced_set_token->value)));
+              children.emplace_back(nonstd_make_unique<NamespacedSetNode>(token->location, namespaced_set_token->ns, namespaced_set_token->name, std::move(namespaced_set_token->value)));
           } else if (auto block_token = dynamic_cast<BlockTemplateToken*>(token.get())) {
               auto body = parseTemplate(begin, it, end);
               if (it == end || (*(it++))->type != TemplateToken::Type::EndBlock) {
                   throw unterminated(**start);
               }
-              children.emplace_back(nonstd_make_unique<BlockNode>(std::move(block_token->name), std::move(body)));
+              children.emplace_back(nonstd_make_unique<BlockNode>(token->location, std::move(block_token->name), std::move(body)));
           } else if (auto macro_token = dynamic_cast<MacroTemplateToken*>(token.get())) {
               auto body = parseTemplate(begin, it, end);
               if (it == end || (*(it++))->type != TemplateToken::Type::EndMacro) {
                   throw unterminated(**start);
               }
-              children.emplace_back(nonstd_make_unique<MacroNode>(std::move(macro_token->name), std::move(macro_token->params), std::move(body)));
+              children.emplace_back(nonstd_make_unique<MacroNode>(token->location, std::move(macro_token->name), std::move(macro_token->params), std::move(body)));
           } else if (auto comment_token = dynamic_cast<CommentTemplateToken*>(token.get())) {
               // Ignore comments
           } else if (dynamic_cast<EndBlockTemplateToken*>(token.get())
@@ -2416,11 +2449,11 @@ private:
             throw unexpected(**it);
         }
         if (children.empty()) {
-          return nonstd_make_unique<TextNode>("");
+          return nonstd_make_unique<TextNode>(Location { template_str, 0 }, std::string());
         } else if (children.size() == 1) {
           return std::move(children[0]);
         } else {
-          return nonstd_make_unique<SequenceNode>(std::move(children));
+          return nonstd_make_unique<SequenceNode>(children[0]->location(), std::move(children));
         }
     }
 
@@ -2474,7 +2507,7 @@ std::shared_ptr<Context> Context::builtins(const Options & options) {
     throw std::runtime_error(args.at("message").get<std::string>());
   }));
   top_level_values.set("tojson", simple_function("tojson", { "value", "indent" }, [](Context &, const Value & args) {
-    return Value(args.at("value").dump(args.get<int64_t>("indent", -1)));
+    return Value(args.at("value").dump(args.get<int64_t>("indent", -1), /* tojson= */ true));
   }));
   top_level_values.set("items", simple_function("items", { "object" }, [](Context &, const Value & args) {
     auto items = Value::array();
