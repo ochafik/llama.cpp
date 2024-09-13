@@ -33,13 +33,10 @@ struct Options {
     bool keep_trailing_newline;
 };
 
-/* Values that behave roughly like in Python.
- * jinja templates deal with objects by reference so we can't just json for arrays & objects,
- * but we do for primitives.
- */
+/* Values that behave roughly like in Python. */
 class Value : public std::enable_shared_from_this<Value> {
 public:
-  struct CallableArgs {
+  struct Arguments {
     std::vector<Value> args;
     std::vector<std::pair<std::string, Value>> kwargs;
 
@@ -56,8 +53,8 @@ public:
     }
   };
   
-  using CallableType = std::function<Value(Context &, const CallableArgs &)>;
-  using FilterType = std::function<Value(Context &, const CallableArgs &)>;
+  using CallableType = std::function<Value(Context &, const Arguments &)>;
+  using FilterType = std::function<Value(Context &, const Arguments &)>;
 
 private:
   using ObjectType = nlohmann::ordered_map<json, Value>;  // Only contains primitive keys
@@ -226,7 +223,7 @@ public:
     if (!key.is_hashable()) throw std::runtime_error("Unashable type: " + dump());
     (*object_)[key.primitive_] = value;
   }
-  Value call(Context & context, const Value::CallableArgs & args) const {
+  Value call(Context & context, const Value::Arguments & args) const {
     if (!callable_) throw std::runtime_error("Value is not callable: " + dump());
     return (*callable_)(context, args);
   }
@@ -528,7 +525,7 @@ class Expression {
 protected:
     virtual Value do_evaluate(Context & context) const = 0;
 public:
-    struct CallableArgs {
+    struct Arguments {
         std::vector<std::unique_ptr<Expression>> args;
         std::vector<std::pair<std::string, std::unique_ptr<Expression>>> kwargs;
 
@@ -540,8 +537,8 @@ public:
           }
         }
 
-        Value::CallableArgs evaluate(Context & context) const {
-            Value::CallableArgs vargs;
+        Value::Arguments evaluate(Context & context) const {
+            Value::Arguments vargs;
             for (const auto& arg : this->args) {
                 vargs.args.push_back(arg->evaluate(context));
             }
@@ -552,7 +549,7 @@ public:
         }
     };
 
-    using CallableParams = std::vector<std::pair<std::string, std::unique_ptr<Expression>>>;
+    using Parameters = std::vector<std::pair<std::string, std::unique_ptr<Expression>>>;
 
     Location location;
 
@@ -579,7 +576,6 @@ public:
     std::string get_name() const { return name; }
     Value do_evaluate(Context & context) const override {
         if (!context.contains(name)) {
-            std::cerr << "Failed to find '" << name << "' in context (has keys: " << Value::array(context.keys()).dump() << ")" << std::endl;
             return Value();
         }
         return context.at(name);
@@ -663,8 +659,8 @@ struct EndIfTemplateToken : public TemplateToken {
 
 struct MacroTemplateToken : public TemplateToken {
     std::unique_ptr<VariableExpr> name;
-    Expression::CallableParams params;
-    MacroTemplateToken(const Location & location, SpaceHandling pre, SpaceHandling post, std::unique_ptr<VariableExpr> && n, Expression::CallableParams && p)
+    Expression::Parameters params;
+    MacroTemplateToken(const Location & location, SpaceHandling pre, SpaceHandling post, std::unique_ptr<VariableExpr> && n, Expression::Parameters && p)
       : TemplateToken(Type::Macro, location, pre, post), name(std::move(n)), params(std::move(p)) {}
 };
 
@@ -823,7 +819,7 @@ public:
               loop.set("length", (int64_t) filtered_items.size());
 
               size_t cycle_index = 0;
-              loop.set("cycle", Value::callable([&](Context & context, const Value::CallableArgs & args) {
+              loop.set("cycle", Value::callable([&](Context & context, const Value::Arguments & args) {
                   if (args.args.empty() || !args.kwargs.empty()) {
                       throw std::runtime_error("cycle() expects at least 1 positional argument and no named arg");
                   }
@@ -851,7 +847,7 @@ public:
       };
 
       if (recursive) {
-        loop_function = [&](Context & context, const Value::CallableArgs & args) {
+        loop_function = [&](Context & context, const Value::Arguments & args) {
             if (args.args.size() != 1 || !args.kwargs.empty() || !args.args[0].is_array()) {
                 throw std::runtime_error("loop() expects exactly 1 positional iterable argument");
             }
@@ -867,11 +863,11 @@ public:
 
 class MacroNode : public TemplateNode {
     std::unique_ptr<VariableExpr> name;
-    Expression::CallableParams params;
+    Expression::Parameters params;
     std::unique_ptr<TemplateNode> body;
     std::unordered_map<std::string, size_t> named_param_positions;
 public:
-    MacroNode(const Location & location, std::unique_ptr<VariableExpr> && n, Expression::CallableParams && p, std::unique_ptr<TemplateNode> && b)
+    MacroNode(const Location & location, std::unique_ptr<VariableExpr> && n, Expression::Parameters && p, std::unique_ptr<TemplateNode> && b)
         : TemplateNode(location), name(std::move(n)), params(std::move(p)), body(std::move(b)) {
         for (size_t i = 0; i < params.size(); ++i) {
           const auto & name = params[i].first;
@@ -881,7 +877,7 @@ public:
         }
     }
     void do_render(std::ostringstream & out, Context & macro_context) const override {
-        macro_context.set(name->get_name(), Value::callable([&](Context & context, const Value::CallableArgs & args) {
+        macro_context.set(name->get_name(), Value::callable([&](Context & context, const Value::Arguments & args) {
             auto call_context = macro_context;
             std::vector<bool> param_set(params.size(), false);
             for (size_t i = 0, n = args.args.size(); i < n; i++) {
@@ -1127,7 +1123,7 @@ public:
         };
 
         if (l.is_callable()) {
-          return Value::callable([l, do_eval](Context & context, const Value::CallableArgs & args) {
+          return Value::callable([l, do_eval](Context & context, const Value::Arguments & args) {
             auto ll = l.call(context, args);
             return do_eval(ll); //args[0].second);
           });
@@ -1140,10 +1136,10 @@ public:
 class MethodCallExpr : public Expression {
     std::unique_ptr<Expression> object;
     std::unique_ptr<VariableExpr> method;
-    Expression::CallableArgs args;
+    Expression::Arguments args;
     // std::vector<std::pair<std::string, std::unique_ptr<Expression>>> args;
 public:
-    MethodCallExpr(const Location & location, std::unique_ptr<Expression> && obj, std::unique_ptr<VariableExpr> && m, Expression::CallableArgs && a)
+    MethodCallExpr(const Location & location, std::unique_ptr<Expression> && obj, std::unique_ptr<VariableExpr> && m, Expression::Arguments && a)
         : Expression(location), object(std::move(obj)), method(std::move(m)), args(std::move(a)) {}
     Value do_evaluate(Context & context) const override {
         auto obj = object->evaluate(context);
@@ -1180,7 +1176,7 @@ public:
             if (!callable.is_callable()) {
               throw std::runtime_error("Property '" + method->get_name() + "' is not callable");
             }
-            Value::CallableArgs vargs = args.evaluate(context);
+            Value::Arguments vargs = args.evaluate(context);
             return callable.call(context, vargs);
           }
         }
@@ -1191,8 +1187,8 @@ public:
 class CallExpr : public Expression {
 public:
     std::unique_ptr<Expression> object;
-    Expression::CallableArgs args;
-    CallExpr(const Location & location, std::unique_ptr<Expression> && obj, Expression::CallableArgs && a)
+    Expression::Arguments args;
+    CallExpr(const Location & location, std::unique_ptr<Expression> && obj, Expression::Arguments && a)
         : Expression(location), object(std::move(obj)), args(std::move(a)) {}
     Value do_evaluate(Context & context) const override {
         auto obj = object->evaluate(context);
@@ -1218,12 +1214,12 @@ public:
           } else {
             if (auto ce = dynamic_cast<CallExpr*>(part.get())) {
               auto target = ce->object->evaluate(context);
-              Value::CallableArgs args = ce->args.evaluate(context);
+              Value::Arguments args = ce->args.evaluate(context);
               args.args.insert(args.args.begin(), result);
               result = target.call(context, args);
             } else {
               auto callable = part->evaluate(context);
-              Value::CallableArgs args;
+              Value::Arguments args;
               args.args.insert(args.args.begin(), result);
               result = callable.call(context, args);
             }
@@ -1441,25 +1437,6 @@ private:
         return "";
     }
 
-    /**
-      * - Expression = LogicalOr ("if" IfExpression)?
-      * - IfExpression = LogicalOr "else" Expression
-      * - LogicalOr = LogicalAnd ("or" LogicalOr)? = LogicalAnd ("or" LogicalAnd)*
-      * - LogicalAnd = LogicalCompare ("and" LogicalAnd)? = LogicalCompare ("and" LogicalCompare)*
-      * - LogicalCompare = StringConcat ((("==" | "!=" | "<" | ">" | "<=" | ">=" | "in") StringConcat) | "is" identifier)?
-      * - StringConcat = MathPow ("~" LogicalAnd)?
-      * - MathPow = MathPlusMinus ("**" MathPow)? = MatPlusMinus ("**" MathPlusMinus)*
-      * - MathPlusMinus = MathMulDiv (("+" | "-") MathPlusMinus)? = MathMulDiv (("+" | "-") MathMulDiv)*
-      * - MathMulDiv = MathUnaryPlusMinus (("*" | "/" | "//" | "%") MathMulDiv)? = MathUnaryPlusMinus (("*" | "/" | "//" | "%") MathUnaryPlusMinus)*
-      * - MathUnaryPlusMinus = ("+" | "-" | "!")? ValueExpression ("|" FilterExpression)?
-      * - FilterExpression = identifier CallParams ("|" FilterExpression)? = identifier CallParams ("|" identifier CallParams)*
-      * - ValueExpression = (identifier | number | string | bool | BracedExpressionOrArray | Tuple | Dictionary ) SubScript? CallParams?
-      * - BracedExpressionOrArray = "(" Expression ("," Expression)* ")"
-      * - Tuple = "[" (Expression ("," Expression)*)? "]"
-      * - Dictionary = "{" (string "=" Expression ("," string "=" Expression)*)? "}"
-      * - SubScript = ("[" Expression "]" | "." identifier CallParams? )+
-      * - CallParams = "(" ((identifier "=")? Expression ("," (identifier "=")? Expression)*)? ")"
-      */
     std::unique_ptr<Expression> parseExpression(bool allow_if_expr = true) {
         auto left = parseLogicalOr();
         if (it == end) return left;
@@ -1559,11 +1536,11 @@ private:
         return left;
     }
 
-    Expression::CallableParams parseParameters() {
+    Expression::Parameters parseParameters() {
         consumeSpaces();
         if (consumeToken("(").empty()) throw std::runtime_error("Expected opening parenthesis in param list");
 
-        Expression::CallableParams result;
+        Expression::Parameters result;
         
         while (it != end) {
             if (!consumeToken(")").empty()) {
@@ -1593,11 +1570,11 @@ private:
         throw std::runtime_error("Expected closing parenthesis in call args");
     }
 
-    Expression::CallableArgs parseCallArgs() {
+    Expression::Arguments parseCallArgs() {
         consumeSpaces();
         if (consumeToken("(").empty()) throw std::runtime_error("Expected opening parenthesis in call args");
 
-        Expression::CallableArgs result;
+        Expression::Arguments result;
         
         while (it != end) {
             if (!consumeToken(")").empty()) {
@@ -1708,7 +1685,7 @@ private:
         return left;
     }
 
-    std::unique_ptr<Expression> call_func(const std::string & name, Expression::CallableArgs && args) const {
+    std::unique_ptr<Expression> call_func(const std::string & name, Expression::Arguments && args) const {
         return nonstd_make_unique<CallExpr>(get_location(), nonstd_make_unique<VariableExpr>(get_location(), name), std::move(args));
     }
 
@@ -2174,7 +2151,7 @@ static Value simple_function(const std::string & fn_name, const std::vector<std:
   std::map<std::string, size_t> named_positions;
   for (size_t i = 0, n = params.size(); i < n; i++) named_positions[params[i]] = i;
 
-  return Value::callable([=](Context & context, const Value::CallableArgs & args) -> Value {
+  return Value::callable([=](Context & context, const Value::Arguments & args) -> Value {
     auto args_obj = Value::object();
     auto positional = true;
     std::vector<bool> provided_args(params.size());
@@ -2279,7 +2256,7 @@ std::shared_ptr<Context> Context::builtins(const Options & options) {
       });
     }
   }));
-  top_level_values.set("namespace", Value::callable([=](Context &, const Value::CallableArgs & args) {
+  top_level_values.set("namespace", Value::callable([=](Context &, const Value::Arguments & args) {
     auto ns = Value::object();
     args.expectArgs("namespace", {0, 0}, {0, std::numeric_limits<size_t>::max()});
     for (auto & arg : args.kwargs) {
@@ -2314,7 +2291,7 @@ std::shared_ptr<Context> Context::builtins(const Options & options) {
   auto make_filter = [](const Value & filter, const Value & extra_args) -> Value {
     return simple_function("", { "value" }, [=](Context & context, const Value & args) {
       auto value = args.at("value");
-      Value::CallableArgs actual_args;
+      Value::Arguments actual_args;
       actual_args.args.emplace_back(value);
       for (size_t i = 0, n = extra_args.size(); i < n; i++) {
         actual_args.args.emplace_back(extra_args.at(i));
@@ -2323,7 +2300,7 @@ std::shared_ptr<Context> Context::builtins(const Options & options) {
     });
   };
   // https://jinja.palletsprojects.com/en/3.0.x/templates/#jinja-filters.reject
-  top_level_values.set("reject", Value::callable([=](Context & context, const Value::CallableArgs & args) {
+  top_level_values.set("reject", Value::callable([=](Context & context, const Value::Arguments & args) {
     args.expectArgs("reject", {2, std::numeric_limits<size_t>::max()}, {0, 0});
     auto & items = args.args[0];
     auto filter_fn = context.get(args.args[1]);
@@ -2338,7 +2315,7 @@ std::shared_ptr<Context> Context::builtins(const Options & options) {
     auto res = Value::array();
     for (size_t i = 0, n = items.size(); i < n; i++) {
       auto & item = items.at(i);
-      Value::CallableArgs filter_args;
+      Value::Arguments filter_args;
       filter_args.args.emplace_back(item);
       auto pred_res = filter.call(context, filter_args);
       if (!pred_res.to_bool()) {
@@ -2347,7 +2324,7 @@ std::shared_ptr<Context> Context::builtins(const Options & options) {
     }
     return res;
   }));
-  top_level_values.set("range", Value::callable([=](Context &, const Value::CallableArgs & args) {
+  top_level_values.set("range", Value::callable([=](Context &, const Value::Arguments & args) {
     std::vector<int64_t> startEndStep(3);
     std::vector<bool> param_set(3);
     if (args.args.size() == 1) {
