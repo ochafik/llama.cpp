@@ -50,17 +50,16 @@ void test_render(const std::string & template_str, const json & bindings, const 
         actual = root->render(*context);
     } catch (const std::runtime_error & e) {
         actual = "ERROR: " + std::string(e.what());
-        std::cerr << "AST: " << root->debug_dump().dump(2) << std::endl << std::flush;
     }
 
     assert_equals(expected, actual);
 
     if (!expected_context.is_null()) {
-        auto dump = context->debug_dump();
         for (const auto & kv : expected_context.items()) {
-            if (dump[kv.key()] != kv.value()) {
-                std::cerr << "Expected context: " << expected_context.dump(2) << std::endl;
-                std::cerr << "Actual context: " << dump.dump(2) << std::endl;
+            auto value = context->get(kv.key());
+            if (value != kv.value()) {
+                std::cerr << "Expected context value for " << kv.key() << ": " << kv.value() << std::endl;
+                std::cerr << "Actual value: " << value.dump() << std::endl;
                 std::cerr << std::flush;
                 throw std::runtime_error("Test failed");
             }
