@@ -145,40 +145,32 @@ private:
     out << string_quote;
   }
   void dump(std::ostringstream & out, int indent = -1, int level = 0, char string_quote = '\'') const {
+    // auto get_indent = [indent](int level) { return std::string(level * indent, ' '); };
     auto print_indent = [&](int level) {
-      if (indent > 0) for (int i = 0, n = level * indent; i < n; ++i) out << ' ';
+      if (indent > 0) {
+          out << "\n";
+          for (int i = 0, n = level * indent; i < n; ++i) out << ' ';
+      }
     };
     auto print_sub_sep = [&]() {
       out << ',';
       if (indent < 0) out << ' ';
-      else {
-        out << '\n';
-        print_indent(level + 1);
-      }
+      else print_indent(level + 1);
     };
 
     if (is_null()) out << "null";
     else if (array_) {
       out << "[";
-      if (indent >= 0) {
-        out << "\n";
-        print_indent(level + 1);
-      }
+      print_indent(level + 1);
       for (size_t i = 0; i < array_->size(); ++i) {
         if (i) print_sub_sep();
         (*array_)[i].dump(out, indent, level + 1, string_quote);
       }
-      if (indent >= 0) {
-        out << "\n";
-        print_indent(level);
-      }
+      print_indent(level);
       out << "]";
     } else if (object_) {
       out << "{";
-      if (indent >= 0) {
-        out << "\n";
-        print_indent(level + 1);
-      }
+      print_indent(level + 1);
       for (auto begin = object_->begin(), it = begin; it != object_->end(); ++it) {
         if (it != begin) print_sub_sep();
         if (it->first.is_string()) {
@@ -189,10 +181,7 @@ private:
         out << ": ";
         it->second.dump(out, indent, level + 1, string_quote);
       }
-      if (indent >= 0) {
-        out << "\n";
-        print_indent(level);
-      }
+      print_indent(level);
       out << "}";
     } else if (callable_) {
       throw std::runtime_error("Cannot dump callable to JSON");
@@ -273,7 +262,6 @@ public:
       throw std::runtime_error("Value is not an array: " + dump());
     array_->push_back(v);
   }
-
   Value get(const Value& key) const {
     if (array_) {
       auto index = key.get<int>();
@@ -286,13 +274,11 @@ public:
     }
     throw std::runtime_error("Value is not an array or object: " + dump());
   }
-
   void set(const Value& key, const Value& value) {
     if (!is_object()) throw std::runtime_error("Value is not an object: " + dump());
     if (!key.is_hashable()) throw std::runtime_error("Unashable type: " + dump());
     (*object_)[key.primitive_] = value;
   }
-
   Value call(Context & context, const Value::CallableArgs & args) const {
     if (!callable_) throw std::runtime_error("Value is not callable: " + dump());
     return (*callable_)(context, args);
@@ -438,6 +424,7 @@ public:
     }
     throw std::runtime_error("get<string> not defined for this value type: " + dump());
   }
+
   std::string dump(int indent=-1, bool to_json=false) const {
     // Note: get<json>().dump(indent) would work but [1, 2] would be dumped to [1,2] instead of [1, 2]
     std::ostringstream out;
@@ -445,37 +432,6 @@ public:
     return out.str();
   }
 
-  template <>
-  json get<json>() const {
-    if (is_primitive()) return primitive_;
-    if (is_null()) return json();
-    if (array_) {
-      std::vector<json> res;
-      for (const auto& item : *array_) {
-        res.push_back(item.get<json>());
-      }
-      return res;
-    }
-    if (object_) {
-      json res = json::object();
-      for (const auto& item : *object_) {
-        const auto & key = item.first;
-        auto json_value = item.second.get<json>();
-        if (key.is_string()) {
-          res[key.get<std::string>()] = json_value;
-        } else if (key.is_primitive()) {
-          res[key.dump()] = json_value;
-        } else {
-          throw std::runtime_error("Invalid key type for conversion to JSON: " + key.dump());
-        }
-      }
-      if (is_callable()) {
-        res["__callable__"] = true;
-      }
-      return res;
-    }
-    throw std::runtime_error("get<json> not defined for this value type: " + dump());
-  }
 
   Value operator-() const {
       if (is_number_integer())
@@ -532,32 +488,27 @@ public:
 } // namespace jinja
 
 namespace std {
-
-// hash specialization for Value
-template <>
-struct hash<jinja::Value> {
-  size_t operator()(const jinja::Value & v) const {
-    if (!v.is_hashable())
-      throw std::runtime_error("Unsupported type for hashing: " + v.dump());
-    return std::hash<json>()(v.get<json>());
-  }
-};
-
+  template <>
+  struct hash<jinja::Value> {
+    size_t operator()(const jinja::Value & v) const {
+      if (!v.is_hashable())
+        throw std::runtime_error("Unsupported type for hashing: " + v.dump());
+      return std::hash<json>()(v.get<json>());
+    }
+  };
 } // namespace std
 
 namespace jinja {
 
-/** Helper to get the n-th line (1-based) */
-std::string get_line(const std::string & source, size_t line) {
-  auto start = source.begin();
-  for (size_t i = 1; i < line; ++i) {
-    start = std::find(start, source.end(), '\n') + 1;
-  }
-  auto end = std::find(start, source.end(), '\n');
-  return std::string(start, end);
-}
-
 static std::string error_location_suffix(const std::string & source, size_t pos) {
+  auto get_line = [&](size_t line) {
+    auto start = source.begin();
+    for (size_t i = 1; i < line; ++i) {
+      start = std::find(start, source.end(), '\n') + 1;
+    }
+    auto end = std::find(start, source.end(), '\n');
+    return std::string(start, end);
+  };
   auto start = source.begin();
   auto end = source.end();
   auto it = start + pos;
@@ -566,10 +517,10 @@ static std::string error_location_suffix(const std::string & source, size_t pos)
   auto col = pos - std::string(start, it).rfind('\n');
   std::ostringstream out;
   out << " at row " << line << ", column " << col << ":\n";
-  if (line > 1) out << get_line(source, line - 1) << "\n";
-  out << get_line(source, line) << "\n";
+  if (line > 1) out << get_line(line - 1) << "\n";
+  out << get_line(line) << "\n";
   out << std::string(col - 1, ' ') << "^" << "\n";
-  if (line < max_line) out << get_line(source, line + 1) << "\n";
+  if (line < max_line) out << get_line(line + 1) << "\n";
 
   return out.str();
 }
