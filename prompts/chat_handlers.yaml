@@ -1,0 +1,269 @@
+# WARNING: this is just a draft for now.
+#
+# https://github.com/ochafik/llama.cpp/blob/agent-example/examples/openai/test_chat_handlers.md
+# https://github.com/ggerganov/llama.cpp/commit/32c6e07d34be375d0131979e280b0848ba2af896
+#
+# For each function calling mode, we can define:
+# - chat_template: The chat template.
+#   Overrides the template stored in the GGUF file, which often completely disregards tool call results.
+# - system: The system template for the model.
+# - tool_call_grammar_template: The grammar template for tool calls (only enabled if tools are specified).
+#   May include the following special rules:
+#   - lazy-triggers: A rule that matches all possible triggers for tool calls. The grammar will not "kick in" until one of these triggers is matched.
+#   - tool-call-\d+: A rule used to constrain *and parse* a given tool call.
+#   - tool-call-\d+-name: The name of the tool (when parsing tool calls).
+#   - tool-call-\d+-jsonargs: The arguments of the tool (when parsing tool calls).
+#   - tool-call-\d+-rawarg: The single raw string argument of the tool (when parsing tool calls).
+# Templates allow a subset of the jinja2 syntax and can reference the following variables and functions:
+#   - Variables
+#     - tools: List of tools available for the model
+#     - messages: List of messages in the chat
+#     - json_schema: The request's JSON schema, if any
+#     - todays_date: The date of the day
+#     - cutting_knowledge_date: The date of the knowledge cut
+#  - Functions
+#     - model(key): Get a value associated with a key in the GGUF file (e.g. model('tokenizer.ggml.bos_token_id') or model('general.name')
+#     - tojson(indent=2): Converts the object to a JSON string with a given indent level
+#     - join(d=''): Joins the elements of the object with the specified separator
+#     - schemaconverter(): Object that converts JSON schemas to grammars
+#       - addrule(name, content)
+#       - addschemarule(name, schema)
+#       - togrammar()
+#     - json_schema_to_typescript: Converts a JSON schema to a TypeScript type
+#     - 
+defaults:
+  chat_prelude: |
+    {%- set todays_date = "2024-09-03" -%}
+    {%- set cutting_knowledge_date = "2023-04-01" -%}
+handlers:
+  - name: llama3.1
+    comments: |
+      Llama 3.1 was trained with 3 builtin tools. To enable them, add them to the tools list alongside any custom tools in the chat request:
+      ```json
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "ipython",
+            "description": "Runs code in an ipython interpreter and returns the result of the execution after 60 seconds.",
+            "parameters": {
+              "type": "object",
+              "properties": {"code": {"type": "string"}},
+              "required": ["code"]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "brave_search",
+            "description": "Executes a web search with Brave.",
+            "parameters": {
+              "type": "object",
+              "properties": {"code": {"type": "query"}},
+              "required": ["query"]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "wolfram_alpha",
+            "description": "Executes a query with Wolfram Alpha.",
+            "parameters": {
+              "type": "object",
+              "properties": {"code": {"type": "query"}},
+              "required": ["query"]
+            }
+          }
+        },
+      ]
+      ```
+
+      Or as a shortcut you can omit the params:
+      ```json
+      "tools": [
+        {"type": "function", "function": {"name": "ipython"}},
+        {"type": "function", "function": {"name": "brave_search"}},
+        {"type": "function", "function": {"name": "wolfram_alpha"}}
+      ]
+      ```
+
+    docs:
+      - https://huggingface.co/blog/llama31#built-in-tool-calling
+      - https://docs.together.ai/docs/llama-3-function-calling
+      - https://github.com/meta-llama/llama-agentic-system
+
+    condition: |
+      {{ model['general.basename'] == 'Meta-Llama-3.1' }}
+
+    chat_template_prelude: |
+      {%- set builtin_tools = ["wolfram_alpha", "brave_search"] -%}
+      {%- set cutting_knowledge_date = "2023-04-01" -%}
+      {%- set todays_date = "2024-09-03" -%}
+
+    extra_stop_words:
+      - "<eom_id>"
+
+    tool_call_grammar_template: |
+      {%- set conv = schemaconverter() -%}
+      {%- set root_parts = [] -%}
+
+      {%- set _ = conv.addrule('lazy-triggers', '"<|python_tag|>" | "<function="') -%}
+      {%- set _ = conv.addrule('tool-call-0-name', '"<|python_tag|>"') -%}
+      {%- set _ = conv.addrule('tool-call-0-rawarg', '.*') -%}
+      {%- set _ = conv.addrule('tool-call-0', 'tool-call-0-name tool-call-0-rawarg') -%}
+      
+      {%- for tool in tools -%}
+        {%- set name_rule = conv.addrule('tool-call-' ~ loop.index ~ '-name', '"' ~ tool.function.name ~ '"') -%}
+        {%- set args_rule = conv.addschemarule('tool-call-' ~ loop.index ~ '-jsonargs', tool.function.parameters) -%}
+        {%- set tool_rule = conv.addschemarule('tool-call-' ~ loop.index, '"<function=" ' ~ name_rule ~ ' ">" ' ~ args_rule ~ ' "</function>"') -%}
+        {%- set _ = root_parts.append(tool_rule) -%}
+      {%- endfor %}
+
+      {%- set _ = conv.addrule('root', '(' ~ join(root_parts, ' | ') ~ ')* tool-call-0?') -%}
+
+      {{ conv.togrammar() }}
+
+  - name: functionary-2.2
+    condition: |
+      {{ True }}
+    chat_template: |
+      {% hahaha %}
+    system_template: |
+      {% hahaha %}
+
+  - name: functionary-3.2
+    docs:
+      - https://github.com/MeetKai/functionary/blob/main/tests/prompt_test_v3.llama3.txt
+    strip_prefixes:
+      - ">>>all\n"
+    extra_stop_words:
+      - "<eom_id>"
+    system_template: |
+      {%- if tools -%}
+      You are capable of executing available function(s) if required.
+      Only execute function(s) when absolutely necessary.
+      Ask for the required input to:recipient==all
+      Use JSON for function arguments.
+      Respond in this format:
+      >>>${recipient}
+      ${content}
+      Available functions:
+      // Supported function definitions that should be called when necessary.
+      namespace functions {
+
+      {%- for tool in tools %}
+      // {{ tool.description }}
+      type {{ tool.function.name }} = (_: {
+        {%- for param_name, param_schema in tool.function.parameters.properties.items() %}
+          // {{ param.description }}
+          {{ param_name }}: {{ param_schema | json_schema_to_typescript }},
+        {%- endfor %}
+      }) => any;
+
+      } // namespace functions
+      {%- endif -%}
+
+    tool_call_grammar_template: |
+      {%- set conv = schemaconverter() -%}
+      {%- set root_parts = [] -%}
+      {%- set trigger_parts = [] -%}
+
+      {%- for tool in tools -%}
+        {%- set name_rule = conv.addrule('tool-call-' ~ loop.index ~ '-name', '"' ~ tool.function.name ~ '"') -%}
+        {%- set args_rule = conv.addschemarule('tool-call-' ~ loop.index ~ '-jsonargs', tool.function.parameters) -%}
+        {%- set tool_rule = conv.addschemarule('tool-call-' ~ loop.index, '">>>" ' ~ name_rule ~ ' "\n" ' ~ args_rule) -%}
+        {%- set _ = root_parts.append(tool_rule) -%}
+        {%- set _ = trigger_parts.append('">>>" ' ~ name_rule ~ ' "\n"') -%}
+      {%- endfor %}
+
+      {%- set _ = conv.addrule('lazy-triggers', join(trigger_parts, ' | ') -%}
+      {%- set _ = conv.addrule('root', '(' ~ join(root_parts, ' | ') ~ ')+') -%}
+
+      {{ conv.togrammar() }}
+
+  - name: Hermes-Pro
+    condition: |
+      {{ model['general.basename'] == 'Hermes-3-Llama-3.1' }}
+    docs:
+      - https://github.com/NousResearch/Hermes-Function-Calling
+      - https://huggingface.co/NousResearch/Hermes-3-Llama-3.1-8B#prompt-format-for-function-calling
+    comments: |
+      https://huggingface.co/NousResearch/Hermes-2-Pro-Mistral-7B-GGUF/resolve/main/Hermes-2-Pro-Mistral-7B.Q5_K_M.gguf
+    tool_call_system_template: |
+      {% if tools -%}
+      You are a function calling AI model. You are provided with function signatures within <tools></tools> XML tags.
+      
+      You may call one or more functions to assist with the user query. Don't make assumptions about what values to plug into functions.
+      
+      Here are the available tools: <tools>{{ tools | tojson(indent=2) }}</tools>
+      
+      Use the following pydantic model json schema for each tool call you will make:
+      
+      {"properties": {"arguments": {"title": "Arguments", "type": "object"}, "name": {"title": "Name", "type": "string"}}, "required": ["arguments", "name"], "title": "FunctionCall", "type": "object"}
+      
+      For each function call return a json object with function name and arguments within <tool_call></tool_call> XML tags as follows:
+      <tool_call>
+      {"arguments": <args-dict>, "name": <function-name>}
+      </tool_call>
+      {% elif json_schema -%}
+      You are a helpful assistant that answers in JSON. Here's the json schema you must adhere to:
+      <schema>
+      {{ json_schema | tojson(indent=2) }}
+      </schema>
+      {% endif %}
+
+    tool_call_grammar_template: |
+      {%- set conv = schemaconverter() -%}
+      {%- set root_parts = [] -%}
+
+      {%- for tool in tools -%}
+        {%- set name_rule = conv.addrule('tool-call-' ~ loop.index ~ '-name', '"' ~ tool.function.name ~ '"') -%}
+        {%- set args_rule = conv.addschemarule('root' ~ loop.index ~ '-jsonargs', tool.function.parameters) -%}
+        {%- set tool_rule = conv.addschemarule(
+          'tool-call-' ~ loop.index,
+          '"<tool_call>{\"name\": \"" ' ~ name_rule ~ ' "\", \"arguments\": " ' ~ args_rule ~ ' "}</tool_call>"')
+        -%}
+        {%- set _ = root_parts.append(tool_rule) -%}
+      {%- endfor %}
+
+      {%- set _ = conv.addrule('lazy-triggers', '"<tool_call>"') -%}
+      {%- set _ = conv.addrule('root', '("(" ' ~ join(root_parts, ' | ') ~ ' ")")+') -%}
+
+      {{ conv.togrammar() }}
+
+  - name: Thoughtful
+    system_template: |
+      You are a function calling AI model.
+      Here are the tools available:
+      {% for tool in tools %}
+        {{ tool | json_schema_to_typescript }}
+      {% endfor %}
+
+      Please respond in JSON format with the following schema:
+      {
+        thought_about_next_step_only: string,
+        next_step: {
+          tool_calls: {
+            name: string,
+            arguments: any
+          }[]
+        } | {
+          result: number
+        }
+      }
+    tool_call_grammar_template: |
+      {%- set conv = schemaconverter() -%}
+      {%- set root_parts = [] -%}
+
+      {%- for tool in tools -%}
+        {%- set name_rule = conv.addrule('tool-call-' ~ loop.index ~ '-name', '"' ~ tool.function.name ~ '"') -%}
+        {%- set args_rule = conv.addschemarule('root' ~ loop.index ~ '-jsonargs', tool.function.parameters) -%}
+        {%- set tool_rule = conv.addschemarule('tool-call-' ~ loop.index, '{"name": ' ~ name_rule ~ ', "arguments": ' ~ args_rule ~ '}') -%}
+        {%- set _ = root_parts.append(tool_rule) -%}
+      {%- endfor %}
+
+      {%- set _ = conv.addrule('root', join(root_parts, ' | ')) -%}
+
+      {{ conv.togrammar() }}
