@@ -457,8 +457,7 @@ static json oaicompat_completion_params_parse(
     
     // Apply chat template to the list of messages
     llama_params["prompt"] = format_chat(model, chat_template_src, body.at("messages"));
-    auto grammar = json_value(llama_params, "grammar", std::string());
-    LOG_INFO("prompt", {{"prompt", prompt}, {"grammar", grammar}});
+    LOG_INFO("prompt", {{"prompt", llama_params["prompt"]}, {"grammar", llama_params["grammar"]}});
 
     // Handle "stop" field
     if (body.contains("stop") && body.at("stop").is_string()) {

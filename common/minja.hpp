@@ -489,10 +489,10 @@ public:
   Context(Value && values, const std::shared_ptr<Context> & parent = nullptr) : values_(std::move(values)), parent_(parent) {
     if (!values_.is_object()) throw std::runtime_error("Context values must be an object: " + values_.dump());
   }
-  ~Context() {}
+  virtual ~Context() {}
 
   static std::shared_ptr<Context> builtins();
-  static std::shared_ptr<Context> make(Value && values);
+  static std::shared_ptr<Context> make(Value && values, const std::shared_ptr<Context> & parent = builtins());
 
   std::vector<Value> keys() const {
     return values_.keys();
@@ -846,7 +846,7 @@ public:
                   cycle_index = (cycle_index + 1) % args.args.size();
                   return item;
               }));
-              auto loop_context = std::make_shared<Context>(Value::object(), context.shared_from_this());
+              auto loop_context = Context::make(Value::object(), context.shared_from_this());
               loop_context->set("loop", loop);
               for (size_t i = 0, n = filtered_items.size(); i < n; ++i) {
                   auto & item = filtered_items.at(i);
@@ -2386,11 +2386,11 @@ std::shared_ptr<Context> Context::builtins() {
     return res;
   }));
 
-  return std::make_shared<Context>(std::move(top_level_values));
+  return Context::make(std::move(top_level_values));
 }
 
-std::shared_ptr<Context> Context::make(Value && values) {
-  return std::make_shared<Context>(values.is_null() ? Value::object() : std::move(values), builtins());
+std::shared_ptr<Context> Context::make(Value && values, const std::shared_ptr<Context> & parent) {
+  return std::make_shared<Context>(values.is_null() ? Value::object() : std::move(values), parent);
 }
 
 }  // namespace minja

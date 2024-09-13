@@ -37,3 +37,8 @@ void llama_grammar_accept_token_impl(
           const struct llama_vocab * vocab,
        const struct llama_sampling * smpl,
                        llama_token   token);
+
+void llama_grammar_accept_string_impl(
+              struct llama_grammar * grammar,
+       const struct llama_sampling * smpl,
+                 const std::string & text);

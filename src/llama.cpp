@@ -19550,8 +19550,9 @@ float * llama_get_logits_ith(struct llama_context * ctx, int32_t i) {
         LLAMA_LOG_ERROR("%s: invalid logits id %d, reason: %s\n", __func__, i, err.what());
 #ifndef NDEBUG
         GGML_ABORT("fatal error");
-#endif
+#else
         return nullptr;
+#endif
     }
 }
 
@@ -20071,6 +20072,13 @@ void llama_grammar_accept_token(
             struct llama_context * ctx,
                      llama_token   token) {
     llama_grammar_accept_token_impl(grammar, &ctx->model.vocab, &ctx->sampling, token);
+}
+
+void llama_grammar_accept_string(
+            struct llama_grammar * grammar,
+            struct llama_context * ctx,
+                     const char  * text) {
+    llama_grammar_accept_string_impl(grammar, &ctx->sampling, text);
 }
 
 //

@@ -521,9 +521,14 @@ void llama_grammar_accept_token_impl(struct llama_grammar * grammar, const struc
     }
 
     const std::string & piece = vocab->cache_token_to_piece.at(token);
+    llama_grammar_accept_string_impl(grammar, smpl, piece);
+}
+
+void llama_grammar_accept_string_impl(struct llama_grammar * grammar, const struct llama_sampling * smpl, const std::string & text) {
+    const int64_t t_start_sample_us = ggml_time_us();
 
     // Note terminating 0 in decoded string
-    const auto   decoded     = decode_utf8(piece, grammar->partial_utf8);
+    const auto   decoded     = decode_utf8(text, grammar->partial_utf8);
     const auto & code_points = decoded.first;
 
     llama_grammar_stacks tmp_new_stacks;
