@@ -1,54 +1,3 @@
-/*
-  Minimalistic Jinja templating engine for llama.cpp. C++11, no deps (single-header), decent language support but very few functions (easy to extend), just what’s needed for actual prompt templates.
-  
-  Models have increasingly complex templates (e.g. Llama 3.1, Hermes 2 Pro w/ tool_use), so we need a proper template engine to get the best out of them.
-
-  Supports:
-  - Statements `{{% … %}}`, variable sections `{{ … }}`, and comments `{# … #}` with pre/post space elision `{%- … -%}` / `{{- … -}}` / `{#- … -#}`
-  - `set` w/ namespaces & destructuring
-  - `if` / `elif` / `else` / `endif`
-  - `for` (`recursive`) (`if`) / `else` / `endfor` w/ `loop.*` (including `loop.cycle`) and destructuring
-  - `macro` / `endmacro`
-  - Extensible filters collection: `count`, `dictsort`, `equalto`, `e` / `escape`, `items`, `join`, `joiner`, `namespace`, `raise_exception`, `range`, `reject`, `tojson`, `trim`
-  - Full expression syntax
-
-  Not supported:
-  - Most filters & pipes
-  - No difference between none and undefined
-  - Tuples
-  - `if` expressions w/o `else` (but `if` statements are fine)
-  - `{% raw %}`
-  - `{% include … %}`, `{% extends …%},
-  
-  Model templates verified to work:
-  - Meta-Llama-3.1-8B-Instruct
-  - Phi-3.5-mini-instruct
-  - Hermes-2-Pro-Llama-3-8B (default & tool_use variants)
-  - Qwen2-VL-7B-Instruct, Qwen2-7B-Instruct
-  - Mixtral-8x7B-Instruct-v0.1
-
-  TODO:
-  - Simplify
-    - Pass tokens to IfNode and such
-    - Remove MacroContext
-  - Functionary 3.2:
-      https://huggingface.co/meetkai/functionary-small-v3.2
-      https://huggingface.co/meetkai/functionary-medium-v3.2 
-    - selectattr("type", "defined")
-      {{ users|selectattr("is_active") }}
-      {{ users|selectattr("email", "none") }}
-      {{ data | selectattr('name', '==', 'Jinja') | list | last }}
-    - Macro nested set scope = global?
-      {%- macro get_param_type(param) -%}
-        {%- set param_type = "any" -%}
-
-    - map(attribute="type")
-  - Add |dict_update({...})
-  - Add {%- if tool.parameters.properties | length == 0 %}
-  - Add `{% raw %}{{ broken }{% endraw %}` https://jbmoelker.github.io/jinja-compat-tests/tags/raw/
-  - Add more functions https://jinja.palletsprojects.com/en/3.0.x/templates/#builtin-filters
-    - https://jbmoelker.github.io/jinja-compat-tests/
-*/
 #pragma once
 
 #include "llama.h"
@@ -145,7 +94,6 @@ private:
     out << string_quote;
   }
   void dump(std::ostringstream & out, int indent = -1, int level = 0, char string_quote = '\'') const {
-    // auto get_indent = [indent](int level) { return std::string(level * indent, ' '); };
     auto print_indent = [&](int level) {
       if (indent > 0) {
           out << "\n";
@@ -223,7 +171,6 @@ public:
   
   std::vector<Value> keys() const {
     if (!object_) throw std::runtime_error("Value is not an object: " + dump());
-
     std::vector<Value> res;
     for (const auto& item : *object_) {
       res.push_back(item.first);
@@ -275,7 +222,7 @@ public:
     throw std::runtime_error("Value is not an array or object: " + dump());
   }
   void set(const Value& key, const Value& value) {
-    if (!is_object()) throw std::runtime_error("Value is not an object: " + dump());
+    if (!object_) throw std::runtime_error("Value is not an object: " + dump());
     if (!key.is_hashable()) throw std::runtime_error("Unashable type: " + dump());
     (*object_)[key.primitive_] = value;
   }
@@ -413,25 +360,11 @@ public:
     throw std::runtime_error("get<T> not defined for this value type: " + dump());
   }
 
-  template <>
-  std::vector<std::string> get<std::vector<std::string>>() const {
-    if (array_) {
-      std::vector<std::string> res;
-      for (const auto& item : *array_) {
-        res.push_back(item.get<std::string>());
-      }
-      return res;
-    }
-    throw std::runtime_error("get<string> not defined for this value type: " + dump());
-  }
-
   std::string dump(int indent=-1, bool to_json=false) const {
-    // Note: get<json>().dump(indent) would work but [1, 2] would be dumped to [1,2] instead of [1, 2]
     std::ostringstream out;
     dump(out, indent, 0, to_json ? '"' : '\'');
     return out.str();
   }
-
 
   Value operator-() const {
       if (is_number_integer())
@@ -2166,7 +2099,6 @@ private:
                 text = std::regex_replace(text, leading_space_regex, "");
               } else if (options.trim_blocks && (it - 1) != begin && !dynamic_cast<ExpressionTemplateToken*>((*(it - 2)).get())) {
                 static std::regex leading_line(R"(^[ \t]*\n)");
-                // static std::regex leading_line(R"(^\n)");
                 text = std::regex_replace(text, leading_line, "");
               }
               if (post_space == SpaceHandling::Strip) {
@@ -2230,7 +2162,6 @@ public:
 
     static std::unique_ptr<TemplateNode> parse(const std::string& template_str, const Options & options) {
         Parser parser(std::make_shared<std::string>(template_str), options);
-
         auto tokens = parser.tokenize();
         TemplateTokenIterator begin = tokens.begin();
         auto it = begin;
