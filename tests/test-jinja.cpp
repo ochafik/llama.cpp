@@ -42,7 +42,7 @@ void assert_equals(const std::string & expected, const std::string & actual) {
 void test_render(const std::string & template_str, const json & bindings, const jinja::Options & options, const std::string & expected, const json & expected_context = {}) {
     Timer timer("  ");
     announce_test(template_str, options);
-    auto root = jinja::Parser::parse(template_str);
+    auto root = jinja::Parser::parse(template_str, options);
     auto context = jinja::Context::make(bindings, options);
     // std::cout << "Context: " << context.dump() << std::endl;
     std::string actual;
@@ -72,7 +72,7 @@ void test_error_contains(const std::string & template_str, const json & bindings
     Timer timer("  ");
     announce_test(template_str, options);
     try {
-        auto root = jinja::Parser::parse(template_str);
+        auto root = jinja::Parser::parse(template_str, options);
         auto context = jinja::Context::make(bindings, options);
         // auto copy = context.is_null() ? Value::object() : std::make_shared<Value>(context);
         auto actual = root->render(*context);
@@ -120,7 +120,35 @@ int main() {
     //     "<|im_start|>user\n"
     //     "Hello<|im_end|>\n"
     // );
+
+    // Test options
+    // - trim_blocks: removes the first newline after a block
+    // - lstrip_blocks: removes leading whitespace on the line of the block
+    std::string trim_tmpl = 
+        "\n"
+        "  {% if true %}Hello{% endif %}  \n"
+        "...\n"
+        "\n";
+     test_render(
+        trim_tmpl,
+        {}, { .trim_blocks = true }, "\n  Hello...\n");
+     test_render(
+        trim_tmpl,
+        {}, {}, "\n  Hello  \n...\n");
+     test_render(
+        trim_tmpl,
+        {}, { .lstrip_blocks = true }, "\nHello  \n...\n");
+     test_render(
+        trim_tmpl,
+        {}, { .trim_blocks = true, .lstrip_blocks = true }, "\nHello...\n");
+
+
+    test_render(
+        R"({%- set separator = joiner(' | ') -%}
+           {%- for item in ["a", "b", "c"] %}{{ separator() }}{{ item }}{% endfor -%})",
+        {}, {}, "a | b | c");
     test_render("a\nb\n", {}, {}, "a\nb");
+    test_render("  {{- ' a\n'}}", {}, {.trim_blocks = true}, " a\n");
 
     test_render(
         R"(
@@ -156,10 +184,6 @@ int main() {
     test_render("{{ 'ab' * 3 }}", {}, {}, "ababab");
     test_render("{{ [1, 2, 3][-1] }}", {}, {}, "3");
     test_render(
-        R"({%- set separator = joiner(' | ') -%}
-           {%- for item in ["a", "b", "c"] %}{{ separator() }}{{ item }}{% endfor -%})",
-        {}, {}, "a | b | c");
-    test_render(
         "{%- for i in range(0) -%}NAH{% else %}OK{% endfor %}",
         {}, {},
         "OK");
@@ -177,7 +201,7 @@ int main() {
         {}, {},
         "0, first=True, last=False, index=1, index0=0, revindex=3, revindex0=2, prev=, next=2,\n"
         "2, first=False, last=False, index=2, index0=1, revindex=2, revindex0=1, prev=0, next=4,\n"
-        "4, first=False, last=True, index=3, index0=2, revindex=1, revindex0=0, prev=2, next=,");
+        "4, first=False, last=True, index=3, index0=2, revindex=1, revindex0=0, prev=2, next=,\n");
     
     test_render(
         R"(
@@ -309,27 +333,6 @@ int main() {
         {{- greeting -}}
     )", {}, {}, "Hello Olivier");
 
-    // Test options
-    // - trim_blocks: removes the first newline after a block
-    // - lstrip_blocks: removes leading whitespace on the line of the block
-    std::string trim_tmpl = 
-        "\n"
-        "  {% if true %}Hello{% endif %}  \n"
-        "...\n"
-        "\n";
-     test_render(
-        trim_tmpl,
-        {}, { .trim_blocks = true }, "\n  Hello...\n");
-     test_render(
-        trim_tmpl,
-        {}, {}, "\n  Hello  \n...\n");
-     test_render(
-        trim_tmpl,
-        {}, { .lstrip_blocks = true }, "\nHello  \n...\n");
-     test_render(
-        trim_tmpl,
-        {}, { .trim_blocks = true, .lstrip_blocks = true }, "\nHello...\n");
-
     auto find_files = [](const std::string & folder, const std::string & ext) {
         std::vector<std::string> files;
         for (const auto & entry : std::__fs::filesystem::directory_iterator(folder)) {
@@ -372,10 +375,11 @@ int main() {
             print_golden_instructions();
             return 1;
         }
+        const auto options = jinja::Options {.trim_blocks = true, .lstrip_blocks = true};
         for (const auto & tmpl_file : jinja_template_files) {
             std::cout << "# Testing template: " << tmpl_file << std::endl << std::flush;
             auto tmpl_str = read_file(tmpl_file);
-            auto tmpl = jinja::Parser::parse(tmpl_str);
+            auto tmpl = jinja::Parser::parse(tmpl_str, options);
 
             auto found_goldens = false;
 
@@ -392,10 +396,7 @@ int main() {
 
                 std::string actual;
                 try {
-                    actual = tmpl->render(*jinja::Context::make(ctx, { 
-                        .trim_blocks = true,
-                        .lstrip_blocks = true,
-                    }));
+                    actual = tmpl->render(*jinja::Context::make(ctx, options));
                 } catch (const std::runtime_error & e) {
                     actual = "ERROR: " + std::string(e.what());
                     // std::cerr << "AST: " << tmpl->dump().dump(2) << std::endl << std::flush;
