@@ -12,6 +12,7 @@
 #include <vector>
 #include <sstream>
 #include <random>
+#include <regex>
 
 #define DEFAULT_OAICOMPAT_MODEL "gpt-3.5-turbo-0613"
 
@@ -371,8 +372,6 @@ static json oaicompat_completion_params_parse(
 
     llama_params["__oaicompat"] = true;
 
-    // Apply chat template to the list of messages
-    llama_params["prompt"] = format_chat(model, chat_template, body.at("messages"));
     if (jinja) {
         static std::vector<std::string> keys = {
             "general.type",
@@ -452,9 +451,15 @@ static json oaicompat_completion_params_parse(
         auto stop = context->get("stop").get<json>();
         llama_params["stop"] = stop.is_string() ? json::array({stop}) : stop.is_array() ? stop : json::array();
 
+        // TODO: recuperate array of regex that contain function calls with groups in name,args order or args,name order.
         
     } else {
     
+    // Apply chat template to the list of messages
+    llama_params["prompt"] = format_chat(model, chat_template_src, body.at("messages"));
+    auto grammar = json_value(llama_params, "grammar", std::string());
+    LOG_INFO("prompt", {{"prompt", prompt}, {"grammar", grammar}});
+
     // Handle "stop" field
     if (body.contains("stop") && body.at("stop").is_string()) {
         llama_params["stop"] = json::array({body.at("stop").get<std::string>()});
@@ -491,6 +496,16 @@ static json oaicompat_completion_params_parse(
         }
     }
 
+    // Params supported by OAI but unsupported by llama.cpp
+    static const std::vector<std::string> unsupported_params { "tools", "tool_choice" };
+    for (auto & param : unsupported_params) {
+        if (body.contains(param)) {
+            throw std::runtime_error("Unsupported param: " + param);
+        }
+    }
+
+    }
+
     // Handle "n" field
     int n_choices = json_value(body, "n", 1);
     if (n_choices != 1) {
@@ -505,13 +520,6 @@ static json oaicompat_completion_params_parse(
         throw std::runtime_error("top_logprobs requires logprobs to be set to true");
     }
 
-    // Params supported by OAI but unsupported by llama.cpp
-    static const std::vector<std::string> unsupported_params { "tools", "tool_choice" };
-    for (auto & param : unsupported_params) {
-        if (body.contains(param)) {
-            throw std::runtime_error("Unsupported param: " + param);
-        }
-    }
 
     // Copy remaining properties to llama_params
     // This allows user to use llama.cpp-specific params like "mirostat", "tfs_z",... via OAI endpoint.
@@ -526,6 +534,85 @@ static json oaicompat_completion_params_parse(
     return llama_params;
 }
 
+/*
+ * Parses `"<tool_call>foo</tool_call><tool_call>bar</tool_call>"` to `[foo, bar]` where foo and bar are valid JSON.
+ */
+static json parse_tool_calls(const std::string& input) {
+    try {
+        std::regex start_pattern(R"(^\s*<tool_call>)");
+        std::regex middle_pattern(R"(\s*</tool_call>\s*<tool_call>)");
+        std::regex end_pattern(R"(\s*</tool_call>\s*$)");
+        
+        auto end = input.end();
+        std::sregex_iterator rend;
+        std::sregex_iterator rit(input.begin(), end, start_pattern);
+        if (rit == rend) {
+            return json();
+        }
+        
+        json tool_calls = json::array();
+        auto it = rit->suffix().first;
+        while (it != end) {
+            // https://json.nlohmann.me/features/parsing/sax_interface/
+            struct json_error_locator : public nlohmann::json_sax<json> {
+                std::size_t position;
+                bool found;
+
+                bool parse_error(std::size_t position, const std::string & last_token, const json::exception & ex) override {
+                    LOG_WARNING("JSON error (Expected)", {{"position", position}, {"last_token", last_token}, {"error", ex.what()}});
+                    this->position = position - 1;
+                    this->found = true;
+                    return false;
+                }
+                bool null() override { return true; }
+                bool boolean(bool) override { return true; }
+                bool number_integer(number_integer_t) override { return true; }
+                bool number_unsigned(number_unsigned_t) override { return true; }
+                bool number_float(number_float_t, const string_t &) override { return true; }
+                bool string(string_t &) override { return true; }
+                bool binary(binary_t &) override { return true; }
+                bool start_object(std::size_t) override { return true; }
+                bool key(string_t &) override { return true; }
+                bool end_object() override { return true; }
+                bool start_array(std::size_t) override { return true; }
+                bool end_array() override { return true; }
+            };
+            // The function call JSON must be followed by a closing </tool_call> tag,
+            // which will break the SAX parser and reveal the end of the JSON object.
+            json_error_locator err_loc;
+            json::sax_parse(it, end, &err_loc);
+            if (!err_loc.found) {
+                LOG_WARNING("Malformed input, missing </tool_call>", {{"input", input}});
+                break;
+            }
+
+            std::string json_sub(it, it + err_loc.position);
+            LOG_WARNING("Parsing tool call", {{"json_sub", json_sub}});
+            auto call = json::parse(it, it + err_loc.position);
+            tool_calls.push_back({
+                {"function", {
+                    {"name", call["name"]},
+                    {"arguments", call["arguments"].dump()},
+                }},
+            });
+            rit = {it, end, middle_pattern};
+            if (rit != rend) {
+                it = rit->suffix().first;
+            } else {
+                rit = {it, end, end_pattern};
+                if (rit == rend) {
+                    LOG_WARNING("Malformed input, missing </tool_call>", {{"input", input}});
+                }
+                break;
+            }
+        }
+        return tool_calls;
+    } catch (const std::exception & e) {
+        LOG_WARNING("Failed to parse tool calls", {{"input", input}, {"error", e.what()}});
+        return json();
+    }
+}
+
 static json format_final_response_oaicompat(const json & request, json result, const std::string & completion_id, bool streaming = false) {
     bool stopped_word        = result.count("stopped_word") != 0;
     bool stopped_eos         = json_value(result, "stopped_eos", false);
@@ -537,6 +624,13 @@ static json format_final_response_oaicompat(const json & request, json result, c
     if (stopped_word || stopped_eos) {
         finish_reason = "stop";
     }
+    json tool_calls;
+    json message_content;
+    if (json_value(request, "parse_tool_calls", false) && (tool_calls = parse_tool_calls(content)).is_array()) {
+        finish_reason = "tool";
+    } else {
+        message_content = content;
+    }
 
     json choices =
         streaming ? json::array({json{{"finish_reason", finish_reason},
@@ -544,7 +638,8 @@ static json format_final_response_oaicompat(const json & request, json result, c
                                         {"delta", json::object()}}})
                   : json::array({json{{"finish_reason", finish_reason},
                                         {"index", 0},
-                                        {"message", json{{"content", content},
+                                        {"message", json{{"content", message_content},
+                                                         {"tool_calls", tool_calls},
                                                          {"role", "assistant"}}}}});
 
     std::time_t t = std::time(0);
