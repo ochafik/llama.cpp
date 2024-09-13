@@ -861,8 +861,7 @@ public:
     std::string render(Context & context) const {
         std::ostringstream out;
         render(out, context);
-        auto result = out.str();
-        return result;
+        return out.str();
     }
     virtual json debug_dump() const = 0;
 };
