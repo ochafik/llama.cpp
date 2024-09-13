@@ -106,7 +106,12 @@
         "description": "Runs code in an ipython interpreter and returns the result of the execution after 60 seconds.",
         "parameters": {
           "type": "object",
-          "properties": {"code": {"type": "string"}},
+          "properties": {
+            "code": {
+              "type": "string",
+              "description": "The code to run in the ipython interpreter."
+            }
+          },
           "required": ["code"]
         }
       }
@@ -118,7 +123,12 @@
         "description": "Executes a web search with Brave.",
         "parameters": {
           "type": "object",
-          "properties": {"query": {"type": "string"}},
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "The query to search for."
+            }
+          },
           "required": ["query"]
         }
       }
@@ -130,7 +140,12 @@
         "description": "Executes a query with Wolfram Alpha.",
         "parameters": {
           "type": "object",
-          "properties": {"query": {"type": "string"}},
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "The query to execute."
+            }
+          },
           "required": ["query"]
         }
       }
@@ -143,7 +158,10 @@
         "parameters": {
           "type": "object",
           "properties": {
-            "condition": {"type": "boolean"}
+            "condition": {
+              "type": "boolean",
+              "description": "The condition to test."
+            }
           },
           "required": ["condition"]
         }

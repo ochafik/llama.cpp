@@ -121,8 +121,8 @@ int main() {
     //     "Hello<|im_end|>\n"
     // );
 
-    test_render(R"({{ {"a": 1} | tojson }})", {}, {}, R"({"a": 1})");
-    test_render(R"({{ {"a": 1} }})", {}, {}, R"({'a': 1})");
+    test_render(R"({{ {"a": "b"} | tojson }})", {}, {}, R"({"a": "b"})");
+    test_render(R"({{ {"a": "b"} }})", {}, {}, R"({'a': 'b'})");
 
     // Test options
     // - trim_blocks: removes the first newline after a block
