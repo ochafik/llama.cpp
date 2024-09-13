@@ -1,8 +1,5 @@
 #pragma once
 
-#include "llama.h"
-#include "common.h"
-
 #include <iostream>
 #include <string>
 #include <vector>
@@ -10,8 +7,6 @@
 #include <memory>
 #include <stdexcept>
 #include <sstream>
-#include <functional>
-#include <unordered_map>
 #include <unordered_set>
 #include <json.hpp>
 
@@ -28,9 +23,9 @@ namespace jinja {
 class Context;
 
 struct Options {
-    bool trim_blocks;
-    bool lstrip_blocks;
-    bool keep_trailing_newline;
+    bool trim_blocks;  // removes the first newline after a block
+    bool lstrip_blocks;  // removes leading whitespace on the line of the block
+    bool keep_trailing_newline;  // don't remove last newline
 };
 
 /* Values that behave roughly like in Python. */
@@ -251,7 +246,6 @@ public:
     return false;
   }
 
-  // operator bool() const {
   bool to_bool() const {
     if (is_null()) return false;
     if (is_boolean()) return get<bool>();
@@ -1130,7 +1124,6 @@ class MethodCallExpr : public Expression {
     std::unique_ptr<Expression> object;
     std::unique_ptr<VariableExpr> method;
     Expression::Arguments args;
-    // std::vector<std::pair<std::string, std::unique_ptr<Expression>>> args;
 public:
     MethodCallExpr(const Location & location, std::unique_ptr<Expression> && obj, std::unique_ptr<VariableExpr> && m, Expression::Arguments && a)
         : Expression(location), object(std::move(obj)), method(std::move(m)), args(std::move(a)) {}
@@ -1521,7 +1514,6 @@ private:
             else if (op_str == "<=") op = BinaryOpExpr::Op::Le;
             else if (op_str == ">=") op = BinaryOpExpr::Op::Ge;
             else if (op_str == "in") op = BinaryOpExpr::Op::In;
-            // if op_str starts with "not" it must be "not in"
             else if (op_str.substr(0, 3) == "not") op = BinaryOpExpr::Op::NotIn;
             else throw std::runtime_error("Unknown comparison operator: " + op_str);
             left = nonstd_make_unique<BinaryOpExpr>(get_location(), std::move(left), std::move(right), op);
@@ -2029,7 +2021,6 @@ private:
           const TemplateTokenIterator & end,
           bool fully = false) const {
         std::vector<std::unique_ptr<TemplateNode>> children;
-        // TemplateToken * previous_token = nullptr;
         while (it != end) {
           const auto start = it;
           const auto & token = *(it++);

@@ -1,6 +1,3 @@
-{#- Licensed under META LLAMA 3 COMMUNITY LICENSE: https://huggingface.co/meta-llama/Meta-Llama-3-8B/blob/main/LICENSE -#}
-{#- https://huggingface.co/NousResearch/Hermes-2-Pro-Llama-3-8B/blob/main/tokenizer_config.json -#}
-
 {%- macro json_to_python_type(json_spec) %}
 {%- set basic_type_map = {
     "string": "str",
@@ -35,7 +32,8 @@
 
 
 {{- bos_token }}
-{{- '<|im_start|>system\n' }}
+{{- '<|im_start|>system
+' }}
 {{- "You are a function calling AI model. You are provided with function signatures within <tools></tools> XML tags. You may call one or more functions to assist with the user query. Don't make assumptions about what values to plug into functions. Here are the available tools: <tools> " }}
 {%- for tool in tools %}
     {%- if tool.function is defined %}
@@ -54,15 +52,19 @@
     {%- if tool.return is defined %}
         {{- " -> " + json_to_python_type(tool.return) }}
     {%- endif %}
-    {{- " - " + tool.description + "\n\n" }}
+    {{- " - " + tool.description + "
+
+" }}
     {%- for param_name, param_fields in tool.parameters.properties|items %}
         {%- if loop.first %}
-            {{- "    Args:\n" }}
+            {{- "    Args:
+" }}
         {%- endif %}
         {{- "        " + param_name + "(" + json_to_python_type(param_fields) + "): " + param_fields.description|trim }}
     {%- endfor %}
     {%- if tool.return is defined and tool.return.description is defined %}
-        {{- "\n    Returns:
+        {{- "
+    Returns:
         " + tool.return.description }}
     {%- endif %}
     {{- '"' }}
@@ -74,22 +76,32 @@
     {%- endif %}
     {{- "}" }}
     {%- if not loop.last %}
-        {{- "\n" }}
+        {{- "
+" }}
     {%- endif %}
 {%- endfor %}
 {{- " </tools>" }}
-{{- 'Use the following pydantic model json schema for each tool call you will make: {"properties": {"name": {"title": "Name", "type": "string"}, "arguments": {"title": "Arguments", "type": "object"}}, "required": ["name", "arguments"], "title": "FunctionCall", "type": "object"}}\n' }}
-{{- "For each function call return a json object with function name and arguments within <tool_call></tool_call> XML tags as follows:\n" }}
-{{- "<tool_call>\n" }}
-{{- '{"name": <function-name>, "arguments": <args-dict>}\n' }}
-{{- '</tool_call><|im_end|>\n' }}
+{{- 'Use the following pydantic model json schema for each tool call you will make: {"properties": {"name": {"title": "Name", "type": "string"}, "arguments": {"title": "Arguments", "type": "object"}}, "required": ["name", "arguments"], "title": "FunctionCall", "type": "object"}}
+' }}
+{{- "For each function call return a json object with function name and arguments within <tool_call></tool_call> XML tags as follows:
+" }}
+{{- "<tool_call>
+" }}
+{{- '{"name": <function-name>, "arguments": <args-dict>}
+' }}
+{{- '</tool_call><|im_end|>
+' }}
 {%- for message in messages %}
     {%- if message.role == "user" or message.role == "system" or (message.role == "assistant" and message.tool_calls is not defined) %}
-        {{- '<|im_start|>' + message.role + '\n' + message.content + '<|im_end|>' + '\n' }}
+        {{- '<|im_start|>' + message.role + '
+' + message.content + '<|im_end|>' + '
+' }}
     {%- elif message.role == "assistant" %}
         {{- '<|im_start|>' + message.role }}
     {%- for tool_call in message.tool_calls %}
-       {{- '\n<tool_call>\n' }}           {%- if tool_call.function is defined %}
+       {{- '
+<tool_call>
+' }}           {%- if tool_call.function is defined %}
                 {%- set tool_call = tool_call.function %}
             {%- endif %}
             {{- '{' }}
@@ -106,19 +118,26 @@
                 {%- endif %}
             {%- endif %}
              {{- '}' }}
-            {{- '\n</tool_call>' }}
+            {{- '
+</tool_call>' }}
     {%- endfor %}
-        {{- '<|im_end|>\n' }}
+        {{- '<|im_end|>
+' }}
     {%- elif message.role == "tool" %}
         {%- if loop.previtem and loop.previtem.role != "tool" %}
-            {{- '<|im_start|>tool\n' }}
+            {{- '<|im_start|>tool
+' }}
         {%- endif %}
-        {{- '<tool_response>\n' }}
+        {{- '<tool_response>
+' }}
         {{- message.content }}
         {%- if not loop.last %}
-            {{- '\n</tool_response>\n' }}
+            {{- '
+</tool_response>
+' }}
         {%- else %}
-            {{- '\n</tool_response>' }}
+            {{- '
+</tool_response>' }}
         {%- endif %}
         {%- if not loop.last and loop.nextitem.role != "tool" %}
             {{- '<|im_end|>' }}
@@ -128,5 +147,6 @@
     {%- endif %}
 {%- endfor %}
 {%- if add_generation_prompt %}
-    {{- '<|im_start|>assistant\n' }}
+    {{- '<|im_start|>assistant
+' }}
 {%- endif %}

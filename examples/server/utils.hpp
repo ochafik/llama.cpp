@@ -8,7 +8,7 @@
 #include "json.hpp"
 #include "json-schema-to-grammar.h"
 #include "chat_handler.hpp"
-#include "jinja.hpp"
+#include "minja.hpp"
 
 #include <string>
 #include <vector>
