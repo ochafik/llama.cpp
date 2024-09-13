@@ -2,6 +2,18 @@
 #include "sampling.h"
 #include <random>
 
+void llama_sampling_init_grammar(llama_sampling_context * context) {
+    std::vector<const llama_grammar_element *> grammar_rules(context->parsed_grammar.c_rules());
+
+    struct llama_grammar * grammar = llama_grammar_init(
+            grammar_rules.data(),
+            grammar_rules.size(), context->parsed_grammar.symbol_ids.at("root"));
+    if (grammar == nullptr) {
+        throw std::runtime_error("Failed to initialize llama_grammar");
+    }
+    context->grammar = grammar;
+}
+
 struct llama_sampling_context * llama_sampling_init(const struct llama_sampling_params & params) {
     struct llama_sampling_context * result = new llama_sampling_context();
 
@@ -26,15 +38,9 @@ struct llama_sampling_context * llama_sampling_init(const struct llama_sampling_
             return nullptr;
         }
 
-        std::vector<const llama_grammar_element *> grammar_rules(result->parsed_grammar.c_rules());
-
-        struct llama_grammar * grammar = llama_grammar_init(
-                grammar_rules.data(),
-                grammar_rules.size(), result->parsed_grammar.symbol_ids.at("root"));
-        if (grammar == nullptr) {
-            throw std::runtime_error("Failed to initialize llama_grammar");
+        if (params.grammar_trigger_words.empty()) {
+            llama_sampling_init_grammar(result);
         }
-        result->grammar = grammar;
     }
 
     result->prev.resize(params.n_prev);

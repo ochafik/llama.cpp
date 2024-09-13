@@ -1289,15 +1289,40 @@ bool gpt_params_find_arg(int argc, char ** argv, const std::string & arg, gpt_pa
         }
         return true;
     }
+    if (arg == "--jinja") {
+        CHECK_ARG
+        params.jinja = true;
+        return true;
+    }
     if (arg == "--chat-template") {
         CHECK_ARG
-        if (!llama_chat_verify_template(argv[i])) {
+        if (!params.jinja && !llama_chat_verify_template(argv[i])) {
             fprintf(stderr, "error: the supplied chat template is not supported: %s\n", argv[i]);
             fprintf(stderr, "note: llama.cpp does not use jinja parser, we only support commonly used templates\n");
             invalid_param = true;
             return true;
         }
         params.chat_template = argv[i];
+        return true;
+    }
+    if (arg == "--chat-template-tool-use") {
+        CHECK_ARG
+        if (!params.jinja) {
+            fprintf(stderr, "error: tools chat template requires --jinja\n");
+            invalid_param = true;
+            return true;
+        }
+        params.chat_template_tool_use = argv[i];
+        return true;
+    }
+    if (arg == "--prologue-template") {
+        CHECK_ARG
+        if (!params.jinja) {
+            fprintf(stderr, "error: prologue template requires --jinja\n");
+            invalid_param = true;
+            return true;
+        }
+        params.prologue_template = argv[i];
         return true;
     }
     if (arg == "--slot-prompt-similarity" || arg == "-sps") {

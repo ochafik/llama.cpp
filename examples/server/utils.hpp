@@ -6,6 +6,7 @@
 // Change JSON_ASSERT from assert() to GGML_ASSERT:
 #define JSON_ASSERT GGML_ASSERT
 #include "json.hpp"
+#include "minja.hpp"
 
 #include <string>
 #include <vector>
@@ -259,20 +260,15 @@ static size_t common_part(const std::string & a, const std::string & b) {
     return i;
 }
 
-static bool ends_with(const std::string & str, const std::string & suffix) {
-    return str.size() >= suffix.size() && 0 == str.compare(str.size() - suffix.size(), suffix.size(), suffix);
-}
-
-static size_t find_partial_stop_string(const std::string &stop, const std::string &text) {
+static size_t find_partial_stop_string(const std::string & stop, const std::string & text) {
     if (!text.empty() && !stop.empty()) {
-        const char text_last_char = text.back();
-        for (int64_t char_index = stop.size() - 1; char_index >= 0; char_index--) {
-            if (stop[char_index] == text_last_char) {
-                const std::string current_partial = stop.substr(0, char_index + 1);
-                if (ends_with(text, current_partial)) {
-                    return text.size() - char_index - 1;
-                }
+        auto it = std::find(stop.rbegin(), stop.rend(), text.back());
+        while (it != stop.rend()) {
+            size_t length = std::distance(it, stop.rend());
+            if (text.length() >= length && 0 == text.compare(text.length() - length, length, stop)) {
+                return text.length() - length;
             }
+            it = std::find(std::next(it), stop.rend(), text.back());
         }
     }
 
@@ -347,17 +343,118 @@ static json probs_vector_to_json(const llama_context * ctx, const std::vector<co
 // OAI utils
 //
 
+static std::string _llama_token_to_piece(const struct llama_model * model, llama_token token, bool special) {
+    std::string piece;
+    piece.resize(piece.capacity());  // using string internal cache, 15 bytes + '\n'
+    const int n_chars = llama_token_to_piece(model, token, &piece[0], piece.size(), 0, special);
+    if (n_chars < 0) {
+        piece.resize(-n_chars);
+        int check = llama_token_to_piece(model, token, &piece[0], piece.size(), 0, special);
+        GGML_ASSERT(check == -n_chars);
+    }
+    else {
+        piece.resize(n_chars);
+    }
+
+    return piece;
+}
+
 static json oaicompat_completion_params_parse(
     const struct llama_model * model,
     const json & body, /* openai api json semantics */
-    const std::string & chat_template) {
+    bool jinja,
+    const std::string & prologue_template,
+    const std::string & chat_template_src,
+    const std::string & chat_template_tool_use_src
+    ) {
     json llama_params;
 
     llama_params["__oaicompat"] = true;
 
     // Apply chat template to the list of messages
     llama_params["prompt"] = format_chat(model, chat_template, body.at("messages"));
+    if (jinja) {
+        static std::vector<std::string> keys = {
+            "general.type",
+            "general.architecture",
+            "general.quantization_version",
+            "general.alignment",
+            "general.file_type",
+            "general.name",
+            "general.author",
+            "general.version",
+            "general.organization",
+            "general.finetune",
+            "general.basename",
+            "tokenizer.chat_template",
+            "tokenizer.chat_template.tool_use",
+        };
+        auto model_meta = json::object();
+        for (const auto & key : keys) {
+            int32_t tlen = llama_model_meta_val_str(model, key.c_str(), nullptr, 0);
+            if (tlen > 0) {
+                std::vector<char> curr_tmpl_buf(tlen + 1, 0);
+                if (llama_model_meta_val_str(model, key.c_str(), curr_tmpl_buf.data(), curr_tmpl_buf.size()) == tlen) {
+                    model_meta[key] = std::string(curr_tmpl_buf.data(), tlen);
+                }
+            }
+        }
 
+        // auto context = minja::Value::context(body);
+        auto context = minja::Context::make(json({
+            {"model", json_value(body, "model", json())},
+            {"messages", json_value(body, "messages", json())},
+            {"tools", json_value(body, "tools", json())},
+            {"tool_choice", json_value(body, "tool_choice", std::string("auto"))},
+            {"parallel_tool_calls", json_value(body, "parallel_tool_calls", false)},
+            {"model_meta", model_meta},
+            {"chat_template", chat_template_src.empty() || chat_template_src == "chatml" ? json() : json(chat_template_src)},
+            {"chat_template_tool_use", chat_template_tool_use_src.empty() || chat_template_tool_use_src == "chatml" ? json() : json(chat_template_tool_use_src)},
+            {"stop", json_value(body, "stop", json())},
+            {"grammar", json_value(body, "grammar", json())},
+            {"response_format", json_value(body, "response_format", json())},
+            {"add_generation_prompt", true},
+            {"eos_token", _llama_token_to_piece(model, llama_token_eos(model), /* special= */ true)},
+            {"bos_token", _llama_token_to_piece(model, llama_token_bos(model), /* special= */ true)},
+        }));
+
+        if (!prologue_template.empty()) {
+            // Examples of what the prologue can do:
+            // - modify the tools based no the tool choice
+            // - modify the messages based on the chat template
+            // - detect the tool style of the chat template
+            // - add stop words based on the tool style (e.g. <|eom|> vs <|eot|>)
+            // - add a grammar based on the tool style and the tool schemas
+            // - (TBC) define lazy grammar trigger words
+            // - define regexps to extract tool calls
+            // - define a custom chat template (as a macro, if chat_template is callable!)
+
+            // TODO: allow it to change the chat template, e.g to choose between tools and not tools
+            auto prologue = minja::Parser::parse(prologue_template, minja::Options {.trim_blocks = true, .lstrip_blocks = true});
+            prologue->render(*context);
+        }
+
+
+        auto chat_template = context->get("chat_template");
+        std::string result;
+        if (chat_template.is_callable()) {
+            result = chat_template.call(*context, {}).get<std::string>();
+        } else {
+            auto tmpl_src = chat_template.get<std::string>();
+            auto tmpl = minja::Parser::parse(tmpl_src, minja::Options {.trim_blocks = true, .lstrip_blocks = true});
+            result = tmpl->render(*context);
+        }
+
+        auto grammar = context->get("grammar");
+        if (grammar.is_string()) {
+            llama_params["grammar"] = grammar.get<std::string>();
+        }
+        auto stop = context->get("stop").get<json>();
+        llama_params["stop"] = stop.is_string() ? json::array({stop}) : stop.is_array() ? stop : json::array();
+
+        
+    } else {
+    
     // Handle "stop" field
     if (body.contains("stop") && body.at("stop").is_string()) {
         llama_params["stop"] = json::array({body.at("stop").get<std::string>()});
@@ -365,12 +462,30 @@ static json oaicompat_completion_params_parse(
         llama_params["stop"] = json_value(body, "stop", json::array());
     }
 
-    // Handle "response_format" field
+    // Handle "response_format" field (https://platform.openai.com/docs/api-reference/chat/create#chat-create-response_format)
+    auto tool_choice = json_value(body, "tool_choice", std::string("auto"));
+    std::string extra_system_message;
     if (body.contains("response_format")) {
         json response_format      = json_value(body, "response_format", json::object());
         std::string response_type = json_value(response_format, "type", std::string());
         if (response_type == "json_object") {
+            // Legacy llama.cpp, llama-cpp-python and Together.ai format.
             llama_params["json_schema"] = json_value(response_format, "schema", json::object());
+        } else if (response_type == "json_schema") {
+            // OpenAI JSON schema format.
+            auto json_schema = json_value(response_format, "json_schema", json::object());
+            json schema = json_value(json_schema, "schema", json::object());
+            std::string description = json_value(json_schema, "description", std::string());
+            if (!description.empty()) {
+                if (schema.contains("description")) {
+                    throw std::runtime_error("Cannot have both a description in the json_schema object and inside its schema.");
+                }
+                schema["description"] = description;
+            }
+            bool strict = json_value(json_schema, "strict", false);
+            if (strict) {
+                llama_params["json_schema"] = schema;
+            }
         } else if (!response_type.empty() && response_type != "text") {
             throw std::runtime_error("response_format type must be one of \"text\" or \"json_object\", but got: " + response_type);
         }

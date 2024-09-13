@@ -7,6 +7,7 @@
 #include <random>
 #include <string>
 #include <unordered_map>
+#include <set>
 #include <vector>
 
 // sampler types
@@ -52,6 +53,7 @@ typedef struct llama_sampling_params {
     };
 
     std::string grammar;  // optional BNF-like grammar to constrain sampling
+    std::set<std::string> grammar_trigger_words; // optional trigger words to enable grammar
 
     // Classifier-Free Guidance
     // https://arxiv.org/abs/2306.17806
@@ -90,6 +92,9 @@ struct llama_sampling_context {
 
 // Create a new sampling context instance.
 struct llama_sampling_context * llama_sampling_init(const struct llama_sampling_params & params);
+
+// Initialize the grammar in the sampling context. Done by llama_sampling_init unless the grammar has lazy trigger words.
+void llama_sampling_init_grammar(llama_sampling_context * context);
 
 void llama_sampling_free(struct llama_sampling_context * ctx);
 
