@@ -70,6 +70,8 @@ def step_server_config(context, server_fqdn: str, server_port: str):
     context.server_seed = None
     context.user_api_key = None
     context.response_format = None
+    context.tools = None
+    context.tool_choice = None
     context.temperature = None
     context.lora_file = None
 
@@ -341,6 +343,13 @@ def step_max_tokens(context, max_tokens):
 def step_response_format(context, response_format):
     context.response_format = json.loads(response_format)
 
+@step('tools {tools}')
+def step_tools(context, tools):
+    context.tools = json.loads(tools)
+
+@step('tool choice {tool_choice}')
+def step_tool_choice(context, tool_choice):
+    context.tool_choice = tool_choice
 
 @step('{temperature:f} temperature')
 def step_temperature(context, temperature):
@@ -475,6 +484,11 @@ async def step_oai_chat_completions(context, api_error):
                                             response_format=context.response_format
                                             if hasattr(context, 'response_format') else None,
 
+                                            tools=context.tools
+                                            if hasattr(context, 'tools') else None,
+
+                                            tool_choice=context.tool_choice,
+
                                             user_api_key=context.user_api_key
                                             if hasattr(context, 'user_api_key') else None,
 
@@ -545,6 +559,9 @@ async def step_oai_chat_completions(context):
                               if hasattr(context, 'enable_streaming') else None,
                               response_format=context.response_format
                               if hasattr(context, 'response_format') else None,
+                              tools=context.tools
+                              if hasattr(context, 'tools') else None,
+                              tool_choice=context.tool_choice,
                               user_api_key=context.user_api_key
                               if hasattr(context, 'user_api_key') else None)
 
@@ -558,16 +575,18 @@ async def step_oai_chat_completions(context):
                               context.base_url,
                               '/chat/completions',
                               True,  # async_client
-                              model=context.model
-                              if hasattr(context, 'model') else None,
-                              n_predict=context.n_predict
-                              if hasattr(context, 'n_predict') else None,
+                              model=context.model,
+                            #   if hasattr(context, 'model') else None,
+                              n_predict=context.n_predict,
+                            #   if hasattr(context, 'n_predict') else None,
                               enable_streaming=context.enable_streaming
                               if hasattr(context, 'enable_streaming') else None,
-                              response_format=context.response_format
-                              if hasattr(context, 'response_format') else None,
-                              user_api_key=context.user_api_key
-                              if hasattr(context, 'user_api_key') else None)
+                              response_format=context.response_format,
+                            #   if hasattr(context, 'response_format') else None,
+                              tools=context.tools,# if hasattr(context, 'tools') else None,
+                              tool_choice=context.tool_choice, # if hasattr(context, 'tool_choice') else None,
+                              user_api_key=context.user_api_key)
+                            #   if hasattr(context, 'user_api_key') else None)
 
 
 @step('all prompts are predicted')
@@ -924,6 +943,8 @@ async def oai_chat_completions(user_prompt,
                                n_predict=None,
                                enable_streaming=None,
                                response_format=None,
+                               tools=None,
+                               tool_choice=None,
                                user_api_key=None,
                                expect_api_error=None) -> int | dict[str, Any]:
     if debug:
@@ -951,6 +972,10 @@ async def oai_chat_completions(user_prompt,
     }
     if response_format is not None:
         payload['response_format'] = response_format
+    if tools is not None:
+        payload['tools'] = tools
+    if tool_choice is not None:
+        payload['tool_choice'] = tool_choice
     completion_response = {
         'content': '',
         'timings': {
@@ -1013,6 +1038,8 @@ async def oai_chat_completions(user_prompt,
                 max_tokens=n_predict,
                 stream=enable_streaming,
                 response_format=payload.get('response_format') or openai.NOT_GIVEN,
+                tools=payload.get('tools'),
+                tool_choice=payload.get('tool_choice'),
                 seed=seed,
                 temperature=payload['temperature']
             )
