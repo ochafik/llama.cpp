@@ -719,7 +719,7 @@ enum SpaceHandling { Keep, Strip, StripSpaces, StripNewline };
 
 class TemplateToken {
 public:
-    enum class Type { Text, Expression, If, Else, Elif, EndIf, For, EndFor, Set, EndSet, Comment, Block, EndBlock, Macro, EndMacro };
+    enum class Type { Text, Expression, If, Else, Elif, EndIf, For, EndFor, Set, EndSet, Comment, Macro, EndMacro };
 
     static std::string typeToString(Type t) {
         switch (t) {
@@ -734,8 +734,6 @@ public:
             case Type::Set: return "set";
             case Type::EndSet: return "endset";
             case Type::Comment: return "comment";
-            case Type::Block: return "block";
-            case Type::EndBlock: return "endblock";
             case Type::Macro: return "macro";
             case Type::EndMacro: return "endmacro";
         }
@@ -777,15 +775,6 @@ struct ElseTemplateToken : public TemplateToken {
 
 struct EndIfTemplateToken : public TemplateToken {
    EndIfTemplateToken(const Location & location, SpaceHandling pre, SpaceHandling post) : TemplateToken(Type::EndIf, location, pre, post) {}
-};
-
-struct BlockTemplateToken : public TemplateToken {
-    std::unique_ptr<VariableExpr> name;
-    BlockTemplateToken(const Location & location, SpaceHandling pre, SpaceHandling post, std::unique_ptr<VariableExpr> && n) : TemplateToken(Type::Block, location, pre, post), name(std::move(n)) {}
-};
-
-struct EndBlockTemplateToken : public TemplateToken {
-    EndBlockTemplateToken(const Location & location, SpaceHandling pre, SpaceHandling post) : TemplateToken(Type::EndBlock, location, pre, post) {}
 };
 
 struct MacroTemplateToken : public TemplateToken {
@@ -990,18 +979,6 @@ public:
 
       visit(iterable_value);
   }
-};
-
-class BlockNode : public TemplateNode {
-    std::unique_ptr<VariableExpr> name;
-    std::unique_ptr<TemplateNode> body;
-public:
-    BlockNode(const Location & location, std::unique_ptr<VariableExpr> && n, std::unique_ptr<TemplateNode> && b)
-        : TemplateNode(location), name(std::move(n)), body(std::move(b)) {}
-    void do_render(std::ostringstream & out, Context & context) const override {
-
-      body->render(out, context);
-    }
 };
 
 class MacroNode : public TemplateNode {
@@ -2167,15 +2144,6 @@ private:
             } else if (keyword == "endset") {
               auto post_space = parseBlockClose();
               tokens.push_back(nonstd_make_unique<EndSetTemplateToken>(location, pre_space, post_space));
-            } else if (keyword == "block") {
-              auto blockname = parseIdentifier();
-              if (!blockname) throw std::runtime_error("Expected block name in block block");
-
-              auto post_space = parseBlockClose();
-              tokens.push_back(nonstd_make_unique<BlockTemplateToken>(location, pre_space, post_space, std::move(blockname)));
-            } else if (keyword == "endblock") {
-              auto post_space = parseBlockClose();
-              tokens.push_back(nonstd_make_unique<EndBlockTemplateToken>(location, pre_space, post_space));
             } else if (keyword == "macro") {
               auto macroname = parseIdentifier();
               if (!macroname) throw std::runtime_error("Expected macro name in macro block");
@@ -2275,12 +2243,6 @@ private:
               }
               children.emplace_back(nonstd_make_unique<SetNode>(token->location, set_token->ns, set_token->var_names, nullptr, std::move(value_template)));
             }
-          } else if (auto block_token = dynamic_cast<BlockTemplateToken*>(token.get())) {
-              auto body = parseTemplate(begin, it, end);
-              if (it == end || (*(it++))->type != TemplateToken::Type::EndBlock) {
-                  throw unterminated(**start);
-              }
-              children.emplace_back(nonstd_make_unique<BlockNode>(token->location, std::move(block_token->name), std::move(body)));
           } else if (auto macro_token = dynamic_cast<MacroTemplateToken*>(token.get())) {
               auto body = parseTemplate(begin, it, end);
               if (it == end || (*(it++))->type != TemplateToken::Type::EndMacro) {
@@ -2289,8 +2251,7 @@ private:
               children.emplace_back(nonstd_make_unique<MacroNode>(token->location, std::move(macro_token->name), std::move(macro_token->params), std::move(body)));
           } else if (auto comment_token = dynamic_cast<CommentTemplateToken*>(token.get())) {
               // Ignore comments
-          } else if (dynamic_cast<EndBlockTemplateToken*>(token.get())
-                  || dynamic_cast<EndForTemplateToken*>(token.get())
+          } else if (dynamic_cast<EndForTemplateToken*>(token.get())
                   || dynamic_cast<EndSetTemplateToken*>(token.get())
                   || dynamic_cast<EndMacroTemplateToken*>(token.get())
                   || dynamic_cast<EndIfTemplateToken*>(token.get())
