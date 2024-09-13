@@ -124,7 +124,7 @@ public:
   using FilterType = std::function<Value(Context &, const CallableArgs &)>;
 
 private:
-  using ObjectType = std::unordered_map<json, Value>;  // Only contains primitive keys
+  using ObjectType = nlohmann::ordered_map<json, Value>;  // Only contains primitive keys
   using ArrayType = std::vector<Value>;
 
   std::shared_ptr<ArrayType> array_;
@@ -138,8 +138,12 @@ private:
 
   static void dump_string(const json & primitive, std::ostringstream & out, char string_quote = '\'') {
     if (!primitive.is_string()) throw std::runtime_error("Value is not a string: " + primitive.dump());
-    // Rework json dump to change string quotes
     auto s = primitive.dump();
+    if (string_quote == '"' || s.find('\'') != std::string::npos) {
+      out << s;
+      return;
+    }
+    // Rework json dump to change string quotes
     out << string_quote;
     for (size_t i = 1, n = s.size() - 1; i < n; ++i) {
       if (s[i] == '\\' && s[i + 1] == '"') {
@@ -207,7 +211,7 @@ private:
       throw std::runtime_error("Cannot dump callable to JSON");
     } else if (is_boolean()) {
       out << (this->to_bool() ? "True" : "False");
-    } else if (is_string() && string_quote != '"') {
+    } else if (is_string()) {
       dump_string(primitive_, out, string_quote);  
     } else {
       out << primitive_.dump();
