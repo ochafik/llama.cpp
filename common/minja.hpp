@@ -2386,7 +2386,7 @@ std::shared_ptr<Context> Context::builtins() {
     return res;
   }));
 
-  return Context::make(std::move(top_level_values));
+  return std::make_shared<Context>(std::move(top_level_values));
 }
 
 std::shared_ptr<Context> Context::make(Value && values, const std::shared_ptr<Context> & parent) {

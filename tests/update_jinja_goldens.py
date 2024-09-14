@@ -34,8 +34,8 @@ model_ids = [
     "microsoft/Phi-3.5-mini-instruct",
 
     # Gated models:
-    "google/gemma-2-2b-it",
-    "mistralai/Mixtral-8x7B-Instruct-v0.1",
+    # "google/gemma-2-2b-it",
+    # "mistralai/Mixtral-8x7B-Instruct-v0.1",
 ]
 
 def raise_exception(message: str):
