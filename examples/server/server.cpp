@@ -1236,7 +1236,8 @@ struct server_context {
                 slot.has_next_token = false;
 
                 is_stop_full = true;
-                length = pos + match.pos;
+                // length = pos + match.pos;
+                length = match.pos;
             }
 
             slot.generated_text.erase(
