@@ -560,6 +560,17 @@ private:
     }
 
     void build(const llama_context * ctx, const std::vector<std::string> & stop_words, const std::vector<std::string> & grammar_trigger_words) {
+        build(
+            [&](const std::string & text) {
+                return llama_tokenize(ctx, text, /* special= */ true);
+            },
+            stop_words,
+            grammar_trigger_words
+        );  
+    }
+
+    void build(const std::function<std::vector<llama_token>(const std::string)> & tokenizer, const std::vector<std::string> & stop_words, const std::vector<std::string> & grammar_trigger_words) {
+        clear();
         this->stop_words = stop_words;
         this->grammar_trigger_words = grammar_trigger_words;
 
@@ -572,7 +583,7 @@ private:
 
         for (size_t i = 0, n = antiprompts.size(); i < n; i++) {
             const auto & antiprompt = antiprompts[i];
-            std::vector<llama_token> tokens = llama_tokenize(ctx, antiprompt.value, false, true);
+            std::vector<llama_token> tokens = tokenizer(antiprompt.value);
             if (tokens.size() == 1) {
                 stop_tokens[tokens[0]] = i;
             }
@@ -588,6 +599,13 @@ private:
         bool is_partial;
         size_t matchLength;
         bool is_grammar_trigger;
+
+        bool operator==(const MatchResult & other) const {
+            return pos == other.pos && pattern == other.pattern && is_partial == other.is_partial && matchLength == other.matchLength && is_grammar_trigger == other.is_grammar_trigger;
+        }
+        operator std::string() const {
+            return "{pos=" + std::to_string(pos) + ", pattern=" + pattern + ", is_partial=" + std::to_string(is_partial) + ", matchLength=" + std::to_string(matchLength) + ", is_grammar_trigger=" + std::to_string(is_grammar_trigger) + "}";
+        }
     };
 
     MatchResult findSingleTokenMatch(llama_token token) const {
