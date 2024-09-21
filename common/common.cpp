@@ -2835,7 +2835,9 @@ bool llama_chat_verify_template(const std::string & tmpl) {
 std::string llama_chat_apply_template(const struct llama_model * model,
         const std::string & tmpl,
         const std::vector<llama_chat_msg> & msgs,
-        bool add_ass) {
+        bool add_ass,
+        const std::string & bos_token,
+        const std::string & eos_token) {
     int alloc_size = 0;
     bool fallback = false; // indicate if we must fallback to default chatml
     std::vector<llama_chat_message> chat;
@@ -2848,7 +2850,7 @@ std::string llama_chat_apply_template(const struct llama_model * model,
     std::vector<char> buf(alloc_size);
 
     // run the first time to get the total output length
-    int32_t res = llama_chat_apply_template(model, ptr_tmpl, chat.data(), chat.size(), add_ass, buf.data(), buf.size());
+    int32_t res = llama_chat_apply_template(model, ptr_tmpl, chat.data(), chat.size(), add_ass, buf.data(), buf.size(), bos_token.c_str(), eos_token.c_str());
 
     // error: chat template is not supported
     if (res < 0) {
@@ -2858,7 +2860,7 @@ std::string llama_chat_apply_template(const struct llama_model * model,
             throw std::runtime_error("this custom template is not supported");
         } else {
             // If the built-in template is not supported, we default to chatml
-            res = llama_chat_apply_template(nullptr, "chatml", chat.data(), chat.size(), add_ass, buf.data(), buf.size());
+            res = llama_chat_apply_template(nullptr, "chatml", chat.data(), chat.size(), add_ass, buf.data(), buf.size(), bos_token.c_str(), eos_token.c_str());
             fallback = true;
         }
     }

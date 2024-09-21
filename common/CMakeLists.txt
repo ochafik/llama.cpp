@@ -61,6 +61,7 @@ add_library(${TARGET} STATIC
     grammar-parser.h
     grammar-parser.cpp
     json.hpp
+    minja.hpp
     json-schema-to-grammar.cpp
     train.h
     train.cpp

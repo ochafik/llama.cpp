@@ -404,7 +404,9 @@ bool llama_chat_verify_template(const std::string & tmpl);
 std::string llama_chat_apply_template(const struct llama_model * model,
         const std::string & tmpl,
         const std::vector<llama_chat_msg> & chat,
-        bool add_ass);
+        bool add_ass,
+        const std::string & bos_token,
+        const std::string & eos_token);
 
 // Format single message, while taking into account the position of that message in chat history
 std::string llama_chat_format_single(const struct llama_model * model,

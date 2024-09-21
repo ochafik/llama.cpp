@@ -3,6 +3,8 @@
 #include "llama-grammar.h"
 #include "llama-sampling.h"
 
+#include "minja.hpp"
+
 #include "unicode.h"
 
 #include "ggml.h"
@@ -19733,7 +19735,35 @@ int32_t llama_detokenize(
 static int32_t llama_chat_apply_template_internal(
     const std::string & tmpl,
     const std::vector<const llama_chat_message *> & chat,
-    std::string & dest, bool add_ass) {
+    std::string & dest, bool add_ass,
+    const std::string & bos_token, const std::string & eos_token) {
+
+    if (getenv("LLAMA_MINJA")) {
+        auto messages = json::array();
+        for (const auto * message : chat) {
+            messages.push_back({
+                {"role", message->role},
+                {"content", message->content},
+            });
+        }
+        auto context = minja::Context::make(json({
+            {"messages", messages},
+            {"add_generation_prompt", add_ass},
+            {"bos_token", bos_token},
+            {"eos_token", eos_token},
+        }));
+        auto tmpl_root = minja::Parser::parse(tmpl, {
+            .lstrip_blocks = true,
+            .trim_blocks = true,
+        });
+        try {
+            dest = tmpl_root->render(*context);
+            return dest.size();
+        } catch (const std::runtime_error & err) {
+            return -1;
+        }
+    }
+
     // Taken from the research: https://github.com/ggerganov/llama.cpp/issues/5527
     std::stringstream ss;
     auto tmpl_contains = [&tmpl](std::string haystack) -> bool {
@@ -20000,7 +20030,9 @@ int32_t llama_chat_apply_template(
                                   size_t   n_msg,
                                     bool   add_ass,
                                     char * buf,
-                                 int32_t   length) {
+                                 int32_t   length,
+                              const char * bos_token,
+                              const char * eos_token) {
     std::string curr_tmpl(tmpl == nullptr ? "" : tmpl);
     if (tmpl == nullptr) {
         GGML_ASSERT(model != nullptr);
@@ -20015,6 +20047,16 @@ int32_t llama_chat_apply_template(
             curr_tmpl = std::string(model_template.data(), model_template.size());
         }
     }
+    std::string curr_bos_token(bos_token ? bos_token : "");
+    std::string curr_eos_token(eos_token ? eos_token : "");
+    if (bos_token == nullptr) {
+        GGML_ASSERT(model != nullptr);
+        curr_bos_token = llama_token_to_piece(model, llama_token_bos(model), true);
+    }
+    if (eos_token == nullptr) {
+        GGML_ASSERT(model != nullptr);
+        curr_eos_token = llama_token_to_piece(model, llama_token_eos(model), true);
+    }
 
     // format the chat to string
     std::vector<const llama_chat_message *> chat_vec;
@@ -20024,7 +20066,7 @@ int32_t llama_chat_apply_template(
     }
 
     std::string formatted_chat;
-    int32_t res = llama_chat_apply_template_internal(curr_tmpl, chat_vec, formatted_chat, add_ass);
+    int32_t res = llama_chat_apply_template_internal(curr_tmpl, chat_vec, formatted_chat, add_ass, curr_bos_token, curr_eos_token);
     if (res < 0) {
         return res;
     }

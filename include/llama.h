@@ -996,7 +996,9 @@ extern "C" {
                                 size_t   n_msg,
                                   bool   add_ass,
                                   char * buf,
-                               int32_t   length);
+                               int32_t   length,
+                            const char * bos_token = nullptr,
+                            const char * eos_token = nullptr);
 
     //
     // Grammar
