@@ -17,6 +17,7 @@
 
 import datetime
 import glob
+import os
 from huggingface_hub import hf_hub_download
 import json
 import jinja2
@@ -52,6 +53,7 @@ def handle_chat_template(model_id, variant, template_src):
     model_name = model_id.replace("/", "-")
     base_name = f'{model_name}-{variant}' if variant else model_name
     template_file = f'tests/chat/templates/{base_name}.jinja'
+    print(f'template_file: {template_file}')
     with open(template_file, 'w') as f:
         f.write(template_src)
         
@@ -107,6 +109,9 @@ def handle_chat_template(model_id, variant, template_src):
     print()
 
 def main():
+    os.mkdir('tests/chat/templates')
+    os.mkdir('tests/chat/goldens')
+    
     for model_id in model_ids:
         # response = requests.get(f"https://huggingface.co/{model_id}/resolve/main/tokenizer_config.json")
         # response.raise_for_status()
