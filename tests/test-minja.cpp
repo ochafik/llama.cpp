@@ -162,6 +162,8 @@ static void test_error_contains(const std::string & template_str, const json & b
 }
 
 static void test_template_features() {
+    test_render(R"({% set foo = true %}{{ foo is defined }})", {}, {}, "True");
+    test_render(R"({% set foo = true %}{{ not foo is defined }})", {}, {}, "False");
     test_render(R"({{ {"a": "b"} | tojson }})", {}, {}, R"({"a": "b"})");
     test_render(R"({{ {"a": "b"} }})", {}, {}, R"({'a': 'b'})");
 

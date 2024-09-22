@@ -1502,14 +1502,26 @@ private:
         return left;
     }
 
+    std::unique_ptr<Expression> parseLogicalNot() {
+        static std::regex not_tok(R"(not\b)");
+        auto location = get_location();
+
+        if (!consumeToken(not_tok).empty()) {
+          auto sub = parseLogicalNot();
+          if (!sub) throw std::runtime_error("Expected expression after 'not' keyword");
+          return nonstd_make_unique<UnaryOpExpr>(location, std::move(sub), UnaryOpExpr::Op::LogicalNot);
+        }
+        return parseLogicalCompare();
+    }
+
     std::unique_ptr<Expression> parseLogicalAnd() {
-        auto left = parseLogicalCompare();
+        auto left = parseLogicalNot();
         if (!left) throw std::runtime_error("Expected left side of 'logical and' expression");
 
         static std::regex and_tok(R"(and\b)");
         auto location = get_location();
         while (!consumeToken(and_tok).empty()) {
-            auto right = parseLogicalCompare();
+            auto right = parseLogicalNot();
             if (!right) throw std::runtime_error("Expected right side of 'and' expression");
             left = nonstd_make_unique<BinaryOpExpr>(location, std::move(left), std::move(right), BinaryOpExpr::Op::And);
         }
@@ -1707,13 +1719,13 @@ private:
     }
 
     std::unique_ptr<Expression> parseMathUnaryPlusMinus() {
-        static std::regex unary_plus_minus_tok(R"(\+|-(?![}%#]\})|not)");
+        static std::regex unary_plus_minus_tok(R"(\+|-(?![}%#]\}))");
         auto op_str = consumeToken(unary_plus_minus_tok);
         auto expr = parseValueExpression();
         if (!expr) throw std::runtime_error("Expected expr of 'unary plus/minus' expression");
         
         if (!op_str.empty()) {
-            auto op = op_str == "+" ? UnaryOpExpr::Op::Plus : op_str == "-" ? UnaryOpExpr::Op::Minus : UnaryOpExpr::Op::LogicalNot;
+            auto op = op_str == "+" ? UnaryOpExpr::Op::Plus : UnaryOpExpr::Op::Minus;
             return nonstd_make_unique<UnaryOpExpr>(get_location(), std::move(expr), op);
         }
         return expr;
