@@ -148,10 +148,10 @@ inline std::string format_chat(const struct llama_model * model, const std::stri
             for (const auto & tool_call : curr_msg["tool_calls"]) {
                 if (json_value(tool_call, "type", std::string("")) == "function"
                         && tool_call.contains("function") && tool_call["function"].is_object()) {
-                    msg.tool_calls.emplace_back(
+                    msg.tool_calls.push_back({
                         json_value(tool_call["function"], "name", std::string("")),
                         json_value(tool_call["function"], "arguments", std::string(""))
-                    );
+                    });
                 }
             }
         }
