@@ -15,6 +15,7 @@ int main(void) {
         std::string bos;
         std::string eos;
         std::string expected_output;
+        std::string jinja_expected_output;
     };
     
     std::vector<llama_chat_message> conversation {
@@ -58,7 +59,8 @@ int main(void) {
         {
             .name = "mlabonne/AlphaMonarch-7B",
             .tmpl = "{% for message in messages %}{{bos_token + message['role'] + '\\n' + message['content'] + eos_token + '\\n'}}{% endfor %}{% if add_generation_prompt %}{{ bos_token + 'assistant\\n' }}{% endif %}",
-            .expected_output = "system\nYou are a helpful assistant</s>\n<s>user\nHello</s>\n<s>assistant\nHi there</s>\n<s>user\nWho are you</s>\n<s>assistant\n   I am an assistant   </s>\n<s>user\nAnother question</s>\n<s>assistant\n",
+            .expected_output       =    "system\nYou are a helpful assistant</s>\n<s>user\nHello</s>\n<s>assistant\nHi there</s>\n<s>user\nWho are you</s>\n<s>assistant\n   I am an assistant   </s>\n<s>user\nAnother question</s>\n<s>assistant\n",
+            .jinja_expected_output = "<s>system\nYou are a helpful assistant</s>\n<s>user\nHello</s>\n<s>assistant\nHi there</s>\n<s>user\nWho are you</s>\n<s>assistant\n   I am an assistant   </s>\n<s>user\nAnother question</s>\n<s>assistant\n",
             .bos = "<s>",
             .eos = "</s>",
         },
@@ -72,7 +74,8 @@ int main(void) {
         {
             .name = "OrionStarAI/Orion-14B-Chat",
             .tmpl = "{% for message in messages %}{% if loop.first %}{{ bos_token }}{% endif %}{% if message['role'] == 'user' %}{{ 'Human: ' + message['content'] + '\\n\\nAssistant: ' + eos_token }}{% elif message['role'] == 'assistant' %}{{ message['content'] + eos_token }}{% endif %}{% endfor %}",
-            .expected_output = "Human: You are a helpful assistant\n\nHello\n\nAssistant: </s>Hi there</s>Human: Who are you\n\nAssistant: </s>   I am an assistant   </s>Human: Another question\n\nAssistant: </s>",
+            .expected_output       =    "Human: You are a helpful assistant\n\nHello\n\nAssistant: </s>Hi there</s>Human: Who are you\n\nAssistant: </s>   I am an assistant   </s>Human: Another question\n\nAssistant: </s>",
+            .jinja_expected_output = "<s>Human: Hello\n\nAssistant: </s>Hi there</s>Human: Who are you\n\nAssistant: </s>   I am an assistant   </s>Human: Another question\n\nAssistant: </s>",
             .bos = "<s>",
             .eos = "</s>",
         },
@@ -162,35 +165,43 @@ int main(void) {
         assert(res < 0);
     }
 
-    for (const auto & tmpl : templates) {
-        printf("=== %s ===\n", tmpl.name.c_str());
-        const auto & custom_template = tmpl.tmpl;
-        const auto & expected = tmpl.expected_output;
-        formatted_chat.resize(1024);
-        res = llama_chat_apply_template(
-            nullptr,
-            custom_template.c_str(),
-            conversation.data(),
-            conversation.size(),
-            true,
-            formatted_chat.data(),
-            formatted_chat.size()
-        );
-        if (res < 0) {
-            printf("Error: %d\n", res);
-            continue;
-        }
-        formatted_chat.resize(res);
-        std::string output(formatted_chat.data(), formatted_chat.size());
-        if (output != expected) {
-            printf("# Failure!\n");
-            printf("Template: %s\n", custom_template.c_str());
-            printf("Expected:\n");
-            printf("%s\n", expected.c_str());
-            printf("-------------------------\n");
-            printf("Actual:\n");
-            printf("%s\n", output.c_str());
-            assert(output == expected);
+    for (auto use_jinja : std::vector<bool> { false, true }) {
+        for (const auto & tmpl : templates) {
+            printf("=== %s ===\n", tmpl.name.c_str());
+            const auto & custom_template = tmpl.tmpl;
+            const auto & expected =
+                use_jinja && !tmpl.jinja_expected_output.empty()
+                    ? tmpl.jinja_expected_output
+                    : tmpl.expected_output;
+            formatted_chat.resize(1024);
+            res = llama_chat_apply_template(
+                nullptr,
+                custom_template.c_str(),
+                conversation.data(),
+                conversation.size(),
+                true,
+                formatted_chat.data(),
+                formatted_chat.size(),
+                use_jinja,
+                tmpl.bos.c_str(),
+                tmpl.eos.c_str()
+            );
+            if (res < 0) {
+                printf("Error: %d\n", res);
+                continue;
+            }
+            formatted_chat.resize(res);
+            std::string output(formatted_chat.data(), formatted_chat.size());
+            if (output != expected) {
+                printf("# Failure!\n");
+                printf("Template: %s\n", custom_template.c_str());
+                printf("Expected:\n");
+                printf("%s\n", expected.c_str());
+                printf("-------------------------\n");
+                printf("Actual:\n");
+                printf("%s\n", output.c_str());
+                assert(output == expected);
+            }
         }
     }
 

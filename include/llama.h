@@ -410,6 +410,13 @@ extern "C" {
     typedef struct llama_chat_message {
         const char * role;
         const char * content;
+        const char * tool;
+        struct llama_tool_call {
+            const char * name;
+            const char * arguments;
+        };
+        const llama_tool_call * tool_calls;
+        uint32_t n_tool_calls;
     } llama_chat_message;
 
     // lora adapter
@@ -997,6 +1004,7 @@ extern "C" {
                                   bool   add_ass,
                                   char * buf,
                                int32_t   length,
+                                  bool   use_jinja = false,
                             const char * bos_token = nullptr,
                             const char * eos_token = nullptr);
 

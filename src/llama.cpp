@@ -19736,15 +19736,31 @@ static int32_t llama_chat_apply_template_internal(
     const std::string & tmpl,
     const std::vector<const llama_chat_message *> & chat,
     std::string & dest, bool add_ass,
+    bool use_jinja,
     const std::string & bos_token, const std::string & eos_token) {
 
-    if (getenv("LLAMA_MINJA")) {
+    if (use_jinja) {
         auto messages = json::array();
-        for (const auto * message : chat) {
-            messages.push_back({
-                {"role", message->role},
-                {"content", message->content},
+        for (const auto * msg : chat) {
+            auto message = json({
+                {"role", msg->role},
+                {"content", msg->content},
             });
+            if (msg->tool) message["tool"] = msg->tool;
+            if (msg->n_tool_calls) {
+                auto tool_calls = json::array();
+                for (uint32_t i = 0; i < msg->n_tool_calls; i++) {
+                    tool_calls.push_back(json({
+                        {"type", "function"},
+                        {"function", {
+                            {"name", msg->tool_calls[i].name},
+                            {"arguments", msg->tool_calls[i].arguments},
+                        }}
+                    }));
+                }
+                messages["tool_calls"] = tool_calls;
+            }
+            messages.push_back(message);
         }
         auto context = minja::Context::make(json({
             {"messages", messages},
@@ -20031,6 +20047,7 @@ int32_t llama_chat_apply_template(
                                     bool   add_ass,
                                     char * buf,
                                  int32_t   length,
+                                    bool   use_jinja,
                               const char * bos_token,
                               const char * eos_token) {
     std::string curr_tmpl(tmpl == nullptr ? "" : tmpl);
@@ -20066,7 +20083,7 @@ int32_t llama_chat_apply_template(
     }
 
     std::string formatted_chat;
-    int32_t res = llama_chat_apply_template_internal(curr_tmpl, chat_vec, formatted_chat, add_ass, curr_bos_token, curr_eos_token);
+    int32_t res = llama_chat_apply_template_internal(curr_tmpl, chat_vec, formatted_chat, add_ass, use_jinja, curr_bos_token, curr_eos_token);
     if (res < 0) {
         return res;
     }
