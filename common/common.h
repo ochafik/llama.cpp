@@ -412,8 +412,8 @@ std::string llama_chat_apply_template(const struct llama_model * model,
         const std::vector<llama_chat_msg> & chat,
         bool add_ass,
         bool use_jinja = false,
-        const std::string * bos_token = nullptr,
-        const std::string * eos_token = nullptr);
+        const char * bos_token = nullptr,
+        const char * eos_token = nullptr);
 
 // Format single message, while taking into account the position of that message in chat history
 std::string llama_chat_format_single(const struct llama_model * model,
@@ -422,8 +422,8 @@ std::string llama_chat_format_single(const struct llama_model * model,
         const llama_chat_msg & new_msg,
         bool add_ass,
         bool use_jinja = false,
-        const std::string * bos_token = nullptr,
-        const std::string * eos_token = nullptr);
+        const char * bos_token = nullptr,
+        const char * eos_token = nullptr);
 
 // Returns an example of formatted chat
 #define LLAMA_CHAT_EXAMPLE json({ \
