@@ -119,7 +119,7 @@ static void test_render(const std::string & template_str, const json & bindings,
     auto context = minja::Context::make(bindings);
     std::string actual;
     try {
-        actual = root->render(*context);
+        actual = root->render(context);
     } catch (const std::runtime_error & e) {
         actual = "ERROR: " + std::string(e.what());
     }
@@ -147,7 +147,7 @@ static void test_error_contains(const std::string & template_str, const json & b
         auto root = minja::Parser::parse(template_str, options);
         auto context = minja::Context::make(bindings);
         // auto copy = context.is_null() ? Value::object() : std::make_shared<Value>(context);
-        auto actual = root->render(*context);
+        auto actual = root->render(context);
         throw std::runtime_error("Expected error: " + expected + ", but got successful result instead: "  + actual);
     } catch (const std::runtime_error & e) {
         std::string actual(e.what());
@@ -410,7 +410,7 @@ static void test_chat_templates_with_common_contexts_against_goldens() {
 
             std::string actual;
             try {
-                actual = tmpl->render(*minja::Context::make(ctx));
+                actual = tmpl->render(minja::Context::make(ctx));
             } catch (const std::runtime_error & e) {
                 actual = "ERROR: " + std::string(e.what());
             }

@@ -19773,7 +19773,7 @@ static int32_t llama_chat_apply_template_internal(
             .trim_blocks = true,
         });
         try {
-            dest = tmpl_root->render(*context);
+            dest = tmpl_root->render(context);
             return dest.size();
         } catch (const std::runtime_error & err) {
             return -1;

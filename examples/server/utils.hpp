@@ -441,18 +441,18 @@ static json oaicompat_completion_params_parse(
 
             // TODO: allow it to change the chat template, e.g to choose between tools and not tools
             auto prologue = minja::Parser::parse(prologue_template, minja::Options {.trim_blocks = true, .lstrip_blocks = true});
-            prologue->render(*context);
+            prologue->render(context);
         }
 
 
         auto chat_template = context->get("chat_template");
         std::string result;
         if (chat_template.is_callable()) {
-            result = chat_template.call(*context, {}).get<std::string>();
+            result = chat_template.call(context, {}).get<std::string>();
         } else {
             auto tmpl_src = chat_template.get<std::string>();
             auto tmpl = minja::Parser::parse(tmpl_src, minja::Options {.trim_blocks = true, .lstrip_blocks = true});
-            result = tmpl->render(*context);
+            result = tmpl->render(context);
         }
 
         auto grammar = context->get("grammar");

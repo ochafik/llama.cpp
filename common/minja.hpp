@@ -48,8 +48,8 @@ public:
     }
   };
   
-  using CallableType = std::function<Value(Context &, const Arguments &)>;
-  using FilterType = std::function<Value(Context &, const Arguments &)>;
+  using CallableType = std::function<Value(const std::shared_ptr<Context> &, const Arguments &)>;
+  using FilterType = std::function<Value(const std::shared_ptr<Context> &, const Arguments &)>;
 
 private:
   using ObjectType = nlohmann::ordered_map<json, Value>;  // Only contains primitive keys
@@ -218,7 +218,7 @@ public:
     if (!key.is_hashable()) throw std::runtime_error("Unashable type: " + dump());
     (*object_)[key.primitive_] = value;
   }
-  Value call(Context & context, const Value::Arguments & args) const {
+  Value call(const std::shared_ptr<Context> & context, const Value::Arguments & args) const {
     if (!callable_) throw std::runtime_error("Value is not callable: " + dump());
     return (*callable_)(context, args);
   }
@@ -541,7 +541,7 @@ struct Location {
 
 class Expression {
 protected:
-    virtual Value do_evaluate(Context & context) const = 0;
+    virtual Value do_evaluate(const std::shared_ptr<Context> & context) const = 0;
 public:
     struct Arguments {
         std::vector<std::unique_ptr<Expression>> args;
@@ -555,7 +555,7 @@ public:
           }
         }
 
-        Value::Arguments evaluate(Context & context) const {
+        Value::Arguments evaluate(const std::shared_ptr<Context> & context) const {
             Value::Arguments vargs;
             for (const auto& arg : this->args) {
                 vargs.args.push_back(arg->evaluate(context));
@@ -574,7 +574,7 @@ public:
     Expression(const Location & location) : location(location) {}
     virtual ~Expression() = default;
 
-    Value evaluate(Context & context) const {
+    Value evaluate(const std::shared_ptr<Context> & context) const {
         try {
             return do_evaluate(context);
         } catch (const std::runtime_error & e) {
@@ -592,23 +592,23 @@ public:
     VariableExpr(const Location & location, const std::string& n)
       : Expression(location), name(n) {}
     std::string get_name() const { return name; }
-    Value do_evaluate(Context & context) const override {
-        if (!context.contains(name)) {
+    Value do_evaluate(const std::shared_ptr<Context> & context) const override {
+        if (!context->contains(name)) {
             return Value();
         }
-        return context.at(name);
+        return context->at(name);
     }
 };
 
-static void destructuring_assign(const std::vector<std::string> & var_names, Context & context, const Value& item) {
+static void destructuring_assign(const std::vector<std::string> & var_names, const std::shared_ptr<Context> & context, const Value& item) {
   if (var_names.size() == 1) {
-      context.set(var_names[0], item);
+      context->set(var_names[0], item);
   } else {
       if (!item.is_array() || item.size() != var_names.size()) {
           throw std::runtime_error("Mismatched number of variables and items in destructuring assignment");
       }
       for (size_t i = 0; i < var_names.size(); ++i) {
-          context.set(var_names[i], item.at(i));
+          context->set(var_names[i], item.at(i));
       }
   }
 }
@@ -720,11 +720,11 @@ struct CommentTemplateToken : public TemplateToken {
 class TemplateNode {
     Location location_;
 protected:
-    virtual void do_render(std::ostringstream & out, Context & context) const = 0;
+    virtual void do_render(std::ostringstream & out, const std::shared_ptr<Context> & context) const = 0;
     
 public:
     TemplateNode(const Location & location) : location_(location) {}
-    void render(std::ostringstream & out, Context & context) const {
+    void render(std::ostringstream & out, const std::shared_ptr<Context> & context) const {
         try {
             do_render(out, context);
         } catch (const std::runtime_error & e) {
@@ -736,7 +736,7 @@ public:
     }
     const Location & location() const { return location_; }
     virtual ~TemplateNode() = default;
-    std::string render(Context & context) const {
+    std::string render(const std::shared_ptr<Context> & context) const {
         std::ostringstream out;
         render(out, context);
         return out.str();
@@ -748,7 +748,7 @@ class SequenceNode : public TemplateNode {
 public:
     SequenceNode(const Location & location, std::vector<std::unique_ptr<TemplateNode>> && c)
       : TemplateNode(location), children(std::move(c)) {}
-    void do_render(std::ostringstream & out, Context & context) const override {
+    void do_render(std::ostringstream & out, const std::shared_ptr<Context> & context) const override {
         for (const auto& child : children) child->render(out, context);
     }
 };
@@ -757,7 +757,7 @@ class TextNode : public TemplateNode {
     std::string text;
 public:
     TextNode(const Location & location, const std::string& t) : TemplateNode(location), text(t) {}
-    void do_render(std::ostringstream & out, Context &) const override {
+    void do_render(std::ostringstream & out, const std::shared_ptr<Context> &) const override {
       out << text;
     }
 };
@@ -766,7 +766,7 @@ class ExpressionNode : public TemplateNode {
     std::unique_ptr<Expression> expr;
 public:
     ExpressionNode(const Location & location, std::unique_ptr<Expression> && e) : TemplateNode(location), expr(std::move(e)) {}
-    void do_render(std::ostringstream & out, Context & context) const override {
+    void do_render(std::ostringstream & out, const std::shared_ptr<Context> & context) const override {
       auto result = expr->evaluate(context);
       if (result.is_string()) {
           out << result.get<std::string>();
@@ -783,7 +783,7 @@ class IfNode : public TemplateNode {
 public:
     IfNode(const Location & location, std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<TemplateNode>>> && c)
         : TemplateNode(location), cascade(std::move(c)) {}
-    void do_render(std::ostringstream & out, Context & context) const override {
+    void do_render(std::ostringstream & out, const std::shared_ptr<Context> & context) const override {
       for (const auto& branch : cascade) {
           auto enter_branch = true;
           if (branch.first) {
@@ -809,7 +809,7 @@ public:
       std::unique_ptr<Expression> && condition, std::unique_ptr<TemplateNode> && body, bool recursive, std::unique_ptr<TemplateNode> && else_body)
             : TemplateNode(location), var_names(var_names), iterable(std::move(iterable)), condition(std::move(condition)), body(std::move(body)), recursive(recursive), else_body(std::move(else_body)) {}
       
-    void do_render(std::ostringstream & out, Context & context) const override {
+    void do_render(std::ostringstream & out, const std::shared_ptr<Context> & context) const override {
       // https://jinja.palletsprojects.com/en/3.0.x/templates/#for
 
       auto iterable_value = iterable->evaluate(context);
@@ -838,7 +838,7 @@ public:
               loop.set("length", (int64_t) filtered_items.size());
 
               size_t cycle_index = 0;
-              loop.set("cycle", Value::callable([&](Context &, const Value::Arguments & args) {
+              loop.set("cycle", Value::callable([&](const std::shared_ptr<Context> &, const Value::Arguments & args) {
                   if (args.args.empty() || !args.kwargs.empty()) {
                       throw std::runtime_error("cycle() expects at least 1 positional argument and no named arg");
                   }
@@ -846,11 +846,11 @@ public:
                   cycle_index = (cycle_index + 1) % args.args.size();
                   return item;
               }));
-              auto loop_context = Context::make(Value::object(), context.shared_from_this());
+              auto loop_context = Context::make(Value::object(), context);
               loop_context->set("loop", loop);
               for (size_t i = 0, n = filtered_items.size(); i < n; ++i) {
                   auto & item = filtered_items.at(i);
-                  destructuring_assign(var_names, *loop_context, item);
+                  destructuring_assign(var_names, loop_context, item);
                   loop.set("index", (int64_t) i + 1);
                   loop.set("index0", (int64_t) i);
                   loop.set("revindex", (int64_t) (n - i));
@@ -860,13 +860,13 @@ public:
                   loop.set("last", i == (n - 1));
                   loop.set("previtem", i > 0 ? filtered_items.at(i - 1) : Value());
                   loop.set("nextitem", i < n - 1 ? filtered_items.at(i + 1) : Value());
-                  body->render(out, *loop_context);
+                  body->render(out, loop_context);
               }
           }
       };
 
       if (recursive) {
-        loop_function = [&](Context &, const Value::Arguments & args) {
+        loop_function = [&](const std::shared_ptr<Context> &, const Value::Arguments & args) {
             if (args.args.size() != 1 || !args.kwargs.empty() || !args.args[0].is_array()) {
                 throw std::runtime_error("loop() expects exactly 1 positional iterable argument");
             }
@@ -895,8 +895,8 @@ public:
           }
         }
     }
-    void do_render(std::ostringstream &, Context & macro_context) const override {
-        macro_context.set(name->get_name(), Value::callable([&](Context & context, const Value::Arguments & args) {
+    void do_render(std::ostringstream &, const std::shared_ptr<Context> & macro_context) const override {
+        macro_context->set(name->get_name(), Value::callable([&](const std::shared_ptr<Context> & context, const Value::Arguments & args) {
             auto call_context = macro_context;
             std::vector<bool> param_set(params.size(), false);
             for (size_t i = 0, n = args.args.size(); i < n; i++) {
@@ -904,7 +904,7 @@ public:
                 if (i >= params.size()) throw std::runtime_error("Too many positional arguments for macro " + name->get_name());
                 param_set[i] = true;
                 auto & param_name = params[i].first;
-                call_context.set(param_name, arg);
+                call_context->set(param_name, arg);
             }
             for (size_t i = 0, n = args.kwargs.size(); i < n; i++) {
                 auto & arg = args.kwargs[i];
@@ -912,13 +912,13 @@ public:
                 auto it = named_param_positions.find(arg_name);
                 if (it == named_param_positions.end()) throw std::runtime_error("Unknown parameter name for macro " + name->get_name() + ": " + arg_name);
                 
-                call_context.set(arg_name, arg.second);
+                call_context->set(arg_name, arg.second);
                 param_set[it->second] = true;
             }
             // Set default values for parameters that were not passed
             for (size_t i = 0, n = params.size(); i < n; i++) {
                 if (!param_set[i] && params[i].second != nullptr) {
-                    call_context.set(params[i].first, params[i].second->evaluate(context));
+                    call_context->set(params[i].first, params[i].second->evaluate(context));
                 }
             }
             return body->render(call_context);
@@ -941,18 +941,18 @@ public:
             throw std::runtime_error("Destructuring assignment is only supported with a single variable name");
           }
         }
-    void do_render(std::ostringstream &, Context & context) const override {
+    void do_render(std::ostringstream &, const std::shared_ptr<Context> & context) const override {
       if (!ns.empty()) {
         if (var_names.size() != 1) {
           throw std::runtime_error("Namespaced set only supports a single variable name");
         }
         auto & name = var_names[0];
-        auto ns_value = context.get(ns);
+        auto ns_value = context->get(ns);
         if (!ns_value.is_object()) throw std::runtime_error("Namespace '" + ns + "' is not an object");
         ns_value.set(name, this->value->evaluate(context));
       } else if (template_value) {
         auto value = template_value->render(context);
-        context.set(var_names[0], value);
+        context->set(var_names[0], value);
       } else {
         destructuring_assign(var_names, context, value->evaluate(context));
       }
@@ -966,7 +966,7 @@ class IfExpr : public Expression {
 public:
     IfExpr(const Location & location, std::unique_ptr<Expression> && c, std::unique_ptr<Expression> && t, std::unique_ptr<Expression> && e)
         : Expression(location), condition(std::move(c)), then_expr(std::move(t)), else_expr(std::move(e)) {}
-    Value do_evaluate(Context & context) const override {
+    Value do_evaluate(const std::shared_ptr<Context> & context) const override {
       if (condition->evaluate(context).to_bool()) {
         return then_expr->evaluate(context);
       }
@@ -982,7 +982,7 @@ class LiteralExpr : public Expression {
 public:
     LiteralExpr(const Location & location, const Value& v)
       : Expression(location), value(v) {}
-    Value do_evaluate(Context &) const override { return value; }
+    Value do_evaluate(const std::shared_ptr<Context> &) const override { return value; }
 };
 
 class ArrayExpr : public Expression {
@@ -990,7 +990,7 @@ class ArrayExpr : public Expression {
 public:
     ArrayExpr(const Location & location, std::vector<std::unique_ptr<Expression>> && e)
       : Expression(location), elements(std::move(e)) {}
-    Value do_evaluate(Context & context) const override {
+    Value do_evaluate(const std::shared_ptr<Context> & context) const override {
         auto result = Value::array();
         for (const auto& e : elements) {
             result.push_back(e->evaluate(context));
@@ -1004,7 +1004,7 @@ class DictExpr : public Expression {
 public:
     DictExpr(const Location & location, std::vector<std::pair<std::unique_ptr<Expression>, std::unique_ptr<Expression>>> && e)
       : Expression(location), elements(std::move(e)) {}
-    Value do_evaluate(Context & context) const override {
+    Value do_evaluate(const std::shared_ptr<Context> & context) const override {
         auto result = Value::object();
         for (const auto& e : elements) {
             result.set(e.first->evaluate(context), e.second->evaluate(context));
@@ -1018,7 +1018,7 @@ public:
     std::unique_ptr<Expression> start, end;
     SliceExpr(const Location & location, std::unique_ptr<Expression> && s, std::unique_ptr<Expression> && e)
       : Expression(location), start(std::move(s)), end(std::move(e)) {}
-    Value do_evaluate(Context &) const override {
+    Value do_evaluate(const std::shared_ptr<Context> &) const override {
         throw std::runtime_error("SliceExpr not implemented");
     }
 };
@@ -1029,7 +1029,7 @@ class SubscriptExpr : public Expression {
 public:
     SubscriptExpr(const Location & location, std::unique_ptr<Expression> && b, std::unique_ptr<Expression> && i)
         : Expression(location), base(std::move(b)), index(std::move(i)) {}
-    Value do_evaluate(Context & context) const override {
+    Value do_evaluate(const std::shared_ptr<Context> & context) const override {
         auto target_value = base->evaluate(context);
         if (auto slice = dynamic_cast<SliceExpr*>(index.get())) {
           if (!target_value.is_array()) throw std::runtime_error("Subscripting non-array");
@@ -1045,7 +1045,7 @@ public:
           auto index_value = index->evaluate(context);
           if (target_value.is_null()) {
             if (auto t = dynamic_cast<VariableExpr*>(base.get())) {
-              throw std::runtime_error("'" + t->get_name() + "' is " + (context.contains(t->get_name()) ? "null" : "not defined"));
+              throw std::runtime_error("'" + t->get_name() + "' is " + (context->contains(t->get_name()) ? "null" : "not defined"));
             }
             throw std::runtime_error("Trying to access property '" +  index_value.dump() + "' on null!");
           }
@@ -1063,7 +1063,7 @@ private:
 public:
     UnaryOpExpr(const Location & location, std::unique_ptr<Expression> && e, Op o)
       : Expression(location), expr(std::move(e)), op(o) {}
-    Value do_evaluate(Context & context) const override {
+    Value do_evaluate(const std::shared_ptr<Context> & context) const override {
         auto e = expr->evaluate(context);
         switch (op) {
             case Op::Plus: return e;
@@ -1084,7 +1084,7 @@ private:
 public:
     BinaryOpExpr(const Location & location, std::unique_ptr<Expression> && l, std::unique_ptr<Expression> && r, Op o)
         : Expression(location), left(std::move(l)), right(std::move(r)), op(o) {}
-    Value do_evaluate(Context & context) const override {
+    Value do_evaluate(const std::shared_ptr<Context> & context) const override {
         auto l = left->evaluate(context);
         
         auto do_eval = [&](const Value & l) -> Value {
@@ -1142,7 +1142,7 @@ public:
         };
 
         if (l.is_callable()) {
-          return Value::callable([l, do_eval](Context & context, const Value::Arguments & args) {
+          return Value::callable([l, do_eval](const std::shared_ptr<Context> & context, const Value::Arguments & args) {
             auto ll = l.call(context, args);
             return do_eval(ll); //args[0].second);
           });
@@ -1159,7 +1159,7 @@ class MethodCallExpr : public Expression {
 public:
     MethodCallExpr(const Location & location, std::unique_ptr<Expression> && obj, std::unique_ptr<VariableExpr> && m, Expression::Arguments && a)
         : Expression(location), object(std::move(obj)), method(std::move(m)), args(std::move(a)) {}
-    Value do_evaluate(Context & context) const override {
+    Value do_evaluate(const std::shared_ptr<Context> & context) const override {
         auto obj = object->evaluate(context);
         if (obj.is_array()) {
           if (method->get_name() == "append") {
@@ -1208,7 +1208,7 @@ public:
     Expression::Arguments args;
     CallExpr(const Location & location, std::unique_ptr<Expression> && obj, Expression::Arguments && a)
         : Expression(location), object(std::move(obj)), args(std::move(a)) {}
-    Value do_evaluate(Context & context) const override {
+    Value do_evaluate(const std::shared_ptr<Context> & context) const override {
         auto obj = object->evaluate(context);
         if (!obj.is_callable()) {
           throw std::runtime_error("Object is not callable: " + obj.dump(2));
@@ -1222,7 +1222,7 @@ class FilterExpr : public Expression {
 public:
     FilterExpr(const Location & location, std::vector<std::unique_ptr<Expression>> && p)
       : Expression(location), parts(std::move(p)) {}
-    Value do_evaluate(Context & context) const override {
+    Value do_evaluate(const std::shared_ptr<Context> & context) const override {
         Value result;
         bool first = true;
         for (const auto& part : parts) {
@@ -2175,11 +2175,11 @@ public:
     }
 };
 
-static Value simple_function(const std::string & fn_name, const std::vector<std::string> & params, const std::function<Value(Context &, const Value & args)> & fn) {
+static Value simple_function(const std::string & fn_name, const std::vector<std::string> & params, const std::function<Value(const std::shared_ptr<Context> &, const Value & args)> & fn) {
   std::map<std::string, size_t> named_positions;
   for (size_t i = 0, n = params.size(); i < n; i++) named_positions[params[i]] = i;
 
-  return Value::callable([=](Context & context, const Value::Arguments & args) -> Value {
+  return Value::callable([=](const std::shared_ptr<Context> & context, const Value::Arguments & args) -> Value {
     auto args_obj = Value::object();
     std::vector<bool> provided_args(params.size());
     for (size_t i = 0, n = args.args.size(); i < n; i++) {
@@ -2207,13 +2207,13 @@ static Value simple_function(const std::string & fn_name, const std::vector<std:
 std::shared_ptr<Context> Context::builtins() {
   auto top_level_values = Value::object();
 
-  top_level_values.set("raise_exception", simple_function("raise_exception", { "message" }, [](Context &, const Value & args) -> Value {
+  top_level_values.set("raise_exception", simple_function("raise_exception", { "message" }, [](const std::shared_ptr<Context> &, const Value & args) -> Value {
     throw std::runtime_error(args.at("message").get<std::string>());
   }));
-  top_level_values.set("tojson", simple_function("tojson", { "value", "indent" }, [](Context &, const Value & args) {
+  top_level_values.set("tojson", simple_function("tojson", { "value", "indent" }, [](const std::shared_ptr<Context> &, const Value & args) {
     return Value(args.at("value").dump(args.get<int64_t>("indent", -1), /* tojson= */ true));
   }));
-  top_level_values.set("items", simple_function("items", { "object" }, [](Context &, const Value & args) {
+  top_level_values.set("items", simple_function("items", { "object" }, [](const std::shared_ptr<Context> &, const Value & args) {
     auto items = Value::array();
     if (args.contains("object")) {
       auto & obj = args.at("object");
@@ -2225,19 +2225,19 @@ std::shared_ptr<Context> Context::builtins() {
     }
     return items;
   }));
-  top_level_values.set("trim", simple_function("trim", { "text" }, [](Context &, const Value & args) {
+  top_level_values.set("trim", simple_function("trim", { "text" }, [](const std::shared_ptr<Context> &, const Value & args) {
     auto & text = args.at("text");
     return text.is_null() ? text : Value(strip(text.get<std::string>()));
   }));
-  auto escape = simple_function("escape", { "text" }, [](Context &, const Value & args) {
+  auto escape = simple_function("escape", { "text" }, [](const std::shared_ptr<Context> &, const Value & args) {
     return Value(html_escape(args.at("text").get<std::string>()));
   });
   top_level_values.set("e", escape);
   top_level_values.set("escape", escape);
-  top_level_values.set("joiner", simple_function("joiner", { "sep" }, [](Context &, const Value & args) {
+  top_level_values.set("joiner", simple_function("joiner", { "sep" }, [](const std::shared_ptr<Context> &, const Value & args) {
     auto sep = args.get<std::string>("sep", "");
     auto first = std::make_shared<bool>(true);
-    return simple_function("", {}, [sep, first](Context &, const Value &) -> Value {
+    return simple_function("", {}, [sep, first](const std::shared_ptr<Context> &, const Value &) -> Value {
       if (*first) {
         *first = false;
         return "";
@@ -2246,10 +2246,10 @@ std::shared_ptr<Context> Context::builtins() {
     });
     return Value(html_escape(args.at("text").get<std::string>()));
   }));
-  top_level_values.set("count", simple_function("count", { "items" }, [](Context &, const Value & args) {
+  top_level_values.set("count", simple_function("count", { "items" }, [](const std::shared_ptr<Context> &, const Value & args) {
     return Value((int64_t) args.at("items").size());
   }));
-  top_level_values.set("dictsort", simple_function("dictsort", { "value" }, [](Context &, const Value & args) {
+  top_level_values.set("dictsort", simple_function("dictsort", { "value" }, [](const std::shared_ptr<Context> &, const Value & args) {
     if (args.size() != 1) throw std::runtime_error("dictsort expects exactly 1 argument (TODO: fix implementation)");
     auto & value = args.at("value");
     auto keys = value.keys();
@@ -2260,7 +2260,7 @@ std::shared_ptr<Context> Context::builtins() {
     }
     return res;
   }));
-  top_level_values.set("join", simple_function("join", { "items", "d" }, [](Context &, const Value & args) {
+  top_level_values.set("join", simple_function("join", { "items", "d" }, [](const std::shared_ptr<Context> &, const Value & args) {
     auto do_join = [](const Value & items, const std::string & sep) {
       std::ostringstream oss;
       auto first = true;
@@ -2276,14 +2276,14 @@ std::shared_ptr<Context> Context::builtins() {
         auto & items = args.at("items");
         return do_join(items, sep);
     } else {
-      return simple_function("", {"items"}, [sep, do_join](Context &, const Value & args) {
+      return simple_function("", {"items"}, [sep, do_join](const std::shared_ptr<Context> &, const Value & args) {
         auto & items = args.at("items");
         if (!items.to_bool() || !items.is_array()) throw std::runtime_error("join expects an array for items, got: " + items.dump());
         return do_join(items, sep);
       });
     }
   }));
-  top_level_values.set("namespace", Value::callable([=](Context &, const Value::Arguments & args) {
+  top_level_values.set("namespace", Value::callable([=](const std::shared_ptr<Context> &, const Value::Arguments & args) {
     auto ns = Value::object();
     args.expectArgs("namespace", {0, 0}, {0, std::numeric_limits<size_t>::max()});
     for (auto & arg : args.kwargs) {
@@ -2291,18 +2291,18 @@ std::shared_ptr<Context> Context::builtins() {
     }
     return ns;
   }));
-  top_level_values.set("equalto", simple_function("equalto", { "expected", "actual" }, [](Context &, const Value & args) -> Value {
+  top_level_values.set("equalto", simple_function("equalto", { "expected", "actual" }, [](const std::shared_ptr<Context> &, const Value & args) -> Value {
       return args.at("actual") == args.at("expected");
   }));
-  top_level_values.set("length", simple_function("length", { "items" }, [](Context &, const Value & args) -> Value {
+  top_level_values.set("length", simple_function("length", { "items" }, [](const std::shared_ptr<Context> &, const Value & args) -> Value {
       return (int64_t) args.at("items").size();
   }));
-  top_level_values.set("list", simple_function("list", { "items" }, [](Context &, const Value & args) -> Value {
+  top_level_values.set("list", simple_function("list", { "items" }, [](const std::shared_ptr<Context> &, const Value & args) -> Value {
       auto items = args.at("items");
       if (!items.is_array()) throw std::runtime_error("object is not iterable");
       return items;
   }));
-  top_level_values.set("unique", simple_function("unique", { "items" }, [](Context &, const Value & args) -> Value {
+  top_level_values.set("unique", simple_function("unique", { "items" }, [](const std::shared_ptr<Context> &, const Value & args) -> Value {
       auto items = args.at("items");
       if (!items.is_array()) throw std::runtime_error("object is not iterable");
       std::unordered_set<Value> seen;
@@ -2316,7 +2316,7 @@ std::shared_ptr<Context> Context::builtins() {
       return result;
   }));
   auto make_filter = [](const Value & filter, const Value & extra_args) -> Value {
-    return simple_function("", { "value" }, [=](Context & context, const Value & args) {
+    return simple_function("", { "value" }, [=](const std::shared_ptr<Context> & context, const Value & args) {
       auto value = args.at("value");
       Value::Arguments actual_args;
       actual_args.args.emplace_back(value);
@@ -2327,10 +2327,10 @@ std::shared_ptr<Context> Context::builtins() {
     });
   };
   // https://jinja.palletsprojects.com/en/3.0.x/templates/#jinja-filters.reject
-  top_level_values.set("reject", Value::callable([=](Context & context, const Value::Arguments & args) {
+  top_level_values.set("reject", Value::callable([=](const std::shared_ptr<Context> & context, const Value::Arguments & args) {
     args.expectArgs("reject", {2, std::numeric_limits<size_t>::max()}, {0, 0});
     auto & items = args.args[0];
-    auto filter_fn = context.get(args.args[1]);
+    auto filter_fn = context->get(args.args[1]);
     if (!filter_fn.to_bool()) throw std::runtime_error("Function not found " + args.args[1].dump());
 
     auto filter_args = Value::array();
@@ -2351,7 +2351,7 @@ std::shared_ptr<Context> Context::builtins() {
     }
     return res;
   }));
-  top_level_values.set("range", Value::callable([=](Context &, const Value::Arguments & args) {
+  top_level_values.set("range", Value::callable([=](const std::shared_ptr<Context> &, const Value::Arguments & args) {
     std::vector<int64_t> startEndStep(3);
     std::vector<bool> param_set(3);
     if (args.args.size() == 1) {
