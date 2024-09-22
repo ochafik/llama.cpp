@@ -1152,6 +1152,27 @@ public:
     }
 };
 
+static std::string strip(const std::string & s) {
+  static std::regex trailing_spaces_regex("^\\s+|\\s+$");
+  return std::regex_replace(s, trailing_spaces_regex, "");
+}
+
+static std::string html_escape(const std::string & s) {
+  std::string result;
+  result.reserve(s.size());
+  for (const auto & c : s) {
+    switch (c) {
+      case '&': result += "&amp;"; break;
+      case '<': result += "&lt;"; break;
+      case '>': result += "&gt;"; break;
+      case '"': result += "&quot;"; break;
+      case '\'': result += "&apos;"; break;
+      default: result += c; break;
+    }
+  }
+  return result;
+}
+
 class MethodCallExpr : public Expression {
     std::unique_ptr<Expression> object;
     std::unique_ptr<VariableExpr> method;
@@ -1196,6 +1217,11 @@ public:
             }
             Value::Arguments vargs = args.evaluate(context);
             return callable.call(context, vargs);
+          }
+        } else if (obj.is_string()) {
+          if (method->get_name() == "strip") {
+            args.expectArgs("strip method", {0, 0}, {0, 0});
+            return Value(strip(obj.get<std::string>()));
           }
         }
         throw std::runtime_error("Unknown method: " + method->get_name());
@@ -1250,27 +1276,6 @@ public:
         parts.insert(parts.begin(), std::move(e));
     }
 };
-
-static std::string strip(const std::string & s) {
-  static std::regex trailing_spaces_regex("^\\s+|\\s+$");
-  return std::regex_replace(s, trailing_spaces_regex, "");
-}
-
-static std::string html_escape(const std::string & s) {
-  std::string result;
-  result.reserve(s.size());
-  for (const auto & c : s) {
-    switch (c) {
-      case '&': result += "&amp;"; break;
-      case '<': result += "&lt;"; break;
-      case '>': result += "&gt;"; break;
-      case '"': result += "&quot;"; break;
-      case '\'': result += "&apos;"; break;
-      default: result += c; break;
-    }
-  }
-  return result;
-}
 
 class Parser {
 private:

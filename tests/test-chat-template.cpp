@@ -159,13 +159,12 @@ int main(void) {
     std::vector<char> formatted_chat(1024);
     int32_t res;
 
-    if (!getenv("LLAMA_MINJA")) {
-        // test invalid chat template
-        res = llama_chat_apply_template(nullptr, "INVALID TEMPLATE", conversation.data(), conversation.size(), true, formatted_chat.data(), formatted_chat.size());
-        assert(res < 0);
-    }
+    // test invalid chat template
+    res = llama_chat_apply_template(nullptr, "INVALID TEMPLATE", conversation.data(), conversation.size(), true, formatted_chat.data(), formatted_chat.size(), false, "<|im_start|>", "<|im_end|>");
+    assert(res < 0);
 
     for (auto use_jinja : std::vector<bool> { false, true }) {
+        printf("\n\n=== Using Jinja: %s ===\n\n", use_jinja ? "true" : "false");
         for (const auto & tmpl : templates) {
             printf("=== %s ===\n", tmpl.name.c_str());
             const auto & custom_template = tmpl.tmpl;

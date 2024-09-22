@@ -19776,6 +19776,7 @@ static int32_t llama_chat_apply_template_internal(
             dest = tmpl_root->render(context);
             return dest.size();
         } catch (const std::runtime_error & err) {
+            LLAMA_LOG_ERROR("Error in jinja template: %s\n", err.what());
             return -1;
         }
     }

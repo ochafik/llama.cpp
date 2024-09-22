@@ -421,6 +421,7 @@ std::string llama_chat_format_single(const struct llama_model * model,
         const std::vector<llama_chat_msg> & past_msg,
         const llama_chat_msg & new_msg,
         bool add_ass,
+        bool use_jinja = false,
         const std::string * bos_token = nullptr,
         const std::string * eos_token = nullptr);
 
