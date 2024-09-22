@@ -35,6 +35,20 @@ public:
     std::vector<Value> args;
     std::vector<std::pair<std::string, Value>> kwargs;
 
+    bool has_named(const std::string & name) const {
+      for (const auto & p : kwargs) {
+        if (p.first == name) return true;
+      }
+      return false;
+    }
+
+    Value get_named(const std::string & name) const {
+      for (const auto & p : kwargs) {
+        if (p.first == name) return p.second;
+      }
+      return Value();
+    }
+    
     bool empty() const {
       return args.empty() && kwargs.empty();
     }
@@ -174,6 +188,7 @@ public:
   size_t size() const {
     if (is_object()) return object_->size();
     if (is_array()) return array_->size();
+    if (is_string()) return primitive_.get<std::string>().length();
     throw std::runtime_error("Value is not an array or object: " + dump());
   }
 
@@ -507,9 +522,6 @@ public:
     if (parent_) return parent_->at(key);
     throw std::runtime_error("Undefined variable: " + key.dump());
   }
-  // bool contains(const std::string & key) const {
-  //   return contains(Value(key));
-  // }
   virtual bool contains(const Value & key) const {
     if (values_.contains(key)) return true;
     if (parent_) return parent_->contains(key);
@@ -2210,15 +2222,15 @@ static Value simple_function(const std::string & fn_name, const std::vector<std:
 }
 
 std::shared_ptr<Context> Context::builtins() {
-  auto top_level_values = Value::object();
+  auto globals = Value::object();
 
-  top_level_values.set("raise_exception", simple_function("raise_exception", { "message" }, [](const std::shared_ptr<Context> &, const Value & args) -> Value {
+  globals.set("raise_exception", simple_function("raise_exception", { "message" }, [](const std::shared_ptr<Context> &, const Value & args) -> Value {
     throw std::runtime_error(args.at("message").get<std::string>());
   }));
-  top_level_values.set("tojson", simple_function("tojson", { "value", "indent" }, [](const std::shared_ptr<Context> &, const Value & args) {
+  globals.set("tojson", simple_function("tojson", { "value", "indent" }, [](const std::shared_ptr<Context> &, const Value & args) {
     return Value(args.at("value").dump(args.get<int64_t>("indent", -1), /* tojson= */ true));
   }));
-  top_level_values.set("items", simple_function("items", { "object" }, [](const std::shared_ptr<Context> &, const Value & args) {
+  globals.set("items", simple_function("items", { "object" }, [](const std::shared_ptr<Context> &, const Value & args) {
     auto items = Value::array();
     if (args.contains("object")) {
       auto & obj = args.at("object");
@@ -2230,16 +2242,22 @@ std::shared_ptr<Context> Context::builtins() {
     }
     return items;
   }));
-  top_level_values.set("trim", simple_function("trim", { "text" }, [](const std::shared_ptr<Context> &, const Value & args) {
+  globals.set("last", simple_function("last", { "items" }, [](const std::shared_ptr<Context> &, const Value & args) {
+    auto items = args.at("items");
+    if (!items.is_array()) throw std::runtime_error("object is not a list");
+    if (items.size() == 0) return Value();
+    return items.at(items.size() - 1);
+  }));
+  globals.set("trim", simple_function("trim", { "text" }, [](const std::shared_ptr<Context> &, const Value & args) {
     auto & text = args.at("text");
     return text.is_null() ? text : Value(strip(text.get<std::string>()));
   }));
   auto escape = simple_function("escape", { "text" }, [](const std::shared_ptr<Context> &, const Value & args) {
     return Value(html_escape(args.at("text").get<std::string>()));
   });
-  top_level_values.set("e", escape);
-  top_level_values.set("escape", escape);
-  top_level_values.set("joiner", simple_function("joiner", { "sep" }, [](const std::shared_ptr<Context> &, const Value & args) {
+  globals.set("e", escape);
+  globals.set("escape", escape);
+  globals.set("joiner", simple_function("joiner", { "sep" }, [](const std::shared_ptr<Context> &, const Value & args) {
     auto sep = args.get<std::string>("sep", "");
     auto first = std::make_shared<bool>(true);
     return simple_function("", {}, [sep, first](const std::shared_ptr<Context> &, const Value &) -> Value {
@@ -2251,10 +2269,10 @@ std::shared_ptr<Context> Context::builtins() {
     });
     return Value(html_escape(args.at("text").get<std::string>()));
   }));
-  top_level_values.set("count", simple_function("count", { "items" }, [](const std::shared_ptr<Context> &, const Value & args) {
+  globals.set("count", simple_function("count", { "items" }, [](const std::shared_ptr<Context> &, const Value & args) {
     return Value((int64_t) args.at("items").size());
   }));
-  top_level_values.set("dictsort", simple_function("dictsort", { "value" }, [](const std::shared_ptr<Context> &, const Value & args) {
+  globals.set("dictsort", simple_function("dictsort", { "value" }, [](const std::shared_ptr<Context> &, const Value & args) {
     if (args.size() != 1) throw std::runtime_error("dictsort expects exactly 1 argument (TODO: fix implementation)");
     auto & value = args.at("value");
     auto keys = value.keys();
@@ -2265,7 +2283,7 @@ std::shared_ptr<Context> Context::builtins() {
     }
     return res;
   }));
-  top_level_values.set("join", simple_function("join", { "items", "d" }, [](const std::shared_ptr<Context> &, const Value & args) {
+  globals.set("join", simple_function("join", { "items", "d" }, [](const std::shared_ptr<Context> &, const Value & args) {
     auto do_join = [](const Value & items, const std::string & sep) {
       std::ostringstream oss;
       auto first = true;
@@ -2288,7 +2306,7 @@ std::shared_ptr<Context> Context::builtins() {
       });
     }
   }));
-  top_level_values.set("namespace", Value::callable([=](const std::shared_ptr<Context> &, const Value::Arguments & args) {
+  globals.set("namespace", Value::callable([=](const std::shared_ptr<Context> &, const Value::Arguments & args) {
     auto ns = Value::object();
     args.expectArgs("namespace", {0, 0}, {0, std::numeric_limits<size_t>::max()});
     for (auto & arg : args.kwargs) {
@@ -2296,19 +2314,22 @@ std::shared_ptr<Context> Context::builtins() {
     }
     return ns;
   }));
-  top_level_values.set("equalto", simple_function("equalto", { "expected", "actual" }, [](const std::shared_ptr<Context> &, const Value & args) -> Value {
+  auto equalto = simple_function("equalto", { "expected", "actual" }, [](const std::shared_ptr<Context> &, const Value & args) -> Value {
       return args.at("actual") == args.at("expected");
+  });
+  globals.set("equalto", equalto);
+  globals.set("==", equalto);
+  globals.set("length", simple_function("length", { "items" }, [](const std::shared_ptr<Context> &, const Value & args) -> Value {
+      auto & items = args.at("items");
+      return (int64_t) items.size();
   }));
-  top_level_values.set("length", simple_function("length", { "items" }, [](const std::shared_ptr<Context> &, const Value & args) -> Value {
-      return (int64_t) args.at("items").size();
-  }));
-  top_level_values.set("list", simple_function("list", { "items" }, [](const std::shared_ptr<Context> &, const Value & args) -> Value {
-      auto items = args.at("items");
+  globals.set("list", simple_function("list", { "items" }, [](const std::shared_ptr<Context> &, const Value & args) -> Value {
+      auto & items = args.at("items");
       if (!items.is_array()) throw std::runtime_error("object is not iterable");
       return items;
   }));
-  top_level_values.set("unique", simple_function("unique", { "items" }, [](const std::shared_ptr<Context> &, const Value & args) -> Value {
-      auto items = args.at("items");
+  globals.set("unique", simple_function("unique", { "items" }, [](const std::shared_ptr<Context> &, const Value & args) -> Value {
+      auto & items = args.at("items");
       if (!items.is_array()) throw std::runtime_error("object is not iterable");
       std::unordered_set<Value> seen;
       auto result = Value::array();
@@ -2322,7 +2343,7 @@ std::shared_ptr<Context> Context::builtins() {
   }));
   auto make_filter = [](const Value & filter, const Value & extra_args) -> Value {
     return simple_function("", { "value" }, [=](const std::shared_ptr<Context> & context, const Value & args) {
-      auto value = args.at("value");
+      auto & value = args.at("value");
       Value::Arguments actual_args;
       actual_args.args.emplace_back(value);
       for (size_t i = 0, n = extra_args.size(); i < n; i++) {
@@ -2332,11 +2353,11 @@ std::shared_ptr<Context> Context::builtins() {
     });
   };
   // https://jinja.palletsprojects.com/en/3.0.x/templates/#jinja-filters.reject
-  top_level_values.set("reject", Value::callable([=](const std::shared_ptr<Context> & context, const Value::Arguments & args) {
+  globals.set("reject", Value::callable([=](const std::shared_ptr<Context> & context, const Value::Arguments & args) {
     args.expectArgs("reject", {2, std::numeric_limits<size_t>::max()}, {0, 0});
     auto & items = args.args[0];
     auto filter_fn = context->get(args.args[1]);
-    if (!filter_fn.to_bool()) throw std::runtime_error("Function not found " + args.args[1].dump());
+    if (filter_fn.is_null()) throw std::runtime_error("Undefined filter: " + args.args[1].dump());
 
     auto filter_args = Value::array();
     for (size_t i = 2, n = args.args.size(); i < n; i++) {
@@ -2356,7 +2377,69 @@ std::shared_ptr<Context> Context::builtins() {
     }
     return res;
   }));
-  top_level_values.set("range", Value::callable([=](const std::shared_ptr<Context> &, const Value::Arguments & args) {
+  globals.set("map", Value::callable([=](const std::shared_ptr<Context> & context, const Value::Arguments & args) {
+    auto res = Value::array();
+    if (args.args.size() == 1 &&
+      (args.has_named("attribute") && args.kwargs.size() == 1 || args.has_named("default") && args.kwargs.size() == 2)) {
+      auto & items = args.args[0];
+      auto attr_name = args.get_named("attribute");
+      auto default_value = args.get_named("default");
+      for (size_t i = 0, n = items.size(); i < n; i++) {
+        auto & item = items.at(i);
+        auto attr = item.get(attr_name);
+        res.push_back(attr.is_null() ? default_value : attr);
+      }
+    } else if (args.kwargs.empty() && args.args.size() >= 2) {
+      auto fn = context->get(args.args[1]);
+      if (fn.is_null()) throw std::runtime_error("Undefined filter: " + args.args[1].dump());
+      Value::Arguments filter_args { {Value()}, {} };
+      for (size_t i = 2, n = args.args.size(); i < n; i++) {
+        filter_args.args.emplace_back(args.args[i]);
+      }
+      for (size_t i = 0, n = args.args[0].size(); i < n; i++) {
+        auto & item = args.args[0].at(i);
+        filter_args.args[0] = item;
+        res.push_back(fn.call(context, filter_args));
+      }
+    } else {
+      throw std::runtime_error("Invalid or unsupported arguments for map");
+    }
+    return res;
+  }));
+  globals.set("selectattr", Value::callable([=](const std::shared_ptr<Context> & context, const Value::Arguments & args) {
+    args.expectArgs("selectattr", {2, std::numeric_limits<size_t>::max()}, {0, 0});
+    auto & items = args.args[0];
+    auto attr_name = args.args[1].get<std::string>();
+
+    bool has_test = false;
+    Value test_fn;
+    Value::Arguments test_args {{Value()}, {}};
+    if (args.args.size() >= 3) {
+      has_test = true;
+      test_fn = context->get(args.args[2]);
+      if (test_fn.is_null()) throw std::runtime_error("Undefined test: " + args.args[2].dump());
+      for (size_t i = 3, n = args.args.size(); i < n; i++) {
+        test_args.args.emplace_back(args.args[i]);
+      }
+      test_args.kwargs = args.kwargs;
+    }
+
+    auto res = Value::array();
+    for (size_t i = 0, n = items.size(); i < n; i++) {
+      auto & item = items.at(i);
+      auto attr = item.get(attr_name);
+      if (has_test) {
+        test_args.args[0] = attr;
+        if (test_fn.call(context, test_args).to_bool()) {
+          res.push_back(item);
+        }
+      } else {
+        res.push_back(attr);
+      }
+    }
+    return res;
+  }));
+  globals.set("range", Value::callable([=](const std::shared_ptr<Context> &, const Value::Arguments & args) {
     std::vector<int64_t> startEndStep(3);
     std::vector<bool> param_set(3);
     if (args.args.size() == 1) {
@@ -2403,7 +2486,7 @@ std::shared_ptr<Context> Context::builtins() {
     return res;
   }));
 
-  return std::make_shared<Context>(std::move(top_level_values));
+  return std::make_shared<Context>(std::move(globals));
 }
 
 std::shared_ptr<Context> Context::make(Value && values, const std::shared_ptr<Context> & parent) {

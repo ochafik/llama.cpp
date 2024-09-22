@@ -162,6 +162,10 @@ static void test_error_contains(const std::string & template_str, const json & b
 }
 
 static void test_template_features() {
+    test_render(R"({{ [{"a": 1}, {"a": 2}, {}] | selectattr("a", "equalto", 1) }})", {}, {}, R"([{'a': 1}])");
+    test_render(R"({{ [{"a": 1}, {"a": 2}] | map(attribute="a") | list }})", {}, {}, "[1, 2]");
+    test_render(R"({{ ["", "a"] | map("length") | list }})", {}, {}, "[0, 1]");
+    test_render(R"({{ range(3) | last }})", {}, {}, "2");
     test_render(R"({% set foo = true %}{{ foo is defined }})", {}, {}, "True");
     test_render(R"({% set foo = true %}{{ not foo is defined }})", {}, {}, "False");
     test_render(R"({{ {"a": "b"} | tojson }})", {}, {}, R"({"a": "b"})");
