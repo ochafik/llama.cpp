@@ -109,8 +109,9 @@ def handle_chat_template(model_id, variant, template_src):
     print()
 
 def main():
-    os.mkdir('tests/chat/templates')
-    os.mkdir('tests/chat/goldens')
+    for dir in ['tests/chat/templates', 'tests/chat/goldens']:
+        if not os.path.isdir(dir):
+            os.mkdir(dir)
     
     for model_id in model_ids:
         # response = requests.get(f"https://huggingface.co/{model_id}/resolve/main/tokenizer_config.json")
