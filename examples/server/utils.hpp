@@ -125,16 +125,17 @@ inline std::string format_chat(const struct llama_model * model, const std::stri
     for (size_t i = 0; i < messages.size(); ++i) {
         const auto & curr_msg = messages[i];
 
-        std::string role = json_value(curr_msg, "role", std::string(""));
+        llama_chat_msg msg;
+        msg.role = json_value(curr_msg, "role", std::string(""));
+        msg.tool = json_value(curr_msg, "tool", std::string(""));
 
-        std::string content;
         if (curr_msg.contains("content")) {
             if (curr_msg["content"].is_string()) {
-                content = curr_msg["content"].get<std::string>();
+                msg.content = curr_msg["content"].get<std::string>();
             } else if (curr_msg["content"].is_array()) {
                 for (const auto & part : curr_msg["content"]) {
                     if (part.contains("text")) {
-                        content += "\n" + part["text"].get<std::string>();
+                        msg.content += "\n" + part["text"].get<std::string>();
                     }
                 }
             } else {
@@ -143,8 +144,18 @@ inline std::string format_chat(const struct llama_model * model, const std::stri
         } else {
             throw std::runtime_error("Missing 'content' (ref: https://github.com/ggerganov/llama.cpp/issues/8367)");
         }
-
-        chat.push_back({role, content});
+        if (curr_msg.contains("tool_calls") && curr_msg["tool_calls"].is_array()) {
+            for (const auto & tool_call : curr_msg["tool_calls"]) {
+                if (json_value(tool_call, "type", std::string("")) == "function"
+                        && tool_call.contains("function") && tool_call["function"].is_object()) {
+                    msg.tool_calls.emplace_back(
+                        json_value(tool_call["function"], "name", std::string("")),
+                        json_value(tool_call["function"], "arguments", std::string(""))
+                    );
+                }
+            }
+        }
+        chat.emplace_back(std::move(msg));
     }
 
     auto formatted_chat = llama_chat_apply_template(model, tmpl, chat, true);
