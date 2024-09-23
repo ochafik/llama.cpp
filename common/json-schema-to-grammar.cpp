@@ -397,22 +397,6 @@ private:
     std::vector<std::string> _errors;
     std::vector<std::string> _warnings;
 
-    std::string add_rule(const std::string & name, const std::string & rule) {
-        std::string esc_name = regex_replace(name, INVALID_RULE_CHARS_RE, "-");
-        if (_rules.find(esc_name) == _rules.end() || _rules[esc_name] == rule) {
-            _rules[esc_name] = rule;
-            return esc_name;
-        } else {
-            int i = 0;
-            while (_rules.find(esc_name + std::to_string(i)) != _rules.end() && _rules[esc_name + std::to_string(i)] != rule) {
-                i++;
-            }
-            std::string key = esc_name + std::to_string(i);
-            _rules[key] = rule;
-            return key;
-        }
-    }
-
     std::string _generate_union_rule(const std::string & name, const std::vector<json> & alt_schemas) {
         std::vector<std::string> rules;
         for (size_t i = 0; i < alt_schemas.size(); i++) {
@@ -813,6 +797,22 @@ public:
           : _fetch_json(fetch_json), _dotall(dotall)
     {
         _rules["space"] = SPACE_RULE;
+    }
+
+    std::string add_rule(const std::string & name, const std::string & rule) {
+        std::string esc_name = regex_replace(name, INVALID_RULE_CHARS_RE, "-");
+        if (_rules.find(esc_name) == _rules.end() || _rules[esc_name] == rule) {
+            _rules[esc_name] = rule;
+            return esc_name;
+        } else {
+            int i = 0;
+            while (_rules.find(esc_name + std::to_string(i)) != _rules.end() && _rules[esc_name + std::to_string(i)] != rule) {
+                i++;
+            }
+            std::string key = esc_name + std::to_string(i);
+            _rules[key] = rule;
+            return key;
+        }
     }
 
     void resolve_refs(json & schema, const std::string & url) {
