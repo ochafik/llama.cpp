@@ -639,21 +639,46 @@ static std::pair<std::string, json> parse_hermes_tool_calls(const std::string& i
     }
 }
 
-static std::pair<std::string, json> parse_llama_3_1_tool_calls(const std::string& input) {
-    throw std::runtime_error("Not implemented");
+static std::pair<std::string, json> parse_llama_3_1_tool_calls(const json & request, const std::string& input) {
+    static std::regex python_tag_regex(R"(^<\|python_tag\|>(.*)$)");
+    std::smatch match;
+    if (std::regex_search(input, match, python_tag_regex)) {
+        return {match.prefix().str(), {
+            {"function", {
+                {"name", "ipython"},
+                {"arguments", {
+                    {"code", match[1].str()},
+                }},
+            }}
+        }};
+    }
+    try {
+        auto call = json::parse(input);
+        // Only treat JSON as a tool call if it has a name attribute that matches any of the tools specified in the request.
+        // There doesn't seem to be any better way to detect a tool call.
+        auto name = json_value(call, "name", std::string());
+        for (const auto & tool : request.at("tools")) {
+            if (json_value(json_value(tool, "function", json::object()), "name", std::string()) == name) {
+                return {input, call};
+            }
+        }
+    } catch (const std::exception & e) {
+        // Do nothing
+    }
+    return {input, json()};
 }
 
 
 static std::pair<std::string, json> parse_functionary_3_2_tool_calls(const std::string& input) {
-    throw std::runtime_error("Not implemented");
+    throw std::runtime_error(std::string("Tool call extraction not implemented: ") + input);
 }
 
-static std::pair<std::string, json> parse_tool_calls(const std::string & chat_template, const std::string& input) {
+static std::pair<std::string, json> parse_tool_calls(const json & request, const std::string & chat_template, const std::string& input) {
     if (chat_template.find("<tool_call>") != std::string::npos) {
         return parse_hermes_tool_calls(input);
     } else if (chat_template.find("<|start_header_id|>") != std::string::npos
             && chat_template.find("<|python_tag|>") != std::string::npos) {
-        return parse_llama_3_1_tool_calls(input);
+        return parse_llama_3_1_tool_calls(request, input);
     } else if (chat_template.find("<|start_header_id|>") != std::string::npos
             && chat_template.find(">>>all") != std::string::npos) {
         return parse_functionary_3_2_tool_calls(input);
@@ -677,12 +702,13 @@ static json format_final_response_oaicompat(const json & request, json result, c
     std::pair<std::string, json> content_and_tool_calls;
     json tool_calls;
     json message_content;
-    if (json_value(request, "parse_tool_calls", false) && (content_and_tool_calls = parse_tool_calls(chat_template, content)).second.is_array()) {
+    if (json_value(request, "parse_tool_calls", false) && (content_and_tool_calls = parse_tool_calls(request, chat_template, content)).second.is_array()) {
         finish_reason = "tool";
         if (!content_and_tool_calls.first.empty()) {
             message_content = content_and_tool_calls.first;
         }
         tool_calls = content_and_tool_calls.second;
+        LOG_INFO("Tool calls", {{"content", content}, {"message_content", message_content}, {"tool_calls", tool_calls}});
     } else {
         message_content = content;
     }
