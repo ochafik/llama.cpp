@@ -12,7 +12,7 @@ enum llama_tool_call_style {
 };
 
 void tool_call_grammar(
-    llama_tool_call_style style,
+    const std::string & chat_template,
     bool allow_content,
     bool parallel_tool_calls,
     const nlohmann::ordered_json & tools,

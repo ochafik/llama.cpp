@@ -1230,7 +1230,7 @@ struct server_context {
                 llama_grammar_accept_string(slot.ctx_sampling->grammar, ctx, match.pattern.c_str());
                 
                 length = pos + match.pos + match.matchLength;
-            } else if (match.pos != std::string::npos && !match.is_partial) {
+            } else if (!match.is_grammar_trigger && match.pos != std::string::npos && !match.is_partial) {
                 slot.stopped_word   = true;
                 slot.stopping_word  = match.pattern;
                 slot.has_next_token = false;
@@ -3069,12 +3069,19 @@ int main(int argc, char ** argv) {
             res_error(res, format_error_response("This server does not support chat completions. Start it without `--embeddings`", ERROR_TYPE_NOT_SUPPORTED));
             return;
         }
-        json data = oaicompat_completion_params_parse(
-            ctx_server.model,
-            json::parse(req.body),
-            params.chat_template,
-            params.use_jinja
-        );
+        json data;
+        try {
+            data = oaicompat_completion_params_parse(
+                ctx_server.model,
+                json::parse(req.body),
+                params.chat_template,
+                params.use_jinja
+            );
+        } catch (const std::exception & e) {
+            LOG_ERROR("Failed to initialize OpenAI-compatible layer", {{"error", e.what()}});
+            res_error(res, format_error_response(std::string("Failed to initialize OpenAI-compatible layer: ") + e.what(), ERROR_TYPE_INVALID_REQUEST));
+            return;
+        }
 
         const int id_task = ctx_server.queue_tasks.get_new_id();
 

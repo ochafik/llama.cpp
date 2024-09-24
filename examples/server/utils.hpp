@@ -392,14 +392,37 @@ static json oaicompat_completion_params_parse(
 
     llama_params["__oaicompat"] = true;
 
-    auto chat_template = chat_template_src.empty() ? llama_model_meta_val_str(model, "tokenizer.chat_template") : chat_template_src;
     auto eos_token = _llama_token_to_piece(model, llama_token_eos(model), /* special= */ true);
     auto bos_token = _llama_token_to_piece(model, llama_token_bos(model), /* special= */ true);
 
-    llama_params["chat_template"] = chat_template;
     
     // Apply chat template to the list of messages
-    llama_params["prompt"] = format_chat(model, chat_template_src, body.at("messages"), use_jinja);
+    std::string chat_template;
+    if (use_jinja) {
+        chat_template = chat_template_src.empty() ? llama_model_meta_val_str(model, "tokenizer.chat_template") : chat_template_src;
+        auto tools = json_value(body, "tools", json());
+        if (tools.is_array() && !tools.empty() && chat_template.find("tools") == std::string::npos) {
+            throw std::runtime_error("Chat template does not seem to support tools. Override the model template with --chat-template.");
+        }
+        auto context = minja::Context::make(json({
+            {"model", json_value(body, "model", json())},
+            {"messages", json_value(body, "messages", json())},
+            {"tools", tools},
+            {"add_generation_prompt", true},
+            {"eos_token", _llama_token_to_piece(model, llama_token_eos(model), /* special= */ true)},
+            {"bos_token", _llama_token_to_piece(model, llama_token_bos(model), /* special= */ true)},
+
+            {"builtin_tools", {"wolfram_alpha", "brave_search"}},
+            {"cutting_knowledge_date", "2023-04-01"},
+            {"todays_date", "2024-09-03"},
+        }));
+        auto tmpl = minja::Parser::parse(chat_template, minja::Options {.trim_blocks = true, .lstrip_blocks = true});
+        llama_params["prompt"] = tmpl->render(context);
+        llama_params["chat_template"] = chat_template;
+    } else {
+        llama_params["prompt"] = format_chat(model, chat_template_src, body.at("messages"), use_jinja);
+    }
+
     LOG_INFO("prompt", {{"prompt", llama_params["prompt"]}, {"grammar", llama_params["grammar"]}});
 
     // Handle "stop" field
@@ -436,7 +459,7 @@ static json oaicompat_completion_params_parse(
         } else if (!response_type.empty() && response_type != "text") {
             throw std::runtime_error("response_format type must be one of \"text\" or \"json_object\", but got: " + response_type);
         }
-    } else if (tool_choice != "none" && body.contains("tools") && body["tools"].is_array()) {
+    } else if (use_jinja && tool_choice != "none" && body.contains("tools") && body["tools"].is_array()) {
         const auto & tools = body["tools"];
         bool parallel_tool_calls = json_value(body, "parallel_tool_calls", false);
         bool allow_content = tool_choice != "required";
@@ -449,7 +472,7 @@ static json oaicompat_completion_params_parse(
         std::function<bool(std::string::const_iterator &, const std::string::const_iterator &, json &)> tool_call_parser;
 
         tool_call_grammar(
-            style,
+            chat_template,
             allow_content,
             parallel_tool_calls,
             tools,
@@ -625,16 +648,14 @@ static std::pair<std::string, json> parse_functionary_3_2_tool_calls(const std::
     throw std::runtime_error("Not implemented");
 }
 
-static bool contains(const std::string & s, const std::string & content) {
-    return s.find(content) != std::string::npos;
-}
-
-static json parse_tool_calls(const std::string & chat_template, const std::string& input) {
-    if (contains(chat_template, "<tool_call>")) {
+static std::pair<std::string, json> parse_tool_calls(const std::string & chat_template, const std::string& input) {
+    if (chat_template.find("<tool_call>") != std::string::npos) {
         return parse_hermes_tool_calls(input);
-    } else if (contains(chat_template, "<|start_header_id|>") && contains(chat_template, "<|python_tag|>")) {
+    } else if (chat_template.find("<|start_header_id|>") != std::string::npos
+            && chat_template.find("<|python_tag|>") != std::string::npos) {
         return parse_llama_3_1_tool_calls(input);
-    } else if (contains(chat_template, "<|start_header_id|>") && contains(chat_template, ">>>all")) {
+    } else if (chat_template.find("<|start_header_id|>") != std::string::npos
+            && chat_template.find(">>>all") != std::string::npos) {
         return parse_functionary_3_2_tool_calls(input);
     } else {
         throw std::runtime_error("Unsupported chat template for tool calls");
@@ -653,10 +674,15 @@ static json format_final_response_oaicompat(const json & request, json result, c
         finish_reason = "stop";
     }
     auto chat_template = json_value(request, "chat_template", std::string());
+    std::pair<std::string, json> content_and_tool_calls;
     json tool_calls;
     json message_content;
-    if (json_value(request, "parse_tool_calls", false) && (tool_calls = parse_tool_calls(chat_template, content)).is_array()) {
+    if (json_value(request, "parse_tool_calls", false) && (content_and_tool_calls = parse_tool_calls(chat_template, content)).second.is_array()) {
         finish_reason = "tool";
+        if (!content_and_tool_calls.first.empty()) {
+            message_content = content_and_tool_calls.first;
+        }
+        tool_calls = content_and_tool_calls.second;
     } else {
         message_content = content;
     }
