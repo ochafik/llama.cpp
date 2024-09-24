@@ -5,12 +5,6 @@
 #define JSON_ASSERT GGML_ASSERT
 #include "json.hpp"
 
-enum llama_tool_call_style {
-  MeetKaiFunctionary_3_2,
-  MetaLlama_3_1,
-  NousResearchHermesPro_2,
-};
-
 void tool_call_grammar(
     const std::string & chat_template,
     bool allow_content,

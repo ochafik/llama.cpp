@@ -63,6 +63,7 @@ add_library(${TARGET} STATIC
     json.hpp
     minja.hpp
     json-schema-to-grammar.cpp
+    tool-call.cpp
     train.h
     train.cpp
     ngram-cache.h

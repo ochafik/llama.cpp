@@ -51,6 +51,8 @@ TEST_TARGETS = \
 	tests/test-grammar-integration \
 	tests/test-grammar-parser \
 	tests/test-json-schema-to-grammar \
+	tests/test-minja \
+	tests/test-tool-call \
 	tests/test-llama-grammar \
 	tests/test-model-load-cancel \
 	tests/test-opt \
@@ -929,7 +931,8 @@ OBJ_COMMON = \
 	common/train.o \
 	common/grammar-parser.o \
 	common/build-info.o \
-	common/json-schema-to-grammar.o
+	common/json-schema-to-grammar.o \
+	common/tool-call.o
 
 OBJ_ALL = $(OBJ_GGML) $(OBJ_LLAMA) $(OBJ_COMMON)
 
@@ -1175,6 +1178,11 @@ common/grammar-parser.o: \
 common/json-schema-to-grammar.o: \
 	common/json-schema-to-grammar.cpp \
 	common/json-schema-to-grammar.h
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+common/tool-call.o: \
+	common/tool-call.cpp \
+	common/tool-call.h
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 common/train.o: \

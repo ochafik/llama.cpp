@@ -121,6 +121,7 @@ llama_target_and_test(test-grad0.cpp)
 llama_target_and_test(test-backend-ops.cpp)
 llama_target_and_test(test-antiprompts.cpp)
 llama_target_and_test(test-minja.cpp)
+llama_target_and_test(test-tool-call.cpp)
 
 llama_target_and_test(test-rope.cpp)
 
