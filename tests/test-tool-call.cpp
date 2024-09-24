@@ -88,7 +88,7 @@ int main() {
         }}
       }});
     test_parse_tool_call(tools, llama_3_1_tmpl,
-      "{\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}",
+      "{\"name\": \"special_function\", \"parameters\": {\"arg1\": 1}}",
       "",
       json {{
         {"function", {

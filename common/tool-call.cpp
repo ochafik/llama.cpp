@@ -131,7 +131,7 @@ static std::pair<std::string, json> parse_llama_3_1_tool_calls(const json & tool
                     return {"", {{
                         {"function", {
                             {"name", name},
-                            {"arguments", call["arguments"].dump()},
+                            {"arguments", call["parameters"].dump()},
                         
                         }},
                     }}};
