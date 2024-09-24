@@ -2,6 +2,7 @@
 
 #include "common.h"
 #include "json-schema-to-grammar.h"
+#include "tool-call.h"
 #include "llama.h"
 #include "grammar-parser.h"
 
