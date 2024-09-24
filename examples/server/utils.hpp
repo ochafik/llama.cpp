@@ -393,7 +393,6 @@ static json oaicompat_completion_params_parse(
 
     // Handle "response_format" field (https://platform.openai.com/docs/api-reference/chat/create#chat-create-response_format)
     auto tool_choice = json_value(body, "tool_choice", std::string("auto"));
-    std::string extra_system_message;
     if (body.contains("response_format")) {
         json response_format      = json_value(body, "response_format", json::object());
         std::string response_type = json_value(response_format, "type", std::string());
