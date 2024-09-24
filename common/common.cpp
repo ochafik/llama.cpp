@@ -1304,6 +1304,21 @@ bool gpt_params_find_arg(int argc, char ** argv, const std::string & arg, gpt_pa
         params.chat_template = argv[i];
         return true;
     }
+    if (arg == "--chat-template-file") {
+        CHECK_ARG
+        std::ifstream file(argv[i]);
+        if (!file) {
+            fprintf(stderr, "error: failed to open file '%s'\n", argv[i]);
+            invalid_param = true;
+            return true;
+        }
+        std::copy(
+            std::istreambuf_iterator<char>(file),
+            std::istreambuf_iterator<char>(),
+            std::back_inserter(params.chat_template)
+        );
+        return true;
+    }
     if (arg == "--slot-prompt-similarity" || arg == "-sps") {
         CHECK_ARG
         params.slot_prompt_similarity = std::stof(argv[i]);
@@ -1748,7 +1763,11 @@ void gpt_params_print_usage(int /*argc*/, char ** argv, const gpt_params & param
     options.push_back({ "server",      "       --jinja",                "enable jinja templating for chat (default: %s)", params.use_jinja ? "enabled" : "disabled" });
     options.push_back({ "server",      "       --chat-template JINJA_TEMPLATE",
                                                                         "set custom jinja chat template (default: template taken from model's metadata)\n"
-                                                                        "only commonly used templates are accepted:\n"
+                                                                        "only commonly used templates are accepted (unless --jinja is set):\n"
+                                                                        "https://github.com/ggerganov/llama.cpp/wiki/Templates-supported-by-llama_chat_apply_template" });
+    options.push_back({ "server",      "       --chat-template-file JINJA_TEMPLATE_FILE",
+                                                                        "set custom jinja chat template (default: template taken from model's metadata)\n"
+                                                                        "only commonly used templates are accepted (unless --jinja is set):\n"
                                                                         "https://github.com/ggerganov/llama.cpp/wiki/Templates-supported-by-llama_chat_apply_template" });
     options.push_back({ "server",      "-sps,  --slot-prompt-similarity SIMILARITY",
                                                                         "how much the prompt of a request must match the prompt of a slot in order to use that slot (default: %.2f, 0.0 = disabled)\n", params.slot_prompt_similarity });
