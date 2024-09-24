@@ -3072,10 +3072,8 @@ int main(int argc, char ** argv) {
         json data = oaicompat_completion_params_parse(
             ctx_server.model,
             json::parse(req.body),
-            params.jinja,
-            params.prologue_template,
             params.chat_template,
-            params.chat_template_tool_use
+            params.use_jinja
         );
 
         const int id_task = ctx_server.queue_tasks.get_new_id();

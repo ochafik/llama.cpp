@@ -2,6 +2,7 @@
 
 #include "llama.h"
 #include "common.h"
+#include "json-schema-to-grammar.h"
 
 // Change JSON_ASSERT from assert() to GGML_ASSERT:
 #define JSON_ASSERT GGML_ASSERT
@@ -119,7 +120,7 @@ static inline void server_log(const char * level, const char * function, int lin
 //
 
 // Format given chat. If tmpl is empty, we take the template from model metadata
-inline std::string format_chat(const struct llama_model * model, const std::string & tmpl, const std::vector<json> & messages) {
+inline std::string format_chat(const struct llama_model * model, const std::string & tmpl, const std::vector<json> & messages, bool use_jinja) {
     std::vector<llama_chat_msg> chat;
 
     for (size_t i = 0; i < messages.size(); ++i) {
@@ -158,7 +159,7 @@ inline std::string format_chat(const struct llama_model * model, const std::stri
         chat.emplace_back(std::move(msg));
     }
 
-    auto formatted_chat = llama_chat_apply_template(model, tmpl, chat, true);
+    auto formatted_chat = llama_chat_apply_template(model, tmpl, chat, true, use_jinja);
     LOG_VERBOSE("formatted_chat", {{"text", formatted_chat.c_str()}});
     return formatted_chat;
 }
@@ -371,103 +372,34 @@ static std::string _llama_token_to_piece(const struct llama_model * model, llama
     return piece;
 }
 
+std::string llama_model_meta_val_str(const struct llama_model * model, const char * key) {
+    int32_t tlen = llama_model_meta_val_str(model, key, nullptr, 0);
+    if (tlen > 0) {
+        std::vector<char> curr_tmpl_buf(tlen + 1, 0);
+        if (llama_model_meta_val_str(model, key, curr_tmpl_buf.data(), curr_tmpl_buf.size()) == tlen) {
+            return std::string(curr_tmpl_buf.data(), tlen);
+        }
+    }
+    return "";
+}
+
 static json oaicompat_completion_params_parse(
     const struct llama_model * model,
     const json & body, /* openai api json semantics */
-    bool jinja,
-    const std::string & prologue_template,
     const std::string & chat_template_src,
-    const std::string & chat_template_tool_use_src
-    ) {
+    bool use_jinja) {
     json llama_params;
 
     llama_params["__oaicompat"] = true;
 
-    if (jinja) {
-        static std::vector<std::string> keys = {
-            "general.type",
-            "general.architecture",
-            "general.quantization_version",
-            "general.alignment",
-            "general.file_type",
-            "general.name",
-            "general.author",
-            "general.version",
-            "general.organization",
-            "general.finetune",
-            "general.basename",
-            "tokenizer.chat_template",
-            "tokenizer.chat_template.tool_use",
-        };
-        auto model_meta = json::object();
-        for (const auto & key : keys) {
-            int32_t tlen = llama_model_meta_val_str(model, key.c_str(), nullptr, 0);
-            if (tlen > 0) {
-                std::vector<char> curr_tmpl_buf(tlen + 1, 0);
-                if (llama_model_meta_val_str(model, key.c_str(), curr_tmpl_buf.data(), curr_tmpl_buf.size()) == tlen) {
-                    model_meta[key] = std::string(curr_tmpl_buf.data(), tlen);
-                }
-            }
-        }
+    auto chat_template = chat_template_src.empty() ? llama_model_meta_val_str(model, "tokenizer.chat_template") : chat_template_src;
+    auto eos_token = _llama_token_to_piece(model, llama_token_eos(model), /* special= */ true);
+    auto bos_token = _llama_token_to_piece(model, llama_token_bos(model), /* special= */ true);
 
-        // auto context = minja::Value::context(body);
-        auto context = minja::Context::make(json({
-            {"model", json_value(body, "model", json())},
-            {"messages", json_value(body, "messages", json())},
-            {"tools", json_value(body, "tools", json())},
-            {"tool_choice", json_value(body, "tool_choice", std::string("auto"))},
-            {"parallel_tool_calls", json_value(body, "parallel_tool_calls", false)},
-            {"model_meta", model_meta},
-            {"chat_template", chat_template_src.empty() || chat_template_src == "chatml" ? json() : json(chat_template_src)},
-            {"chat_template_tool_use", chat_template_tool_use_src.empty() || chat_template_tool_use_src == "chatml" ? json() : json(chat_template_tool_use_src)},
-            {"stop", json_value(body, "stop", json())},
-            {"grammar", json_value(body, "grammar", json())},
-            {"response_format", json_value(body, "response_format", json())},
-            {"add_generation_prompt", true},
-            {"eos_token", _llama_token_to_piece(model, llama_token_eos(model), /* special= */ true)},
-            {"bos_token", _llama_token_to_piece(model, llama_token_bos(model), /* special= */ true)},
-        }));
-
-        if (!prologue_template.empty()) {
-            // Examples of what the prologue can do:
-            // - modify the tools based no the tool choice
-            // - modify the messages based on the chat template
-            // - detect the tool style of the chat template
-            // - add stop words based on the tool style (e.g. <|eom|> vs <|eot|>)
-            // - add a grammar based on the tool style and the tool schemas
-            // - (TBC) define lazy grammar trigger words
-            // - define regexps to extract tool calls
-            // - define a custom chat template (as a macro, if chat_template is callable!)
-
-            // TODO: allow it to change the chat template, e.g to choose between tools and not tools
-            auto prologue = minja::Parser::parse(prologue_template, minja::Options {.trim_blocks = true, .lstrip_blocks = true});
-            prologue->render(context);
-        }
-
-
-        auto chat_template = context->get("chat_template");
-        std::string result;
-        if (chat_template.is_callable()) {
-            result = chat_template.call(context, {}).get<std::string>();
-        } else {
-            auto tmpl_src = chat_template.get<std::string>();
-            auto tmpl = minja::Parser::parse(tmpl_src, minja::Options {.trim_blocks = true, .lstrip_blocks = true});
-            result = tmpl->render(context);
-        }
-
-        auto grammar = context->get("grammar");
-        if (grammar.is_string()) {
-            llama_params["grammar"] = grammar.get<std::string>();
-        }
-        auto stop = context->get("stop").get<json>();
-        llama_params["stop"] = stop.is_string() ? json::array({stop}) : stop.is_array() ? stop : json::array();
-
-        // TODO: recuperate array of regex that contain function calls with groups in name,args order or args,name order.
-        
-    } else {
+    llama_params["chat_template"] = chat_template;
     
     // Apply chat template to the list of messages
-    llama_params["prompt"] = format_chat(model, chat_template_src, body.at("messages"));
+    llama_params["prompt"] = format_chat(model, chat_template_src, body.at("messages"), use_jinja);
     LOG_INFO("prompt", {{"prompt", llama_params["prompt"]}, {"grammar", llama_params["grammar"]}});
 
     // Handle "stop" field
@@ -504,16 +436,52 @@ static json oaicompat_completion_params_parse(
         } else if (!response_type.empty() && response_type != "text") {
             throw std::runtime_error("response_format type must be one of \"text\" or \"json_object\", but got: " + response_type);
         }
-    }
+    } else if (tool_choice != "none" && body.contains("tools") && body["tools"].is_array()) {
+        const auto & tools = body["tools"];
+        bool parallel_tool_calls = json_value(body, "parallel_tool_calls", false);
+        bool allow_content = tool_choice != "required";
 
-    // Params supported by OAI but unsupported by llama.cpp
-    static const std::vector<std::string> unsupported_params { "tools", "tool_choice" };
-    for (auto & param : unsupported_params) {
-        if (body.contains(param)) {
-            throw std::runtime_error("Unsupported param: " + param);
+        llama_tool_call_style style = llama_tool_call_style::MetaLlama_3_1;
+        
+        std::string grammar;
+        std::vector<std::string> grammar_trigger_words;
+        std::vector<std::string> additional_stop_words;
+        std::function<bool(std::string::const_iterator &, const std::string::const_iterator &, json &)> tool_call_parser;
+
+        tool_call_grammar(
+            style,
+            allow_content,
+            parallel_tool_calls,
+            tools,
+            grammar,
+            grammar_trigger_words,
+            additional_stop_words,
+            tool_call_parser);
+
+        for (const auto & stop : additional_stop_words) {
+            llama_params["stop"].push_back(stop);
         }
-    }
+        if (!grammar_trigger_words.empty()) {
+            auto triggers = json::array();
+            for (const auto & word : grammar_trigger_words) {
+                triggers.push_back(word);
+            }
+            llama_params["grammar_trigger_words"] = triggers;
+        }
 
+        llama_params["grammar"] = grammar;
+        llama_params["parse_tool_calls"] = true;
+        llama_params["parallel_tool_calls"] = parallel_tool_calls;
+    }
+    
+    // Params supported by OAI but unsupported by llama.cpp
+    if (!use_jinja) {
+        static const std::vector<std::string> unsupported_params { "tools", "tool_choice" };
+        for (auto & param : unsupported_params) {
+            if (body.contains(param)) {
+                throw std::runtime_error("Unsupported param (--jinja mode required for tool call): " + param);
+            }
+        }
     }
 
     // Handle "n" field
@@ -547,58 +515,83 @@ static json oaicompat_completion_params_parse(
 /*
  * Parses `"<tool_call>foo</tool_call><tool_call>bar</tool_call>"` to `[foo, bar]` where foo and bar are valid JSON.
  */
-static json parse_tool_calls(const std::string& input) {
+
+struct llama_tool_call_extractor {
+    std::string regex_with_group_names;
+    std::vector<std::string> group_names;
+    std::regex regex;
+
+};
+
+static bool parse_json(std::string::const_iterator & it, const std::string::const_iterator & end, json & out) {
+    // // https://json.nlohmann.me/features/parsing/sax_interface/
+    struct json_error_locator : public nlohmann::json_sax<json> {
+        std::size_t position;
+        bool found_error;
+
+        bool parse_error(std::size_t position, const std::string & last_token, const json::exception & ex) override {
+            LOG_WARNING("JSON error (Expected)", {{"position", position}, {"last_token", last_token}, {"error", ex.what()}});
+            this->position = position - 1;
+            this->found_error = true;
+            return false;
+        }
+        bool null() override { return true; }
+        bool boolean(bool) override { return true; }
+        bool number_integer(number_integer_t) override { return true; }
+        bool number_unsigned(number_unsigned_t) override { return true; }
+        bool number_float(number_float_t, const string_t &) override { return true; }
+        bool string(string_t &) override { return true; }
+        bool binary(binary_t &) override { return true; }
+        bool start_object(std::size_t) override { return true; }
+        bool key(string_t &) override { return true; }
+        bool end_object() override { return true; }
+        bool start_array(std::size_t) override { return true; }
+        bool end_array() override { return true; }
+    };
+    json_error_locator err_loc;
+    json::sax_parse(it, end, &err_loc);
+
+    std::string::const_iterator temptative_end;
+    if (err_loc.found_error) {
+        temptative_end = it + err_loc.position;
+    } else {
+        temptative_end = end;
+    }
+    std::string json_sub {it, it + err_loc.position};
+    LOG_WARNING("Parsing json", {{"json_sub", json_sub}});
     try {
-        std::regex start_pattern(R"(^\s*<tool_call>)");
-        std::regex middle_pattern(R"(\s*</tool_call>\s*<tool_call>)");
-        std::regex end_pattern(R"(\s*</tool_call>\s*$)");
+        out = json::parse(json_sub);
+        it = temptative_end;
+        return true;
+    } catch (const std::exception & e) {
+        LOG_WARNING("Failed to parse tool call", {{"json_sub", json_sub}, {"error", e.what()}});
+        return false;
+    }
+}
+
+static std::pair<std::string, json> parse_hermes_tool_calls(const std::string& input) {
+    try {
+        std::regex start_pattern(R"(^[\n\s]*<tool_call>)");
+        std::regex middle_pattern(R"([\n\s]*</tool_call>[\n\s]*<tool_call>)");
+        std::regex end_pattern(R"([\n\s]*</tool_call>[\n\s]*$)");
         
         auto end = input.end();
         std::sregex_iterator rend;
         std::sregex_iterator rit(input.begin(), end, start_pattern);
         if (rit == rend) {
-            return json();
+            return {input, json()};
         }
         
+        auto content = rit->prefix();
+
         json tool_calls = json::array();
         auto it = rit->suffix().first;
         while (it != end) {
-            // https://json.nlohmann.me/features/parsing/sax_interface/
-            struct json_error_locator : public nlohmann::json_sax<json> {
-                std::size_t position;
-                bool found;
-
-                bool parse_error(std::size_t position, const std::string & last_token, const json::exception & ex) override {
-                    LOG_WARNING("JSON error (Expected)", {{"position", position}, {"last_token", last_token}, {"error", ex.what()}});
-                    this->position = position - 1;
-                    this->found = true;
-                    return false;
-                }
-                bool null() override { return true; }
-                bool boolean(bool) override { return true; }
-                bool number_integer(number_integer_t) override { return true; }
-                bool number_unsigned(number_unsigned_t) override { return true; }
-                bool number_float(number_float_t, const string_t &) override { return true; }
-                bool string(string_t &) override { return true; }
-                bool binary(binary_t &) override { return true; }
-                bool start_object(std::size_t) override { return true; }
-                bool key(string_t &) override { return true; }
-                bool end_object() override { return true; }
-                bool start_array(std::size_t) override { return true; }
-                bool end_array() override { return true; }
-            };
-            // The function call JSON must be followed by a closing </tool_call> tag,
-            // which will break the SAX parser and reveal the end of the JSON object.
-            json_error_locator err_loc;
-            json::sax_parse(it, end, &err_loc);
-            if (!err_loc.found) {
-                LOG_WARNING("Malformed input, missing </tool_call>", {{"input", input}});
+            json call;
+            if (!parse_json(it, end, call)) {
+                LOG_WARNING("Failed to parse json tool call", {{"input", input}});
                 break;
             }
-
-            std::string json_sub(it, it + err_loc.position);
-            LOG_WARNING("Parsing tool call", {{"json_sub", json_sub}});
-            auto call = json::parse(it, it + err_loc.position);
             tool_calls.push_back({
                 {"function", {
                     {"name", call["name"]},
@@ -616,10 +609,35 @@ static json parse_tool_calls(const std::string& input) {
                 break;
             }
         }
-        return tool_calls;
+        return {content, tool_calls};
     } catch (const std::exception & e) {
         LOG_WARNING("Failed to parse tool calls", {{"input", input}, {"error", e.what()}});
-        return json();
+        return {input, json()};
+    }
+}
+
+static std::pair<std::string, json> parse_llama_3_1_tool_calls(const std::string& input) {
+    throw std::runtime_error("Not implemented");
+}
+
+
+static std::pair<std::string, json> parse_functionary_3_2_tool_calls(const std::string& input) {
+    throw std::runtime_error("Not implemented");
+}
+
+static bool contains(const std::string & s, const std::string & content) {
+    return s.find(content) != std::string::npos;
+}
+
+static json parse_tool_calls(const std::string & chat_template, const std::string& input) {
+    if (contains(chat_template, "<tool_call>")) {
+        return parse_hermes_tool_calls(input);
+    } else if (contains(chat_template, "<|start_header_id|>") && contains(chat_template, "<|python_tag|>")) {
+        return parse_llama_3_1_tool_calls(input);
+    } else if (contains(chat_template, "<|start_header_id|>") && contains(chat_template, ">>>all")) {
+        return parse_functionary_3_2_tool_calls(input);
+    } else {
+        throw std::runtime_error("Unsupported chat template for tool calls");
     }
 }
 
@@ -634,9 +652,10 @@ static json format_final_response_oaicompat(const json & request, json result, c
     if (stopped_word || stopped_eos) {
         finish_reason = "stop";
     }
+    auto chat_template = json_value(request, "chat_template", std::string());
     json tool_calls;
     json message_content;
-    if (json_value(request, "parse_tool_calls", false) && (tool_calls = parse_tool_calls(content)).is_array()) {
+    if (json_value(request, "parse_tool_calls", false) && (tool_calls = parse_tool_calls(chat_template, content)).is_array()) {
         finish_reason = "tool";
     } else {
         message_content = content;

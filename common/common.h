@@ -210,10 +210,8 @@ struct gpt_params {
 
     std::string hostname      = "127.0.0.1";
     std::string public_path   = "";
-    bool jinja = false;
-    std::string prologue_template = "";
+    bool use_jinja = false;
     std::string chat_template = "";
-    std::string chat_template_tool_use = "";
     std::string system_prompt = "";
     bool enable_chat_template = true;
 

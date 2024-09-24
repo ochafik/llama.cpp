@@ -1290,38 +1290,18 @@ bool gpt_params_find_arg(int argc, char ** argv, const std::string & arg, gpt_pa
         return true;
     }
     if (arg == "--jinja") {
-        params.jinja = true;
+        params.use_jinja = true;
         return true;
     }
     if (arg == "--chat-template") {
         CHECK_ARG
-        if (!params.jinja && !llama_chat_verify_template(argv[i])) {
+        if (!params.use_jinja && !llama_chat_verify_template(argv[i])) {
             fprintf(stderr, "error: the supplied chat template is not supported: %s\n", argv[i]);
             fprintf(stderr, "note: llama.cpp does not use jinja parser, we only support commonly used templates\n");
             invalid_param = true;
             return true;
         }
         params.chat_template = argv[i];
-        return true;
-    }
-    if (arg == "--chat-template-tool-use") {
-        CHECK_ARG
-        if (!params.jinja) {
-            fprintf(stderr, "error: tools chat template requires --jinja\n");
-            invalid_param = true;
-            return true;
-        }
-        params.chat_template_tool_use = argv[i];
-        return true;
-    }
-    if (arg == "--prologue-template") {
-        CHECK_ARG
-        if (!params.jinja) {
-            fprintf(stderr, "error: prologue template requires --jinja\n");
-            invalid_param = true;
-            return true;
-        }
-        params.prologue_template = argv[i];
         return true;
     }
     if (arg == "--slot-prompt-similarity" || arg == "-sps") {
@@ -1765,7 +1745,7 @@ void gpt_params_print_usage(int /*argc*/, char ** argv, const gpt_params & param
     options.push_back({ "server",      "       --metrics",              "enable prometheus compatible metrics endpoint (default: %s)", params.endpoint_metrics ? "enabled" : "disabled" });
     options.push_back({ "server",      "       --no-slots",             "disables slots monitoring endpoint (default: %s)", params.endpoint_slots ? "enabled" : "disabled" });
     options.push_back({ "server",      "       --slot-save-path PATH",  "path to save slot kv cache (default: disabled)" });
-    options.push_back({ "server",      "       --jinja",                "enable jinja templating for chat (default: %s)", params.jinja ? "enabled" : "disabled" });
+    options.push_back({ "server",      "       --jinja",                "enable jinja templating for chat (default: %s)", params.use_jinja ? "enabled" : "disabled" });
     options.push_back({ "server",      "       --chat-template JINJA_TEMPLATE",
                                                                         "set custom jinja chat template (default: template taken from model's metadata)\n"
                                                                         "only commonly used templates are accepted:\n"

@@ -35,6 +35,7 @@ model_ids = [
     "microsoft/Phi-3.5-mini-instruct",
 
     # Gated models:
+    # "meta-llama/Meta-Llama-3.1-8B-Instruct",
     # "google/gemma-2-2b-it",
     # "mistralai/Mixtral-8x7B-Instruct-v0.1",
 ]
