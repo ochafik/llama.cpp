@@ -464,8 +464,6 @@ static json oaicompat_completion_params_parse(
         bool parallel_tool_calls = json_value(body, "parallel_tool_calls", false);
         bool allow_content = tool_choice != "required";
 
-        llama_tool_call_style style = llama_tool_call_style::MetaLlama_3_1;
-        
         std::string grammar;
         std::vector<std::string> grammar_trigger_words;
         std::vector<std::string> additional_stop_words;
