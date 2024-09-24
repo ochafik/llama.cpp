@@ -352,16 +352,14 @@ static json oaicompat_completion_params_parse(
 
     llama_params["__oaicompat"] = true;
 
-    auto eos_token = _llama_token_to_piece(model, llama_token_eos(model), /* special= */ true);
-    auto bos_token = _llama_token_to_piece(model, llama_token_bos(model), /* special= */ true);
-
+    auto tools = json_value(body, "tools", json());
+    auto has_tools = tools.is_array() && !tools.empty();
     
     // Apply chat template to the list of messages
     std::string chat_template;
     if (use_jinja) {
         chat_template = chat_template_src.empty() ? llama_model_meta_val_str(model, "tokenizer.chat_template") : chat_template_src;
-        auto tools = json_value(body, "tools", json());
-        if (tools.is_array() && !tools.empty() && chat_template.find("tools") == std::string::npos) {
+        if (has_tools && chat_template.find("tools") == std::string::npos) {
             throw std::runtime_error("Chat template does not seem to support tools. Override the model template with --chat-template.");
         }
         auto context = minja::Context::make(json({
@@ -372,13 +370,16 @@ static json oaicompat_completion_params_parse(
             {"eos_token", _llama_token_to_piece(model, llama_token_eos(model), /* special= */ true)},
             {"bos_token", _llama_token_to_piece(model, llama_token_bos(model), /* special= */ true)},
 
+            // Llama 3.1 Instruct-specific variables:
             {"builtin_tools", {"wolfram_alpha", "brave_search"}},
-            {"cutting_knowledge_date", "2023-04-01"},
-            {"todays_date", "2024-09-03"},
+            {"todays_date", "2024-09-03"}, // TODO: make customizable or dynamic.
+            // {"cutting_knowledge_date", "2023-04-01"},
         }));
         auto tmpl = minja::Parser::parse(chat_template, minja::Options {.trim_blocks = true, .lstrip_blocks = true});
         llama_params["prompt"] = tmpl->render(context);
         llama_params["chat_template"] = chat_template;
+    } else if (has_tools) {
+        throw std::runtime_error("Tools are only supported in --jinja mode");
     } else {
         llama_params["prompt"] = format_chat(model, chat_template_src, body.at("messages"), use_jinja);
     }
@@ -417,8 +418,7 @@ static json oaicompat_completion_params_parse(
         } else if (!response_type.empty() && response_type != "text") {
             throw std::runtime_error("response_format type must be one of \"text\" or \"json_object\", but got: " + response_type);
         }
-    } else if (use_jinja && tool_choice != "none" && body.contains("tools") && body["tools"].is_array()) {
-        const auto & tools = body["tools"];
+    } else if (use_jinja && tool_choice != "none" && has_tools) {
         bool parallel_tool_calls = json_value(body, "parallel_tool_calls", false);
         bool allow_content = tool_choice != "required";
 
