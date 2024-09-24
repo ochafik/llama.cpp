@@ -8,6 +8,7 @@
 #define JSON_ASSERT GGML_ASSERT
 #include "json.hpp"
 #include "minja.hpp"
+#include "tool-call.h"
 
 #include <string>
 #include <vector>
