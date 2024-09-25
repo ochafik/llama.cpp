@@ -1510,9 +1510,9 @@ std::string llama_detokenize(llama_context * ctx, const std::vector<llama_token>
 // Chat template utils
 //
 
-bool llama_chat_verify_template(const std::string & tmpl) {
+bool llama_chat_verify_template(const std::string & tmpl, bool use_jinja) {
     llama_chat_message chat[] = {{"user", "test"}};
-    int res = llama_chat_apply_template(nullptr, tmpl.c_str(), chat, 1, true, nullptr, 0);
+    int res = llama_chat_apply_template(nullptr, tmpl.c_str(), chat, 1, true, nullptr, 0, use_jinja);
     return res >= 0;
 }
 

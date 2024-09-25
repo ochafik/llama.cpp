@@ -483,7 +483,7 @@ struct llama_chat_msg {
 };
 
 // Check if the template supplied via "--chat-template" is supported or not. Returns true if it's valid
-bool llama_chat_verify_template(const std::string & tmpl);
+bool llama_chat_verify_template(const std::string & tmpl, bool use_jinja = false);
 
 // CPP wrapper for llama_chat_apply_template
 // If the built-in template is not supported, we default to chatml
