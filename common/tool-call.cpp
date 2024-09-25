@@ -74,7 +74,7 @@ static bool parse_json(std::string::const_iterator & it, const std::string::cons
 
 static llama_tool_calls parse_hermes_tool_calls(const std::string& input) {
     try {
-        std::regex start_pattern(R"(^[\n\s]*<tool_call>)");
+        std::regex start_pattern(R"([\n\s]*<tool_call>)");
         std::regex middle_pattern(R"([\n\s]*</tool_call>[\n\s]*<tool_call>)");
         std::regex end_pattern(R"([\n\s]*</tool_call>[\n\s]*$)");
         
@@ -116,7 +116,7 @@ static llama_tool_calls parse_hermes_tool_calls(const std::string& input) {
 }
 
 static llama_tool_calls parse_llama_3_1_tool_calls(const json & tools, const std::string& input) {
-    static std::regex python_tag_regex(R"(^<\|python_tag\|>(.*)$)");
+    static std::regex python_tag_regex(R"(<\|python_tag\|>([\s\S\n]*)$)");
     std::smatch match;
     if (std::regex_search(input, match, python_tag_regex)) {
         return {
@@ -150,7 +150,7 @@ static llama_tool_calls parse_llama_3_1_tool_calls(const json & tools, const std
 
 
 static llama_tool_calls parse_functionary_3_2_tool_calls(const std::string& input) {
-    static std::regex python_tag_regex(R"(>>>(\w+)\n((?!>>>).+))");
+    static std::regex python_tag_regex(R"(>>>(\w+)\n((?!>>>)[\s\S\n]*))");
     std::smatch match;
     llama_tool_calls result;
     std::string content;

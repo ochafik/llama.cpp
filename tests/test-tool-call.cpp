@@ -58,8 +58,8 @@ int main() {
       {"tools", tools}
     };
     
-    std::string hermes_2_pro_tmpl = "Hermes 2 Pro template should have <tool_call> inside it";
-    test_parse_tool_call(tools, hermes_2_pro_tmpl,
+    std::string hermes_2_pro_like_tmpl = "Hermes 2 Pro template should have <tool_call> inside it";
+    test_parse_tool_call(tools, hermes_2_pro_like_tmpl,
       "<tool_call>{\"name\": \"foo\", \"arguments\": {\"bar\": 1}}</tool_call>",
       "",
       json {{
@@ -71,8 +71,8 @@ int main() {
         }}
       }});
    
-    std::string functionary_3_2_tmpl = "Functionary 3.2 template should have <|start_header_id|> and then some >>>all inside it";
-    test_parse_tool_call(tools, functionary_3_2_tmpl,
+    std::string functionary_3_2_like_tmpl = "Functionary 3.2 template should have <|start_header_id|> and then some >>>all inside it";
+    test_parse_tool_call(tools, functionary_3_2_like_tmpl,
       ">>>ipython\nprint('Hello, world!')",
       "",
       json {{
@@ -84,8 +84,8 @@ int main() {
         }}
       }});
    
-    std::string llama_3_1_tmpl = "Llama 3.1 template should have <|start_header_id|> and <|python_tag|> inside it";
-    test_parse_tool_call(tools, llama_3_1_tmpl,
+    std::string llama_3_1_like_tmpl = "Llama 3.1 template should have <|start_header_id|> and <|python_tag|> inside it";
+    test_parse_tool_call(tools, llama_3_1_like_tmpl,
       "<|python_tag|>this could be anything",
       "",
       json {{
@@ -96,7 +96,16 @@ int main() {
           }).dump()}
         }}
       }});
-    test_parse_tool_call(tools, llama_3_1_tmpl,
+    test_parse_tool_call(tools, llama_3_1_like_tmpl,
+      "I'm thinking<|python_tag|>",
+      "I'm thinking",
+      json {{
+        {"function", {
+          {"name", "ipython"},
+          {"arguments", (json {{"code", ""}}).dump()}
+        }}
+      }});
+    test_parse_tool_call(tools, llama_3_1_like_tmpl,
       "{\"name\": \"special_function\", \"parameters\": {\"arg1\": 1}}",
       "",
       json {{
@@ -107,7 +116,7 @@ int main() {
           }).dump()}
         }}
       }});
-    test_parse_tool_call(tools, llama_3_1_tmpl,
+    test_parse_tool_call(tools, llama_3_1_like_tmpl,
       "{\"name\": \"unknown_function\", \"arguments\": {\"arg1\": 1}}",
       "{\"name\": \"unknown_function\", \"arguments\": {\"arg1\": 1}}", json::array());
 
