@@ -25,7 +25,12 @@ static void test_parse_tool_call(const json & tools, const std::string & chat_te
     assert_equals(expected_content, result.content);
     auto tool_calls = json::array();
     for (const auto & tc : result.tool_calls) {
-        tool_calls.push_back({{"name", tc.name}, {"arguments", tc.arguments}});
+        tool_calls.push_back({
+          {"function", {
+            {"name", tc.name},
+            {"arguments", tc.arguments},
+          }}
+        });
     }
     assert_equals(expected_tool_calls.dump(), tool_calls.dump());
 }
@@ -104,7 +109,7 @@ int main() {
       }});
     test_parse_tool_call(tools, llama_3_1_tmpl,
       "{\"name\": \"unknown_function\", \"arguments\": {\"arg1\": 1}}",
-      "{\"name\": \"unknown_function\", \"arguments\": {\"arg1\": 1}}", json());
+      "{\"name\": \"unknown_function\", \"arguments\": {\"arg1\": 1}}", json::array());
 
     return 0;
 }
