@@ -32,6 +32,8 @@ model_ids = [
     "meetkai/functionary-medium-v3.2",
     "Qwen/Qwen2-7B-Instruct",
     "Qwen/Qwen2-VL-7B-Instruct",
+    "Qwen/Qwen2.5-7B-Instruct", # "Qwen/Qwen2.5-72B-Instruct", "Qwen/Qwen2.5-Coder-7B-Instruct",
+    "Qwen/Qwen2.5-Math-7B-Instruct", # "Qwen/Qwen2.5-Math-72B-Instruct",
     "microsoft/Phi-3.5-mini-instruct",
 
     # Gated models:
