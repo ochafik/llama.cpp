@@ -193,9 +193,9 @@ void llama_sampler_accept(struct llama_sampler * smpl, llama_token token) {
     }
 }
 
-void llama_sampler_accept_str(struct llama_sampler * smpl, const char * text) {
+void llama_sampler_accept_str(struct llama_sampler * smpl, const char * piece) {
     if (smpl->iface->accept_str) {
-        smpl->iface->accept_str(smpl, text);
+        smpl->iface->accept_str(smpl, piece);
     }
 }
 
@@ -1306,10 +1306,10 @@ static void llama_sampler_grammar_accept_impl(struct llama_sampler * smpl, llama
     }
 }
 
-static void llama_sampler_grammar_accept_str(struct llama_sampler * smpl, const char * text) {
+static void llama_sampler_grammar_accept_str(struct llama_sampler * smpl, const char * piece) {
     auto * ctx = (llama_sampler_grammar *) smpl->ctx;
     if (ctx->grammar) {
-        llama_grammar_accept_str(*ctx->grammar, text);
+        llama_grammar_accept_str(*ctx->grammar, piece);
     }
 }
 

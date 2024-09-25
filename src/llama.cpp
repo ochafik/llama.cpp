@@ -20980,6 +20980,7 @@ static int32_t llama_chat_apply_template_internal(
     const std::vector<const llama_chat_message *> & chat,
     std::string & dest, bool add_ass,
     bool use_jinja,
+    const std::string & tools,
     const std::string & bos_token, const std::string & eos_token) {
 
     if (use_jinja) {
@@ -21049,6 +21050,10 @@ static int32_t llama_chat_apply_template_internal(
             {"bos_token", bos_token},
             {"eos_token", eos_token},
         }));
+        if (!tools.empty()) {
+            auto tools_val = minja::Value(json::parse(tools));
+            context->set("tools", tools_val);
+        }
         auto tmpl_root = minja::Parser::parse(tmpl, {
             .lstrip_blocks = true,
             .trim_blocks = true,
@@ -21330,6 +21335,7 @@ int32_t llama_chat_apply_template(
                                     char * buf,
                                  int32_t   length,
                                     bool   use_jinja,
+                              const char * tools,
                               const char * bos_token,
                               const char * eos_token) {
     std::string curr_tmpl(tmpl == nullptr ? "" : tmpl);
@@ -21365,7 +21371,7 @@ int32_t llama_chat_apply_template(
     }
 
     std::string formatted_chat;
-    int32_t res = llama_chat_apply_template_internal(curr_tmpl, chat_vec, formatted_chat, add_ass, use_jinja, curr_bos_token, curr_eos_token);
+    int32_t res = llama_chat_apply_template_internal(curr_tmpl, chat_vec, formatted_chat, add_ass, use_jinja, tools == nullptr ? "" : tools, curr_bos_token, curr_eos_token);
     if (res < 0) {
         return res;
     }

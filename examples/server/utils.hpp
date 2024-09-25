@@ -59,7 +59,7 @@ static T json_value(const json & body, const std::string & key, const T & defaul
 //
 
 // Format given chat. If tmpl is empty, we take the template from model metadata
-inline std::string format_chat(const struct llama_model * model, const std::string & tmpl, const std::vector<json> & messages, bool use_jinja) {
+inline std::string format_chat(const struct llama_model * model, const std::string & tmpl, const std::vector<json> & messages, const json & tools, bool use_jinja) {
     std::vector<llama_chat_msg> chat;
 
     for (size_t i = 0; i < messages.size(); ++i) {
@@ -98,7 +98,7 @@ inline std::string format_chat(const struct llama_model * model, const std::stri
         chat.emplace_back(std::move(msg));
     }
 
-    const auto formatted_chat = llama_chat_apply_template(model, tmpl, chat, true, use_jinja);
+    const auto formatted_chat = llama_chat_apply_template(model, tmpl, chat, true, use_jinja, tools.is_null() ? "" : tools.dump());
     LOG_DBG("formatted_chat: '%s'\n", formatted_chat.c_str());
 
     return formatted_chat;
@@ -356,33 +356,32 @@ static json oaicompat_completion_params_parse(
     auto has_tools = tools.is_array() && !tools.empty();
     
     // Apply chat template to the list of messages
-    std::string chat_template;
+    auto chat_template = chat_template_src.empty() ? llama_model_meta_val_str(model, "tokenizer.chat_template") : chat_template_src;
+    llama_params["chat_template"] = chat_template;
     if (use_jinja) {
-        chat_template = chat_template_src.empty() ? llama_model_meta_val_str(model, "tokenizer.chat_template") : chat_template_src;
         if (has_tools && chat_template.find("tools") == std::string::npos) {
             throw std::runtime_error("Chat template does not seem to support tools. Override the model template with --chat-template.");
         }
-        auto context = minja::Context::make(json({
-            {"model", json_value(body, "model", json())},
-            {"messages", json_value(body, "messages", json())},
-            {"tools", tools},
-            {"add_generation_prompt", true},
-            {"eos_token", _llama_token_to_piece(model, llama_token_eos(model), /* special= */ true)},
-            {"bos_token", _llama_token_to_piece(model, llama_token_bos(model), /* special= */ true)},
+        // auto context = minja::Context::make(json({
+        //     {"messages", json_value(body, "messages", json())},
+        //     {"tools", tools},
+        //     {"add_generation_prompt", true},
+        //     {"eos_token", _llama_token_to_piece(model, llama_token_eos(model), /* special= */ true)},
+        //     {"bos_token", _llama_token_to_piece(model, llama_token_bos(model), /* special= */ true)},
 
-            // Llama 3.1 Instruct-specific variables:
-            {"builtin_tools", {"wolfram_alpha", "brave_search"}},
-            {"todays_date", "2024-09-03"}, // TODO: make customizable or dynamic.
-            // {"cutting_knowledge_date", "2023-04-01"},
-        }));
-        auto tmpl = minja::Parser::parse(chat_template, minja::Options {.trim_blocks = true, .lstrip_blocks = true});
-        llama_params["prompt"] = tmpl->render(context);
-        llama_params["chat_template"] = chat_template;
+        //     // Llama 3.1 Instruct-specific variables
+        //     // TODO: pass these as a JSON bag of key-values, or pass date dynamically
+        //     {"builtin_tools", {"wolfram_alpha", "brave_search"}},
+        //     {"todays_date", "2024-09-03"},
+        //     // {"cutting_knowledge_date", "2023-04-01"},
+        // }));
+        // auto tmpl = minja::Parser::parse(chat_template, minja::Options {.trim_blocks = true, .lstrip_blocks = true});
+        // llama_params["prompt"] = tmpl->render(context);
     } else if (has_tools) {
         throw std::runtime_error("Tools are only supported in --jinja mode");
-    } else {
-        llama_params["prompt"] = format_chat(model, chat_template_src, body.at("messages"), use_jinja);
+    // } else {
     }
+    llama_params["prompt"] = format_chat(model, chat_template, body.at("messages"), tools, use_jinja);
 
     // Handle "stop" field
     if (body.contains("stop") && body.at("stop").is_string()) {

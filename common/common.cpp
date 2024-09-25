@@ -1521,6 +1521,7 @@ std::string llama_chat_apply_template(const struct llama_model * model,
         const std::vector<llama_chat_msg> & msgs,
         bool add_ass,
         bool use_jinja,
+        const std::string & tools,
         const char * bos_token,
         const char * eos_token) {
     int alloc_size = 0;
@@ -1535,7 +1536,7 @@ std::string llama_chat_apply_template(const struct llama_model * model,
     std::vector<char> buf(alloc_size);
 
     // run the first time to get the total output length
-    int32_t res = llama_chat_apply_template(model, ptr_tmpl, chat.data(), chat.size(), add_ass, buf.data(), buf.size(), use_jinja, bos_token, eos_token);
+    int32_t res = llama_chat_apply_template(model, ptr_tmpl, chat.data(), chat.size(), add_ass, buf.data(), buf.size(), use_jinja, tools.empty() ? nullptr : tools.data(), bos_token, eos_token);
 
     // error: chat template is not supported
     if (res < 0) {
@@ -1569,6 +1570,7 @@ std::string llama_chat_format_single(const struct llama_model * model,
         const llama_chat_msg & new_msg,
         bool add_ass,
         bool use_jinja,
+        const std::string & tools,
         const char * bos_token,
         const char * eos_token) {
     std::ostringstream ss;

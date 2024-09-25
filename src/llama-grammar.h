@@ -145,4 +145,4 @@ void llama_grammar_accept_impl(
 
 void llama_grammar_accept_str(
               struct llama_grammar & grammar,
-                 const std::string & text);
+                 const std::string & piece);
