@@ -421,33 +421,20 @@ static json oaicompat_completion_params_parse(
         bool parallel_tool_calls = json_value(body, "parallel_tool_calls", false);
         bool allow_content = tool_choice != "required";
 
-        std::string grammar;
-        std::vector<std::string> grammar_trigger_words;
-        std::vector<std::string> additional_stop_words;
-        std::function<bool(std::string::const_iterator &, const std::string::const_iterator &, json &)> tool_call_parser;
+        auto handler = llama_tool_call_handler_init(chat_template, allow_content, parallel_tool_calls, tools);
 
-        tool_call_grammar(
-            chat_template,
-            allow_content,
-            parallel_tool_calls,
-            tools,
-            grammar,
-            grammar_trigger_words,
-            additional_stop_words,
-            tool_call_parser);
-
-        for (const auto & stop : additional_stop_words) {
+        for (const auto & stop : handler.additional_stop_words) {
             llama_params["stop"].push_back(stop);
         }
-        if (!grammar_trigger_words.empty()) {
+        if (!handler.grammar_trigger_words.empty()) {
             auto triggers = json::array();
-            for (const auto & word : grammar_trigger_words) {
+            for (const auto & word : handler.grammar_trigger_words) {
                 triggers.push_back(word);
             }
             llama_params["grammar_trigger_words"] = triggers;
         }
 
-        llama_params["grammar"] = grammar;
+        llama_params["grammar"] = handler.grammar;
         llama_params["parse_tool_calls"] = true;
         llama_params["parallel_tool_calls"] = parallel_tool_calls;
     }
@@ -501,16 +488,20 @@ static json format_final_response_oaicompat(const json & request, const json & r
         finish_reason = "stop";
     }
     auto chat_template = json_value(request, "chat_template", std::string());
-    std::pair<std::string, json> content_and_tool_calls;
+    llama_tool_calls parsed_tool_calls;
     auto tools = json_value(request, "tools", json::array());
     json tool_calls;
     json message_content;
-    if (json_value(request, "parse_tool_calls", false) && (content_and_tool_calls = parse_tool_calls(tools, chat_template, content)).second.is_array()) {
+    if (json_value(request, "parse_tool_calls", false)
+            && !(parsed_tool_calls = parse_tool_calls(tools, chat_template, content)).tool_calls.empty()) {
         finish_reason = "tool";
-        if (!content_and_tool_calls.first.empty()) {
-            message_content = content_and_tool_calls.first;
+        if (!parsed_tool_calls.content.empty()) {
+            message_content = parsed_tool_calls.content;
         }
-        tool_calls = content_and_tool_calls.second;
+        tool_calls = json::array();
+        for (const auto & tc : parsed_tool_calls.tool_calls) {
+            tool_calls.push_back({{"name", tc.name}, {"arguments", tc.arguments}});
+        }
     } else {
         message_content = content;
     }

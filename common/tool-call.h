@@ -5,14 +5,26 @@
 #define JSON_ASSERT GGML_ASSERT
 #include "json.hpp"
 
-std::pair<std::string, nlohmann::ordered_json> parse_tool_calls(const nlohmann::ordered_json & tools, const std::string & chat_template, const std::string& input);
+struct llama_tool_call {
+    std::string name;
+    std::string arguments;
+};
 
-void tool_call_grammar(
+struct llama_tool_calls {
+    std::string content;
+    std::vector<llama_tool_call> tool_calls;
+};
+
+struct llama_tool_call_handler {
+    std::string grammar;
+    std::vector<std::string> grammar_trigger_words;
+    std::vector<std::string> additional_stop_words;
+};
+
+llama_tool_calls parse_tool_calls(const nlohmann::ordered_json & tools, const std::string & chat_template, const std::string& input);
+
+llama_tool_call_handler llama_tool_call_handler_init(
     const std::string & chat_template,
     bool allow_content,
     bool parallel_tool_calls,
-    const nlohmann::ordered_json & tools,
-    std::string & grammar,
-    std::vector<std::string> & grammar_trigger_words,
-    std::vector<std::string> & additional_stop_words,
-    std::function<bool(std::string::const_iterator &, const std::string::const_iterator &, nlohmann::ordered_json &)> & tool_call_parser);
+    const nlohmann::ordered_json & tools);
