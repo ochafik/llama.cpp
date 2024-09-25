@@ -20,10 +20,14 @@ static void assert_equals(const std::string & expected, const std::string & actu
     cmake -B build -DLLAMA_CURL=1 -DCMAKE_BUILD_TYPE=Release && cmake --build build -t test-tool-call -j && ./build/bin/test-tool-call
 */
 
-void test_parse_tool_call(const json & tools, const std::string & chat_template, const std::string & input, const std::string & expected_content, const json & expected_tool_calls) {
+static void test_parse_tool_call(const json & tools, const std::string & chat_template, const std::string & input, const std::string & expected_content, const json & expected_tool_calls) {
     auto result = parse_tool_calls(tools, chat_template, input);
-    assert_equals(expected_content, result.first);
-    assert_equals(expected_tool_calls.dump(), result.second.dump());
+    assert_equals(expected_content, result.content);
+    auto tool_calls = json::array();
+    for (const auto & tc : result.tool_calls) {
+        tool_calls.push_back({{"name", tc.name}, {"arguments", tc.arguments}});
+    }
+    assert_equals(expected_tool_calls.dump(), tool_calls.dump());
 }
 int main() {
     json tools = json::parse(R"([

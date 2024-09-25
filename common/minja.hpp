@@ -2222,7 +2222,7 @@ static Value simple_function(const std::string & fn_name, const std::vector<std:
   });
 }
 
-std::shared_ptr<Context> Context::builtins() {
+inline std::shared_ptr<Context> Context::builtins() {
   auto globals = Value::object();
 
   globals.set("raise_exception", simple_function("raise_exception", { "message" }, [](const std::shared_ptr<Context> &, Value & args) -> Value {
@@ -2381,7 +2381,7 @@ std::shared_ptr<Context> Context::builtins() {
   globals.set("map", Value::callable([=](const std::shared_ptr<Context> & context, Value::Arguments & args) {
     auto res = Value::array();
     if (args.args.size() == 1 &&
-      (args.has_named("attribute") && args.kwargs.size() == 1 || args.has_named("default") && args.kwargs.size() == 2)) {
+      ((args.has_named("attribute") && args.kwargs.size() == 1) || (args.has_named("default") && args.kwargs.size() == 2))) {
       auto & items = args.args[0];
       auto attr_name = args.get_named("attribute");
       auto default_value = args.get_named("default");
@@ -2490,7 +2490,7 @@ std::shared_ptr<Context> Context::builtins() {
   return std::make_shared<Context>(std::move(globals));
 }
 
-std::shared_ptr<Context> Context::make(Value && values, const std::shared_ptr<Context> & parent) {
+inline std::shared_ptr<Context> Context::make(Value && values, const std::shared_ptr<Context> & parent) {
   return std::make_shared<Context>(values.is_null() ? Value::object() : std::move(values), parent);
 }
 
