@@ -5,14 +5,15 @@
 #define JSON_ASSERT GGML_ASSERT
 #include "json.hpp"
 
-void tool_call_grammar(
-    const std::string & chat_template,
-    bool allow_content,
-    bool parallel_tool_calls,
-    const nlohmann::ordered_json & tools,
-    std::string & grammar,
-    std::vector<std::string> & grammar_trigger_words,
-    std::vector<std::string> & additional_stop_words,
-    std::function<bool(std::string::const_iterator &, const std::string::const_iterator &, nlohmann::ordered_json &)> & tool_call_parser);
+template <typename Iterator>
+std::string join(Iterator begin, Iterator end, const std::string & separator);
 
-std::string json_schema_to_grammar(const nlohmann::ordered_json& schema);
+std::string json_schema_to_grammar(const nlohmann::ordered_json & schema);
+
+struct llama_grammar_builder {
+    std::function<std::string(const std::string &, const std::string &)> add_rule;
+    std::function<std::string(const std::string &, const nlohmann::ordered_json &)> add_schema;
+    std::function<void(nlohmann::ordered_json &)> resolve_refs;
+};
+
+std::string build_grammar(const std::function<void(const llama_grammar_builder &)> & cb);

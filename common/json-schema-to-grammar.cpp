@@ -11,9 +11,6 @@
 
 using json = nlohmann::ordered_json;
 
-template <typename Iterator>
-static std::string join(Iterator begin, Iterator end, const std::string & separator);
-
 static std::string repeat(const std::string & str, size_t n);
 
 static std::string build_repetition(const std::string & item_rule, int min_items, int max_items, const std::string & separator_rule = "") {
@@ -1036,102 +1033,28 @@ public:
 };
 
 std::string json_schema_to_grammar(const json & schema) {
-    SchemaConverter converter([](const std::string &) { return json::object(); }, /* dotall= */ false);
-    auto copy = schema;
-    converter.resolve_refs(copy, "input");
-    converter.visit(copy, "");
+    return build_grammar([&](const llama_grammar_builder & callbacks) {
+        auto copy = schema;
+        callbacks.resolve_refs(copy);
+        callbacks.add_schema("root", copy);
+    });
+}
+
+std::string build_grammar(const std::function<void(const llama_grammar_builder &)> & cb) {
+    SchemaConverter converter([&](const std::string & name) { return json(); }, /* dotall= */ false);
+    llama_grammar_builder builder {
+        .add_rule = [&](const std::string & name, const std::string & rule) {
+            return converter.add_rule(name, rule);
+        },
+        .add_schema = [&](const std::string & name, const nlohmann::ordered_json & schema) {
+            return converter.visit(schema, name);
+        },
+        .resolve_refs = [&](nlohmann::ordered_json & schema) {
+            converter.resolve_refs(schema, "");
+        }
+    };
+    cb(builder);
     converter.check_errors();
     return converter.format_grammar();
 }
 
-void tool_call_grammar(
-    const std::string & chat_template,
-    bool allow_content,
-    bool parallel_tool_calls,
-    // llama_tool_call_mode mode,
-    const nlohmann::ordered_json & tools,
-    std::string & grammar,
-    std::vector<std::string> & grammar_trigger_words,
-    std::vector<std::string> & additional_stop_words,
-    std::function<bool(std::string::const_iterator &, const std::string::const_iterator &, json &)> & tool_call_parser)
-{
-    SchemaConverter converter([](const std::string &) { return json::object(); }, /* dotall= */ false);
-    if (chat_template.find(">>>all") != std::string::npos) {
-        // MeetKaiFunctionary_3_2
-        // >>>all\nlet's call functions>>>fn1\n{"arg1": 1...}\n>>>fn2\n{"arg1": 1...}...
-        // Using ">>>f1\n", ">>>f2\n"... as trigger words for the grammar
-        std::vector<std::string> tool_rules;
-        for (size_t i = 0, n = tools.size(); i < n; i++) {
-            auto & tool = tools[i];
-            const auto & function = tool["function"];
-            std::string name = function["name"];
-            auto parameters = function["parameters"];
-            auto tool_rule = converter.visit("\">>>" + name + "\\n\" " + converter.visit(parameters, name + "-args"), name + "-call");
-            tool_rules.push_back(tool_rule);
-            if (allow_content) {
-                grammar_trigger_words.push_back(">>>" + name + "\n");
-            }
-        }
-        auto tool_call = converter.add_rule("tool_call", join(tool_rules.begin(), tool_rules.end(), " | ")) + " space";
-        converter.add_rule("root", parallel_tool_calls ? "(" + tool_call + ")+" : tool_call);
-    } else if (chat_template.find("<tool_call>") != std::string::npos) {
-        // NousResearchHermesPro_2
-        // (content)?(<tool_call>{"name": "foo", "arguments": {"a": 1}}</tool_call>)*
-        std::vector<std::string> tool_rules;
-        for (const auto & tool : tools) {
-            const auto & function = tool["function"];
-            std::string name = function["name"];
-            auto parameters = function["parameters"];
-            converter.resolve_refs(parameters, name);
-            tool_rules.push_back(converter.visit(json {
-                {"type", "object"},
-                {"properties", json {
-                    {"name", json {{"const", name}}},
-                    {"arguments", parameters},
-                }},
-                {"required", json::array({"name", "arguments"})},
-            }, name + "-call"));
-        }
-
-        auto tool_call = "\"<tool_call>\" " + converter.add_rule("tool_call", join(tool_rules.begin(), tool_rules.end(), " | ")) + " \"</tool_call>\" space";
-        converter.add_rule("root", parallel_tool_calls ? "(" + tool_call + ")+" : tool_call);
-        if (allow_content) {
-            grammar_trigger_words.push_back("<tool_call>");
-        }
-    } else if (chat_template.find("<|python_tag|>") != std::string::npos) {
-        // MetaLlama_3_1
-        static std::vector<std::string> builtin_tools {"wolfram_alpha", "brave_search"};
-        std::vector<std::string> tool_rules;
-
-        for (const auto & tool : tools) {
-            const auto & function = tool["function"];
-            std::string name = function["name"];
-            auto parameters = function["parameters"];
-            converter.resolve_refs(parameters, name);
-            if (name == "ipython" || std::find(builtin_tools.begin(), builtin_tools.end(), name) != builtin_tools.end()) {
-                tool_rules.push_back(converter.add_rule("ipython-call", "\"<|python_tag|>\" .*"));
-                if (allow_content) {
-                    grammar_trigger_words.push_back("<|python_tag|>");
-                }
-            } else {
-                //"<|start_header_id|>assistant<|end_header_id|>\n\n{\"name\": \"" + name + "\", " + 
-                tool_rules.push_back(
-                    converter.add_rule(
-                        name + "-call",
-                        "\"\\n{\\\"name\\\": " + name + "\\\", \\\"parameters\\\", \" " +
-                            converter.visit(parameters, name + "-args") +
-                        " \"}\""));
-                if (allow_content) {
-                    grammar_trigger_words.push_back("\n{\"" + name + "\"");
-                }
-            }
-        }
-
-        converter.add_rule("root", join(tool_rules.begin(), tool_rules.end(), " | "));
-        additional_stop_words.push_back("<|eom_id|>");
-    } else {
-        throw std::runtime_error("Unsupported tool call style!");
-    }
-    converter.check_errors();
-    grammar = converter.format_grammar();
-}

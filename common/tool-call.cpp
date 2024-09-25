@@ -179,3 +179,95 @@ std::pair<std::string, json> parse_tool_calls(const json & tools, const std::str
         throw std::runtime_error("Unsupported chat template for tool calls");
     }
 }
+
+void tool_call_grammar(
+    const std::string & chat_template,
+    bool allow_content,
+    bool parallel_tool_calls,
+    // llama_tool_call_mode mode,
+    const nlohmann::ordered_json & tools,
+    std::string & grammar,
+    std::vector<std::string> & grammar_trigger_words,
+    std::vector<std::string> & additional_stop_words,
+    std::function<bool(std::string::const_iterator &, const std::string::const_iterator &, json &)> & tool_call_parser)
+{
+    grammar = build_grammar([&](const llama_grammar_builder & builder) {
+        if (chat_template.find(">>>all") != std::string::npos) {
+            // MeetKaiFunctionary_3_2
+            // >>>all\nlet's call functions>>>fn1\n{"arg1": 1...}\n>>>fn2\n{"arg1": 1...}...
+            // Using ">>>f1\n", ">>>f2\n"... as trigger words for the grammar
+            std::vector<std::string> tool_rules;
+            for (size_t i = 0, n = tools.size(); i < n; i++) {
+                auto & tool = tools[i];
+                const auto & function = tool["function"];
+                std::string name = function["name"];
+                auto parameters = function["parameters"];
+                auto tool_rule = builder.add_rule(name + "-call", "\">>>" + name + "\\n\" " + builder.add_schema(name + "-args", parameters));
+                tool_rules.push_back(tool_rule);
+                if (allow_content) {
+                    grammar_trigger_words.push_back(">>>" + name + "\n");
+                }
+            }
+            auto tool_call = builder.add_rule("tool_call", join(tool_rules.begin(), tool_rules.end(), " | ")) + " space";
+            builder.add_rule("root", parallel_tool_calls ? "(" + tool_call + ")+" : tool_call);
+        } else if (chat_template.find("<tool_call>") != std::string::npos) {
+            // NousResearchHermesPro_2
+            // (content)?(<tool_call>{"name": "foo", "arguments": {"a": 1}}</tool_call>)*
+            std::vector<std::string> tool_rules;
+            for (const auto & tool : tools) {
+                const auto & function = tool["function"];
+                std::string name = function["name"];
+                auto parameters = function["parameters"];
+                builder.resolve_refs(parameters);
+                tool_rules.push_back(builder.add_schema(name + "-call", {
+                    {"type", "object"},
+                    {"properties", json {
+                        {"name", json {{"const", name}}},
+                        {"arguments", parameters},
+                    }},
+                    {"required", json::array({"name", "arguments"})},
+                }));
+            }
+
+            auto tool_call = "\"<tool_call>\" " + builder.add_rule("tool_call", join(tool_rules.begin(), tool_rules.end(), " | ")) + " \"</tool_call>\" space";
+            builder.add_rule("root", parallel_tool_calls ? "(" + tool_call + ")+" : tool_call);
+            if (allow_content) {
+                grammar_trigger_words.push_back("<tool_call>");
+            }
+        } else if (chat_template.find("<|python_tag|>") != std::string::npos) {
+            // MetaLlama_3_1
+            static std::vector<std::string> builtin_tools {"wolfram_alpha", "brave_search"};
+            std::vector<std::string> tool_rules;
+
+            for (const auto & tool : tools) {
+                const auto & function = tool["function"];
+                std::string name = function["name"];
+                auto parameters = function["parameters"];
+                builder.resolve_refs(parameters);
+                if (name == "ipython" || std::find(builtin_tools.begin(), builtin_tools.end(), name) != builtin_tools.end()) {
+                    tool_rules.push_back(builder.add_rule("ipython-call", "\"<|python_tag|>\" .*"));
+                    if (allow_content) {
+                        grammar_trigger_words.push_back("<|python_tag|>");
+                    }
+                } else {
+                    //"<|start_header_id|>assistant<|end_header_id|>\n\n{\"name\": \"" + name + "\", " + 
+                    tool_rules.push_back(
+                        builder.add_rule(
+                            name + "-call",
+                            "\"\\n{\\\"name\\\": " + name + "\\\", \\\"parameters\\\", \" " +
+                                builder.add_schema(name + "-args", parameters) +
+                            " \"}\""));
+                    if (allow_content) {
+                        grammar_trigger_words.push_back("\n{\"" + name + "\"");
+                    }
+                }
+            }
+
+            builder.add_rule("root", join(tool_rules.begin(), tool_rules.end(), " | "));
+            additional_stop_words.push_back("<|eom_id|>");
+        } else {
+            // TODO: generic thoughtful schema.
+            throw std::runtime_error("Unsupported tool call style!");
+        }
+    });
+}
