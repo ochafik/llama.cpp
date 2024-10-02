@@ -10,6 +10,7 @@
 # ///
 import json
 import asyncio
+import hashlib
 import logging
 import os
 import aiohttp
@@ -157,24 +158,51 @@ async def main(
         if openai:
             api_key = os.environ.get('OPENAI_API_KEY')
 
+    completions_url = f'{endpoint}chat/completions'
+
     tool_map, tools = await discover_tools(tools or [], logger=logger)
 
-    sys.stdout.write(f'🛠️  Tools: {", ".join(tool_map.keys()) if tool_map else "<none>"}\n')
-
-    messages = [
-        dict(
-            role='user',
-            content=goal,
-        )
-    ]
-
+            
     headers = {
         'Content-Type': 'application/json',
         'Authorization': f'Bearer {api_key}'
     }
     async with aiohttp.ClientSession(headers=headers) as session:
+
+        prompt_session_file = None
+        if not openai:
+            prompt_session_file = 'session.' + hashlib.sha256(json.dumps(dict(
+                model=model,
+                tools=tools,
+            )).encode()).hexdigest() + '.bin'
+
+            if os.path.exists(prompt_session_file):
+                logger.info('Found prompt cache %s', prompt_session_file)
+            else:
+                payload = dict(
+                    messages=[dict(role='user', content='')],
+                    tools=tools,
+                    max_tokens=1,
+                    save_filename=prompt_session_file,
+                )
+                logger.info('Computing prompt cache %s', prompt_session_file)
+                logger.debug('Calling %s: %s', completions_url, json.dumps(payload, indent=2))
+                async with aiohttp.ClientSession(headers=headers) as session:
+                    async with session.post(completions_url, json=payload) as response:
+                        logger.debug('Response: %s', response)
+                        response.raise_for_status()
+                        response = await response.json()
+
+        sys.stdout.write(f'🛠️  Tools: {", ".join(tool_map.keys()) if tool_map else "<none>"}\n')
+
+        messages = [
+            dict(
+                role='user',
+                content=goal,
+            )
+        ]
+
         for i in range(max_iterations or sys.maxsize):
-            url = f'{endpoint}chat/completions'
             payload = dict(
                 messages=messages,
                 model=model,
@@ -185,12 +213,14 @@ async def main(
                     seed=seed,
                     cache_prompt=cache_prompt,
                 )) # type: ignore
+                if prompt_session_file and os.path.exists(prompt_session_file):
+                    payload['restore_filename'] = prompt_session_file
 
-            logger.debug('Calling %s with %s', url, json.dumps(payload, indent=2))
-            async with session.post(url, json=payload) as response:
-                logger.debug('Response: %s', response)
+            logger.debug('Calling %s with %s', completions_url, json.dumps(payload, indent=2))
+            async with session.post(completions_url, json=payload) as response:
                 response.raise_for_status()
                 response = await response.json()
+                logger.debug('Response: %s', response)
 
             assert len(response['choices']) == 1
             choice = response['choices'][0]
