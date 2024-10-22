@@ -267,6 +267,79 @@ static void _build_min_max_int(int min_value, int max_value, std::stringstream &
     throw std::runtime_error("At least one of min_value or max_value must be set");
 }
 
+const auto DECIMALS = 16;
+const auto MAX_DECIMAL_PART = std::atoi(std::string('9', DECIMALS).c_str());
+
+struct SplitNumber {
+    int integral_part;
+    int padded_decimal_part;
+};
+
+int _pad_decimal(int d) {
+    auto str = (std::ostringstream() << d).str();
+    if (str.length() < DECIMALS) {
+        str.append(std::string('0', DECIMALS - str.length()));
+    }
+    return std::atoi(str.c_str());
+}
+
+SplitNumber split_number_parts(double value) {
+    auto s = (std::ostringstream() << value).str();
+    auto i = s.find(".");
+    if (i == std::string::npos) {
+        auto integral = std::atoi(s.c_str());
+        return {integral, 0};
+    } else {
+        auto integral = std::atoi(s.substr(0, i).c_str());
+        auto decimal = _pad_decimal(std::atoi(s.substr(i + 1).c_str()));
+        return {integral, decimal};
+    }
+}
+
+bool _build_min_max_double(double min_value, bool min_included, double max_value, bool max_included, std::stringstream & out, int decimals_left = 16, bool top_level = true) {
+    auto has_min = min_value != std::numeric_limits<double>::min();
+    auto has_max = max_value != std::numeric_limits<double>::max();
+    
+
+    if (has_min) {
+        auto min_parts = split_number_parts(min_value);
+        auto added_sep = false;
+        auto add_sep = [&]() {
+            if (!added_sep) return;
+            out << " | ";
+            added_sep = true;
+        };
+        if (has_max) {
+            auto max_parts = split_number_parts(max_value);
+            // if (min_parts.first > max_parts.first) throw std::
+            if (min_parts.integral_part < max_parts.integral_part) {
+                add_sep();
+                _build_min_max_int(min_parts.integral_part + 1, max_parts.integral_part, out);
+                out << "(\".\" decimal-part)";
+
+                if (min_parts.padded_decimal_part < MAX_DECIMAL_PART || min_included) {
+                    add_sep();
+                    out << "\"" << min_parts.integral_part << "\" (\".\") ";
+                    _build_min_max_int(min_parts.padded_decimal_part + (min_included ? 0 : 1), MAX_DECIMAL_PART, out);
+                }
+            }
+            if (max_parts.padded_decimal_part > 0 || max_included) {
+                add_sep();
+                out << "\"" << max_parts.integral_part << ".\" ";
+                _build_min_max_int(0, max_parts.padded_decimal_part, out);
+            }
+        } else {
+            _build_min_max_int(min_parts.integral_part + 1, std::numeric_limits<int>::max(), out);
+            out << "(\".\" decimal-part)";
+            if (min_parts.padded_decimal_part < MAX_DECIMAL_PART || min_included) {
+                add_sep();
+                out << "\"" << min_parts.integral_part << "\" (\".\") ";
+                _build_min_max_int(min_parts.padded_decimal_part + (min_included ? 0 : 1), MAX_DECIMAL_PART, out);
+            }
+        }
+    }
+}
+
 const std::string SPACE_RULE = "| \" \" | \"\\n\" [ \\t]{0,20}";
 
 struct BuiltinRule {
@@ -986,25 +1059,52 @@ public:
             std::string char_rule = _add_primitive("char", PRIMITIVE_RULES.at("char"));
             int min_len = schema.contains("minLength") ? schema["minLength"].get<int>() : 0;
             int max_len = schema.contains("maxLength") ? schema["maxLength"].get<int>() : std::numeric_limits<int>::max();
-            return _add_rule(rule_name, "\"\\\"\" " + build_repetition(char_rule, min_len, max_len) + " \"\\\"\" space");
-        } else if (schema_type == "integer" && (schema.contains("minimum") || schema.contains("exclusiveMinimum") || schema.contains("maximum") || schema.contains("exclusiveMaximum"))) {
-            int min_value = std::numeric_limits<int>::min();
-            int max_value = std::numeric_limits<int>::max();
-            if (schema.contains("minimum")) {
-                min_value = schema["minimum"].get<int>();
-            } else if (schema.contains("exclusiveMinimum")) {
-                min_value = schema["exclusiveMinimum"].get<int>() + 1;
+            return add_rule(rule_name, "\"\\\"\" " + build_repetition(char_rule, min_len, max_len) + " \"\\\"\" space");
+        } else if (schema.contains("minimum") || schema.contains("exclusiveMinimum") || schema.contains("maximum") || schema.contains("exclusiveMaximum")) {
+            if (schema_type == "integer") {
+                int min_value = std::numeric_limits<int>::min();
+                int max_value = std::numeric_limits<int>::max();
+                if (schema.contains("minimum")) {
+                    min_value = schema["minimum"].get<int>();
+                } else if (schema.contains("exclusiveMinimum")) {
+                    min_value = schema["exclusiveMinimum"].get<int>() + 1;
+                }
+                if (schema.contains("maximum")) {
+                    max_value = schema["maximum"].get<int>();
+                } else if (schema.contains("exclusiveMaximum")) {
+                    max_value = schema["exclusiveMaximum"].get<int>() - 1;
+                }
+                std::stringstream out;
+                out << "(";
+                _build_min_max_int(min_value, max_value, out);
+                out << ") space";
+                return add_rule(rule_name, out.str());
+            } else {
+                double min_value = std::numeric_limits<double>::min();
+                double max_value = std::numeric_limits<double>::max();
+                bool min_included = true;
+                bool max_included = true;
+                if (schema.contains("minimum")) {
+                    min_value = schema["minimum"].get<double>();
+                } else if (schema.contains("exclusiveMinimum")) {
+                    min_value = schema["exclusiveMinimum"].get<double>();
+                    min_included = false;
+                }
+                if (schema.contains("maximum")) {
+                    max_value = schema["maximum"].get<double>();
+                } else if (schema.contains("exclusiveMaximum")) {
+                    max_value = schema["exclusiveMaximum"].get<double>();
+                    min_included = false;
+                }
+                std::stringstream out;
+                out << "(";
+                if (!_build_min_max_double(min_value, min_included, max_value, max_included, out)) {
+                    _errors.push_back("Unsupported numeric bounds: " + schema.dump());
+                    return "";
+                }
+                out << ") space";
+                return add_rule(rule_name, out.str());
             }
-            if (schema.contains("maximum")) {
-                max_value = schema["maximum"].get<int>();
-            } else if (schema.contains("exclusiveMaximum")) {
-                max_value = schema["exclusiveMaximum"].get<int>() - 1;
-            }
-            std::stringstream out;
-            out << "(";
-            _build_min_max_int(min_value, max_value, out);
-            out << ") space";
-            return _add_rule(rule_name, out.str());
         } else if (schema.empty() || schema_type == "object") {
             return _add_rule(rule_name, _add_primitive("object", PRIMITIVE_RULES.at("object")));
         } else {
