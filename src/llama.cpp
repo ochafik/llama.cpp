@@ -20760,6 +20760,73 @@ struct llama_data_write_file : llama_data_write {
     }
 };
 
+struct llama_data_write_file_incrementally : llama_data_write {
+    llama_file * file;
+    size_t size_written = 0;
+    size_t current_offset = 0;
+    std::vector<uint8_t> temp_buffer;
+
+    llama_data_write_file_incrementally(llama_file * f) : file(f) {}
+
+    void write(const void * src, size_t size) override {
+        // Determine how many bytes we can read from the current file position
+        size_t bytes_to_read = 0;
+        if (current_offset < file->size) {
+            bytes_to_read = std::min(size, file->size - current_offset);
+        }
+
+        bool data_is_different = true;
+
+        if (bytes_to_read > 0) {
+            // Read existing data from the file
+            temp_buffer.resize(bytes_to_read);
+            file->seek(current_offset, SEEK_SET);
+            file->read_raw(temp_buffer.data(), bytes_to_read);
+
+            // Compare existing data with new data
+            if (memcmp(temp_buffer.data(), src, bytes_to_read) == 0) {
+                if (bytes_to_read == size) {
+                    // All data matches; no need to write
+                    data_is_different = false;
+                } else {
+                    // Existing data matches, but new data is longer
+                    data_is_different = true;
+                }
+            } else {
+                // Data differs; need to write
+                data_is_different = true;
+            }
+        } else {
+            // No existing data to compare; need to write
+            data_is_different = true;
+        }
+
+        if (data_is_different) {
+            // Seek back to the current offset
+            file->seek(current_offset, SEEK_SET);
+
+            // Write new data
+            file->write_raw(src, size);
+        }
+
+        size_written += size;
+        current_offset += size;
+    }
+
+    void write_tensor_data(const struct ggml_tensor * tensor, size_t offset, size_t size) override {
+        // Retrieve data from the tensor
+        temp_buffer.resize(size);
+        ggml_backend_tensor_get(tensor, temp_buffer.data(), offset, size);
+
+        // Write data using the write method
+        write(temp_buffer.data(), size);
+    }
+
+    size_t get_size_written() override {
+        return size_written;
+    }
+};
+
 struct llama_data_read_file : llama_data_read {
     llama_file * file;
     size_t size_read = 0;
@@ -20977,6 +21044,10 @@ size_t llama_state_seq_set_data(struct llama_context * ctx, const uint8_t * src,
     }
 }
 
+/*
+    TODO: make this incremental
+    - Read n_token_count
+*/
 static size_t llama_state_seq_save_file_internal(struct llama_context * ctx, const char * filepath, llama_seq_id seq_id, const llama_token * tokens, size_t n_token_count) {
     llama_file file(filepath, "wb");
 
@@ -20984,6 +21055,7 @@ static size_t llama_state_seq_save_file_internal(struct llama_context * ctx, con
     file.write_u32(LLAMA_STATE_SEQ_VERSION);
 
     // save the prompt
+    // TODO: change format so we reserve the size of max context window in here
     file.write_u32((uint32_t) n_token_count);
     file.write_raw(tokens, sizeof(llama_token) * n_token_count);
 
