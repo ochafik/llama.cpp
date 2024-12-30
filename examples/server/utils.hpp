@@ -574,15 +574,15 @@ static json oaicompat_completion_params_parse(
         } else if (response_type == "json_schema") {
             // OpenAI JSON schema format.
             auto json_schema = json_value(response_format, "json_schema", json::object());
-            json schema = json_value(json_schema, "schema", json::object());
-            std::string description = json_value(json_schema, "description", std::string());
+            auto schema = json_value(json_schema, "schema", json::object());
+            auto description = json_value(json_schema, "description", std::string());
             if (!description.empty()) {
                 if (schema.contains("description")) {
                     throw std::runtime_error("Cannot have both a description in the json_schema object and inside its schema.");
                 }
                 schema["description"] = description;
             }
-            bool strict = json_value(json_schema, "strict", false);
+            auto strict = json_value(json_schema, "strict", false);
             if (strict) {
                 llama_params["json_schema"] = schema;
             }
