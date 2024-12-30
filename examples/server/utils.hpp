@@ -565,15 +565,27 @@ static json oaicompat_completion_params_parse(
         llama_params["stop"] = json_value(body, "stop", json::array());
     }
 
-    // Handle "response_format" field
+    // Handle "response_format" field (https://platform.openai.com/docs/api-reference/chat/create#chat-create-response_format)
     if (body.contains("response_format")) {
         json response_format      = json_value(body, "response_format", json::object());
         std::string response_type = json_value(response_format, "type", std::string());
         if (response_type == "json_object") {
             llama_params["json_schema"] = json_value(response_format, "schema", json::object());
         } else if (response_type == "json_schema") {
-            json json_schema = json_value(response_format, "json_schema", json::object());
-            llama_params["json_schema"] = json_value(json_schema, "schema", json::object());
+            // OpenAI JSON schema format.
+            auto json_schema = json_value(response_format, "json_schema", json::object());
+            json schema = json_value(json_schema, "schema", json::object());
+            std::string description = json_value(json_schema, "description", std::string());
+            if (!description.empty()) {
+                if (schema.contains("description")) {
+                    throw std::runtime_error("Cannot have both a description in the json_schema object and inside its schema.");
+                }
+                schema["description"] = description;
+            }
+            bool strict = json_value(json_schema, "strict", false);
+            if (strict) {
+                llama_params["json_schema"] = schema;
+            }
         } else if (!response_type.empty() && response_type != "text") {
             throw std::runtime_error("response_format type must be one of \"text\" or \"json_object\", but got: " + response_type);
         }
