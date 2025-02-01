@@ -1,6 +1,7 @@
 #include "mcp.hpp"
 #include <unistd.h>
 #include <sys/wait.h>
+#include <signal.h>
 #include <vector>
 #include <stdexcept>
 #include <cstdio>
@@ -14,6 +15,16 @@ public:
         if (!m_writeFile || !m_readFile) {
             if (m_writeFile) fclose(m_writeFile);
             throw std::runtime_error("Failed to open pipes");
+        }
+    }
+
+    ~SingleThreadedJSONRPCStdioSubprocessImpl() {
+        if (m_writeFile) fclose(m_writeFile);
+        if (m_readFile) fclose(m_readFile);
+        if (m_pid > 0) {
+            kill(m_pid, SIGTERM);
+            int status;
+            waitpid(m_pid, &status, 0);
         }
     }
     
