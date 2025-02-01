@@ -67,6 +67,7 @@ add_library(${TARGET} STATIC
     json.hpp
     log.cpp
     log.h
+    mcp.cpp
     minja.hpp
     ngram-cache.cpp
     ngram-cache.h
