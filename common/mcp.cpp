@@ -19,7 +19,7 @@ public:
     SingleThreadedJSONRPCStdioSubprocessImpl(int writeFd, int readFd, pid_t pid)
         : m_writeFd(writeFd), m_readFd(readFd), m_pid(pid)
     {
-        // Wrap FDs in FILE* for simpler line-based IO
+        // Wrap FDs in FILE* for buffered IO
         m_writeFile = fdopen(m_writeFd, "w");
         if (!m_writeFile) {
             throw std::runtime_error("fdopen for writeFd failed");
@@ -30,36 +30,13 @@ public:
             throw std::runtime_error("fdopen for readFd failed");
         }
 
-        // // Optional: enable line buffering
-        // setvbuf(m_writeFile, nullptr, _IOLBF, 0);
-        // setvbuf(m_readFile,  nullptr, _IOLBF, 0);
-
         // Use full buffering instead of line buffering
         setvbuf(m_writeFile, nullptr, _IOFBF, 4096);
         setvbuf(m_readFile, nullptr, _IOFBF, 4096);
     }
-
-    ~SingleThreadedJSONRPCStdioSubprocessImpl() override
-    {
-        if (m_writeFile) {
-            fclose(m_writeFile);
-            m_writeFile = nullptr;
-        }
-        if (m_readFile) {
-            fclose(m_readFile);
-            m_readFile = nullptr;
-        }
-
-        // Optionally wait for child or send a signal, depending on your needs:
-        if (m_pid > 0) {
-            int status;
-            waitpid(m_pid, &status, 0);
-        }
-    }
-
+    
     nlohmann::ordered_json call(const std::string & methodName, const nlohmann::ordered_json & arguments) override
     {
-        // Build a minimal JSON-RPC request
         json request = {
             {"jsonrpc", "2.0"},
             {"method",  methodName},
@@ -67,23 +44,65 @@ public:
             {"id",      nextId++}
         };
 
-        // Write request as a single line to child's stdin
         auto requestStr = request.dump();
-        fprintf(stderr, "Sending request: %s\n", requestStr.c_str());
+        fprintf(stderr, "Parent: Sending request: %s\n", requestStr.c_str());
+        
+        // Make sure we're in a good state
+        if (ferror(m_writeFile) || ferror(m_readFile)) {
+            fprintf(stderr, "Parent: File error before write\n");
+            throw std::runtime_error("File error before write");
+        }
+        
+        // Write request
         if (fprintf(m_writeFile, "%s\n", requestStr.c_str()) < 0) {
-            throw std::runtime_error("Failed to write to child stdin");
+            fprintf(stderr, "Parent: Write failed: %s\n", strerror(errno));
+            throw std::runtime_error("Write failed");
         }
-        fflush(m_writeFile);
+        
+        // Flush output
+        if (fflush(m_writeFile) != 0) {
+            fprintf(stderr, "Parent: Flush failed: %s\n", strerror(errno));
+            throw std::runtime_error("Flush failed");
+        }
 
-        // Read a single line as the response
+        fprintf(stderr, "Parent: Write complete, waiting for response...\n");
+
+        // Read response with timeout
         char buffer[4096];
+        fd_set readfds;
+        struct timeval tv;
+        
+        // Set up the fd_set for select
+        FD_ZERO(&readfds);
+        FD_SET(m_readFd, &readfds);
+        
+        // Set timeout to 5 seconds
+        tv.tv_sec = 5;
+        tv.tv_usec = 0;
+        
+        // Wait for data to be available
+        int ready = select(m_readFd + 1, &readfds, NULL, NULL, &tv);
+        if (ready < 0) {
+            fprintf(stderr, "Parent: Select error: %s\n", strerror(errno));
+            throw std::runtime_error("Select failed");
+        } else if (ready == 0) {
+            fprintf(stderr, "Parent: Read timeout after 5 seconds\n");
+            throw std::runtime_error("Read timeout");
+        }
+        
+        // Data is available, try to read it
         if (!fgets(buffer, sizeof(buffer), m_readFile)) {
-            throw std::runtime_error("Failed to read child stdout line");
+            if (feof(m_readFile)) {
+                fprintf(stderr, "Parent: EOF while reading response\n");
+                throw std::runtime_error("EOF while reading response");
+            } else {
+                fprintf(stderr, "Parent: Read error: %s\n", strerror(errno));
+                throw std::runtime_error("Read error");
+            }
         }
 
-        // Parse into a JSON object
-        json response = json::parse(buffer);
-        return response;
+        fprintf(stderr, "Parent: Got response: %s\n", buffer);
+        return json::parse(buffer);
     }
 
 private:
@@ -94,63 +113,89 @@ private:
     FILE* m_readFile;
     int   nextId = 1;
 };
+#include <cerrno>
+#include <cstring>
 
 std::unique_ptr<SingleThreadedJSONRPCStdioSubprocess>
 SingleThreadedJSONRPCStdioSubprocess::create(
     const std::string & program,
     const std::vector<std::string> & args)
 {
-    // We'll need two pipes: one for parent->child (stdin), one for child->parent (stdout)
+    // Debug print at start
+    fprintf(stderr, "Starting subprocess creation for program: %s\n", program.c_str());
+
     int toChild[2];
     int fromChild[2];
+    
     if (pipe(toChild) != 0) {
+        fprintf(stderr, "Failed to create toChild pipe: %s\n", strerror(errno));
         throw std::runtime_error("Failed to create pipe for child stdin");
     }
+    fprintf(stderr, "Created toChild pipe: read=%d, write=%d\n", toChild[0], toChild[1]);
+
     if (pipe(fromChild) != 0) {
+        fprintf(stderr, "Failed to create fromChild pipe: %s\n", strerror(errno));
         close(toChild[0]); close(toChild[1]);
         throw std::runtime_error("Failed to create pipe for child stdout");
     }
+    fprintf(stderr, "Created fromChild pipe: read=%d, write=%d\n", fromChild[0], fromChild[1]);
 
     pid_t pid = fork();
     if (pid < 0) {
-        // Fork failed
+        fprintf(stderr, "Fork failed: %s\n", strerror(errno));
         close(toChild[0]);   close(toChild[1]);
         close(fromChild[0]); close(fromChild[1]);
         throw std::runtime_error("fork() failed");
     }
     else if (pid == 0) {
-        // In child process
-        // Hook up child's stdin to read end of toChild
-        dup2(toChild[0], STDIN_FILENO);
-        // Hook up child's stdout to write end of fromChild
-        dup2(fromChild[1], STDOUT_FILENO);
+        // Child process
+        fprintf(stderr, "Child process started (pid=%d)\n", getpid());
 
-        // Close unused FDs
+        if (dup2(toChild[0], STDIN_FILENO) == -1) {
+            fprintf(stderr, "Child: dup2 failed for stdin: %s\n", strerror(errno));
+            _exit(1);
+        }
+        if (dup2(fromChild[1], STDOUT_FILENO) == -1) {
+            fprintf(stderr, "Child: dup2 failed for stdout: %s\n", strerror(errno));
+            _exit(1);
+        }
+
+        // Close unused pipe ends
         close(toChild[1]);
         close(fromChild[0]);
 
-        // Convert std::vector<std::string> to the proper argv form
+        // Convert args to argv
         std::vector<char*> argv;
-        argv.reserve(args.size() + 2); // +1 for program +1 for null terminator
+        argv.reserve(args.size() + 2);
         argv.push_back(const_cast<char*>(program.c_str()));
         for (auto & arg : args) {
             argv.push_back(const_cast<char*>(arg.c_str()));
         }
         argv.push_back(nullptr);
 
-        // Replace child process image
-        execvp(argv[0], argv.data());
+        fprintf(stderr, "Child: about to exec: %s\n", program.c_str());
+        for (int i = 0; argv[i] != nullptr; i++) {
+            fprintf(stderr, "  arg[%d]: %s\n", i, argv[i]);
+        }
 
-        // If execvp returns, there was an error
+        execvp(argv[0], argv.data());
+        
+        // If we get here, exec failed
+        fprintf(stderr, "Child: execvp failed: %s\n", strerror(errno));
         _exit(127);
     }
     else {
-        // In parent process
-        // Close unused FDs
+        // Parent process
+        fprintf(stderr, "Parent: child pid is %d\n", pid);
+
+        // Close unused pipe ends
         close(toChild[0]);
         close(fromChild[1]);
 
-        // Return a new instance
+        fprintf(stderr, "Parent: creating implementation with write=%d, read=%d\n", 
+                toChild[1], fromChild[0]);
+
+        // Return new instance
         return std::unique_ptr<SingleThreadedJSONRPCStdioSubprocess>(
             new SingleThreadedJSONRPCStdioSubprocessImpl(toChild[1], fromChild[0], pid)
         );
