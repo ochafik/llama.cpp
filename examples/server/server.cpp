@@ -719,6 +719,18 @@ struct server_task_result_cmpl_final : server_task_result {
             }
         }
 
+        json message {
+            {"content", msg.content},
+            {"tool_calls", tool_calls},
+            {"role", "assistant"},
+        };
+        if (!msg.tool_plan.empty()) {
+            message["tool_plan"] = msg.tool_plan;
+        }
+        if (!msg.thoughts.empty()) {
+            message["thoughts"] = msg.thoughts;
+        }
+
         json choice {
             {"finish_reason", finish_reason},
             {"index", 0},

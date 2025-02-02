@@ -166,34 +166,61 @@ static common_chat_params common_chat_params_init_generic(const common_chat_temp
     common_chat_params data;
 
     auto tool_call_schemas = json::array();
-    foreach_function(inputs.tools, [&](const json & tool) {
-        const auto & function = tool["function"];
-        auto tool_schema = json {
-            {"type", "object"},
-            {"properties", {
-                {"name", {
-                    {"type", "string"},
-                    {"const", function["name"]},
+    if (inputs.tools.is_array()) {
+        foreach_function(inputs.tools, [&](const json & tool) {
+            const auto & function = tool["function"];
+            auto tool_schema = json {
+                {"type", "object"},
+                {"properties", {
+                    {"name", {
+                        {"type", "string"},
+                        {"const", function["name"]},
+                    }},
+                    {"arguments", function["parameters"]},
                 }},
-                {"arguments", function["parameters"]},
-            }},
-            {"required", json::array({"name", "arguments"})},
-        };
-        if (function.contains("description")) {
-            tool_schema["description"] = function["description"];
-        }
-        if (inputs.parallel_tool_calls) {
-            tool_schema["properties"]["id"] = {
-                {"type", "string"},
-                {"minLength", 4},
+                {"required", json::array({"name", "arguments"})},
             };
-            tool_schema["required"].push_back("id");
-        }
-        tool_call_schemas.emplace_back(tool_schema);
-    });
-    const auto tool_call =
-        inputs.parallel_tool_calls
-            ? json {
+            if (function.contains("description")) {
+                tool_schema["description"] = function["description"];
+            }
+            if (inputs.parallel_tool_calls) {
+                tool_schema["properties"]["id"] = {
+                    {"type", "string"},
+                    {"minLength", 4},
+                };
+                tool_schema["required"].push_back("id");
+            }
+            tool_call_schemas.emplace_back(tool_schema);
+        });
+    }
+    json schema;
+    std::string system;
+#if 0
+    json response_schema = {
+        {"type", "object"},
+        {"properties", {
+            {"response", inputs.json_schema.is_null()
+                ? json {{"type", "string"}}
+                : inputs.json_schema
+            },
+        }},
+        {"required", json::array({"response"})},
+    };
+    if (tool_call_schemas.empty()) {
+        response_schema["properties"]["thoughts"] = {
+            {"type", "string"},
+        };
+        response_schema["required"].push_back("thoughts");
+        schema = response_schema;
+        system = "Respond in JSON format, explaining your thoughts before giving your response.";
+    } else {
+        json tool_plan_thoughts_schema {
+            {"type", "string"},
+            {"description", "Inner monologue (explain reasoning & tool call plan before calling tools)"},
+        };
+        json tool_calls_schemas;
+        if (inputs.parallel_tool_calls) {
+            tool_calls_schemas = {
                 {"type", "object"},
                 {"properties", {
                     {"tool_calls", {
@@ -205,8 +232,10 @@ static common_chat_params common_chat_params_init_generic(const common_chat_temp
                     }},
                 }},
                 {"required", json::array({"tool_calls"})},
-            }
-            : json {
+            };
+            system = "Respond in JSON format with your thoughts before a tool_calls result";
+        } else {
+            tool_calls_schemas = {
                 {"type", "object"},
                 {"properties", {
                     {"tool_call", tool_call_schemas.size() == 1 ? tool_call_schemas[0] : json {
@@ -215,33 +244,158 @@ static common_chat_params common_chat_params_init_generic(const common_chat_temp
                 }},
                 {"required", json::array({"tool_call"})},
             };
-    const auto schema =
-        inputs.tool_choice != "required"
-            ? json {
-                {"anyOf", json::array({
-                    tool_call,
-                    {
-                        {"type", "object"},
-                        {"properties", {
-                            {"response", inputs.json_schema.is_null()
-                                ? json {{"type", "string"}}
-                                : inputs.json_schema
-                            },
+            system = "Respond in JSON format with your thoughts before a tool_call result";
+        }
+        schema = {
+            {"type", "object"},
+            {"properties", {
+                {"thoughts", tool_plan_thoughts_schema},
+                {"result", tool_calls_schemas},
+            }},
+        };
+#else
+    auto make_response_schema = [&]() -> json {
+        return {
+            {"type", "object"},
+            {"properties", {
+                {"thoughts", {
+                    {"type", "string"},
+                    {"description", "Inner monologue (explain reasoning before giving the response)"},
+                }},
+                {"response", inputs.json_schema.is_null()
+                    ? json {{"type", "string"}}
+                    : inputs.json_schema
+                },
+            }},
+            {"required", json::array({"thoughts", "response"})},
+        };
+    };
+    if (tool_call_schemas.empty()) {
+        schema = make_response_schema();
+        system = "Respond in JSON format, explaining your thoughts before giving your response.";
+    } else {
+        json tool_calls_schema;
+        if (inputs.parallel_tool_calls) {
+            tool_calls_schema = {
+                {"type", "object"},
+                {"properties", {
+                    {"thoughts", {
+                        {"type", "string"},
+                        {"description", "Inner monologue (explain reasoning & tool call plan before calling tools)"},
+                    }},
+                    {"tool_calls", {
+                        {"type", "array"},
+                        {"items", tool_call_schemas.size() == 1 ? tool_call_schemas[0] : json {
+                            {"anyOf", tool_call_schemas},
                         }},
-                        {"required", json::array({"response"})},
-                    },
+                        {"minItems", 1},
+                    }},
+                }},
+                {"required", json::array({"thoughts", "tool_calls"})},
+            };
+            system = "Respond in JSON format with your thoughts before a tool_calls result";
+        } else {
+            tool_calls_schema = {
+                {"type", "object"},
+                {"properties", {
+                    {"thoughts", {
+                        {"type", "string"},
+                        {"description", "Inner monologue (explain reasoning & tool call plan before calling a tool)"},
+                    }},
+                    {"tool_call", tool_call_schemas.size() == 1 ? tool_call_schemas[0] : json {
+                        {"anyOf", tool_call_schemas},
+                    }},
+                }},
+                {"required", json::array({"thoughts", "tool_call"})},
+            };
+            system = "Respond in JSON format with your thoughts before a tool_call result";
+        }
+        if (inputs.tool_choice == "required") {
+            schema = tool_calls_schema;
+        } else {
+            schema = {
+                {"anyOf", json::array({
+                    tool_calls_schema,
+                    make_response_schema(),
                 })}
-            }
-            : tool_call;
+            };
+        }
+#endif
 
+    // json response_schema {
+    //     {"type", "object"},
+    //     {"properties", {
+    //         {"thinking", {
+    //             {"type", "string"},
+    //             {"description", "Inner monologue (explain reasoning before giving the response)"},
+    //         }},
+    //         {"response", inputs.json_schema.is_null()
+    //             ? json {{"type", "string"}}
+    //             : inputs.json_schema
+    //         },
+    //     }},
+    //     {"required", json::array({"thinking", "response"})},
+    //     // {"required", json::array({"response"})},
+    // };
+    // json schema;
+    // if (tool_call_schemas.empty()) {
+    //     schema = response_schema;
+    // } else {
+    //     json tool_plan_thoughts_schema {
+    //         {"type", "string"},
+    //         {"description", "Inner monologue (explain reasoning & tool call plan before calling tools)"},
+    //     };
+    //     const auto tool_calls_schema =
+    //         inputs.parallel_tool_calls
+    //             ? json {
+    //                 {"type", "object"},
+    //                 {"properties", {
+    //                     {"thoughts", tool_plan_thoughts_schema},
+    //                     {"tool_calls", {
+    //                         {"type", "array"},
+    //                         {"items", tool_call_schemas.size() == 1 ? tool_call_schemas[0] : json {
+    //                             {"anyOf", tool_call_schemas},
+    //                         }},
+    //                         {"minItems", 1},
+    //                     }},
+    //                 }},
+    //                 {"required", json::array({"thoughts", "tool_calls"})},
+    //             }
+    //             : json {
+    //                 {"type", "object"},
+    //                 {"properties", {
+    //                     {"thoughts", tool_plan_thoughts_schema},
+    //                     {"tool_call", tool_call_schemas.size() == 1 ? tool_call_schemas[0] : json {
+    //                         {"anyOf", tool_call_schemas},
+    //                     }},
+    //                 }},
+    //                 {"required", json::array({"thoughts", "tool_call"})},
+    //             };
+    //     if (inputs.tool_choice == "required") {
+    //         schema = tool_calls_schema;
+    //     } else {
+    //         schema = {
+    //             {"anyOf", json::array({
+    //                 tool_calls_schema,
+    //                 response_schema,
+    //             })}
+    //         };
+    //     }
+    }
     data.grammar_lazy = false;
     data.grammar = build_grammar([&](const common_grammar_builder & builder) {
+        LOG_DBG("Chat: JSON schema: %s\n", schema.dump(2).c_str());
         builder.add_schema("root", schema);
     }, grammar_options);
 
     auto tweaked_messages = common_chat_template::add_system(
         inputs.messages,
-        "Respond in JSON format, either with `tool_call` (a request to call tools) or with `response` reply to the user's request");
+        system);
+        // tool_call_schemas.empty()
+            // ? "Respond in JSON format with your thoughts first."
+            // : "Respond in JSON format with your thoughts first, then either `tool_call" + std::string(inputs.parallel_tool_calls ? "s" : "") + "` (a request to call tools) or `response` (reply to the user's request)");
+            // ? "Respond in JSON format"
+            // : "Respond in JSON format, either with `tool_call" + std::string(inputs.parallel_tool_calls ? "s" : "") + "` (a request to call tools) or with `response` (reply to the user's request)");
 
     data.prompt = tmpl.apply(tweaked_messages, inputs.tools.empty() ? json() : inputs.tools, inputs.add_generation_prompt);
     data.format = COMMON_CHAT_FORMAT_GENERIC;
@@ -251,6 +405,9 @@ static common_chat_msg common_chat_parse_generic(const std::string & input) {
     json data = json::parse(input);
     common_chat_msg result;
     result.role = "assistant";
+    if (data.contains("thoughts")) {
+        result.thoughts = data["thoughts"];
+    }
     if (data.contains("tool_calls")) {
         for (const auto & tool_call : data["tool_calls"]) {
             result.tool_calls.push_back({
@@ -816,9 +973,9 @@ common_chat_params common_chat_params_init(const common_chat_template & tmpl, co
         auto allow_python_tag_builtin_tools = src.find("<|python_tag|>") != std::string::npos;
         return common_chat_params_init_llama_3_1_tool_calls(tmpl, inputs, allow_python_tag_builtin_tools);
     }
-    if (src.find("<｜tool▁calls▁begin｜>") != std::string::npos) {
-        return common_chat_params_init_deepseek_r1(tmpl, inputs);
-    }
+    // if (src.find("<｜tool▁calls▁begin｜>") != std::string::npos) {
+    //     return common_chat_params_init_deepseek_r1(tmpl, inputs);
+    // }
     if (src.find("[TOOL_CALLS]") != std::string::npos) {
         return common_chat_params_init_mistral_nemo(tmpl, inputs);
     }

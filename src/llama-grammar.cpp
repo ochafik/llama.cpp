@@ -1164,6 +1164,7 @@ void llama_grammar_accept_impl(struct llama_grammar & grammar, llama_token token
     GGML_ASSERT(grammar.vocab != nullptr);
 
     const auto & piece = grammar.vocab->token_to_piece(token);
+    LLAMA_LOG_DEBUG("Accepting token %u = %s\n", token, piece.c_str());
 
     if (grammar.awaiting_trigger) {
         if (std::find(grammar.trigger_tokens.begin(), grammar.trigger_tokens.end(), token) != grammar.trigger_tokens.end()) {
@@ -1213,5 +1214,7 @@ void llama_grammar_accept_str(struct llama_grammar & grammar, const std::string 
     }
 
     grammar.partial_utf8 = decoded.second;
-    GGML_ASSERT(!grammar.stacks.empty());
+    if (grammar.stacks.empty()) {
+        throw std::runtime_error("Unexpected empty grammar stack after accepting piece: " + piece);
+    }
 }
