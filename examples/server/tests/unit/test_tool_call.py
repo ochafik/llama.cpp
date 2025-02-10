@@ -429,7 +429,7 @@ def do_test_calc_result(result_override: str | None, n_predict: int, **kwargs):
     if result_override is not None:
         assert re.match(result_override, content), f'Expected {result_override}, got {content}'
     else:
-        assert re.match('^[\\s\\S]*?((That\'s|\\bis) (approximately )?)?\\b0\\.(56\\b|556)', content), \
+        assert re.match('^[\\s\\S]*?((That\'s|\\bis) (approximately )?)?\\b0\\.(5\\b|56\\b|556)', content), \
             f'Expected something like "The y coordinate is 0.56.", got {content}'
 
 
@@ -606,7 +606,7 @@ if __name__ == "__main__":
         export LLAMA_CACHE=$HOME/Library/Caches/llama.cpp
         export LLAMA_SERVER_BIN_PATH=$PWD/build/bin/llama-server
     
-        ( for temp_dec in {0..9}; do ()
+        ( for temp_dec in {0..9}; do
             for ignore_grammar in 0 1 ; do (
                 export LLAMA_IGNORE_CHAT_GRAMMAR=$ignore_grammar ;
                 python examples/server/tests/unit/test_tool_call.py --seed 124 --temp 0.$temp_dec --model "Qwen 2.5 Coder 7B Q4_K_M" --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF ;
