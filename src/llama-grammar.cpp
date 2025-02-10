@@ -985,12 +985,8 @@ struct llama_grammar * llama_grammar_init_impl(
     llama_grammar_parser parser;
 
     // if there is a grammar, parse it
-    if (!parser.parse(grammar_str)) {
-        return nullptr;
-    }
-
-    // will be empty (default) if there are parse errors
-    if (parser.rules.empty()) {
+    // rules will be empty (default) if there are parse errors
+    if (!parser.parse(grammar_str) || parser.rules.empty()) {
         fprintf(stderr, "%s: failed to parse grammar\n", __func__);
         return nullptr;
     }
