@@ -607,15 +607,19 @@ if __name__ == "__main__":
         export LLAMA_SERVER_BIN_PATH=$PWD/build/bin/llama-server
     
         ( for temp_dec in {0..9}; do
-            python examples/server/tests/unit/test_tool_call.py --temp 0.$temp_dec --model bartowski/Qwen2.5-Coder-7B-Instruct-GGUF
-            python examples/server/tests/unit/test_tool_call.py --temp 0.$temp_dec --model ollama:qwen2.5-coder:7b
+            LLAMA_IGNORE_CHAT_GRAMMAR=1 \
+                python examples/server/tests/unit/test_tool_call.py --temp 0.$temp_dec --model "Qwen 2.5 Coder 7B Instruct Q4_K_M" --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF ;
+                python examples/server/tests/unit/test_tool_call.py --temp 0.$temp_dec --model "Qwen 2.5 Coder 7B Instruct Q4_K_M" --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF ;
+                python examples/server/tests/unit/test_tool_call.py --temp 0.$temp_dec --model "Qwen 2.5 Coder 7B Instruct Q4_K_M" --ollama qwen2.5-coder:7b ;
         done ) | tee qwen2.5-coder-7b.jsonl
 
     '''
     # get -hf and --chat-template overrides from command line
     parser = argparse.ArgumentParser(description='Run tests for the chat server.')
     parser.add_argument('--chat-template', type=str, help='Override the chat template file path')
-    parser.add_argument('--model', type=str, help='Override the model Hugging Face repository')
+    parser.add_argument('--model', type=str, help='Override the model Hugging Face repository', required=True)
+    parser.add_argument('--hf', type=str, help='Override the model Hugging Face repository')
+    parser.add_argument('--ollama', type=str, help='Override the model Hugging Face repository')
     parser.add_argument('--n', type=int, help='Number of times to run each test', default=10)
     parser.add_argument('--temp', type=float, help='Temperature')
     parser.add_argument('--top-p', type=float, help='top_p')
@@ -640,19 +644,22 @@ if __name__ == "__main__":
         kwargs['seed'] = args.seed
         
     server = ServerProcess()
-    if args.model.startswith('ollama:'):
+    if args.ollama is not None:
+        implementation = "ollama"
         server.server_port = 11434
         server.server_host = "localhost"
-        model = args.model[args.model.index(":")+1:]
-        kwargs['model'] = model
-        subprocess.check_call(["ollama", "pull", model])
+        model_id = args.ollama
+        kwargs['model'] = model_id
+        subprocess.check_call(["ollama", "pull", model_id])
         # print(subprocess.check_output(["ollama", "pull", model]), flush=True, file=sys.stderr)
     else:
+        implementation = "llama-server" + (" (no grammar)" if os.environ.get("LLAMA_IGNORE_CHAT_GRAMMAR") else "")
         server.n_slots = 1
         server.jinja = True
         server.n_predict = 512 # High because of DeepSeek R1
-        server.model_hf_repo = args.model
+        server.model_hf_repo = args.hf
         server.model_hf_file = None
+        model_id = args.hf
         # server.n_predict = n_predict
         # if isinstance(template_override, tuple):
         #     (template_hf_repo, template_variant) = template_override
@@ -695,6 +702,8 @@ if __name__ == "__main__":
         print('\n', file=sys.stderr, flush=True)
         print(json.dumps(dict(
             model=args.model,
+            implementation=implementation,
+            model_id=model_id,
             test=test_name,
             temp=args.temp,
             top_p=args.top_p,
