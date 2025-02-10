@@ -523,7 +523,7 @@ def do_test_hello_world(expected_arguments_override: str | None, **kwargs):
     res = server.make_request("POST", "/v1/chat/completions", data={
         "max_tokens": 256,
         "messages": [
-            {"role": "system", "content": "You are a coding assistant."},
+            {"role": "system", "content": "You are a tool-calling agent."},
             {"role": "user", "content": "say hello world with python"},
         ],
         "tools": [PYTHON_TOOL],
@@ -544,7 +544,7 @@ def do_test_hello_world(expected_arguments_override: str | None, **kwargs):
         assert 'code' in actual_arguments, f"code not found in {json.dumps(actual_arguments)}"
         code = actual_arguments["code"]
         assert isinstance(code, str), f"Expected code to be a string, got {type(code)}: {json.dumps(code)}"
-        assert re.match(r'''print\(("[Hh]ello,? [Ww]orld!?"|'[Hh]ello,? [Ww]orld!?')\)''', code), f'Expected hello world, got {code}'
+        assert re.match(r'''((#.*)?\n)*print\(("[Hh]ello,? [Ww]orld!?"|'[Hh]ello,? [Ww]orld!?')\)''', code), f'Expected hello world, got {code}'
 
 
 @pytest.mark.slow
@@ -606,7 +606,7 @@ if __name__ == "__main__":
         export LLAMA_CACHE=$HOME/Library/Caches/llama.cpp
         export LLAMA_SERVER_BIN_PATH=$PWD/build/bin/llama-server
     
-        ( for temp in "" "--temp 0.0" "--temp 0.5" "--temp 0.75" "--temp 1.0" ; do
+        ( for temp in "" "--temp=0.0" "--temp=0.5" "--temp=0.75" "--temp=1.0" ; do
             for ignore_grammar in 0 1 ; do (
                 export LLAMA_IGNORE_CHAT_GRAMMAR=$ignore_grammar ;
                 python examples/server/tests/unit/test_tool_call.py --n 5 --seed 124 $temp --model "Qwen 2.5 Coder 7B Q4_K_M" --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF ;

@@ -84,7 +84,8 @@ static common_chat_msg parse_json_tool_calls(
     const std::string& input,
     const std::optional<std::regex> & trigger_opt,
     const std::regex & function_regex,
-    const std::regex & close_regex) {
+    const std::regex & close_regex,
+    bool allow_raw_python = false) {
     std::smatch match;
 
     common_chat_msg result;
@@ -116,6 +117,10 @@ static common_chat_msg parse_json_tool_calls(
 
         json arguments;
         if (!parse_json(it, end, arguments)) {
+            if (allow_raw_python && name == "python") {
+                result.tool_calls.push_back({name, json({{"code", std::string(it, end)}}).dump(), /* id= */ ""});
+                break;
+            }
             throw std::runtime_error("Failed to parse json tool call arguments: " + input);
         }
         if (!std::regex_search(it, end, match, close_regex)) {
@@ -730,10 +735,10 @@ static common_chat_params common_chat_params_init_functionary_v3_2(const common_
                 auto args_rule = builder.add_schema(name + "-args", parameters);
                 first_tool_rules.push_back(builder.add_rule(name + "-call", "( \"assistant<|end_header_id|>\\n\" )? \"" + name + "\\n\" " + args_rule));
                 subsequent_tool_rules.push_back(builder.add_rule(name + "-call2", "\">>>" + name + "\\n\" " + args_rule));
-                data.grammar_triggers.push_back({name + "\n", /* .at_start = */ true});
-                data.grammar_triggers.push_back({"assistant<|end_header_id|>\n" + name + "\n", /* .at_start = */ true});
-                data.grammar_triggers.push_back({">>>" + name + "\n", /* .at_start = */ false});
-                data.grammar_triggers.push_back({">>>assistant<|end_header_id|>\n" + name + "\n", /* .at_start = */ false});
+                data.grammar_triggers.push_back({name, /* .at_start = */ true});
+                data.grammar_triggers.push_back({"assistant<|end_header_id|>\n" + name, /* .at_start = */ true});
+                data.grammar_triggers.push_back({">>>" + name, /* .at_start = */ false});
+                data.grammar_triggers.push_back({">>>assistant<|end_header_id|>\n" + name, /* .at_start = */ false});
             });
             data.preserved_tokens = {
                 "<|end_header_id|>",
@@ -788,7 +793,7 @@ static common_chat_msg common_chat_parse_functionary_v3_2(const std::string & in
     }
     // TODO: tighten & simplify.
     try {
-        auto res = parse_json_tool_calls(std::string(it, end), std::nullopt, function_regex, close_regex);
+        auto res = parse_json_tool_calls(std::string(it, end), std::nullopt, function_regex, close_regex, /* allow_raw_python= */ true);
         res.content = content + res.content;
         return res;
     } catch (const std::exception & e) {
