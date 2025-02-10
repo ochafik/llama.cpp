@@ -728,11 +728,16 @@ static common_chat_params common_chat_params_init_functionary_v3_2(const common_
                 std::string name = function["name"];
                 auto parameters = function["parameters"];
                 auto args_rule = builder.add_schema(name + "-args", parameters);
-                first_tool_rules.push_back(builder.add_rule(name + "-call", "\"" + name + "\\n\" " + args_rule));
+                first_tool_rules.push_back(builder.add_rule(name + "-call", "( \"assistant<|end_header_id|>\\n\" )? \"" + name + "\\n\" " + args_rule));
                 subsequent_tool_rules.push_back(builder.add_rule(name + "-call2", "\">>>" + name + "\\n\" " + args_rule));
-                data.grammar_triggers.push_back({name, /* .at_start = */ true});
-                data.grammar_triggers.push_back({">>>" + name, /* .at_start = */ false});
+                data.grammar_triggers.push_back({name + "\n", /* .at_start = */ true});
+                data.grammar_triggers.push_back({"assistant<|end_header_id|>\n" + name + "\n", /* .at_start = */ true});
+                data.grammar_triggers.push_back({">>>" + name + "\n", /* .at_start = */ false});
+                data.grammar_triggers.push_back({">>>assistant<|end_header_id|>\n" + name + "\n", /* .at_start = */ false});
             });
+            data.preserved_tokens = {
+                "<|end_header_id|>",
+            };
             auto first_rule = first_tool_rules.empty() ? "" : builder.add_rule("first_tool_call", string_join(first_tool_rules, " | ")) + " space";
             if (inputs.parallel_tool_calls) {
                 auto subsequent_rule = builder.add_rule("subsequent_tool_call", string_join(subsequent_tool_rules, " | ")) + " space";
@@ -761,7 +766,7 @@ static bool consume(std::string::const_iterator & it, const std::string::const_i
 }
 
 static common_chat_msg common_chat_parse_functionary_v3_2(const std::string & input) {
-    static std::regex function_regex(R"((?:>>>)?(\w+)\n)");
+    static std::regex function_regex(R"((?:>>>)?(?:assistant<|end_header_id|>\n)?(\w+)\n)");
     static std::regex close_regex(R"($|(?=>>>))");
 
     std::string content;
