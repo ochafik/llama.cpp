@@ -650,8 +650,11 @@ static json oaicompat_completion_params_parse(
 
         llama_params["chat_format"] = static_cast<int>(chat_params.format);
         llama_params["prompt"] = chat_params.prompt;
-        llama_params["grammar"] = chat_params.grammar;
-        llama_params["grammar_lazy"] = chat_params.grammar_lazy;
+        const static bool ignore_chat_grammar = getenv("LLAMA_IGNORE_CHAT_GRAMMAR");
+        if (!ignore_chat_grammar) {
+            llama_params["grammar"] = chat_params.grammar;
+            llama_params["grammar_lazy"] = chat_params.grammar_lazy;
+        }
         auto grammar_triggers = json::array();
         for (const auto & trigger : chat_params.grammar_triggers) {
             grammar_triggers.push_back({
