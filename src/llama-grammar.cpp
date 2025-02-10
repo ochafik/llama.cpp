@@ -1176,13 +1176,16 @@ void llama_grammar_accept_impl(struct llama_grammar & grammar, llama_token token
             // TODO: consider a smarter incremental substring search algorithm (store last position to search from).
             grammar.trigger_buffer += piece;
             for (const auto & word : grammar.trigger_words) {
-                auto pos = grammar.trigger_buffer.find(word);
-                if (pos != std::string::npos) {
+                GGML_ASSERT(!word.empty());
+                auto at_start = word[0] == '^';
+                const char * word_str = at_start ? word.c_str() + 1 : word[0] == '\\' && word.size() > 1 && word[1] == '^' ? word.c_str() + 1 : word.c_str();
+                auto pos = grammar.trigger_buffer.find(word_str);
+                if ((pos == 0) || (!at_start && pos != std::string::npos)) {
                     grammar.awaiting_trigger = false;
                     auto constrained_str = grammar.trigger_buffer.substr(pos);
                     grammar.trigger_buffer.clear();
                     llama_grammar_accept_str(grammar, constrained_str);
-                    LLAMA_LOG_DEBUG("Grammar triggered on word `%s`", word.c_str());
+                    LLAMA_LOG_DEBUG("Grammar triggered on %sword `%s`", at_start ? "starting " : "", word_str);
                     return;
                 }
             }
