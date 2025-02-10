@@ -435,9 +435,9 @@ static common_chat_params common_chat_params_init_command_r7b(const common_chat_
     return data;
 }
 static common_chat_msg common_chat_parse_command_r7b(const std::string & input, bool extract_reasoning) {
-    static std::regex thought_regex("(<\\|START_THINKING\\|>([\\s\\S\\n\\r]*?)<\\|END_THINKING\\|>)([\\s\\S\\n\\r]*)");
-    static std::regex action_regex("<\\|START_ACTION\\|>([\\s\\S\\n\\r]*?)<\\|END_ACTION\\|>");
-    static std::regex response_regex("(?:<\\|START_RESPONSE\\|>)?([\\s\\S\\n\\r]*?)<\\|END_RESPONSE\\|>");
+    static std::regex thought_regex("(<\\|START_THINKING\\|>([\\s\\S]*?)<\\|END_THINKING\\|>)([\\s\\S]*)");
+    static std::regex action_regex("<\\|START_ACTION\\|>([\\s\\S]*?)<\\|END_ACTION\\|>");
+    static std::regex response_regex("(?:<\\|START_RESPONSE\\|>)?([\\s\\S]*?)<\\|END_RESPONSE\\|>");
 
     std::smatch match;
 
@@ -571,7 +571,7 @@ static common_chat_params common_chat_params_init_llama_3_1_tool_calls(const com
 }
 static common_chat_msg common_chat_parse_llama_3_1(const std::string & input, bool with_builtin_tools = false) {
     // TODO: tighten & simplify the parser, don't accept leading text context.
-    static std::regex function_regex("\\{[\\s\\n\\r]*(?:\"type\"[\\s\\n\\r]*:[\\s\\n\\r]*\"function\"[\\s\\n\\r]*,[\\s\\n\\r]*|[\\s\\n\\r]*)\"name\"[\\s\\n\\r]*:[\\s\\n\\r]*\"([^\"]+)\"[\\s\\n\\r]*,[\\s\\n\\r]*\"parameters\": ");
+    static std::regex function_regex("\\{\\s*(?:\"type\"\\s*:\\s*\"function\"\\s*,\\s*|\\s*)\"name\"\\s*:\\s*\"([^\"]+)\"\\s*,\\s*\"parameters\": ");
     static std::regex close_regex("\\}");
     static std::regex builtin_call_regex("<\\|python_tag\\|>([^.(]+)\\.call\\((.*)\\)");
 
