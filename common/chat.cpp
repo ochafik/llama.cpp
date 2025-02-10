@@ -30,7 +30,7 @@ const common_grammar_options grammar_options {
     // /* .compact_spaces = */ true,
 };
 
-static bool parse_json(std::string::const_iterator & it, const std::string::const_iterator & end, json & out) {
+static std::optional<json> parse_json(std::string::const_iterator & it, const std::string::const_iterator & end) {
     // // https://json.nlohmann.me/features/parsing/sax_interface/
     struct json_error_locator : public nlohmann::json_sax<json> {
         std::size_t position;
@@ -67,12 +67,34 @@ static bool parse_json(std::string::const_iterator & it, const std::string::cons
     }
     std::string json_sub {it, temptative_end};
     try {
-        out = json::parse(json_sub);
         it = temptative_end;
-        return true;
+        return json::parse(json_sub);
     } catch (const std::exception &) {
-        return false;
+        return std::nullopt;
     }
+}
+
+static bool parse_literal(std::string::const_iterator & it, const std::string::const_iterator & end, const std::string & expected) {
+    auto expected_it = expected.begin();
+    auto tmp_it = it;
+    while (tmp_it != end && expected_it != expected.end() && *tmp_it == *expected_it) {
+        ++tmp_it;
+        ++expected_it;
+    }
+    if (expected_it == expected.end()) {
+        it = tmp_it;
+        return true;
+    }
+    return false;
+}
+
+static std::optional<std::smatch> parse_pattern(std::string::const_iterator & it, const std::string::const_iterator & end, const std::regex & expected) {
+    std::smatch match;
+    if (std::regex_search(it, end, match, expected)) {
+        it = match.suffix().first;
+        return match;
+    }
+    return std::nullopt;
 }
 
 
@@ -115,19 +137,19 @@ static common_chat_msg parse_json_tool_calls(
         result.content += std::string(it, rit->prefix().second);
         it = rit->suffix().first;
 
-        json arguments;
-        if (!parse_json(it, end, arguments)) {
+        if (auto arguments = parse_json(it, end)) {
+            if (!std::regex_search(it, end, match, close_regex)) {
+                throw std::runtime_error("Malformed input, missing closing pattern: " + input);
+            }
+            it = match.suffix().first;
+            result.tool_calls.push_back({name, arguments->is_string() ? arguments->get<std::string>() : arguments->dump(), /* id= */ ""});
+        } else {
             if (allow_raw_python && name == "python") {
                 result.tool_calls.push_back({name, json({{"code", std::string(it, end)}}).dump(), /* id= */ ""});
                 break;
             }
             throw std::runtime_error("Failed to parse json tool call arguments: " + input);
         }
-        if (!std::regex_search(it, end, match, close_regex)) {
-            throw std::runtime_error("Malformed input, missing closing pattern: " + input);
-        }
-        it = match.suffix().first;
-        result.tool_calls.push_back({name, arguments.is_string() ? arguments.get<std::string>() : arguments.dump(), /* id= */ ""});
     }
 
     if (!result.tool_calls.empty()) {
@@ -756,20 +778,6 @@ static common_chat_params common_chat_params_init_functionary_v3_2(const common_
     return data;
 }
 
-static bool consume(std::string::const_iterator & it, const std::string::const_iterator & end, const std::string & expected) {
-    auto expected_it = expected.begin();
-    auto tmp_it = it;
-    while (tmp_it != end && expected_it != expected.end() && *tmp_it == *expected_it) {
-        ++tmp_it;
-        ++expected_it;
-    }
-    if (expected_it == expected.end()) {
-        it = tmp_it;
-        return true;
-    }
-    return false;
-}
-
 static common_chat_msg common_chat_parse_functionary_v3_2(const std::string & input) {
     static std::regex function_regex(R"((?:>>>)?(?:assistant<|end_header_id|>\n)?(\w+)\n)");
     static std::regex close_regex(R"($|(?=>>>))");
@@ -778,7 +786,7 @@ static common_chat_msg common_chat_parse_functionary_v3_2(const std::string & in
     auto it = input.begin();
     const auto end = input.end();
 
-    if (consume(it, end, "all\n")) {
+    if (parse_literal(it, end, "all\n")) {
         std::smatch match;
         if (std::regex_search(it, end, match, function_regex)) {
             auto fun_it = match.prefix().second;
@@ -943,26 +951,26 @@ static common_chat_msg common_chat_parse_hermes_2_pro(const std::string & input)
 
         auto it = rit->suffix().first;
         while (it != end) {
-            json call;
-            if (!parse_json(it, end, call)) {
-                throw std::runtime_error("Failed to parse json tool call");
-            }
-            const auto & arguments = call["arguments"];
-            result.tool_calls.push_back({
-                call["name"],
-                arguments.dump(),
-                // arguments.is_string() ? arguments.get<std::string>() : arguments.dump(),
-                /* id= */ "",
-            });
-            rit = {it, end, middle_pattern};
-            if (rit != rend) {
-                it = rit->suffix().first;
-            } else {
-                rit = {it, end, end_pattern};
-                if (rit == rend) {
-                    throw std::runtime_error("Malformed input, missing </tool_call>");
+            if (auto call = parse_json(it, end)) {
+                const auto & arguments = (*call)["arguments"];
+                result.tool_calls.push_back({
+                    (*call)["name"],
+                    arguments.dump(),
+                    // arguments.is_string() ? arguments.get<std::string>() : arguments.dump(),
+                    /* id= */ "",
+                });
+                rit = {it, end, middle_pattern};
+                if (rit != rend) {
+                    it = rit->suffix().first;
+                } else {
+                    rit = {it, end, end_pattern};
+                    if (rit == rend) {
+                        throw std::runtime_error("Malformed input, missing </tool_call>");
+                    }
+                    break;
                 }
-                break;
+            } else {
+                throw std::runtime_error("Failed to parse json tool call");
             }
         }
         return result;
