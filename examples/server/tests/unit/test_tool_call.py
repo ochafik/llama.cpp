@@ -606,16 +606,16 @@ if __name__ == "__main__":
         export LLAMA_CACHE=$HOME/Library/Caches/llama.cpp
         export LLAMA_SERVER_BIN_PATH=$PWD/build/bin/llama-server
     
-        ( for temp_dec in {0..9}; do
+        ( for temp_dec in 0.0 0.5 0.75 1.0 ; do
             for ignore_grammar in 0 1 ; do (
                 export LLAMA_IGNORE_CHAT_GRAMMAR=$ignore_grammar ;
-                python examples/server/tests/unit/test_tool_call.py --seed 124 --temp 0.$temp_dec --model "Qwen 2.5 Coder 7B Q4_K_M" --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF ;
-                python examples/server/tests/unit/test_tool_call.py --seed 124 --temp 0.$temp_dec --model "Mistral Nemo 2407 Q6_K" --hf bartowski/Mistral-Nemo-Instruct-2407-GGUF:Q6_K_L ;
-                python examples/server/tests/unit/test_tool_call.py --seed 124 --temp 0.$temp_dec --model "Functionary Small v3.2 Q4_K_M" --hf bartowski/functionary-small-v3.2-GGUF:Q4_K_M ;
-                python examples/server/tests/unit/test_tool_call.py --seed 124 --temp 0.$temp_dec --model "Llama 3.3 Instruct 70B Q4_K_M" --hf bartowski/Llama-3.3-70B-Instruct-GGUF:Q4_K_M ;
+                python examples/server/tests/unit/test_tool_call.py --n 5 --seed 124 --temp 0.$temp_dec --model "Qwen 2.5 Coder 7B Q4_K_M" --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF ;
+                python examples/server/tests/unit/test_tool_call.py --n 5 --seed 124 --temp 0.$temp_dec --model "Mistral Nemo 2407 Q6_K" --hf bartowski/Mistral-Nemo-Instruct-2407-GGUF:Q6_K_L ;
+                python examples/server/tests/unit/test_tool_call.py --n 5 --seed 124 --temp 0.$temp_dec --model "Functionary Small v3.2 Q4_K_M" --hf bartowski/functionary-small-v3.2-GGUF:Q4_K_M ;
+                python examples/server/tests/unit/test_tool_call.py --n 5 --seed 124 --temp 0.$temp_dec --model "Llama 3.3 Instruct 70B Q4_K_M" --hf bartowski/Llama-3.3-70B-Instruct-GGUF:Q4_K_M ;
             ) ; done ;
-            python examples/server/tests/unit/test_tool_call.py --seed 124 --temp 0.$temp_dec --model "Qwen 2.5 Coder 7B Q4_K_M" --ollama qwen2.5-coder:7b ;
-            python examples/server/tests/unit/test_tool_call.py --seed 124 --temp 0.$temp_dec --model "Mistral Nemo 2407 Q6_K" --ollama mistral-nemo:12b-instruct-2407-q6_K ;
+            python examples/server/tests/unit/test_tool_call.py --n 5 --seed 124 --temp 0.$temp_dec --model "Qwen 2.5 Coder 7B Q4_K_M" --ollama qwen2.5-coder:7b ;
+            python examples/server/tests/unit/test_tool_call.py --n 5 --seed 124 --temp 0.$temp_dec --model "Mistral Nemo 2407 Q6_K" --ollama mistral-nemo:12b-instruct-2407-q6_K ;
         done ) | tee misc.jsonl
     '''
     # get -hf and --chat-template overrides from command line
@@ -657,7 +657,7 @@ if __name__ == "__main__":
         subprocess.check_call(["ollama", "pull", model_id])
         # print(subprocess.check_output(["ollama", "pull", model]), flush=True, file=sys.stderr)
     else:
-        implementation = "llama-server" + (" (no grammar)" if os.environ.get("LLAMA_IGNORE_CHAT_GRAMMAR") else "")
+        implementation = "llama-server" + (" (no grammar)" if os.environ.get("LLAMA_IGNORE_CHAT_GRAMMAR", "1") == "1" else "")
         server.n_slots = 1
         server.jinja = True
         server.n_predict = 512 # High because of DeepSeek R1
