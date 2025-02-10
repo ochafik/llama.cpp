@@ -181,7 +181,7 @@ class ServerProcess:
             server_args.extend(["--chat-template-file", self.chat_template_file])
 
         args = [str(arg) for arg in [server_path, *server_args]]
-        print(f"bench: starting server with: {' '.join(args)}")
+        print(f"tests: starting server with: {' '.join(args)}", file=sys.stderr, flush=True)
 
         flags = 0
         if "nt" == os.name:
@@ -192,13 +192,16 @@ class ServerProcess:
         self.process = subprocess.Popen(
             [str(arg) for arg in [server_path, *server_args]],
             creationflags=flags,
-            stdout=sys.stdout,
-            stderr=sys.stdout,
+            # Silent
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            # stdout=sys.stdout,
+            # stderr=sys.stdout,
             env={**os.environ, "LLAMA_CACHE": "tmp"} if "LLAMA_CACHE" not in os.environ else None,
         )
         server_instances.add(self)
 
-        print(f"server pid={self.process.pid}, pytest pid={os.getpid()}")
+        print(f"server pid={self.process.pid}, pytest pid={os.getpid()}", file=sys.stderr, flush=True)
 
         # wait for server to start
         start_time = time.time()
@@ -212,7 +215,7 @@ class ServerProcess:
                     return  # server is ready
             except Exception as e:
                 pass
-            print(f"Waiting for server to start...")
+            print(f"Waiting for server to start...", file=sys.stderr, flush=True)
             time.sleep(0.5)
         raise TimeoutError(f"Server did not start within {timeout_seconds} seconds")
 
@@ -220,7 +223,7 @@ class ServerProcess:
         if self in server_instances:
             server_instances.remove(self)
         if self.process:
-            print(f"Stopping server with pid={self.process.pid}")
+            print(f"Stopping server with pid={self.process.pid}", file=sys.stderr, flush=True)
             self.process.kill()
             self.process = None
 
@@ -233,6 +236,7 @@ class ServerProcess:
         timeout: float | None = None,
     ) -> ServerResponse:
         url = f"http://{self.server_host}:{self.server_port}{path}"
+        # print(f"#\ncurl {url} -d '{json.dumps(data, indent=2)}'\n", file=sys.stderr, flush=True)
         parse_body = False
         if method == "GET":
             response = requests.get(url, headers=headers, timeout=timeout)
@@ -248,7 +252,7 @@ class ServerProcess:
         result.headers = dict(response.headers)
         result.status_code = response.status_code
         result.body = response.json() if parse_body else None
-        print("Response from server", json.dumps(result.body, indent=2))
+        print("Response from server", json.dumps(result.body, indent=2), file=sys.stderr, flush=True)
         return result
 
     def make_stream_request(
