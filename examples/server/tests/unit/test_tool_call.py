@@ -1,4 +1,6 @@
+#!/usr/bin/env python
 import argparse
+from contextlib import contextmanager
 from statistics import mean, median
 import pytest
 
@@ -601,6 +603,26 @@ def test_hello_world(expected_arguments_override: str | None, hf_repo: str, temp
     # Note: without these greedy params, Functionary v3.2 writes `def hello_world():\n    print("Hello, World!")\nhello_world()` which is correct but a pain to test.
     do_test_hello_world(expected_arguments_override, temperature=0.0, top_k=1, top_p=1.0)
 
+
+@contextmanager
+def scoped_server(sp: ServerProcess):
+    global server
+    server = sp
+
+    import atexit
+    def stop():
+        global server
+        nonlocal sp
+        if sp is not None:
+            sp.stop()
+            sp = None # type: ignore
+            server = None # type: ignore
+    atexit.register(stop)
+    
+    yield sp
+    
+    stop()
+
 if __name__ == "__main__":
     '''
         export LLAMA_CACHE=$HOME/Library/Caches/llama.cpp
@@ -609,22 +631,26 @@ if __name__ == "__main__":
         ( for temp in "" "--temp=0.0" "--temp=0.5" "--temp=0.75" "--temp=1.0" ; do
             for ignore_grammar in 0 1 ; do (
                 export LLAMA_IGNORE_CHAT_GRAMMAR=$ignore_grammar ;
-                python examples/server/tests/unit/test_tool_call.py --n 5 --seed 124 $temp --model "Qwen 2.5 Coder 7B Q4_K_M" --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF ;
-                python examples/server/tests/unit/test_tool_call.py --n 5 --seed 124 $temp --model "Functionary Small v3.2 Q4_K_M" --hf bartowski/functionary-small-v3.2-GGUF:Q4_K_M ;
-                python examples/server/tests/unit/test_tool_call.py --n 5 --seed 124 $temp --model "Mistral Nemo 2407 Q4_K_M" --hf bartowski/Mistral-Nemo-Instruct-2407-GGUF ;
+                ./examples/server/tests/unit/test_tool_call.py --n 5 --seed 124 $temp --model "Mistral Nemo 2407 Q4_K_M" --hf bartowski/Mistral-Nemo-Instruct-2407-GGUF ;
+                ./examples/server/tests/unit/test_tool_call.py --n 20 --seed 124 $temp --model "Qwen 2.5 Coder 7B Q4_K_M"      --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF --ollama qwen2.5-coder:7b ;
+                ./examples/server/tests/unit/test_tool_call.py --n 5  --seed 124 $temp --model "Functionary Small v3.2 Q4_K_M" --hf bartowski/functionary-small-v3.2-GGUF:Q4_K_M ;
+                
             ) ; done ;
-            python examples/server/tests/unit/test_tool_call.py --n 5 --seed 124 $temp --model "Qwen 2.5 Coder 7B Q4_K_M" --ollama qwen2.5-coder:7b ;
-            python examples/server/tests/unit/test_tool_call.py --n 5 --seed 124 $temp --model "Mistral Nemo 2407 Q6_K" --ollama mistral-nemo:12b-instruct-2407-q6_K ;
-        done ) | tee misc.jsonl
+        done ) | tee qc2_.jsonl
         
-                python examples/server/tests/unit/test_tool_call.py --n 5 --seed 124 $temp --model "Llama 3.3 Instruct 70B Q4_K_M" --hf bartowski/Llama-3.3-70B-Instruct-GGUF:Q4_K_M ;
+                # GOOD
+                
+                # BAD
+                
+                ./examples/server/tests/unit/test_tool_call.py --n 5 --seed 124 $temp --model "Mistral Nemo 2407 Q6_K" --ollama mistral-nemo:12b-instruct-2407-q6_K ;
+                ./examples/server/tests/unit/test_tool_call.py --n 5 --seed 124 $temp --model "Llama 3.3 Instruct 70B Q4_K_M" --hf bartowski/Llama-3.3-70B-Instruct-GGUF:Q4_K_M ;
     '''
     # get -hf and --chat-template overrides from command line
     parser = argparse.ArgumentParser(description='Run tests for the chat server.')
-    parser.add_argument('--chat-template', type=str, help='Override the chat template file path')
-    parser.add_argument('--model', type=str, help='Override the model Hugging Face repository', required=True)
-    parser.add_argument('--hf', type=str, help='Override the model Hugging Face repository')
-    parser.add_argument('--ollama', type=str, help='Override the model Hugging Face repository')
+    parser.add_argument('--model', type=str, help='Name of the model to test (implementation agnostic)', required=True)
+    parser.add_argument('--hf', type=str, help='GGUF huggingface model repo id (+ optional quant) to test w/ llama-server')
+    parser.add_argument('--chat-template', type=str, help='Chat template override for llama-server')
+    parser.add_argument('--ollama', type=str, help='Ollama model tag to test')
     parser.add_argument('--n', type=int, help='Number of times to run each test', default=30)
     parser.add_argument('--temp', type=float, help='Temperature')
     parser.add_argument('--top-p', type=float, help='top_p')
@@ -638,33 +664,77 @@ if __name__ == "__main__":
 
     n_predict = 512
     
-    kwargs = {}
-    if args.temp is not None:
-        kwargs['temperature'] = args.temp
-    if args.top_p is not None:
-        kwargs['top_p'] = args.top_p
-    if args.top_k is not None:
-        kwargs['top_k'] = args.top_k
-    if args.seed is not None:
-        kwargs['seed'] = args.seed
+    def run(implementation: str, model_id: str, **request_kwargs):
+        if args.temp is not None:
+            request_kwargs['temperature'] = args.temp
+        if args.top_p is not None:
+            request_kwargs['top_p'] = args.top_p
+        if args.top_k is not None:
+            request_kwargs['top_k'] = args.top_k
+        if args.seed is not None:
+            request_kwargs['seed'] = args.seed
         
-    server = ServerProcess()
-    if args.ollama is not None:
-        implementation = "ollama"
-        server.server_port = 11434
-        server.server_host = "localhost"
-        model_id = args.ollama
-        kwargs['model'] = model_id
-        subprocess.check_call(["ollama", "pull", model_id])
-        # print(subprocess.check_output(["ollama", "pull", model]), flush=True, file=sys.stderr)
-    else:
-        implementation = "llama-server" + (" (no grammar)" if os.environ.get("LLAMA_IGNORE_CHAT_GRAMMAR", "1") == "1" else "")
+        tests = {
+            "hello world": lambda: do_test_hello_world(None, **request_kwargs),
+            "weather": lambda: do_test_weather(**request_kwargs),
+            "calc result": lambda: do_test_calc_result(None, 512, **request_kwargs),
+        }
+        for test_name, test in tests.items():
+            success_count = 0
+            failure_count = 0
+            failures = []
+            success_times = []
+            failure_times = []
+            print(f"Running {test_name}: ", file=sys.stderr, flush=True)
+            for i in range(n):
+                start_time = time.time()
+                def elapsed():
+                    return time.time() - start_time
+                try:
+                    test()
+                    success_times.append(elapsed())
+                    success_count += 1
+                    print('.', end='', file=sys.stderr, flush=True)
+                except Exception as e:
+                    print('!', end='', file=sys.stderr, flush=True)
+                    if failure_count == 0:
+                        print(f" ({e}) ", end='', file=sys.stderr, flush=True)
+                    failure_count += 1
+                    failure_times.append(elapsed())
+                    failures.append(str(e))
+            print('\n', file=sys.stderr, flush=True)
+            print(json.dumps(dict(
+                model=args.model,
+                implementation=implementation,
+                model_id=model_id,
+                test=test_name,
+                temp=args.temp,
+                top_p=args.top_p,
+                top_k=args.top_k,
+                success_ratio=float(success_count) / n,
+                avg_time=mean(success_times + failure_times),
+                median_time=median(success_times + failure_times),
+                success_count=success_count,
+                success_times=success_times,
+                failure_count=failure_count,
+                failure_times=failure_times,
+                failures=list(set(failures)),
+            )) + '\n', flush=True)
+                
+        
+    if args.hf is not None:
+        server = ServerProcess()
         server.n_slots = 1
         server.jinja = True
         server.n_predict = 512 # High because of DeepSeek R1
         server.model_hf_repo = args.hf
         server.model_hf_file = None
-        model_id = args.hf
+        
+        with scoped_server(server):
+            server.start(timeout_seconds=TIMEOUT_SERVER_START)
+            run(
+                implementation="llama-server" + (" (no grammar)" if os.environ.get("LLAMA_IGNORE_CHAT_GRAMMAR", "1") == "1" else ""), 
+                model_id=args.hf)
         # server.n_predict = n_predict
         # if isinstance(template_override, tuple):
         #     (template_hf_repo, template_variant) = template_override
@@ -672,53 +742,17 @@ if __name__ == "__main__":
         #     assert os.path.exists(server.chat_template_file), f"Template file {server.chat_template_file} does not exist. Run `python scripts/get_chat_template.py {template_hf_repo} {template_variant} > {server.chat_template_file}` to download the template."
         # elif isinstance(template_override, str):
         #     server.chat_template = template_override
-        import atexit
-        atexit.register(server.stop)
-        server.start(timeout_seconds=TIMEOUT_SERVER_START)
+        # import atexit
+        # atexit.register(server.stop)
+        # server.start(timeout_seconds=TIMEOUT_SERVER_START)
 
-    tests = {
-        "weather": lambda: do_test_weather(**kwargs),
-        "calc result": lambda: do_test_calc_result(None, 512, **kwargs),
-        "hello world": lambda: do_test_hello_world(None, **kwargs),
-    }
-    for test_name, test in tests.items():
-        success_count = 0
-        failure_count = 0
-        failures = []
-        success_times = []
-        failure_times = []
-        print(f"Running {test_name}: ", file=sys.stderr, flush=True)
-        for i in range(n):
-            start_time = time.time()
-            def elapsed():
-                return time.time() - start_time
-            try:
-                test()
-                success_times.append(elapsed())
-                success_count += 1
-                print('.', end='', file=sys.stderr, flush=True)
-            except Exception as e:
-                print('!', end='', file=sys.stderr, flush=True)
-                if failure_count == 0:
-                    print(f" ({e}) ", end='', file=sys.stderr, flush=True)
-                failure_count += 1
-                failure_times.append(elapsed())
-                failures.append(str(e))
-        print('\n', file=sys.stderr, flush=True)
-        print(json.dumps(dict(
-            model=args.model,
-            implementation=implementation,
-            model_id=model_id,
-            test=test_name,
-            temp=args.temp,
-            top_p=args.top_p,
-            top_k=args.top_k,
-            success_ratio=float(success_count) / n,
-            avg_time=mean(success_times + failure_times),
-            median_time=median(success_times + failure_times),
-            success_count=success_count,
-            success_times=success_times,
-            failure_count=failure_count,
-            failure_times=failure_times,
-            failures=list(set(failures)),
-        )) + '\n', flush=True)
+    if args.ollama is not None:
+        server = ServerProcess()
+        server.server_port = 11434
+        server.server_host = "localhost"
+        subprocess.check_call(["ollama", "pull", args.ollama])
+        
+        with scoped_server(server):
+            run(implementation="ollama", model_id=args.ollama, model=args.ollama)
+        # print(subprocess.check_output(["ollama", "pull", model]), flush=True, file=sys.stderr)
+    

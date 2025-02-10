@@ -273,7 +273,7 @@ class ServerProcess:
                 break
             elif line.startswith('data: '):
                 data = json.loads(line[6:])
-                print("Partial response from server", json.dumps(data, indent=2))
+                print("Partial response from server", json.dumps(data, indent=2), file=sys.stderr, flush=True)
                 yield data
 
 
@@ -383,9 +383,9 @@ def parallel_function_calls(function_list: List[Tuple[Callable[..., Any], Tuple[
 
     # Check if there were any exceptions
     if exceptions:
-        print("Exceptions occurred:")
+        print("Exceptions occurred:", file=sys.stderr, flush=True)
         for index, error in exceptions:
-            print(f"Function at index {index}: {error}")
+            print(f"Function at index {index}: {error}", file=sys.stderr, flush=True)
 
     return results
 
