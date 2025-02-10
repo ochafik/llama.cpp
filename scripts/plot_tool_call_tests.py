@@ -1,4 +1,5 @@
 import json
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -33,9 +34,11 @@ for rec in lines:
 
 temps = set()
 tests = set()
+impls = set()
 for (temp, impl, test) in data_dict.keys():
     temps.add(temp)
     tests.add(test)
+    impls.add(impl)
 temps = sorted(list(temps))
 tests = sorted(list(tests))
 column_groups = [
@@ -46,8 +49,9 @@ column_groups = [
 
 all_cols = []
 for (impl, tests) in column_groups:
-    for t in tests:
-        all_cols.append((impl, t))
+    if impl in impls:
+        for t in tests:
+            all_cols.append((impl, t))
 
 # Create a 2D list (rows x columns) for the final heatmap
 matrix = []
@@ -55,7 +59,7 @@ for temp in temps:
     row_vals = []
     for (impl, test) in all_cols:
         # Get success ratio if present, else 0 (or NaN if you prefer)
-        val = data_dict.get((temp, impl, test), 0.0)
+        val = data_dict.get((temp, impl, test), np.nan)
         row_vals.append(val)
     matrix.append(row_vals)
 
