@@ -650,7 +650,7 @@ static json oaicompat_completion_params_parse(
 
         llama_params["chat_format"] = static_cast<int>(chat_params.format);
         llama_params["prompt"] = chat_params.prompt;
-        const static bool ignore_chat_grammar = getenv("LLAMA_IGNORE_CHAT_GRAMMAR");
+        const static bool ignore_chat_grammar = getenv("LLAMA_IGNORE_CHAT_GRAMMAR") && std::string(getenv("LLAMA_IGNORE_CHAT_GRAMMAR")) == "1";
         if (!ignore_chat_grammar) {
             llama_params["grammar"] = chat_params.grammar;
             llama_params["grammar_lazy"] = chat_params.grammar_lazy;
