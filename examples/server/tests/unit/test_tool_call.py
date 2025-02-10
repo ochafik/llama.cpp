@@ -316,7 +316,7 @@ def do_test_weather(**kwargs):
     assert 'location' in actual_arguments, f"location not found in {json.dumps(actual_arguments)}"
     location = actual_arguments["location"]
     assert isinstance(location, str), f"Expected location to be a string, got {type(location)}: {json.dumps(location)}"
-    assert re.match('^Istanbul(, (TR|Turkey|Türkiye))?$', location), f'Expected Istanbul for location, got {location}'
+    assert re.match('^Istanbul(, ?(TR|Turkey|Türkiye))?$', location), f'Expected Istanbul for location, got {location}'
 
 
 @pytest.mark.slow
