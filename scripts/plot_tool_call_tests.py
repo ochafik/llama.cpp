@@ -46,7 +46,7 @@ for (model, temp, impl, test) in data_dict.keys():
     temps.add(temp)
     tests.add(test)
     impls.add(impl)
-temps = sorted(list(temps))
+temps = sorted(list(temps), key=lambda x: x if x is not None else -1)
 tests = sorted(list(tests))
 column_groups = [
     ("llama-server", tests),
