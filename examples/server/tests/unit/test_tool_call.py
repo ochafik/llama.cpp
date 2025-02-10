@@ -608,9 +608,9 @@ if __name__ == "__main__":
     
         ( for temp_dec in {0..9}; do
             LLAMA_IGNORE_CHAT_GRAMMAR=1 \
-                python examples/server/tests/unit/test_tool_call.py --temp 0.$temp_dec --model "Qwen 2.5 Coder 7B Instruct Q4_K_M" --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF ;
-                python examples/server/tests/unit/test_tool_call.py --temp 0.$temp_dec --model "Qwen 2.5 Coder 7B Instruct Q4_K_M" --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF ;
-                python examples/server/tests/unit/test_tool_call.py --temp 0.$temp_dec --model "Qwen 2.5 Coder 7B Instruct Q4_K_M" --ollama qwen2.5-coder:7b ;
+                python examples/server/tests/unit/test_tool_call.py --seed 124 --temp 0.$temp_dec --model "Qwen 2.5 Coder 7B Instruct Q4_K_M" --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF ;
+                python examples/server/tests/unit/test_tool_call.py --seed 124 --temp 0.$temp_dec --model "Qwen 2.5 Coder 7B Instruct Q4_K_M" --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF ;
+                python examples/server/tests/unit/test_tool_call.py --seed 124 --temp 0.$temp_dec --model "Qwen 2.5 Coder 7B Instruct Q4_K_M" --ollama qwen2.5-coder:7b ;
         done ) | tee qwen2.5-coder-7b.jsonl
 
     '''
@@ -620,7 +620,7 @@ if __name__ == "__main__":
     parser.add_argument('--model', type=str, help='Override the model Hugging Face repository', required=True)
     parser.add_argument('--hf', type=str, help='Override the model Hugging Face repository')
     parser.add_argument('--ollama', type=str, help='Override the model Hugging Face repository')
-    parser.add_argument('--n', type=int, help='Number of times to run each test', default=10)
+    parser.add_argument('--n', type=int, help='Number of times to run each test', default=30)
     parser.add_argument('--temp', type=float, help='Temperature')
     parser.add_argument('--top-p', type=float, help='top_p')
     parser.add_argument('--top-k', type=int, help='top_k')
