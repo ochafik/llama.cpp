@@ -608,11 +608,16 @@ if __name__ == "__main__":
     
         ( for temp_dec in {0..9}; do
             LLAMA_IGNORE_CHAT_GRAMMAR=1 \
-                python examples/server/tests/unit/test_tool_call.py --seed 124 --temp 0.$temp_dec --model "Qwen 2.5 Coder 7B Instruct Q4_K_M" --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF ;
-                python examples/server/tests/unit/test_tool_call.py --seed 124 --temp 0.$temp_dec --model "Qwen 2.5 Coder 7B Instruct Q4_K_M" --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF ;
-                python examples/server/tests/unit/test_tool_call.py --seed 124 --temp 0.$temp_dec --model "Qwen 2.5 Coder 7B Instruct Q4_K_M" --ollama qwen2.5-coder:7b ;
+                python examples/server/tests/unit/test_tool_call.py --seed 124 --temp 0.$temp_dec --model "Qwen 2.5 Coder 7B Q4_K_M" --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF ;
+                python examples/server/tests/unit/test_tool_call.py --seed 124 --temp 0.$temp_dec --model "Qwen 2.5 Coder 7B Q4_K_M" --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF ;
+                python examples/server/tests/unit/test_tool_call.py --seed 124 --temp 0.$temp_dec --model "Qwen 2.5 Coder 7B Q4_K_M" --ollama qwen2.5-coder:7b ;
         done ) | tee qwen2.5-coder-7b.jsonl
 
+        ( for temp_dec in {0..9}; do
+            python examples/server/tests/unit/test_tool_call.py --seed 124 --temp 0.$temp_dec --model "Mistral Nemo 2407 Q6_K" --hf bartowski/Mistral-Nemo-Instruct-2407-GGUF:Q6_K_L ;
+            python examples/server/tests/unit/test_tool_call.py --seed 124 --temp 0.$temp_dec --model "Functionary Small v3.2 Q4_K_M" --hf bartowski/functionary-small-v3.2-GGUF:Q4_K_M ;
+            python examples/server/tests/unit/test_tool_call.py --seed 124 --temp 0.$temp_dec --model "Llama 3.3 Instruct 70B Q4_K_M" --hf bartowski/Llama-3.3-70B-Instruct-GGUF:Q4_K_M ;
+        done ) | tee misc.jsonl
     '''
     # get -hf and --chat-template overrides from command line
     parser = argparse.ArgumentParser(description='Run tests for the chat server.')

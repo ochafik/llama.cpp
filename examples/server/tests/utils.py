@@ -252,7 +252,7 @@ class ServerProcess:
         result.headers = dict(response.headers)
         result.status_code = response.status_code
         result.body = response.json() if parse_body else None
-        print("Response from server", json.dumps(result.body, indent=2), file=sys.stderr, flush=True)
+        # print("Response from server", json.dumps(result.body, indent=2), file=sys.stderr, flush=True)
         return result
 
     def make_stream_request(
