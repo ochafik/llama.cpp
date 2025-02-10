@@ -892,10 +892,18 @@ static common_chat_params common_chat_params_init_hermes_2_pro(const common_chat
                 {"required", json::array({"name", "arguments"})},
             }));
         });
-        auto tool_call = "\"<tool_call>\" space " + builder.add_rule("tool_call", string_join(tool_rules, " | ")) + " \"</tool_call>\" space";
-        builder.add_rule("root", inputs.parallel_tool_calls ? "(" + tool_call + ")+" : tool_call);
+        auto tool_call = builder.add_rule("tool_call", string_join(tool_rules, " | ") + " space");
+        auto tool_call_alt = builder.add_rule("tool_call_alt", 
+            "( \"<tool_call>\" space " + tool_call + " \"</tool_call>\" "
+            "| \"```json\\n\" space " + tool_call + " \"\\n```\" "
+            "| \"<tools>\" space " + tool_call + " \"</tools>\" ) "
+            "space");
+        builder.add_rule("root", inputs.parallel_tool_calls ? "(" + tool_call_alt + ")+" : tool_call_alt);
         data.grammar_triggers.push_back({"<tool_call>", /* .at_start = */ false});
+        data.grammar_triggers.push_back({"<tools>", /* .at_start = */ false});
+        data.grammar_triggers.push_back({"```json\n{\n  \"name\": \"", /* .at_start = */ true});
         data.preserved_tokens = { "</tool_call>" };
+        data.preserved_tokens = { "</tools>" };
     }, grammar_options);
 
     data.prompt = apply(tmpl, inputs.messages, inputs.tools.empty() ? json() : inputs.tools, inputs.add_generation_prompt);
@@ -904,9 +912,9 @@ static common_chat_params common_chat_params_init_hermes_2_pro(const common_chat
 }
 static common_chat_msg common_chat_parse_hermes_2_pro(const std::string & input) {
     try {
-        std::regex start_pattern(R"([\n\s]*<tool_call>)");
-        std::regex middle_pattern(R"([\n\s]*</tool_call>[\n\s]*<tool_call>)");
-        std::regex end_pattern(R"([\n\s]*</tool_call>[\n\s]*$)");
+        std::regex start_pattern(R"([\n\s]*(?:<tool_call>|<tools>|```json\n))");
+        std::regex middle_pattern(R"([\n\s]*</(?:tool_call|tools)>[\n\s]*<(?:tool_call|tools)>)");
+        std::regex end_pattern(R"([\n\s]*(?:</tool_call>|</tools>|```)[\n\s]*$)");
 
         auto end = input.end();
         std::sregex_iterator rend;
