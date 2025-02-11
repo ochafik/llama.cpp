@@ -218,6 +218,10 @@ class ServerProcess:
                     return  # server is ready
             except Exception as e:
                 pass
+            # Check if process died
+            if self.process.poll() is not None:
+                raise RuntimeError(f"Server process died with return code {self.process.returncode}")
+            
             print(f"Waiting for server to start...", file=sys.stderr, flush=True)
             time.sleep(0.5)
         raise TimeoutError(f"Server did not start within {timeout_seconds} seconds")
