@@ -457,6 +457,103 @@ static void test_template_output_parsers() {
     inputs_tools_builtin.extract_reasoning  = false;
 
     {
+        const common_chat_template tmpl(
+            read_file("models/templates/NousResearch-Hermes-2-Pro-Llama-3-8B-tool_use.jinja"), "<s>", "</s>");
+        std::vector<std::string> end_tokens{ "<|im_end|>" };
+
+        assert_equals(COMMON_CHAT_FORMAT_HERMES_2_PRO, common_chat_params_init(tmpl, inputs_tools).format);
+        assert_equals(
+            COMMON_CHAT_FORMAT_HERMES_2_PRO,
+            common_chat_params_init(
+                common_chat_template(read_file("models/templates/NousResearch-Hermes-3-Llama-3.1-8B-tool_use.jinja"),
+                                     "<s>", "</s>"),
+                inputs_tools)
+                .format);
+        assert_equals(
+            COMMON_CHAT_FORMAT_HERMES_2_PRO,
+            common_chat_params_init(
+                common_chat_template(read_file("models/templates/Qwen-Qwen2.5-7B-Instruct.jinja"), "<s>", "</s>"),
+                inputs_tools)
+                .format);
+
+        // Test parsing
+        assert_msg_equals(msg_from_json(message_assist_call), common_chat_parse(
+            "<tool_call>\n"
+            "{\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+            "</tool_call>",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(msg_from_json(message_assist_call), common_chat_parse(
+            "<function=special_function>{\"arg1\": 1}</function>",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(msg_from_json(message_assist_call), common_chat_parse(
+            "<function name=\"special_function\">\n"
+            "{\"arg1\": 1}\n"
+            "</function>",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(msg_from_json(message_assist_call), common_chat_parse(
+            "<tool>\n"
+            "  {\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+            "</tool>",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(msg_from_json(message_assist_call), common_chat_parse(
+            "<tools>\n"
+            "  {\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+            "</tools>",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(msg_from_json(message_assist_call), common_chat_parse(
+            "<response>\n"
+            "  {\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+            "</response>",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(msg_from_json(message_assist_call), common_chat_parse(
+            "```xml\n"
+            "<response>\n"
+            "    {\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+            "</response>\n"
+            "```",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(msg_from_json(message_assist_call), common_chat_parse(
+            "```xml\n"
+            "  {\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+            "```",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(msg_from_json(message_assist_call), common_chat_parse(
+            "```\n"
+            "  {\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+            "```",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(msg_from_json(message_assist_call), common_chat_parse(
+            "```\n"
+            "{\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+            "```",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(msg_from_json(message_assist_call), common_chat_parse(
+            "```json\n"
+            "  {\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+            "```",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(msg_from_json(message_assist_call), common_chat_parse(
+            "<json>\n"
+            "  {\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+            "</json>",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(msg_from_json(message_assist_call), common_chat_parse(
+            "<JSON>\n"
+            "  {\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+            "</JSON>",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+
+        test_template(tmpl, end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
+        test_template(tmpl, end_tokens, message_assist_call, tools,
+                      "<tool_call>\n"
+                      "{\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+                      "</tool_call>");
+        test_template(tmpl, end_tokens, python_message_assist_call, tools,
+                      "<tool_call>\n"
+                      "{\"name\": \"python\", \"arguments\": {\"code\": \"print('hey')\"}}\n"
+                      "</tool_call>");
+    }
+    {
         // Not supported yet
         const common_chat_template tmpl(read_file("models/templates/CohereForAI-c4ai-command-r-plus-tool_use.jinja"), "<s>", "</s>");
         assert_equals(COMMON_CHAT_FORMAT_GENERIC, common_chat_params_init(tmpl, inputs_tools).format);
@@ -560,36 +657,6 @@ static void test_template_output_parsers() {
         test_template(
             tmpl, end_tokens, message_assist_call_id, tools,
             "[TOOL_CALLS][{\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}, \"id\": \"123456789\"}]");
-    }
-    {
-        const common_chat_template tmpl(
-            read_file("models/templates/NousResearch-Hermes-2-Pro-Llama-3-8B-tool_use.jinja"), "<s>", "</s>");
-        std::vector<std::string> end_tokens{ "<|im_end|>" };
-
-        assert_equals(COMMON_CHAT_FORMAT_HERMES_2_PRO, common_chat_params_init(tmpl, inputs_tools).format);
-        assert_equals(
-            COMMON_CHAT_FORMAT_HERMES_2_PRO,
-            common_chat_params_init(
-                common_chat_template(read_file("models/templates/NousResearch-Hermes-3-Llama-3.1-8B-tool_use.jinja"),
-                                     "<s>", "</s>"),
-                inputs_tools)
-                .format);
-        assert_equals(
-            COMMON_CHAT_FORMAT_HERMES_2_PRO,
-            common_chat_params_init(
-                common_chat_template(read_file("models/templates/Qwen-Qwen2.5-7B-Instruct.jinja"), "<s>", "</s>"),
-                inputs_tools)
-                .format);
-
-        test_template(tmpl, end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
-        test_template(tmpl, end_tokens, message_assist_call, tools,
-                      "<tool_call>\n"
-                      "{\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
-                      "</tool_call>");
-        test_template(tmpl, end_tokens, python_message_assist_call, tools,
-                      "<tool_call>\n"
-                      "{\"name\": \"python\", \"arguments\": {\"code\": \"print('hey')\"}}\n"
-                      "</tool_call>");
     }
     {
         const common_chat_template tmpl(read_file("models/templates/meta-llama-Llama-3.1-8B-Instruct.jinja"), "<s>",
