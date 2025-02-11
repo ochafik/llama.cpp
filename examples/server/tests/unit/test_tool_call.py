@@ -628,8 +628,9 @@ if __name__ == "__main__":
     '''
         (   export LLAMA_CACHE=$HOME/Library/Caches/llama.cpp ;
             export LLAMA_SERVER_BIN_PATH=$PWD/build/bin/llama-server ;
-            export ARGS=( --n=10 --temps=0,0.5,0.75,1,1.5,2,5, ) ;
-            ./examples/server/tests/unit/test_tool_call.py --model " Qwen 2.5 7B Q4_K_M" --hf Qwen2.5-7B-Instruct-GGUF
+            export ARGS=( --n=10 --temps=0,0.5,0.75,1,1.5,2,5, --append=llamas.jsonl ) ;
+            ./examples/server/tests/unit/test_tool_call.py ${ARGS[@]} --model "Qwen 2.5 1.5B Q4_K_M"          --hf bartowski/Qwen2.5-1.5B-Instruct-GGUF      --ollama qwen2.5:1.5b-instruct-q4_K_M ;
+            ./examples/server/tests/unit/test_tool_call.py ${ARGS[@]} --model "Qwen 2.5 7B Q4_K_M"            --hf bartowski/Qwen2.5-7B-Instruct-GGUF ;
             ./examples/server/tests/unit/test_tool_call.py ${ARGS[@]} --model "Llama 3.2 Instruct 1B Q4_K_M"  --hf bartowski/Llama-3.2-1B-Instruct-GGUF      --ollama llama3.2:1b-instruct-q4_K_M ;
             ./examples/server/tests/unit/test_tool_call.py ${ARGS[@]} --model "Llama 3.2 Instruct 3B Q4_K_M"  --hf bartowski/Llama-3.2-3B-Instruct-GGUF      --ollama llama3.1:3b ;
             ./examples/server/tests/unit/test_tool_call.py ${ARGS[@]} --model "Llama 3.1 Instruct 8B Q4_K_M"  --hf bartowski/Meta-Llama-3.1-8B-Instruct-GGUF --ollama llama3.1:8b ;
@@ -637,7 +638,7 @@ if __name__ == "__main__":
             ./examples/server/tests/unit/test_tool_call.py ${ARGS[@]} --model "Mistral Nemo 2407 Q4_K_M"      --hf bartowski/Mistral-Nemo-Instruct-2407-GGUF --ollama mistral-nemo:12b ;
             ./examples/server/tests/unit/test_tool_call.py ${ARGS[@]} --model "Qwen 2.5 Coder 7B Q4_K_M"      --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF  --ollama qwen2.5-coder:7b ;
             ./examples/server/tests/unit/test_tool_call.py ${ARGS[@]} --model "Functionary Small v3.2 Q4_K_M" --hf bartowski/functionary-small-v3.2-GGUF ;
-        ) | tee llamas.jsonl
+        )
         
     '''
     # get -hf and --chat-template overrides from command line
@@ -652,129 +653,129 @@ if __name__ == "__main__":
     parser.add_argument('--top-p', type=float, help='top_p')
     parser.add_argument('--top-k', type=int, help='top_k')
     parser.add_argument('--seed', type=int, help='Random seed')
+    parser.add_argument('--port', type=int, help='llama-server port')
+    parser.add_argument('--output', type=str, help='Output JSON file')
+    parser.add_argument('--append', type=str, help='Output JSON file')
+    
 
     args = parser.parse_args()
 
+    # Check only one of output and append
+    assert (args.output is None) != (args.append is None), "Exactly one of --output and --append must be specified"
+    
     # chat_template = args.chat_template
     n = args.n
 
     n_predict = 512
     
-    def run(*, implementation: str, model_id: str, temp: float | None = None, output_kwargs={}, request_kwargs={}):
-        request_kwargs = {**request_kwargs}
-        if temp is not None:
-            request_kwargs['temperature'] = temp
-        if args.top_p is not None:
-            request_kwargs['top_p'] = args.top_p
-        if args.top_k is not None:
-            request_kwargs['top_k'] = args.top_k
-        if args.seed is not None:
-            request_kwargs['seed'] = args.seed
-        
-        request_kwargs['cache_prompt'] = False
-        
-        tests = {
-            "hello world": lambda: do_test_hello_world(**request_kwargs),
-            "weather": lambda: do_test_weather(**request_kwargs),
-            "calc result": lambda: do_test_calc_result(None, 512, **request_kwargs),
-        }
-        for test_name, test in tests.items():
-            success_count = 0
-            failure_count = 0
-            failures = []
-            success_times = []
-            failure_times = []
-            print(f"Running {test_name}: ", file=sys.stderr, flush=True)
-            for i in range(n):
-                start_time = time.time()
-                def elapsed():
-                    return time.time() - start_time
-                try:
-                    test()
-                    success_times.append(elapsed())
-                    success_count += 1
-                    print('.', end='', file=sys.stderr, flush=True)
-                except Exception as e:
-                    print('!', end='', file=sys.stderr, flush=True)
-                    if failure_count == 0:
-                        print(f" ({e}) ", end='', file=sys.stderr, flush=True)
-                    failure_count += 1
-                    failure_times.append(elapsed())
-                    failures.append(str(e))
-            print('\n', file=sys.stderr, flush=True)
-            print(json.dumps({**output_kwargs, **dict(
-                model=args.model,
-                implementation=implementation,
-                model_id=model_id,
-                test=test_name,
-                temp=temp,
-                top_p=args.top_p,
-                top_k=args.top_k,
-                success_ratio=float(success_count) / n,
-                avg_time=mean(success_times + failure_times),
-                median_time=median(success_times + failure_times),
-                success_count=success_count,
-                success_times=success_times,
-                failure_count=failure_count,
-                failure_times=failure_times,
-                failures=list(set(failures)),
-            )}) + '\n', flush=True)
-                
-        # server.n_predict = n_predict
-        # if isinstance(template_override, tuple):
-        #     (template_hf_repo, template_variant) = template_override
-        #     server.chat_template_file = f"../../../models/templates/{template_hf_repo.replace('/', '-') + ('-' + template_variant if template_variant else '')}.jinja"
-        #     assert os.path.exists(server.chat_template_file), f"Template file {server.chat_template_file} does not exist. Run `python scripts/get_chat_template.py {template_hf_repo} {template_variant} > {server.chat_template_file}` to download the template."
-        # elif isinstance(template_override, str):
-        #     server.chat_template = template_override
-        # import atexit
-        # atexit.register(server.stop)
-        # server.start(timeout_seconds=TIMEOUT_SERVER_START)
-
-    temps = [float(temp) if temp != "" else None for temp in args.temps.split(',')] if args.temps is not None else [None]
-    for temp in temps:
-        if args.hf is not None:
-            server = ServerProcess()
-            server.n_slots = 1
-            server.jinja = True
-            server.n_predict = 512 # High because of DeepSeek R1
-            server.model_hf_repo = args.hf
-            server.model_hf_file = None
-            server.model_draft_hf_repo = args.hfd
-            server.chat_template = args.chat_template
-            # server.debug = True
+    with open(args.output or args.append, 'w' if args.output else 'a') as output_file:
+    
+        def run(*, implementation: str, model_id: str, temp: float | None = None, output_kwargs={}, request_kwargs={}):
+            request_kwargs = {**request_kwargs}
+            if temp is not None:
+                request_kwargs['temperature'] = temp
+            if args.top_p is not None:
+                request_kwargs['top_p'] = args.top_p
+            if args.top_k is not None:
+                request_kwargs['top_k'] = args.top_k
+            if args.seed is not None:
+                request_kwargs['seed'] = args.seed
             
-            with scoped_server(server):
-                server.start(timeout_seconds=TIMEOUT_SERVER_START)
-                for ignore_chat_grammar in [False, True]:
+            request_kwargs['cache_prompt'] = False
+            
+            tests = {
+                "hello world": lambda: do_test_hello_world(**request_kwargs),
+                "weather": lambda: do_test_weather(**request_kwargs),
+                "calc result": lambda: do_test_calc_result(None, 512, **request_kwargs),
+            }
+            for test_name, test in tests.items():
+                success_count = 0
+                failure_count = 0
+                failures = []
+                success_times = []
+                failure_times = []
+                print(f"Running {test_name}: ", file=sys.stderr, flush=True)
+                for i in range(n):
+                    start_time = time.time()
+                    def elapsed():
+                        return time.time() - start_time
+                    try:
+                        test()
+                        success_times.append(elapsed())
+                        success_count += 1
+                        print('.', end='', file=sys.stderr, flush=True)
+                    except Exception as e:
+                        print('!', end='', file=sys.stderr, flush=True)
+                        if failure_count == 0:
+                            print(f" ({e}) ", end='', file=sys.stderr, flush=True)
+                        failure_count += 1
+                        failure_times.append(elapsed())
+                        failures.append(str(e))
+                print('\n', file=sys.stderr, flush=True)
+                output_file.write(json.dumps({**output_kwargs, **dict(
+                    model=args.model,
+                    implementation=implementation,
+                    model_id=model_id,
+                    test=test_name,
+                    temp=temp,
+                    top_p=args.top_p,
+                    top_k=args.top_k,
+                    success_ratio=float(success_count) / n,
+                    avg_time=mean(success_times + failure_times),
+                    median_time=median(success_times + failure_times),
+                    success_count=success_count,
+                    success_times=success_times,
+                    failure_count=failure_count,
+                    failure_times=failure_times,
+                    failures=list(set(failures)),
+                )}) + '\n')
+                output_file.flush()
+
+        temps = [float(temp) if temp != "" else None for temp in args.temps.split(',')] if args.temps is not None else [None]
+        for temp in temps:
+            if args.hf is not None:
+                server = ServerProcess()
+                server.n_slots = 1
+                server.jinja = True
+                server.n_predict = 512 # High because of DeepSeek R1
+                server.model_hf_repo = args.hf
+                server.model_hf_file = None
+                server.model_draft_hf_repo = args.hfd
+                server.chat_template = args.chat_template
+                server.server_port = args.port
+                # server.debug = True
+                
+                with scoped_server(server):
+                    server.start(timeout_seconds=TIMEOUT_SERVER_START)
+                    for ignore_chat_grammar in [False, True]:
+                        run(
+                            implementation="llama-server" + (" (no grammar)" if ignore_chat_grammar else ""),
+                            model_id=args.hf, 
+                            temp=temp,
+                            output_kwargs=dict(
+                                chat_template=args.chat_template,
+                            ),
+                            request_kwargs=dict(
+                                ignore_chat_grammar=ignore_chat_grammar,
+                            ),
+                        )
+
+            if args.ollama is not None:
+                server = ServerProcess()
+                server.server_port = 11434
+                server.server_host = "localhost"
+                subprocess.check_call(["ollama", "pull", args.ollama])
+                
+                with scoped_server(server):
                     run(
-                        implementation="llama-server" + (" (no grammar)" if ignore_chat_grammar else ""),
-                        model_id=args.hf, 
+                        implementation="ollama",
+                        model_id=args.ollama,
                         temp=temp,
                         output_kwargs=dict(
-                            chat_template=args.chat_template,
+                            chat_template=None,
                         ),
                         request_kwargs=dict(
-                            ignore_chat_grammar=ignore_chat_grammar,
+                            model=args.ollama,
                         ),
                     )
-
-        if args.ollama is not None:
-            server = ServerProcess()
-            server.server_port = 11434
-            server.server_host = "localhost"
-            subprocess.check_call(["ollama", "pull", args.ollama])
-            
-            with scoped_server(server):
-                run(
-                    implementation="ollama",
-                    model_id=args.ollama,
-                    temp=temp,
-                    output_kwargs=dict(
-                        chat_template=None,
-                    ),
-                    request_kwargs=dict(
-                        model=args.ollama,
-                    ),
-                )
     
