@@ -159,9 +159,9 @@ def test_completion_with_required_tool_tiny_slow(template_name: str, tool: dict,
     (PYTHON_TOOL,  "code",     "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF", None),
     (PYTHON_TOOL,  "code",     "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF", "chatml"),
 
-    # Note: gemma-2-2b-it knows itself as "model", not "assistant", so we don't test the ill-suited chatml on it.
     (TEST_TOOL,    "success",  "bartowski/gemma-2-2b-it-GGUF",              None),
     (PYTHON_TOOL,  "code",     "bartowski/gemma-2-2b-it-GGUF",              None),
+    (PYTHON_TOOL,  "code",     "bartowski/gemma-2-2b-it-GGUF",              "chatml"),
 
     (TEST_TOOL,    "success",  "bartowski/Phi-3.5-mini-instruct-GGUF",      None),
     (PYTHON_TOOL,  "code",     "bartowski/Phi-3.5-mini-instruct-GGUF",      None),
@@ -177,11 +177,11 @@ def test_completion_with_required_tool_tiny_slow(template_name: str, tool: dict,
 
     (TEST_TOOL,    "success",  "bartowski/Hermes-2-Pro-Llama-3-8B-GGUF", ("NousResearch/Hermes-2-Pro-Llama-3-8B", "tool_use")),
     (PYTHON_TOOL,  "code",     "bartowski/Hermes-2-Pro-Llama-3-8B-GGUF", ("NousResearch/Hermes-2-Pro-Llama-3-8B", "tool_use")),
-    # (PYTHON_TOOL,  "code",     "bartowski/Hermes-2-Pro-Llama-3-8B-GGUF", "chatml"),
+    (PYTHON_TOOL,  "code",     "bartowski/Hermes-2-Pro-Llama-3-8B-GGUF", "chatml"),
 
     (TEST_TOOL,    "success",  "bartowski/Hermes-3-Llama-3.1-8B-GGUF",   ("NousResearch/Hermes-3-Llama-3.1-8B", "tool_use")),
     (PYTHON_TOOL,  "code",     "bartowski/Hermes-3-Llama-3.1-8B-GGUF",   ("NousResearch/Hermes-3-Llama-3.1-8B", "tool_use")),
-    # (PYTHON_TOOL,  "code",     "bartowski/Hermes-3-Llama-3.1-8B-GGUF",   "chatml"),
+    (PYTHON_TOOL,  "code",     "bartowski/Hermes-3-Llama-3.1-8B-GGUF",   "chatml"),
 
     (TEST_TOOL,    "success",  "bartowski/Mistral-Nemo-Instruct-2407-GGUF", None),
     (PYTHON_TOOL,  "code",     "bartowski/Mistral-Nemo-Instruct-2407-GGUF", None),
@@ -197,10 +197,10 @@ def test_completion_with_required_tool_tiny_slow(template_name: str, tool: dict,
 
     (TEST_TOOL,    "success",  "bartowski/Llama-3.2-1B-Instruct-GGUF",      ("meta-llama/Llama-3.2-3B-Instruct", None)),
     (PYTHON_TOOL,  "code",     "bartowski/Llama-3.2-1B-Instruct-GGUF",      ("meta-llama/Llama-3.2-3B-Instruct", None)),
-    # (PYTHON_TOOL,  "code",     "bartowski/Llama-3.2-1B-Instruct-GGUF",      "chatml"),
-    # TODO: fix these
-    # (TEST_TOOL,    "success",  "bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF", None),
-    # (PYTHON_TOOL,  "code",     "bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF", None),
+    (PYTHON_TOOL,  "code",     "bartowski/Llama-3.2-1B-Instruct-GGUF",      "chatml"),
+
+    (TEST_TOOL,    "success",  "bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF", None),
+    (PYTHON_TOOL,  "code",     "bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF", None),
 ])
 def test_completion_with_required_tool_real_model(tool: dict, argument_key: str | None, hf_repo: str, template_override: str | Tuple[str, str | None] | None):
     global server
