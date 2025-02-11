@@ -742,7 +742,8 @@ if __name__ == "__main__":
                 server.model_hf_file = None
                 server.model_draft_hf_repo = args.hfd
                 server.chat_template = args.chat_template
-                server.server_port = args.port
+                if args.port is not None:
+                    server.server_port = args.port
                 # server.debug = True
                 
                 with scoped_server(server):
