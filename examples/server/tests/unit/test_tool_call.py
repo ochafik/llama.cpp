@@ -626,9 +626,10 @@ def scoped_server(sp: ServerProcess):
 
 if __name__ == "__main__":
     '''
-        (   export LLAMA_CACHE=$HOME/Library/Caches/llama.cpp ;
+        cmake --build build -j && ( \
+            export LLAMA_CACHE=$HOME/Library/Caches/llama.cpp ;
             export LLAMA_SERVER_BIN_PATH=$PWD/build/bin/llama-server ;
-            export ARGS=( --n=10 --temps=0,0.5,0.75,1,1.5,2,5, --append=llamas.jsonl ) ;
+            export ARGS=( --n=10 --temps=0,0.5,0.75,1,1.5,2,5, --append=all.jsonl ) ;
             ./examples/server/tests/unit/test_tool_call.py ${ARGS[@]} --model "Qwen 2.5 1.5B Q4_K_M"          --hf bartowski/Qwen2.5-1.5B-Instruct-GGUF      --ollama qwen2.5:1.5b-instruct-q4_K_M ;
             ./examples/server/tests/unit/test_tool_call.py ${ARGS[@]} --model "Qwen 2.5 Coder 7B Q4_K_M"      --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF  --ollama qwen2.5-coder:7b ;
             ./examples/server/tests/unit/test_tool_call.py ${ARGS[@]} --model "Qwen 2.5 7B Q4_K_M"            --hf bartowski/Qwen2.5-7B-Instruct-GGUF ;
