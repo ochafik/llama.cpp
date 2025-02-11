@@ -170,6 +170,7 @@ struct slot_params {
             {"n_probs",                   sampling.n_probs},
             {"min_keep",                  sampling.min_keep},
             {"grammar",                   sampling.grammar},
+            {"grammar_lazy",              sampling.grammar_lazy},
             {"grammar_trigger_words",     grammar_trigger_words},
             {"grammar_trigger_tokens",    sampling.grammar_trigger_tokens},
             {"preserved_tokens",          sampling.preserved_tokens},
