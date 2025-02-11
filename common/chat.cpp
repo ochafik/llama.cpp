@@ -968,24 +968,22 @@ static common_chat_params common_chat_params_init_hermes_2_pro(const common_chat
             std::string name = function["name"];
             auto parameters = function["parameters"];
             builder.resolve_refs(parameters);
-            std::string args_rule;
             if (name == "python" && parameters.contains("properties") && parameters["properties"].contains("code") && parameters["properties"].size() == 1) {
-                args_rule = builder.add_rule(name + "-call",
+                tool_rules.push_back(builder.add_rule(name + "-call",
                     "\"{\" space "
                     "\"\\\"name\\\":\" space \"\\\"" + name + "\\\"\" space \",\" space "
                     "\"\\\"arguments\\\":\" space " + add_python_code_arguments_rule(name + "-code-arguments", builder) + " "
-                    "\"}\" space ");
+                    "\"}\" space "));
             } else {
-                args_rule = builder.add_schema(name + "-call", {
+                tool_rules.push_back(builder.add_schema(name + "-call", {
                     {"type", "object"},
                     {"properties", json {
                         {"name", json {{"const", name}}},
                         {"arguments", parameters},
                     }},
                     {"required", json::array({"name", "arguments"})},
-                });
+                }));
             }
-            tool_rules.push_back(args_rule);
         });
         auto tool_call = builder.add_rule("tool_call", "( " + string_join(tool_rules, " | ") + " ) space");
         auto tool_call_alt = builder.add_rule("tool_call_alt", 
@@ -997,8 +995,10 @@ static common_chat_params common_chat_params_init_hermes_2_pro(const common_chat
         data.grammar_triggers.push_back({"<tool_call>", /* .at_start = */ false});
         data.grammar_triggers.push_back({"<tools>", /* .at_start = */ false});
         data.grammar_triggers.push_back({"```json\n{\n  \"name\": \"", /* .at_start = */ true});
-        data.preserved_tokens = { "</tool_call>" };
-        data.preserved_tokens = { "</tools>" };
+        data.preserved_tokens = {
+            "</tool_call>",
+            "</tools>",
+        };
     }, grammar_options);
 
     data.prompt = apply(tmpl, inputs.messages, inputs.tools.empty() ? json() : inputs.tools, inputs.add_generation_prompt);
