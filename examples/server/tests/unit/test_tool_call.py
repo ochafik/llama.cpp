@@ -77,7 +77,7 @@ WEATHER_TOOL = {
 }
 
 
-def do_test_completion_with_required_tool_tiny(tool: dict, argument_key: str | None, **kwargs):
+def do_test_completion_with_required_tool_tiny(tool: dict, argument_key: str | None, n_predict, **kwargs):
     global server
     res = server.make_request("POST", "/v1/chat/completions", data={
         "max_tokens": n_predict,
@@ -118,7 +118,7 @@ def test_completion_with_required_tool_tiny_fast(template_name: str, tool: dict,
     server.n_predict = n_predict
     server.chat_template_file = f'../../../models/templates/{template_name}.jinja'
     server.start(timeout_seconds=TIMEOUT_SERVER_START)
-    do_test_completion_with_required_tool_tiny(tool, argument_key, temperature=0.0, top_k=1, top_p=1.0)
+    do_test_completion_with_required_tool_tiny(tool, argument_key, n_predict, temperature=0.0, top_k=1, top_p=1.0)
 
 
 @pytest.mark.slow
@@ -150,7 +150,7 @@ def test_completion_with_required_tool_tiny_slow(template_name: str, tool: dict,
     server.n_predict = n_predict
     server.chat_template_file = f'../../../models/templates/{template_name}.jinja'
     server.start(timeout_seconds=TIMEOUT_SERVER_START)
-    do_test_completion_with_required_tool_tiny(template_name, tool, argument_key)
+    do_test_completion_with_required_tool_tiny(tool, argument_key, n_predict)
 
 
 @pytest.mark.slow
@@ -166,6 +166,10 @@ def test_completion_with_required_tool_tiny_slow(template_name: str, tool: dict,
     (TEST_TOOL,    "success",  "bartowski/Phi-3.5-mini-instruct-GGUF",      None),
     (PYTHON_TOOL,  "code",     "bartowski/Phi-3.5-mini-instruct-GGUF",      None),
     (PYTHON_TOOL,  "code",     "bartowski/Phi-3.5-mini-instruct-GGUF",      "chatml"),
+
+    (TEST_TOOL,    "success",  "bartowski/Qwen2.5-1.5B-Instruct-GGUF",      None),
+    (PYTHON_TOOL,  "code",     "bartowski/Qwen2.5-1.5B-Instruct-GGUF",      None),
+    (PYTHON_TOOL,  "code",     "bartowski/Qwen2.5-1.5B-Instruct-GGUF",      "chatml"),
 
     (TEST_TOOL,    "success",  "bartowski/Qwen2.5-7B-Instruct-GGUF",        None),
     (PYTHON_TOOL,  "code",     "bartowski/Qwen2.5-7B-Instruct-GGUF",        None),
@@ -242,7 +246,7 @@ def test_completion_with_required_tool_real_model(tool: dict, argument_key: str 
         assert argument_key in actual_arguments, f"tool arguments: {json.dumps(actual_arguments)}, expected: {argument_key}"
 
 
-def do_test_completion_without_tool_call(template_name: str, n_predict: int, tools: list[dict], tool_choice: str | None, **kwargs):
+def do_test_completion_without_tool_call(n_predict: int, tools: list[dict], tool_choice: str | None, **kwargs):
     global server
     res = server.make_request("POST", "/v1/chat/completions", data={
         "max_tokens": n_predict,
@@ -270,7 +274,7 @@ def test_completion_without_tool_call_fast(template_name: str, n_predict: int, t
     server.n_predict = n_predict
     server.chat_template_file = f'../../../models/templates/{template_name}.jinja'
     server.start(timeout_seconds=TIMEOUT_SERVER_START)
-    do_test_completion_without_tool_call(template_name, n_predict, tools, tool_choice)
+    do_test_completion_without_tool_call(n_predict, tools, tool_choice)
 
 
 @pytest.mark.slow
@@ -291,13 +295,12 @@ def test_completion_without_tool_call_slow(template_name: str, n_predict: int, t
     server.n_predict = n_predict
     server.chat_template_file = f'../../../models/templates/{template_name}.jinja'
     server.start(timeout_seconds=TIMEOUT_SERVER_START)
-    do_test_completion_without_tool_call(template_name, n_predict, tools, tool_choice)
+    do_test_completion_without_tool_call(n_predict, tools, tool_choice)
 
 
 def do_test_weather(**kwargs):
     global server
     res = server.make_request("POST", "/v1/chat/completions", data={
-        "max_tokens": n_predict,
         "messages": [
             {"role": "system", "content": "You are a chatbot that uses tools/functions. Dont overthink things."},
             {"role": "user", "content": "What is the weather in Istanbul?"},
@@ -321,11 +324,17 @@ def do_test_weather(**kwargs):
 
 @pytest.mark.slow
 @pytest.mark.parametrize("hf_repo,template_override", [
+    ("bartowski/Llama-3.2-3B-Instruct-GGUF",      ("meta-llama/Llama-3.2-3B-Instruct", None)),
+    ("bartowski/Llama-3.2-3B-Instruct-GGUF",      "chatml"),
+
     ("bartowski/Meta-Llama-3.1-8B-Instruct-GGUF", None),
     ("bartowski/Meta-Llama-3.1-8B-Instruct-GGUF", "chatml"),
 
     ("bartowski/Phi-3.5-mini-instruct-GGUF",      None),
     ("bartowski/Phi-3.5-mini-instruct-GGUF",      "chatml"),
+
+    ("bartowski/Qwen2.5-1.5B-Instruct-GGUF",      None),
+    ("bartowski/Qwen2.5-1.5B-Instruct-GGUF",      "chatml"),
 
     ("bartowski/Qwen2.5-7B-Instruct-GGUF",        None),
     ("bartowski/Qwen2.5-7B-Instruct-GGUF",        "chatml"),
@@ -341,9 +350,6 @@ def do_test_weather(**kwargs):
 
     ("bartowski/functionary-small-v3.2-GGUF:Q8_0",       ("meetkai/functionary-medium-v3.2", None)),
     ("bartowski/functionary-small-v3.2-GGUF:Q8_0",       "chatml"),
-
-    ("bartowski/Llama-3.2-3B-Instruct-GGUF",      ("meta-llama/Llama-3.2-3B-Instruct", None)),
-    ("bartowski/Llama-3.2-3B-Instruct-GGUF",      "chatml"),
 
     ("bartowski/c4ai-command-r7b-12-2024-GGUF:Q6_K_L",   ("CohereForAI/c4ai-command-r7b-12-2024", "tool_use")),
 
@@ -370,7 +376,7 @@ def test_weather(hf_repo: str, template_override: str | Tuple[str, str | None] |
     elif isinstance(template_override, str):
         server.chat_template = template_override
     server.start(timeout_seconds=TIMEOUT_SERVER_START)
-    do_test_weather()
+    do_test_weather(max_tokens=n_predict)
 
 
 def do_test_calc_result(result_override: str | None, n_predict: int, **kwargs):
@@ -520,10 +526,9 @@ def test_thoughts(n_predict: int, reasoning_format: Literal['deepseek', 'none'] 
         assert re.match(expect_reasoning_content, reasoning_content), f'Expected {expect_reasoning_content}, got {reasoning_content}'
 
 
-def do_test_hello_world(expected_arguments_override: str | None, **kwargs):
+def do_test_hello_world(**kwargs):
     global server
     res = server.make_request("POST", "/v1/chat/completions", data={
-        "max_tokens": 256,
         "messages": [
             {"role": "system", "content": "You are a tool-calling agent."},
             {"role": "user", "content": "say hello world with python"},
@@ -538,58 +543,55 @@ def do_test_hello_world(expected_arguments_override: str | None, **kwargs):
     tool_call = tool_calls[0]
     assert choice["message"].get("content") in (None, ""), f'Expected no content in {choice["message"]}'
     assert tool_call["function"]["name"] == PYTHON_TOOL["function"]["name"]
-    actual_arguments = tool_call["function"]["arguments"]
-    if expected_arguments_override is not None:
-        assert actual_arguments == expected_arguments_override
-    else:
-        actual_arguments = json.loads(actual_arguments)
-        assert 'code' in actual_arguments, f"code not found in {json.dumps(actual_arguments)}"
-        code = actual_arguments["code"]
-        assert isinstance(code, str), f"Expected code to be a string, got {type(code)}: {json.dumps(code)}"
-        assert re.match(r'''((#.*)?\n)*print\(("[Hh]ello,? [Ww]orld!?"|'[Hh]ello,? [Ww]orld!?')\)''', code), f'Expected hello world, got {code}'
+    actual_arguments = json.loads(tool_call["function"]["arguments"])
+    assert 'code' in actual_arguments, f"code not found in {json.dumps(actual_arguments)}"
+    code = actual_arguments["code"]
+    assert isinstance(code, str), f"Expected code to be a string, got {type(code)}: {json.dumps(code)}"
+    assert re.match(r'''((#.*)?\n)*print\(("[Hh]ello,? [Ww]orld!?"|'[Hh]ello,? [Ww]orld!?')\)''', code), f'Expected hello world, got {code}'
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("expected_arguments_override,hf_repo,template_override", [
-    (None,                 "bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF", None),
-    # (None,                 "bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF", "chatml"),
+@pytest.mark.parametrize("hf_repo,template_override", [
+    ("bartowski/Llama-3.2-1B-Instruct-GGUF",      ("meta-llama-Llama-3.2-3B-Instruct", None)),
+    ("bartowski/Llama-3.2-1B-Instruct-GGUF",      None),
 
-    (None,                 "bartowski/Phi-3.5-mini-instruct-GGUF",      None),
-    (None,                 "bartowski/Phi-3.5-mini-instruct-GGUF",      "chatml"),
+    ("bartowski/Llama-3.2-3B-Instruct-GGUF",      ("meta-llama-Llama-3.2-3B-Instruct", None)),
+    ("bartowski/Llama-3.2-3B-Instruct-GGUF",      None),
 
-    (None,                 "bartowski/functionary-small-v3.2-GGUF:Q8_0",       ("meetkai-functionary-medium-v3.2", None)),
-    (None,                 "bartowski/functionary-small-v3.2-GGUF:Q8_0",       "chatml"),
+    ("bartowski/Meta-Llama-3.1-8B-Instruct-GGUF", None),
+    # ("bartowski/Meta-Llama-3.1-8B-Instruct-GGUF", "chatml"),
 
-    ('{"code":"print("}',  "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF", None),
-    (None,                 "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF", "chatml"),
+    ("bartowski/Qwen2.5-7B-Instruct-GGUF",        None),
+    ("bartowski/Qwen2.5-7B-Instruct-GGUF",        "chatml"),
 
-    (None,                 "bartowski/Llama-3.2-1B-Instruct-GGUF",      ("meta-llama-Llama-3.2-3B-Instruct", None)),
-    (None,                 "bartowski/Llama-3.2-1B-Instruct-GGUF",      "chatml"),
+    ("bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF", None),
+    # ("bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF", "chatml"),
 
-    ('{"code":"print("}',  "bartowski/Llama-3.2-3B-Instruct-GGUF",      ("meta-llama-Llama-3.2-3B-Instruct", None)),
-    (None,                 "bartowski/Llama-3.2-3B-Instruct-GGUF",      "chatml"),
+    ("bartowski/Phi-3.5-mini-instruct-GGUF",      None),
+    ("bartowski/Phi-3.5-mini-instruct-GGUF",      "chatml"),
 
-    (None,                 "bartowski/Qwen2.5-7B-Instruct-GGUF",        None),
-    (None,                 "bartowski/Qwen2.5-7B-Instruct-GGUF",        "chatml"),
+    ("bartowski/functionary-small-v3.2-GGUF:Q8_0",       ("meetkai-functionary-medium-v3.2", None)),
+    ("bartowski/functionary-small-v3.2-GGUF:Q8_0",       "chatml"),
 
-    (None,                 "bartowski/Hermes-2-Pro-Llama-3-8B-GGUF",    ("NousResearch/Hermes-2-Pro-Llama-3-8B", "tool_use")),
-    (None,                 "bartowski/Hermes-2-Pro-Llama-3-8B-GGUF",    "chatml"),
+    ("bartowski/Hermes-2-Pro-Llama-3-8B-GGUF",    ("NousResearch/Hermes-2-Pro-Llama-3-8B", "tool_use")),
+    ("bartowski/Hermes-2-Pro-Llama-3-8B-GGUF",    "chatml"),
 
-    (None,                 "bartowski/Hermes-3-Llama-3.1-8B-GGUF",      ("NousResearch-Hermes-3-Llama-3.1-8B", "tool_use")),
-    (None,                 "bartowski/Hermes-3-Llama-3.1-8B-GGUF",      "chatml"),
+    ("bartowski/Hermes-3-Llama-3.1-8B-GGUF",      ("NousResearch-Hermes-3-Llama-3.1-8B", "tool_use")),
+    ("bartowski/Hermes-3-Llama-3.1-8B-GGUF",      "chatml"),
 
-    (None,                 "bartowski/Mistral-Nemo-Instruct-2407-GGUF", None),
-    (None,                 "bartowski/Mistral-Nemo-Instruct-2407-GGUF", "chatml"),
+    ("bartowski/Mistral-Nemo-Instruct-2407-GGUF", None),
+    ("bartowski/Mistral-Nemo-Instruct-2407-GGUF", "chatml"),
 
     # Note: gemma-2-2b-it knows itself as "model", not "assistant", so we don't test the ill-suited chatml on it.
-    (None,                 "bartowski/gemma-2-2b-it-GGUF",              None),
+    ("bartowski/gemma-2-2b-it-GGUF",              None),
 ])
-def test_hello_world(expected_arguments_override: str | None, hf_repo: str, template_override: str | Tuple[str, str | None] | None):
+def test_hello_world(hf_repo: str, template_override: str | Tuple[str, str | None] | None):
     global server
+    n_predict = 512 # High because of DeepSeek R1
     server.n_slots = 1
     server.jinja = True
     server.n_ctx = 8192
-    server.n_predict = 512 # High because of DeepSeek R1
+    server.n_predict = n_predict
     server.model_hf_repo = hf_repo
     server.model_hf_file = None
     if isinstance(template_override, tuple):
@@ -600,8 +602,7 @@ def test_hello_world(expected_arguments_override: str | None, hf_repo: str, temp
         server.chat_template = template_override
     server.start(timeout_seconds=TIMEOUT_SERVER_START)
 
-    # Note: without these greedy params, Functionary v3.2 writes `def hello_world():\n    print("Hello, World!")\nhello_world()` which is correct but a pain to test.
-    do_test_hello_world(expected_arguments_override, temperature=0.0, top_k=1, top_p=1.0)
+    do_test_hello_world(max_tokens=n_predict)
 
 
 @contextmanager
@@ -628,6 +629,7 @@ if __name__ == "__main__":
         (   export LLAMA_CACHE=$HOME/Library/Caches/llama.cpp ;
             export LLAMA_SERVER_BIN_PATH=$PWD/build/bin/llama-server ;
             export ARGS=( --n=10 --temps=0,0.5,0.75,1,1.5,2,5, ) ;
+            ./examples/server/tests/unit/test_tool_call.py --model " Qwen 2.5 7B Q4_K_M" --hf Qwen2.5-7B-Instruct-GGUF
             ./examples/server/tests/unit/test_tool_call.py ${ARGS[@]} --model "Llama 3.2 Instruct 1B Q4_K_M"  --hf bartowski/Llama-3.2-1B-Instruct-GGUF      --ollama llama3.2:1b-instruct-q4_K_M ;
             ./examples/server/tests/unit/test_tool_call.py ${ARGS[@]} --model "Llama 3.2 Instruct 3B Q4_K_M"  --hf bartowski/Llama-3.2-3B-Instruct-GGUF      --ollama llama3.1:3b ;
             ./examples/server/tests/unit/test_tool_call.py ${ARGS[@]} --model "Llama 3.1 Instruct 8B Q4_K_M"  --hf bartowski/Meta-Llama-3.1-8B-Instruct-GGUF --ollama llama3.1:8b ;
@@ -672,7 +674,7 @@ if __name__ == "__main__":
         request_kwargs['cache_prompt'] = False
         
         tests = {
-            "hello world": lambda: do_test_hello_world(None, **request_kwargs),
+            "hello world": lambda: do_test_hello_world(**request_kwargs),
             "weather": lambda: do_test_weather(**request_kwargs),
             "calc result": lambda: do_test_calc_result(None, 512, **request_kwargs),
         }
