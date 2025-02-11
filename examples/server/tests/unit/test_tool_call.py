@@ -384,7 +384,7 @@ def do_test_calc_result(result_override: str | None, n_predict: int, **kwargs):
     res = server.make_request("POST", "/v1/chat/completions", data={
         "max_tokens": n_predict,
         "messages": [
-            {"role": "system", "content": "You are a chatbot that uses tools/functions. Dont overthink things, and provide very concise answers. Do not explain your reasoning to the user. Provide any numerical values back to the user with at most two decimals."},
+            {"role": "system", "content": "You are a tools-calling assistant. You express numerical values with at most two decimals."},
             {"role": "user", "content": "What's the y coordinate of a point on the unit sphere at angle 30 degrees?"},
             {
                 "role": "assistant",
@@ -630,8 +630,8 @@ if __name__ == "__main__":
             export LLAMA_CACHE=$HOME/Library/Caches/llama.cpp ;
             export LLAMA_SERVER_BIN_PATH=$PWD/build/bin/llama-server ;
             export ARGS=( --n=10 --temps=0,0.5,0.75,1,1.5,2,5, --append=all.jsonl ) ;
-            ./examples/server/tests/unit/test_tool_call.py ${ARGS[@]} --model "Qwen 2.5 1.5B Q4_K_M"          --hf bartowski/Qwen2.5-1.5B-Instruct-GGUF      --ollama qwen2.5:1.5b-instruct-q4_K_M ;
             ./examples/server/tests/unit/test_tool_call.py ${ARGS[@]} --model "Qwen 2.5 Coder 7B Q4_K_M"      --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF  --ollama qwen2.5-coder:7b ;
+            ./examples/server/tests/unit/test_tool_call.py ${ARGS[@]} --model "Qwen 2.5 1.5B Q4_K_M"          --hf bartowski/Qwen2.5-1.5B-Instruct-GGUF      --ollama qwen2.5:1.5b-instruct-q4_K_M ;
             ./examples/server/tests/unit/test_tool_call.py ${ARGS[@]} --model "Qwen 2.5 7B Q4_K_M"            --hf bartowski/Qwen2.5-7B-Instruct-GGUF ;
             ./examples/server/tests/unit/test_tool_call.py ${ARGS[@]} --model "Llama 3.2 Instruct 1B Q4_K_M"  --hf bartowski/Llama-3.2-1B-Instruct-GGUF      --ollama llama3.2:1b-instruct-q4_K_M ;
             ./examples/server/tests/unit/test_tool_call.py ${ARGS[@]} --model "Llama 3.2 Instruct 3B Q4_K_M"  --hf bartowski/Llama-3.2-3B-Instruct-GGUF      --ollama llama3.1:3b ;
@@ -695,7 +695,7 @@ if __name__ == "__main__":
                 failures = []
                 success_times = []
                 failure_times = []
-                print(f"Running {test_name}: ", file=sys.stderr, flush=True)
+                print(f"Running {test_name} ({implementation}, {args.model}): ", file=sys.stderr, flush=True)
                 for i in range(n):
                     start_time = time.time()
                     def elapsed():
