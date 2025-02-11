@@ -542,6 +542,12 @@ static void test_template_output_parsers() {
             "  {\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
             "</JSON>",
             COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(msg_from_json(message_assist_call), common_chat_parse(
+            "{\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(msg_from_json(message_assist_call), common_chat_parse(
+            "{\n  \"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
 
         test_template(tmpl, end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
         test_template(tmpl, end_tokens, message_assist_call, tools,
