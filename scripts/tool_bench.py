@@ -91,7 +91,7 @@ if __name__ == "__main__":
 
     with open(args.output or args.append, 'w' if args.output else 'a') as output_file:
 
-        def run(*, implementation: str, model_id: str, temp: float | None = None, output_kwargs={}, request_kwargs={}):
+        def run(server: ServerProcess, *, implementation: str, model_id: str, temp: float | None = None, output_kwargs={}, request_kwargs={}):
             request_kwargs = {**request_kwargs}
             if temp is not None:
                 request_kwargs['temperature'] = temp
@@ -105,9 +105,9 @@ if __name__ == "__main__":
             request_kwargs['cache_prompt'] = False
 
             tests = {
-                "hello world": lambda: do_test_hello_world(**request_kwargs),
-                "weather": lambda: do_test_weather(**request_kwargs),
-                "calc result": lambda: do_test_calc_result(None, 512, **request_kwargs),
+                "hello world": lambda server: do_test_hello_world(server, **request_kwargs),
+                "weather": lambda server: do_test_weather(server, **request_kwargs),
+                "calc result": lambda server: do_test_calc_result(server, None, 512, **request_kwargs),
             }
             for test_name, test in tests.items():
                 success_count = 0
@@ -121,7 +121,7 @@ if __name__ == "__main__":
                     def elapsed():
                         return time.time() - start_time
                     try:
-                        test()
+                        test(server)
                         success_times.append(elapsed())
                         success_count += 1
                         print('.', end='', file=sys.stderr, flush=True)
@@ -171,6 +171,7 @@ if __name__ == "__main__":
                     server.start(timeout_seconds=TIMEOUT_SERVER_START)
                     for ignore_chat_grammar in [False, True]:
                         run(
+                            server,
                             implementation="llama-server" + (" (no grammar)" if ignore_chat_grammar else ""),
                             model_id=args.hf,
                             temp=temp,
@@ -190,6 +191,7 @@ if __name__ == "__main__":
 
                 with scoped_server(server):
                     run(
+                        server,
                         implementation="ollama",
                         model_id=args.ollama,
                         temp=temp,

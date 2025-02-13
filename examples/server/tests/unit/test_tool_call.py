@@ -74,8 +74,7 @@ WEATHER_TOOL = {
 }
 
 
-def do_test_completion_with_required_tool_tiny(tool: dict, argument_key: str | None, n_predict, **kwargs):
-    global server
+def do_test_completion_with_required_tool_tiny(server: ServerProcess, tool: dict, argument_key: str | None, n_predict, **kwargs):
     res = server.make_request("POST", "/v1/chat/completions", data={
         "max_tokens": n_predict,
         "messages": [
@@ -115,7 +114,7 @@ def test_completion_with_required_tool_tiny_fast(template_name: str, tool: dict,
     server.n_predict = n_predict
     server.chat_template_file = f'../../../models/templates/{template_name}.jinja'
     server.start(timeout_seconds=TIMEOUT_SERVER_START)
-    do_test_completion_with_required_tool_tiny(tool, argument_key, n_predict, temperature=0.0, top_k=1, top_p=1.0)
+    do_test_completion_with_required_tool_tiny(server, tool, argument_key, n_predict, temperature=0.0, top_k=1, top_p=1.0)
 
 
 @pytest.mark.slow
@@ -147,7 +146,7 @@ def test_completion_with_required_tool_tiny_slow(template_name: str, tool: dict,
     server.n_predict = n_predict
     server.chat_template_file = f'../../../models/templates/{template_name}.jinja'
     server.start(timeout_seconds=TIMEOUT_SERVER_START)
-    do_test_completion_with_required_tool_tiny(tool, argument_key, n_predict)
+    do_test_completion_with_required_tool_tiny(server, tool, argument_key, n_predict)
 
 
 @pytest.mark.slow
@@ -243,8 +242,7 @@ def test_completion_with_required_tool_real_model(tool: dict, argument_key: str 
         assert argument_key in actual_arguments, f"tool arguments: {json.dumps(actual_arguments)}, expected: {argument_key}"
 
 
-def do_test_completion_without_tool_call(n_predict: int, tools: list[dict], tool_choice: str | None, **kwargs):
-    global server
+def do_test_completion_without_tool_call(server: ServerProcess, n_predict: int, tools: list[dict], tool_choice: str | None, **kwargs):
     res = server.make_request("POST", "/v1/chat/completions", data={
         "max_tokens": n_predict,
         "messages": [
@@ -271,7 +269,7 @@ def test_completion_without_tool_call_fast(template_name: str, n_predict: int, t
     server.n_predict = n_predict
     server.chat_template_file = f'../../../models/templates/{template_name}.jinja'
     server.start(timeout_seconds=TIMEOUT_SERVER_START)
-    do_test_completion_without_tool_call(n_predict, tools, tool_choice)
+    do_test_completion_without_tool_call(server, n_predict, tools, tool_choice)
 
 
 @pytest.mark.slow
@@ -292,7 +290,7 @@ def test_completion_without_tool_call_slow(template_name: str, n_predict: int, t
     server.n_predict = n_predict
     server.chat_template_file = f'../../../models/templates/{template_name}.jinja'
     server.start(timeout_seconds=TIMEOUT_SERVER_START)
-    do_test_completion_without_tool_call(n_predict, tools, tool_choice)
+    do_test_completion_without_tool_call(server, n_predict, tools, tool_choice)
 
 
 @pytest.mark.slow
@@ -349,11 +347,10 @@ def test_weather(hf_repo: str, template_override: str | Tuple[str, str | None] |
     elif isinstance(template_override, str):
         server.chat_template = template_override
     server.start(timeout_seconds=TIMEOUT_SERVER_START)
-    do_test_weather(max_tokens=n_predict)
+    do_test_weather(server, max_tokens=n_predict)
 
 
-def do_test_weather(**kwargs):
-    global server
+def do_test_weather(server: ServerProcess, **kwargs):
     res = server.make_request("POST", "/v1/chat/completions", data={
         "messages": [
             {"role": "system", "content": "You are a chatbot that uses tools/functions. Dont overthink things."},
@@ -409,11 +406,10 @@ def test_calc_result(result_override: str | None, n_predict: int, hf_repo: str, 
     elif isinstance(template_override, str):
         server.chat_template = template_override
     server.start(timeout_seconds=TIMEOUT_SERVER_START)
-    do_test_calc_result(result_override, n_predict)
+    do_test_calc_result(server, result_override, n_predict)
 
 
-def do_test_calc_result(result_override: str | None, n_predict: int, **kwargs):
-    global server
+def do_test_calc_result(server: ServerProcess, result_override: str | None, n_predict: int, **kwargs):
     res = server.make_request("POST", "/v1/chat/completions", data={
         "max_tokens": n_predict,
         "messages": [
@@ -577,11 +573,10 @@ def test_hello_world(hf_repo: str, template_override: str | Tuple[str, str | Non
         server.chat_template = template_override
     server.start(timeout_seconds=TIMEOUT_SERVER_START)
 
-    do_test_hello_world(max_tokens=n_predict)
+    do_test_hello_world(server, max_tokens=n_predict)
 
 
-def do_test_hello_world(**kwargs):
-    global server
+def do_test_hello_world(server: ServerProcess, **kwargs):
     res = server.make_request("POST", "/v1/chat/completions", data={
         "messages": [
             {"role": "system", "content": "You are a tool-calling agent."},
