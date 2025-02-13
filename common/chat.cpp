@@ -1015,6 +1015,7 @@ static common_chat_params common_chat_params_init_hermes_2_pro(const common_chat
             "\"<response>\"  space "     + any_tool_call + " \"</response>\"",
             "\"<tools>\"     space "     + any_tool_call + " \"</tools>\"",
             "\"<json>\"      space "     + any_tool_call + " \"</json>\"",
+            "\"<xml>\"      space "     + any_tool_call + " \"</xml>\"",
             "\"<JSON>\"      space "     + any_tool_call + " \"</JSON>\"",
         };
         auto wrappable_tool_call = builder.add_rule("wrappable_tool_call", "( " + string_join(alt_tags, " | ") + " ) space");
@@ -1028,6 +1029,7 @@ static common_chat_params common_chat_params_init_hermes_2_pro(const common_chat
         // Trigger on some common known "good bad" outputs (only from the start to avoid false positives)
         // data.grammar_triggers.push_back({"<function_call>", /* .at_start = */ true});
         data.grammar_triggers.push_back({"<tools>", /* .at_start = */ true});
+        data.grammar_triggers.push_back({"<xml>", /* .at_start = */ true});
         data.grammar_triggers.push_back({"<response>", /* .at_start = */ true});
         data.grammar_triggers.push_back({"```\n{\"name\":", /* .at_start = */ true});
         data.grammar_triggers.push_back({"```\n  {\"name\":", /* .at_start = */ true});
@@ -1066,6 +1068,7 @@ static common_chat_msg common_chat_parse_hermes_2_pro(const std::string& input) 
         "|<tools>"
         "|<response>"
         "|<json>"
+        "|<xml>"
         "|<JSON>"
         ")?"
         "(\\s*\\{\\s*\"name\":[\\s\\S]*)"    // match 3 (named tool call + rest)
