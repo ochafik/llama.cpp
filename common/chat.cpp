@@ -236,9 +236,9 @@ static common_chat_params common_chat_params_init_generic(const common_chat_temp
             {"properties", {
                 {"name", {
                     {"type", "string"},
-                    {"const", function["name"]},
+                    {"const", function.at("name")},
                 }},
-                {"arguments", function["parameters"]},
+                {"arguments", function.at("parameters")},
             }},
             {"required", json::array({"name", "arguments"})},
         };
@@ -250,7 +250,7 @@ static common_chat_params common_chat_params_init_generic(const common_chat_temp
                 {"type", "string"},
                 {"minLength", 4},
             };
-            tool_schema["required"].push_back("id");
+            tool_schema.at("required").push_back("id");
         }
         tool_call_schemas.emplace_back(tool_schema);
     });
@@ -318,14 +318,14 @@ static common_chat_msg common_chat_parse_generic(const std::string & input) {
         for (const auto & tool_call : data["tool_calls"]) {
             result.tool_calls.push_back({
                 tool_call.at("name"),
-                tool_call["arguments"].dump(),
+                tool_call.at("arguments").dump(),
                 tool_call.contains("id") ? tool_call.at("id") : "",
             });
         }
     } else if (data.contains("tool_call")) {
         result.tool_calls.push_back({
             data.at("tool_call").at("name"),
-            data.at("tool_call")["arguments"].dump(),
+            data.at("tool_call").at("arguments").dump(),
             /* id= */ "",
         });
     } else if (data.contains("response")) {
@@ -349,9 +349,9 @@ static common_chat_params common_chat_params_init_mistral_nemo(const common_chat
                     // It's hard to constrain that for now (while reusing the JSON schema conversion), so we're just expecting a plain object.
                     {"name", {
                         {"type", "string"},
-                        {"const", function["name"]},
+                        {"const", function.at("name")},
                     }},
-                    {"arguments", function["parameters"]},
+                    {"arguments", function.at("parameters")},
                     {"id", {
                         {"type", "string"},
                         // Nemo's template expects a 9-character alphanumeric ID.
@@ -397,9 +397,9 @@ static common_chat_params common_chat_params_init_command_r7b(const common_chat_
                     }},
                     {"tool_name", {
                         {"type", "string"},
-                        {"const", function["name"]},
+                        {"const", function.at("name")},
                     }},
-                    {"parameters", function["parameters"]},
+                    {"parameters", function.at("parameters")},
                 }},
                 {"required", json::array({"tool_call_id", "tool_name", "parameters"})},
             });
@@ -424,8 +424,8 @@ static common_chat_params common_chat_params_init_command_r7b(const common_chat_
     };
     auto adjusted_messages = json::array();
     for (const auto & msg : inputs.messages) {
-        auto has_reasoning_content = msg.contains("reasoning_content") && msg["reasoning_content"].is_string();
-        auto has_tool_calls = msg.contains("tool_calls") && msg["tool_calls"].is_array();
+        auto has_reasoning_content = msg.contains("reasoning_content") && msg.at("reasoning_content").is_string();
+        auto has_tool_calls = msg.contains("tool_calls") && msg.at("tool_calls").is_array();
         if (has_reasoning_content && has_tool_calls) {
             auto adjusted_message = msg;
             adjusted_message["tool_plan"] = msg.at("reasoning_content");
@@ -466,7 +466,7 @@ static common_chat_msg common_chat_parse_command_r7b(const std::string & input, 
         for (const auto & action : actions) {
             result.tool_calls.push_back({
                 /* .name = */      action.at("tool_name"),
-                /* .arguments = */ action["parameters"].dump(),
+                /* .arguments = */ action.at("parameters").dump(),
                 /* .id = */        action.at("tool_call_id"),
             });
         }
@@ -562,7 +562,7 @@ static std::string add_python_code_arguments_rule(const std::string & name, cons
 }
 
 static std::string add_json_tool_args_rule(const std::string & name, const json & parameters, const common_grammar_builder & builder) {
-    if (name == "python" && parameters.contains("properties") && parameters["properties"].contains("code") && parameters["properties"].size() == 1) {
+    if (name == "python" && parameters.contains("properties") && parameters.at("properties").contains("code") && parameters.at("properties").size() == 1) {
         return add_python_code_arguments_rule(name + "-code-args", builder);
     } else {
         return builder.add_schema(name + "-args", parameters);
@@ -792,9 +792,9 @@ static common_chat_params common_chat_params_init_firefunction_v2(const common_c
                     {"properties", {
                         {"name", {
                             {"type", "string"},
-                            {"const", function["name"]},
+                            {"const", function.at("name")},
                         }},
-                        {"arguments", function["parameters"]},
+                        {"arguments", function.at("parameters")},
                     }},
                     {"required", json::array({"name", "arguments", "id"})},
                 });
@@ -983,7 +983,7 @@ static common_chat_params common_chat_params_init_hermes_2_pro(const common_chat
             std::string name = function.at("name");
             auto parameters = function.at("parameters");
             builder.resolve_refs(parameters);
-            if (name == "python" && parameters.contains("properties") && parameters["properties"].contains("code") && parameters["properties"].size() == 1) {
+            if (name == "python" && parameters.contains("properties") && parameters.at("properties").contains("code") && parameters.at("properties").size() == 1) {
                 tool_rules.push_back(builder.add_rule(name + "-call",
                     "\"{\" space "
                     "\"\\\"name\\\":\" space \"\\\"" + name + "\\\"\" space \",\" space "
