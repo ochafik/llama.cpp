@@ -537,7 +537,7 @@ static std::string add_escaped_python_code_soup_rule(const common_grammar_builde
         // Allow (escaped) double quoted strings and their nested (double) escapes
         R"(   [\\] ["] (  [^"\\\t\r\n\uff00-\uffef] | [\\] [\\] ["] | [\\] [trnu] )* [\\] ["] |  )" 
         // Allow single quoted strings and their nested (double) escapes
-        R"(   ['] (  [^'\\\t\r\n\uff00-\uffef] | [\\] [\\] ['] | [\\] [^'\t\r\n\uff00-\uffef] )* ['] |            )" 
+        R"(   ['] (  [^"'\\\t\r\n\uff00-\uffef] | [\\] [\\] ['] | [\\] [^'\t\r\n\uff00-\uffef] )* ['] |            )" 
         // Soup wrapped in parentheses, curly braces or square brackets
         R"(   [(] json-escaped-code-soup [)] |                              )"
         R"(   [{] json-escaped-code-soup [}] |                              )"
