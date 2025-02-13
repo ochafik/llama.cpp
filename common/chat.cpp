@@ -315,7 +315,7 @@ static common_chat_msg common_chat_parse_generic(const std::string & input) {
     common_chat_msg result;
     result.role = "assistant";
     if (data.contains("tool_calls")) {
-        for (const auto & tool_call : data["tool_calls"]) {
+        for (const auto & tool_call : data.at("tool_calls")) {
             result.tool_calls.push_back({
                 tool_call.at("name"),
                 tool_call.at("arguments").dump(),
