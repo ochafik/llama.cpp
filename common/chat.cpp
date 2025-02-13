@@ -67,8 +67,9 @@ static std::optional<json> parse_json(std::string::const_iterator & it, const st
     }
     std::string json_sub {it, temptative_end};
     try {
+        auto out = json::parse(json_sub);
         it = temptative_end;
-        return json::parse(json_sub);
+        return out;
     } catch (const std::exception &) {
         return std::nullopt;
     }
