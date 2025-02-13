@@ -532,14 +532,24 @@ static void expect_tool_parameters(const std::string & name, const json & parame
 */
 static std::string add_escaped_python_code_soup_rule(const common_grammar_builder & builder) {
     return builder.add_rule("json-escaped-code-soup", 
-        R"( ( [#] ( ( [^\\] | [\\] [^n] )* [\\] [n] )? |                    )"
-        R"(   ['] (  [^'\\] | [\\] [\\] ['] | [\\] [^'] )* ['] |            )"
-        R"(   [\\] ["] (  [^"\\] | [\\] [\\] ["] | [\\] [^"] )* [\\] ["] |  )"
-        R"(   [^#{}"'\[\]\\()]+ |                                           )"
+        // Allow comments w/ (escaped) newline
+        R"( ( [#] ( ( [^\\\t\r\n\uff00-\uffef] | [\\] [^n\n] )* [\\] [n] )? |                    )" 
+        // Allow (escaped) double quoted strings and their nested (double) escapes
+        R"(   [\\] ["] (  [^"\\\t\r\n\uff00-\uffef] | [\\] [\\] ["] | [\\] [trnu] )* [\\] ["] |  )" 
+        // Allow single quoted strings and their nested (double) escapes
+        R"(   ['] (  [^'\\\t\r\n\uff00-\uffef] | [\\] [\\] ['] | [\\] [^'\t\r\n\uff00-\uffef] )* ['] |            )" 
+        // Soup wrapped in parentheses, curly braces or square brackets
         R"(   [(] json-escaped-code-soup [)] |                              )"
         R"(   [{] json-escaped-code-soup [}] |                              )"
-        R"(   "[" json-escaped-code-soup "]"                                )"
-        R"( )*                                                              )"
+        R"(   "[" json-escaped-code-soup "]" |                              )" 
+        // Allow escapes
+        R"(   [\\] [\\trnu] |                                               )" 
+        // Allow other characters, minus code blocks for halfwidth & fullwidth forms (U+FF00 - U+FFEF)
+        // (special tokens can use these to avoid prompt injections, as they will have to be unicode-escaped w/ \uXXXX
+        // and won't be able to interfere w/ parsing)
+        R"(   [^#{}"'\[\]\\()\t\r\n\uff00-\uffef]+                                )" 
+        // After any repetition of the previous, allow trailing comment w/o newline
+        R"( )* ( [#] ( [^\\] | [\\] [^n] )* )?                              )" 
     );
 }
 
@@ -645,33 +655,32 @@ static common_chat_msg common_chat_parse_llama_3_1(const std::string & input, bo
     static std::regex function_regex(
         "\\{\\s*(?:\"type\"\\s*:\\s*\"function\"\\s*,\\s*|\\s*)\"name\"\\s*:\\s*\"([^\"]+)\"\\s*,\\s*\"parameters\": ");
     static std::regex close_regex("\\}");
-    static std::regex builtin_call_regex("<\\|python_tag\\|>([^.(]+)\\.call\\((.*)\\)");
+    static std::regex builtin_call_regex("<\\|python_tag\\|>\\s*([^.(]+)\\s*\\.\\s*call\\s*\\(\\s*([\\w]+)\\s*=\\s*([\\s\\S]*?)\\)");
 
     if (with_builtin_tools) {
         std::smatch match;
         if (std::regex_match(input, match, builtin_call_regex)) {
-            auto name = match[1].str();
-            auto raw_args = match[2].str();
-
-            // TODO: if/when builtin tools start accepting more than 1 argument, use parse_json for real parsing.
-            auto it_eq = raw_args.find('=');
-            auto arg_name = raw_args.substr(0, it_eq);
-            auto arg_value_str = raw_args.substr(it_eq + 1);
-            auto arg_value = json::parse(arg_value_str);
-
-            return {
-                /* .role = */ "assistant",
-                /* .content = */ match.prefix().str(),
-                /* .tool_calls = */ {
-                    {
-                        /* .name = */ match[1],
-                        /* .arguments = */ (json {
-                            {arg_name, arg_value},
-                        }).dump(),
-                        /* .id = */ "",
+            try {
+                auto name = match[1].str();
+                auto arg_name = match[2].str();
+                auto arg_value_str = match[3].str();
+                auto arg_value = json::parse(arg_value_str);
+                return {
+                    /* .role = */ "assistant",
+                    /* .content = */ "",
+                    /* .tool_calls = */ {
+                        {
+                            /* .name = */ name,
+                            /* .arguments = */ (json {
+                                {arg_name, arg_value},
+                            }).dump(),
+                            /* .id = */ "",
+                        },
                     },
-                },
-            };
+                };
+            } catch (const std::exception & e) {
+                LOG_WRN("Failed to parse builtin tool call arguments (%s): %s", e.what(), input.c_str());
+            }
         }
     }
     return parse_json_tool_calls(input, std::nullopt, function_regex, close_regex);
