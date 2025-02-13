@@ -542,9 +542,11 @@ def test_thoughts(n_predict: int, reasoning_format: Literal['deepseek', 'none'] 
 
     ("bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M",      ("meta-llama-Llama-3.2-3B-Instruct", None)),
     ("bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M",      None),
+    ("bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M",      "chatml"),
 
     ("bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M",      ("meta-llama-Llama-3.2-3B-Instruct", None)),
     ("bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M",      None),
+    ("bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M",      "chatml"),
 
     ("bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M",        None),
     ("bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M",        "chatml"),
