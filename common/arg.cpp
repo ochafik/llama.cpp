@@ -674,7 +674,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
     ));
     add_opt(common_arg(
         {"--no-context-shift"},
-        string_format("disables context shift on inifinite text generation (default: %s)", params.ctx_shift ? "disabled" : "enabled"),
+        string_format("disables context shift on infinite text generation (default: %s)", params.ctx_shift ? "disabled" : "enabled"),
         [](common_params & params) {
             params.ctx_shift = false;
         }
@@ -946,6 +946,13 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             params.sampling.min_p = std::stof(value);
         }
     ).set_sparam());
+    add_opt(common_arg(
+        {"--top-nsigma"}, "N",
+        string_format("top-n-sigma sampling (default: %.1f, -1.0 = disabled)", params.sampling.top_n_sigma),
+        [](common_params & params, const std::string & value) {
+            params.sampling.top_n_sigma = std::stof(value);
+        }
+    ).set_examples({LLAMA_EXAMPLE_MAIN}).set_sparam());
     add_opt(common_arg(
         {"--xtc-probability"}, "N",
         string_format("xtc probability (default: %.1f, 0.0 = disabled)", (double)params.sampling.xtc_probability),

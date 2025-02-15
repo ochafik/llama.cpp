@@ -196,10 +196,8 @@ class ServerProcess:
             [str(arg) for arg in [server_path, *server_args]],
             creationflags=flags,
             # Silent
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            # stdout=sys.stdout,
-            # stderr=sys.stdout,
+            stdout=sys.stdout,
+            stderr=sys.stdout,
             env={**os.environ, "LLAMA_CACHE": "tmp"} if "LLAMA_CACHE" not in os.environ else None,
         )
         server_instances.add(self)
