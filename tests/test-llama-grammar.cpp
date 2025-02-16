@@ -113,7 +113,7 @@ int main()
         }
     }
 
-    std::vector<const llama_grammar_element *> grammar_rules(parsed_grammar.c_rules());
+    std::vector<const llama_grammar_element *> grammar_rules(parsed_grammar.c_rules().stack);
 
     llama_grammar * grammar = llama_grammar_init_impl(nullptr, grammar_rules.data(), grammar_rules.size(), parsed_grammar.symbol_ids.at("root"));
     if (grammar == nullptr) {
@@ -174,9 +174,9 @@ int main()
     for (const llama_grammar_stack & stack : llama_grammar_get_stacks(grammar))
     {
         // compare stack to expected_stack
-        for (uint32_t i = 0; i < stack.size(); i++)
+        for (uint32_t i = 0; i < stack.stack.size(); i++)
         {
-            const llama_grammar_element * element = stack[i];
+            const llama_grammar_element * element = stack.stack[i];
             const llama_grammar_element & expected_element = expected_stacks[index][i];
 
             // pretty print error message before asserting

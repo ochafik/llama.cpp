@@ -54,7 +54,18 @@ struct llama_grammar_candidate {
 };
 
 using llama_grammar_rule  = std::vector<      llama_grammar_element>;
-using llama_grammar_stack = std::vector<const llama_grammar_element *>;
+// using llama_grammar_stack = std::vector<const llama_grammar_element *>;
+struct llama_grammar_stack {
+    std::vector<const llama_grammar_element *> stack;
+    std::vector<llama_token> pending_tokens;
+
+    bool operator==(const llama_grammar_stack & other) const {
+        return stack == other.stack && pending_tokens == other.pending_tokens;
+    }
+    bool empty() const {
+        return stack.empty() && pending_tokens.empty();
+    }
+};
 
 using llama_grammar_rules      = std::vector<llama_grammar_rule>;
 using llama_grammar_stacks     = std::vector<llama_grammar_stack>;
