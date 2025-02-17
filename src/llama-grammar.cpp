@@ -994,6 +994,7 @@ void llama_grammar_do_accept(const llama_grammar_rules & rules, llama_grammar_st
             pushed_new_pos = true;
         }
         llama_grammar_advance_stack(rules, stack, [&](llama_grammar_stack & stack) {
+            GGML_ASSERT(stack.pending_chars.empty());
             auto next_codepoints = codepoints + 1;
             if (!*next_codepoints) {
                 callback(stack);
@@ -1032,8 +1033,11 @@ void llama_grammar_accept(struct llama_grammar * grammar, uint32_t chr) {
         if (lazy_stacks && !stacks_new.empty()) {
             fprintf(stderr, "L");
             fflush(stdout);
-            stack.pending_chars.push_back(chr);
-            advance_callback(stack);
+            auto match = llama_grammar_match_char(stack.stack.back(), chr);
+            if (match.first) {
+                stack.pending_chars.push_back(chr);
+                advance_callback(stack);
+            }
             continue;
         }
 
