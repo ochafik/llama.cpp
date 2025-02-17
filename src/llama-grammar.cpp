@@ -766,10 +766,10 @@ static bool llama_grammar_accept_candidate_for_stack(
 
     std::function<bool(llama_grammar_stack &, const llama_grammar_candidate &)> accept_stack = [&](llama_grammar_stack & stack, const llama_grammar_candidate & tok) {
         if (stack.stack.empty()) {
-            // if (*tok.code_points != 0 || tok.partial_utf8.n_remain != 0) {
-            //     return false;
-            // }
-            // return true;
+            if (*tok.code_points != 0 || tok.partial_utf8.n_remain != 0) {
+                return false;
+            }
+            return true;
             // return false;
         }
 
