@@ -793,6 +793,7 @@ static bool llama_grammar_accept_candidate_for_stack(
         llama_grammar_candidate next_candidate = {tok.index, tok.code_points + 1, tok.partial_utf8};
         
         llama_grammar_advance_stack(rules, stack, [&](llama_grammar_stack & stack) {
+            GGML_ASSERT(stack.pending_chars.empty());
             if (stack.stack.empty()) {
                 if (!*next_candidate.code_points && next_candidate.partial_utf8.n_remain == 0) {
                     found = true;
@@ -859,7 +860,7 @@ static llama_grammar_candidates llama_grammar_reject_candidates(
 
         for (const auto & stack : stacks) {
             if (llama_grammar_accept_candidate_for_stack(rules, stack, candidates.front())) {
-                printf(".");
+                fprintf(stderr, ".");
                 return {};
             }
         }
@@ -890,7 +891,7 @@ static llama_grammar_candidates llama_grammar_reject_candidates(
             if (stack.pending_chars.empty()) {
                 advance_callback(stack);
             } else {
-                printf("U");
+                fprintf(stderr, "U");
                 fflush(stdout);
                 codepoints.clear();
                 codepoints.insert(codepoints.end(), stack.pending_chars.begin(), stack.pending_chars.end());
@@ -1029,7 +1030,7 @@ void llama_grammar_accept(struct llama_grammar * grammar, uint32_t chr) {
         }
 
         if (lazy_stacks && !stacks_new.empty()) {
-            printf("L");
+            fprintf(stderr, "L");
             fflush(stdout);
             stack.pending_chars.push_back(chr);
             advance_callback(stack);
@@ -1100,6 +1101,7 @@ llama_grammar_candidates llama_grammar_reject_candidates_for_stack(
     }
     llama_grammar_stacks next_stacks;
     llama_grammar_advance_stack(rules, stack_after, [&](llama_grammar_stack & stack) {
+        GGML_ASSERT(stack.pending_chars.empty());
         if (std::find(next_stacks.begin(), next_stacks.end(), stack) == next_stacks.end()) {
             // only add the stack if it's not a duplicate of one we already have
             next_stacks.push_back(stack);
@@ -1150,6 +1152,7 @@ struct llama_grammar * llama_grammar_init_impl(
     // loop over alternates of start rule to build initial stacks
     llama_grammar_stacks stacks;
     auto advance_callback = [&](llama_grammar_stack & stack) {
+        GGML_ASSERT(stack.pending_chars.empty());
         if (std::find(stacks.begin(), stacks.end(), stack) == stacks.end()) {
             // only add the stack if it's not a duplicate of one we already have
             stacks.push_back(stack);
@@ -1255,6 +1258,7 @@ struct llama_grammar * llama_grammar_init_impl(
     // loop over alternates of start rule to build initial stacks
     llama_grammar_stacks stacks;
     auto advance_callback = [&](llama_grammar_stack & stack) {
+        GGML_ASSERT(stack.pending_chars.empty());
         if (std::find(stacks.begin(), stacks.end(), stack) == stacks.end()) {
             // only add the stack if it's not a duplicate of one we already have
             stacks.push_back(stack);
@@ -1315,7 +1319,7 @@ void llama_grammar_free_impl(struct llama_grammar * grammar) {
         return;
     }
 
-    fprintf(stderr, "# [%s] max stack size: %zu\n", __func__, grammar->max_stack_size);
+    fprintf(stdout, "# [%s] max stack size: %zu\n", __func__, grammar->max_stack_size);
 
     delete grammar;
 }
