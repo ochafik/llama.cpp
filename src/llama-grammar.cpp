@@ -744,6 +744,55 @@ static void llama_grammar_advance_stack(
     }
 }
 
+static bool llama_grammar_accept_candidate_for_stack(
+        const llama_grammar_rules & rules,
+        const llama_grammar_stack & stack,
+        const llama_grammar_candidate & candidate) {
+    if (stack.stack.empty()) {
+        return false;
+    }
+
+    std::function<bool(const llama_grammar_stack &, const uint32_t *)> accept_stack = [&](const llama_grammar_stack & stack, const uint32_t * codepoint_it) {
+        if (stack.stack.empty()) {
+            return false;
+        }
+
+        auto chr = *codepoint_it;
+
+        auto match = llama_grammar_match_char(stack.stack.back(), chr);
+        if (!match.first) {
+            return false;
+        }
+
+        const llama_grammar_element * pos = match.second;
+
+        // update top of stack to next element, if any
+        llama_grammar_stack new_stack;
+        new_stack.stack = {stack.stack.begin(), stack.stack.end() - 1};
+        if (!llama_grammar_is_end_of_sequence(pos)) {
+            new_stack.stack.push_back(pos);
+        }
+        llama_grammar_stacks stacks_new;
+        llama_grammar_advance_stack(rules, new_stack, stacks_new);
+        if (stacks_new.empty()) {
+            return false;
+        }
+
+        auto next_it = codepoint_it + 1;
+        if (!*next_it) {
+            return true;
+        }
+
+        for (const auto & new_stack : stacks_new) {
+            if (accept_stack(new_stack, next_it)) {
+                return true;
+            }
+        }
+        return false;
+    };
+    return accept_stack(stack, candidate.code_points);
+}
+
 static llama_grammar_candidates llama_grammar_reject_candidates(
         const llama_grammar_rules      & rules,
         const llama_grammar_stacks     & stacks,
@@ -752,6 +801,15 @@ static llama_grammar_candidates llama_grammar_reject_candidates(
 
     if (candidates.empty()) {
         return {};
+    }
+
+    if (candidates.size() == 1) {
+        // Try to accept the candidate w/ non-pending stacks
+        for (const auto & stack : stacks) {
+            if (llama_grammar_accept_candidate_for_stack(rules, stack, candidates.front())) {
+                return {};
+            }
+        }
     }
 
     // TODO:
@@ -835,6 +893,7 @@ void llama_grammar_accept(struct llama_grammar * grammar, uint32_t chr) {
         if (stack.stack.empty()) {
             continue;
         }
+
 
         auto match = llama_grammar_match_char(stack.stack.back(), chr);
         if (match.first) {

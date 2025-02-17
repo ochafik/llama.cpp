@@ -57,13 +57,13 @@ using llama_grammar_rule  = std::vector<      llama_grammar_element>;
 // using llama_grammar_stack = std::vector<const llama_grammar_element *>;
 struct llama_grammar_stack {
     std::vector<const llama_grammar_element *> stack;
-    std::vector<llama_token> pending_tokens;
+    std::vector<uint32_t> pending_chars;
 
     bool operator==(const llama_grammar_stack & other) const {
-        return stack == other.stack && pending_tokens == other.pending_tokens;
+        return stack == other.stack && pending_chars == other.pending_chars;
     }
     bool empty() const {
-        return stack.empty() && pending_tokens.empty();
+        return stack.empty() && pending_chars.empty();
     }
 };
 
