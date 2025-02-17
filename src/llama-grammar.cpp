@@ -833,6 +833,15 @@ static llama_grammar_candidates llama_grammar_reject_candidates(
     const auto fasttrack = getenv("FASTTRACK") && std::string(getenv("FASTTRACK")) == "1";
     if (fasttrack && candidates.size() == 1) {
         // Try to accept the candidate w/ non-pending stacks
+        /*
+        
+        cmake --build build -j && \
+            hyperfine --warmup 1 --runs 10 \
+                -L b "FASTTRACK=1 ./build/bin/llama-cli,FASTTRACK=0 ./build/bin/llama-cli,./buildControl/bin/llama-cli" \
+                '{b} -jf ../tsconfig.json -hf bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M --seed 423 -p "here is a tsconfig.json: " -no-cnv' -i
+
+        */
+
         for (const auto & stack : stacks) {
             if (llama_grammar_accept_candidate_for_stack(rules, stack, candidates.front())) {
                 return {};
