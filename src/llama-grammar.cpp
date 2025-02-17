@@ -803,8 +803,8 @@ static llama_grammar_candidates llama_grammar_reject_candidates(
         return {};
     }
 
-    const auto disable_fasttrack = getenv("DISABLE_FASTTRACK") && std::string(getenv("DISABLE_FASTTRACK")) == "1";
-    if (!disable_fasttrack && candidates.size() == 1) {
+    const auto fasttrack = getenv("FASTTRACK") && std::string(getenv("FASTTRACK")) == "1";
+    if (fasttrack && candidates.size() == 1) {
         // Try to accept the candidate w/ non-pending stacks
         for (const auto & stack : stacks) {
             if (llama_grammar_accept_candidate_for_stack(rules, stack, candidates.front())) {
