@@ -122,6 +122,7 @@ struct llama_grammar {
 
     const llama_grammar_rules  rules;  // TODO: shared ptr
           llama_grammar_stacks stacks;
+    size_t max_stack_size = 0;
 
     // buffer for partially generated UTF-8 sequence from accepted tokens
     llama_partial_utf8 partial_utf8;

@@ -1050,6 +1050,7 @@ void llama_grammar_accept(struct llama_grammar * grammar, uint32_t chr) {
     }
     
     grammar->stacks = std::move(stacks_new);
+    grammar->max_stack_size = std::max(grammar->max_stack_size, grammar->stacks.size());
 }
 
 llama_grammar_candidates llama_grammar_reject_candidates_for_stack(
@@ -1178,10 +1179,12 @@ struct llama_grammar * llama_grammar_init_impl(
     // Important: vec_rules has to be moved here, not copied, because stacks contains
     // pointers to elements of vec_rules. If vec_rules were copied into llama_grammar
     // then the pointers would be invalidated when the local vec_rules goes out of scope.
+    auto nstacks = stacks.size();
     return new llama_grammar {
         vocab,
         std::move(vec_rules),
         std::move(stacks),
+        /* .max_stacks_size = */ nstacks,
         /* .partial_utf8 = */     {},
         /* .lazy =*/              false,
         /* .awaiting_trigger = */ false,
@@ -1292,10 +1295,12 @@ struct llama_grammar * llama_grammar_init_impl(
     // Important: vec_rules has to be moved here, not copied, because stacks contains
     // pointers to elements of vec_rules. If vec_rules were copied into llama_grammar
     // then the pointers would be invalidated when the local vec_rules goes out of scope.
+    auto nstacks = stacks.size();
     return new llama_grammar {
         vocab,
         std::move(vec_rules),
         std::move(stacks),
+        /* .max_stacks_size = */ nstacks,
         /* .partial_utf8 = */     {},
         /* .lazy = */             lazy,
         /* .awaiting_trigger = */ lazy,
@@ -1310,6 +1315,8 @@ void llama_grammar_free_impl(struct llama_grammar * grammar) {
         return;
     }
 
+    fprintf(stderr, "# [%s] max stack size: %zu\n", __func__, grammar->max_stack_size);
+
     delete grammar;
 }
 
@@ -1318,6 +1325,7 @@ struct llama_grammar * llama_grammar_clone_impl(const struct llama_grammar & gra
         grammar.vocab,
         grammar.rules,
         grammar.stacks,
+        grammar.max_stack_size,
         grammar.partial_utf8,
         grammar.lazy,
         grammar.awaiting_trigger,
