@@ -826,7 +826,10 @@ static bool llama_grammar_accept_candidate_for_stack(
     }
     code_points.push_back(0);
 
-    auto stack_copy = stack;
+    llama_grammar_stack stack_copy;
+    // Intentionally not copying pending_chars
+    stack_copy.stack = stack.stack;
+
     return accept_stack(stack_copy, {candidate.index, code_points.data(), candidate.partial_utf8});
 }
 
@@ -892,6 +895,7 @@ static llama_grammar_candidates llama_grammar_reject_candidates(
                 codepoints.clear();
                 codepoints.insert(codepoints.end(), stack.pending_chars.begin(), stack.pending_chars.end());
                 codepoints.push_back(0);
+                stack.pending_chars.clear();
                 llama_grammar_do_accept(rules, stack, codepoints.data(), advance_callback);
             }
         }
@@ -1036,6 +1040,7 @@ void llama_grammar_accept(struct llama_grammar * grammar, uint32_t chr) {
         code_points.insert(code_points.begin(), stack.pending_chars.begin(), stack.pending_chars.end());
         code_points.push_back(chr);
         code_points.push_back(0);
+        stack.pending_chars.clear();
 
         llama_grammar_do_accept(grammar->rules, stack, code_points.data(), advance_callback);
     }
