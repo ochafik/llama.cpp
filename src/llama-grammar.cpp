@@ -685,15 +685,12 @@ static bool llama_grammar_match_partial_char(
 
 // transforms a grammar pushdown stack into N possible stacks, all ending
 // at a character range (terminal element)
-static void llama_grammar_advance_stack(
-        const llama_grammar_rules  & rules,
-              llama_grammar_stack  & stack,
-              llama_grammar_stacks & new_stacks) {
+static bool llama_grammar_advance_stack(
+                              const llama_grammar_rules  & rules,
+                                    llama_grammar_stack  & stack,
+        const std::function<bool(llama_grammar_stack &)> & callback) {
     if (stack.stack.empty()) {
-        if (std::find(new_stacks.begin(), new_stacks.end(), stack) == new_stacks.end()) {
-            new_stacks.emplace_back(stack);
-        }
-        return;
+        return callback(stack);
     }
 
     const llama_grammar_element * pos = stack.stack.back();
@@ -719,7 +716,7 @@ static void llama_grammar_advance_stack(
                     stack.stack.push_back(subpos);
                     pushed_sub_pos = true;
                 }
-                llama_grammar_advance_stack(rules, stack, new_stacks);
+                auto should_continue = llama_grammar_advance_stack(rules, stack, callback);
 
                 // Restore stack
                 if (pushed_new_pos) {
@@ -729,6 +726,10 @@ static void llama_grammar_advance_stack(
                     stack.stack.pop_back();
                 }
                 stack.stack.push_back(old_pos);
+
+                if (!should_continue) {
+                    return false;
+                }
 
                 while (!llama_grammar_is_end_of_sequence(subpos)) {
                     // scan to end of alternate def
@@ -741,16 +742,12 @@ static void llama_grammar_advance_stack(
                     break;
                 }
             } while (true);
-            break;
+            return true;
         }
         case LLAMA_GRETYPE_CHAR:
         case LLAMA_GRETYPE_CHAR_NOT:
         case LLAMA_GRETYPE_CHAR_ANY:
-            if (std::find(new_stacks.begin(), new_stacks.end(), stack) == new_stacks.end()) {
-                // only add the stack if it's not a duplicate of one we already have
-                new_stacks.emplace_back(stack);
-            }
-            break;
+            return callback(stack);
         default:
             // end of alternate (LLAMA_GRETYPE_END, LLAMA_GRETYPE_ALT) or middle of char range
             // (LLAMA_GRETYPE_CHAR_ALT, LLAMA_GRETYPE_CHAR_RNG_UPPER); stack should never be left on
@@ -769,10 +766,10 @@ static bool llama_grammar_accept_candidate_for_stack(
 
     std::function<bool(llama_grammar_stack &, const llama_grammar_candidate &)> accept_stack = [&](llama_grammar_stack & stack, const llama_grammar_candidate & tok) {
         if (stack.stack.empty()) {
-            if (*tok.code_points != 0 || tok.partial_utf8.n_remain != 0) {
-                return false;
-            }
-            return true;
+            // if (*tok.code_points != 0 || tok.partial_utf8.n_remain != 0) {
+            //     return false;
+            // }
+            // return true;
             // return false;
         }
 
@@ -791,8 +788,25 @@ static bool llama_grammar_accept_candidate_for_stack(
             stack.stack.push_back(new_pos);
             pushed_new_pos = true;
         }
-        llama_grammar_stacks stacks_new;
-        llama_grammar_advance_stack(rules, stack, stacks_new);
+        auto found = false;
+
+        llama_grammar_candidate next_candidate = {tok.index, tok.code_points + 1, tok.partial_utf8};
+        
+        llama_grammar_advance_stack(rules, stack, [&](llama_grammar_stack & stack) {
+            if (stack.stack.empty()) {
+                if (!*next_candidate.code_points && next_candidate.partial_utf8.n_remain == 0) {
+                    found = true;
+                    return false; // stop search
+                } else {
+                    return true; // continue
+                }
+            }
+            if (accept_stack(stack, next_candidate)) {
+                found = true;
+                return false;
+            }
+            return true;
+        });
 
         // Restore stack
         if (pushed_new_pos) {
@@ -800,21 +814,7 @@ static bool llama_grammar_accept_candidate_for_stack(
         }
         stack.stack.push_back(old_pos);
 
-        if (stacks_new.empty()) {
-            return false;
-        }
-
-        llama_grammar_candidate next_candidate = {tok.index, tok.code_points + 1, tok.partial_utf8};
-        if (!*next_candidate.code_points && next_candidate.partial_utf8.n_remain == 0) {
-            return true;
-        }
-
-        for (auto & new_stack : stacks_new) {
-            if (accept_stack(new_stack, next_candidate)) {
-                return true;
-            }
-        }
-        return false;
+        return found;
     };
     auto copy = stack;
     return accept_stack(copy, candidate);
@@ -924,6 +924,13 @@ llama_grammar_stacks & llama_grammar_get_stacks(struct llama_grammar * grammar) 
 
 void llama_grammar_accept(struct llama_grammar * grammar, uint32_t chr) {
     llama_grammar_stacks stacks_new;
+    auto advance_callback = [&](llama_grammar_stack & stack) {
+        if (std::find(stacks_new.begin(), stacks_new.end(), stack) == stacks_new.end()) {
+            // only add the stack if it's not a duplicate of one we already have
+            stacks_new.push_back(stack);
+        }
+        return true;
+    };
     stacks_new.reserve(grammar->stacks.size());
 
     for (auto & stack : grammar->stacks) {
@@ -944,7 +951,7 @@ void llama_grammar_accept(struct llama_grammar * grammar, uint32_t chr) {
                 stack.stack.push_back(pos);
                 pushed_new_pos = true;
             }
-            llama_grammar_advance_stack(grammar->rules, stack, stacks_new);
+            llama_grammar_advance_stack(grammar->rules, stack, advance_callback);
 
             // Restore stack
             if (pushed_new_pos) {
@@ -1003,7 +1010,13 @@ llama_grammar_candidates llama_grammar_reject_candidates_for_stack(
         stack_after.stack.push_back(stack_pos_after);
     }
     llama_grammar_stacks next_stacks;
-    llama_grammar_advance_stack(rules, stack_after, next_stacks);
+    llama_grammar_advance_stack(rules, stack_after, [&](llama_grammar_stack & stack) {
+        if (std::find(next_stacks.begin(), next_stacks.end(), stack) == next_stacks.end()) {
+            // only add the stack if it's not a duplicate of one we already have
+            next_stacks.push_back(stack);
+        }
+        return true;
+    });
 
     auto next_rejects = llama_grammar_reject_candidates(rules, next_stacks, next_candidates);
     for (const auto & tok : next_rejects) {
@@ -1047,6 +1060,13 @@ struct llama_grammar * llama_grammar_init_impl(
 
     // loop over alternates of start rule to build initial stacks
     llama_grammar_stacks stacks;
+    auto advance_callback = [&](llama_grammar_stack & stack) {
+        if (std::find(stacks.begin(), stacks.end(), stack) == stacks.end()) {
+            // only add the stack if it's not a duplicate of one we already have
+            stacks.push_back(stack);
+        }
+        return true;
+    };
     pos = vec_rules[start_rule_index].data();
     do {
         llama_grammar_stack stack;
@@ -1054,7 +1074,7 @@ struct llama_grammar * llama_grammar_init_impl(
             // if alternate is nonempty, add to stack
             stack.stack.push_back(pos);
         }
-        llama_grammar_advance_stack(vec_rules, stack, stacks);
+        llama_grammar_advance_stack(vec_rules, stack, advance_callback);
         while (!llama_grammar_is_end_of_sequence(pos)) {
             // scan to end of alternate def
             pos++;
@@ -1143,6 +1163,13 @@ struct llama_grammar * llama_grammar_init_impl(
 
     // loop over alternates of start rule to build initial stacks
     llama_grammar_stacks stacks;
+    auto advance_callback = [&](llama_grammar_stack & stack) {
+        if (std::find(stacks.begin(), stacks.end(), stack) == stacks.end()) {
+            // only add the stack if it's not a duplicate of one we already have
+            stacks.push_back(stack);
+        }
+        return true;
+    };
     pos = vec_rules[start_rule_index].data();
     do {
         llama_grammar_stack stack;
@@ -1150,7 +1177,7 @@ struct llama_grammar * llama_grammar_init_impl(
             // if alternate is nonempty, add to stack
             stack.stack.push_back(pos);
         }
-        llama_grammar_advance_stack(vec_rules, stack, stacks);
+        llama_grammar_advance_stack(vec_rules, stack, advance_callback);
         while (!llama_grammar_is_end_of_sequence(pos)) {
             // scan to end of alternate def
             pos++;
