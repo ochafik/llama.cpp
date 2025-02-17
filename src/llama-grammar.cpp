@@ -816,13 +816,25 @@ static bool llama_grammar_accept_candidate_for_stack(
 
         return found;
     };
-    auto copy = stack;
-    return accept_stack(copy, candidate);
+    
+    // Prepend pending chars to code points.
+    std::vector<uint32_t> code_points(stack.pending_chars.begin(), stack.pending_chars.end());
+    auto p = candidate.code_points;
+    while (*p) {
+        code_points.push_back(*p);
+        p++;
+    }
+    code_points.push_back(0);
+
+    auto stack_copy = stack;
+    return accept_stack(stack_copy, {candidate.index, code_points.data(), candidate.partial_utf8});
 }
+
+void llama_grammar_do_accept(const llama_grammar_rules & rules, llama_grammar_stack & stack, const uint32_t * codepoints, const std::function<bool(llama_grammar_stack &)> & callback);
 
 static llama_grammar_candidates llama_grammar_reject_candidates(
         const llama_grammar_rules      & rules,
-        const llama_grammar_stacks     & stacks,
+              llama_grammar_stacks     & stacks,
         const llama_grammar_candidates & candidates) {
     GGML_ASSERT(!stacks.empty()); // REVIEW
 
@@ -844,9 +856,46 @@ static llama_grammar_candidates llama_grammar_reject_candidates(
 
         for (const auto & stack : stacks) {
             if (llama_grammar_accept_candidate_for_stack(rules, stack, candidates.front())) {
+                printf(".");
                 return {};
             }
         }
+    }
+
+    auto has_lazy_stacks = false;
+    for (const auto & stack : stacks) {
+        if (!stack.pending_chars.empty()) {
+            has_lazy_stacks = true;
+            break;
+        }
+    }
+
+    if (has_lazy_stacks) {
+        llama_grammar_stacks stacks_new;
+        stacks_new.reserve(stacks.size());
+        auto advance_callback = [&](llama_grammar_stack & stack) {
+            if (std::find(stacks_new.begin(), stacks_new.end(), stack) == stacks_new.end()) {
+                // only add the stack if it's not a duplicate of one we already have
+                stacks_new.push_back(stack);
+            }
+            return true;
+        };
+        
+        std::vector<uint32_t> codepoints;
+        for (size_t i = 0, size = stacks.size(); i < size; ++i) {
+            auto & stack = stacks[i];
+            if (stack.pending_chars.empty()) {
+                advance_callback(stack);
+            } else {
+                printf("U");
+                fflush(stdout);
+                codepoints.clear();
+                codepoints.insert(codepoints.end(), stack.pending_chars.begin(), stack.pending_chars.end());
+                codepoints.push_back(0);
+                llama_grammar_do_accept(rules, stack, codepoints.data(), advance_callback);
+            }
+        }
+        stacks = std::move(stacks_new);
     }
 
     // TODO:
@@ -854,7 +903,7 @@ static llama_grammar_candidates llama_grammar_reject_candidates(
     // - If a stack has pending tokens, catch it up (expand / collapse stacks as needed) then continue
     auto rejects = llama_grammar_reject_candidates_for_stack(rules, stacks.front(), candidates);
 
-    for (size_t i = 1, size = stacks.size(); i < size; ++i) {
+    for (size_t i = 1, size = stacks.size(); i < size && !rejects.empty(); ++i) {
         rejects = llama_grammar_reject_candidates_for_stack(rules, stacks[i], rejects);
     }
 
@@ -922,6 +971,41 @@ llama_grammar_stacks & llama_grammar_get_stacks(struct llama_grammar * grammar) 
     return grammar->stacks;
 }
 
+const bool lazy_stacks = getenv("LAZY_STACKS") && std::string(getenv("LAZY_STACKS")) == "1";
+
+void llama_grammar_do_accept(const llama_grammar_rules & rules, llama_grammar_stack & stack, const uint32_t * codepoints, const std::function<bool(llama_grammar_stack &)> & callback) {
+    GGML_ASSERT(!stack.stack.empty());    
+
+    auto match = llama_grammar_match_char(stack.stack.back(), *codepoints);
+    if (match.first) {
+        const llama_grammar_element * pos = match.second;
+
+        // update top of stack to next element, if any
+        auto old_pos = stack.stack.back();
+        stack.stack.pop_back();
+        auto pushed_new_pos = false;
+        if (!llama_grammar_is_end_of_sequence(pos)) {
+            stack.stack.push_back(pos);
+            pushed_new_pos = true;
+        }
+        llama_grammar_advance_stack(rules, stack, [&](llama_grammar_stack & stack) {
+            auto next_codepoints = codepoints + 1;
+            if (!*next_codepoints) {
+                callback(stack);
+            } else {
+                llama_grammar_do_accept(rules, stack, next_codepoints, callback);
+            }
+            return true;
+        });
+
+        // Restore stack
+        if (pushed_new_pos) {
+            stack.stack.pop_back();
+        }
+        stack.stack.push_back(old_pos);
+    }
+}
+
 void llama_grammar_accept(struct llama_grammar * grammar, uint32_t chr) {
     llama_grammar_stacks stacks_new;
     auto advance_callback = [&](llama_grammar_stack & stack) {
@@ -933,34 +1017,33 @@ void llama_grammar_accept(struct llama_grammar * grammar, uint32_t chr) {
     };
     stacks_new.reserve(grammar->stacks.size());
 
+    std::vector<uint32_t> code_points;
+
     for (auto & stack : grammar->stacks) {
         if (stack.stack.empty()) {
             continue;
         }
 
-
-        auto match = llama_grammar_match_char(stack.stack.back(), chr);
-        if (match.first) {
-            const llama_grammar_element * pos = match.second;
-
-            // update top of stack to next element, if any
-            auto old_pos = stack.stack.back();
-            stack.stack.pop_back();
-            auto pushed_new_pos = false;
-            if (!llama_grammar_is_end_of_sequence(pos)) {
-                stack.stack.push_back(pos);
-                pushed_new_pos = true;
-            }
-            llama_grammar_advance_stack(grammar->rules, stack, advance_callback);
-
-            // Restore stack
-            if (pushed_new_pos) {
-                stack.stack.pop_back();
-            }
-            stack.stack.push_back(old_pos);
+        if (lazy_stacks && !stacks_new.empty()) {
+            printf("L");
+            fflush(stdout);
+            stack.pending_chars.push_back(chr);
+            advance_callback(stack);
+            continue;
         }
+
+        code_points.clear();
+        code_points.insert(code_points.begin(), stack.pending_chars.begin(), stack.pending_chars.end());
+        code_points.push_back(chr);
+        code_points.push_back(0);
+
+        llama_grammar_do_accept(grammar->rules, stack, code_points.data(), advance_callback);
     }
 
+    if (!stacks_new.empty()) {
+        GGML_ASSERT(stacks_new[0].pending_chars.empty());
+    }
+    
     grammar->stacks = std::move(stacks_new);
 }
 
@@ -1254,7 +1337,7 @@ struct llama_grammar * llama_grammar_clone_impl(const struct llama_grammar & gra
     return result;
 }
 
-void llama_grammar_apply_impl(const struct llama_grammar & grammar, llama_token_data_array * cur_p) {
+void llama_grammar_apply_impl(struct llama_grammar & grammar, llama_token_data_array * cur_p) {
     GGML_ASSERT(grammar.vocab != nullptr);
 
     if (grammar.awaiting_trigger) {
