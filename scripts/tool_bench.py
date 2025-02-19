@@ -13,6 +13,7 @@
 # ///
 '''
     cmake --build build -j && ( \
+        export RETRIES=3 ;
         export LLAMA_CACHE=$HOME/Library/Caches/llama.cpp ;
         export LLAMA_SERVER_BIN_PATH=$PWD/build/bin/llama-server ;
         export ARGS=( --n=10 --temps=0,0.5,0.75,1,1.5,2,5, --output=../new.jsonl ) ;
@@ -33,7 +34,7 @@ import argparse
 from contextlib import contextmanager
 from statistics import mean, median
 import subprocess
-import pytest
+import json
 
 # ensure grandparent path is in sys.path
 from pathlib import Path
@@ -73,7 +74,7 @@ if __name__ == "__main__":
     parser.add_argument('--hf', type=str, help='GGUF huggingface model repo id (+ optional quant) to test w/ llama-server')
     parser.add_argument('--chat-template', type=str, help='Chat template override for llama-server')
     parser.add_argument('--ollama', type=str, help='Ollama model tag to test')
-    parser.add_argument('--n', type=int, help='Number of times to run each test', default=30)
+    parser.add_argument('--n', type=int, help='Number of times to run each test', default=10)
     parser.add_argument('--temps', type=str, help='Comma-separated list of temperatures')
     parser.add_argument('--top-p', type=float, help='top_p')
     parser.add_argument('--top-k', type=int, help='top_k')
@@ -172,7 +173,7 @@ if __name__ == "__main__":
 
                 with scoped_server(server):
                     server.start(timeout_seconds=TIMEOUT_SERVER_START)
-                    for ignore_chat_grammar in [False, True]:
+                    for ignore_chat_grammar in [False]:
                         run(
                             server,
                             implementation="llama-server" + (" (no grammar)" if ignore_chat_grammar else ""),
