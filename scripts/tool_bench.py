@@ -17,7 +17,7 @@
         export RETRIES=3 ;
         export LLAMA_CACHE=$HOME/Library/Caches/llama.cpp ;
         export LLAMA_SERVER_BIN_PATH=$PWD/build/bin/llama-server ;
-        export ARGS=( --n 10 --temp -1 --temp 0 --temp 0.5 --temp 0.75 --temp 1 --temp 1.5 --temp 2 --temp 5 ) ;
+        export ARGS=( --n 30 --temp -1 --temp 0 --temp 0.5 --temp 0.75 --temp 1 --temp 1.5 --temp 2 --temp 5 ) ;
         ./scripts/tool_bench.py run ${ARGS[@]} --model "Qwen 2.5 1.5B Q4_K_M"                  --output qwen1.5b.jsonl  --hf bartowski/Qwen2.5-1.5B-Instruct-GGUF         --ollama qwen2.5:1.5b-instruct-q4_K_M ;
         ./scripts/tool_bench.py run ${ARGS[@]} --model "Llama 3.2 Instruct 1B Q4_K_M"          --output llama1b.jsonl   --hf bartowski/Llama-3.2-1B-Instruct-GGUF         --ollama llama3.2:1b-instruct-q4_K_M ;
         ./scripts/tool_bench.py run ${ARGS[@]} --model "Llama 3.2 Instruct 3B Q4_K_M"          --output llama3b.jsonl   --hf bartowski/Llama-3.2-3B-Instruct-GGUF         --ollama llama3.1:3b ;
@@ -29,10 +29,10 @@
         ./scripts/tool_bench.py run ${ARGS[@]} --model "Functionary Small v3.2 Q4_K_M"         --output funcsmall.jsonl --hf bartowski/functionary-small-v3.2-GGUF ;
         ./scripts/tool_bench.py run ${ARGS[@]} --model "DeepSeek R1 Distill Qwen 1.5B Q4_K_M"  --output dsqw1.5b.jsonl  --hf bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF --ollama deepseek-r1:1.5b ;
     )
-    
+
     ./scripts/tool_bench.py plot qwen1.5b.jsonl
     ./scripts/tool_bench.py plot *.jsonl --output all.png
-    
+
     for f in *.jsonl; do
         ./scripts/tool_bench.py plot $f --output ${f%.jsonl}.png
     done
@@ -45,6 +45,7 @@ from pathlib import Path
 from statistics import mean, median
 from typing import Annotated, List, Optional
 from typing import Dict, List, Tuple, Set, Any
+import atexit
 import json
 import logging
 import matplotlib.pyplot as plt
@@ -54,6 +55,7 @@ import seaborn as sns
 import subprocess
 import sys
 import time
+import typer
 
 sys.path.insert(0, Path(__file__).parent.parent.as_posix())
 print(sys.path)
@@ -63,27 +65,14 @@ from examples.server.tests.unit.test_tool_call import TIMEOUT_SERVER_START, do_t
 
 @contextmanager
 def scoped_server(sp: ServerProcess):
-    global server
-    server = sp
-
-    import atexit
     def stop():
-        global server
         nonlocal sp
         if sp is not None:
             sp.stop()
             sp = None # type: ignore
-            server = None # type: ignore
     atexit.register(stop)
-
     yield sp
-
     stop()
-
-
-import typer
-
-app = typer.Typer()
 
 
 logging.basicConfig(
@@ -92,20 +81,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+app = typer.Typer()
+
 @app.command()
 def plot(files: List[Path], output: Optional[Path] = None):
-    
+
     lines: List[Dict] = []
     for file in files:
         if not file.exists():
             logger.error(f"File not found: {file}")
             continue
-            
+
         try:
             with file.open() as f:
                 raw_data = f.read()
             logger.info(f"Reading {file} ({len(raw_data)} bytes)")
-            
+
             for line_num, line in enumerate(raw_data.split('\n'), 1):
                 line = line.strip()
                 if not line:
@@ -120,7 +111,7 @@ def plot(files: List[Path], output: Optional[Path] = None):
 
     if not lines:
         raise Exception("No valid data was loaded")
-    
+
     data_dict: Dict[Tuple, float] = {}
     models: List[str] = []
     temps = set()
@@ -133,16 +124,16 @@ def plot(files: List[Path], output: Optional[Path] = None):
             impl = rec["implementation"]
             test = rec["test"]
             success = rec["success_ratio"]
-            
-            
+
+
             data_dict[(model, temp, impl, test)] = success
-            
+
             if model not in models:
                 models.append(model)
             temps.add(temp)
             tests.add(test)
             impls.add(impl)
-            
+
         except KeyError as e:
             logger.warning(f"Missing required field in record: {e}")
 
@@ -151,7 +142,7 @@ def plot(files: List[Path], output: Optional[Path] = None):
     tests = list(sorted(tests))
     impls = list(sorted(impls))
 
-    
+
     logger.info(f"Processed {len(lines)} lines")
     logger.info(f"Found {len(data_dict)} valid data points")
     logger.info(f"Models: {models}")
@@ -159,10 +150,10 @@ def plot(files: List[Path], output: Optional[Path] = None):
     logger.info(f"Tests: {tests}")
     logger.info(f"Implementations: {impls}")
 
-    
+
     matrix = []
     index = []
-    
+
     all_cols = [
         (impl, test)
         for impl in impls
@@ -176,33 +167,33 @@ def plot(files: List[Path], output: Optional[Path] = None):
                 for impl, test in all_cols
             ]
             matrix.append(row_vals)
-    
+
     columns = [f"{impl}\n({test})" for impl, test in all_cols]
 
     df = pd.DataFrame(matrix, index=index, columns=columns)
 
     plt.figure(figsize=(12, 6))
-            
+
     sns.heatmap(
         df, annot=True, cmap="RdYlGn", vmin=0.0, vmax=1.0, cbar=True, fmt=".2f", center=0.5, square=True, linewidths=0.5,
         cbar_kws={"label": "Success Ratio"},
     )
-    
+
     plt.title("Tool Call Bench\nSuccess Ratios by Implementation & Test", pad=20)
     plt.xlabel("Implementation and Test", labelpad=10)
     plt.ylabel("Model @ Temperature", labelpad=10)
-    
+
     plt.xticks(rotation=45, ha='right')
     plt.yticks(rotation=0)
-    
+
     plt.tight_layout()
-    
+
     if output:
         plt.savefig(output, dpi=300, bbox_inches='tight')
         logger.info(f"Plot saved to {output}")
     else:
         plt.show()
-    
+
 @app.command()
 def run(
     output: Annotated[Path, typer.Option(help="Output JSON file")],
@@ -220,11 +211,11 @@ def run(
     append: Annotated[bool, typer.Option(help="Append to output file")] = False,
 ):
     # Check only one of output and append
-    
+
     n_predict = 512
 
     assert force or not output.exists(), f"Output file already exists: {output}; use --force to overwrite"
-        
+
     with output.open('a' if append else 'w') as output_file:
 
         def run(server: ServerProcess, *, implementation: str, model_id: str, temp: float | None = None, output_kwargs={}, request_kwargs={}):
