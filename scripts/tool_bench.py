@@ -15,32 +15,36 @@
     cmake --build build -j && ( \
         export LLAMA_CACHE=$HOME/Library/Caches/llama.cpp ;
         export LLAMA_SERVER_BIN_PATH=$PWD/build/bin/llama-server ;
-        export ARGS=( --n=10 --temps=0,0.5,0.75,1,1.5,2,5, --append=all.jsonl ) ;
-        ./scripts/tool_bench.py ${ARGS[@]} --model "DeepSeek R1 Distill Qwen 1.5B Q4_K_M"  --hf bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF --ollama deepseek-r1:1.5b ;
-        ./scripts/tool_bench.py ${ARGS[@]} --model "Qwen 2.5 Coder 7B Q4_K_M"              --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF     --ollama qwen2.5-coder:7b ;
-        ./scripts/tool_bench.py ${ARGS[@]} --model "Qwen 2.5 1.5B Q4_K_M"                  --hf bartowski/Qwen2.5-1.5B-Instruct-GGUF         --ollama qwen2.5:1.5b-instruct-q4_K_M ;
-        ./scripts/tool_bench.py ${ARGS[@]} --model "Qwen 2.5 7B Q4_K_M"                    --hf bartowski/Qwen2.5-7B-Instruct-GGUF ;
+        export ARGS=( --n=10 --temps=0,0.5,0.75,1,1.5,2,5, --output=../new.jsonl ) ;
         ./scripts/tool_bench.py ${ARGS[@]} --model "Llama 3.2 Instruct 1B Q4_K_M"          --hf bartowski/Llama-3.2-1B-Instruct-GGUF         --ollama llama3.2:1b-instruct-q4_K_M ;
         ./scripts/tool_bench.py ${ARGS[@]} --model "Llama 3.2 Instruct 3B Q4_K_M"          --hf bartowski/Llama-3.2-3B-Instruct-GGUF         --ollama llama3.1:3b ;
         ./scripts/tool_bench.py ${ARGS[@]} --model "Llama 3.1 Instruct 8B Q4_K_M"          --hf bartowski/Meta-Llama-3.1-8B-Instruct-GGUF    --ollama llama3.1:8b ;
+        ./scripts/tool_bench.py ${ARGS[@]} --model "Qwen 2.5 1.5B Q4_K_M"                  --hf bartowski/Qwen2.5-1.5B-Instruct-GGUF         --ollama qwen2.5:1.5b-instruct-q4_K_M ;
+        ./scripts/tool_bench.py ${ARGS[@]} --model "Qwen 2.5 Coder 7B Q4_K_M"              --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF     --ollama qwen2.5-coder:7b ;
+        ./scripts/tool_bench.py ${ARGS[@]} --model "Qwen 2.5 7B Q4_K_M"                    --hf bartowski/Qwen2.5-7B-Instruct-GGUF ;
         ./scripts/tool_bench.py ${ARGS[@]} --model "Llama 3.3 Instruct 70B Q4_K_M"         --hf bartowski/Llama-3.3-70B-Instruct-GGUF ;
         ./scripts/tool_bench.py ${ARGS[@]} --model "Mistral Nemo 2407 Q4_K_M"              --hf bartowski/Mistral-Nemo-Instruct-2407-GGUF    --ollama mistral-nemo:12b ;
         ./scripts/tool_bench.py ${ARGS[@]} --model "Functionary Small v3.2 Q4_K_M"         --hf bartowski/functionary-small-v3.2-GGUF ;
+        ./scripts/tool_bench.py ${ARGS[@]} --model "DeepSeek R1 Distill Qwen 1.5B Q4_K_M"  --hf bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF --ollama deepseek-r1:1.5b ;
     )
 
 '''
 import argparse
 from contextlib import contextmanager
 from statistics import mean, median
+import subprocess
 import pytest
 
 # ensure grandparent path is in sys.path
 from pathlib import Path
 import sys
+import time
+
 
 sys.path.insert(0, Path(__file__).parent.parent.as_posix())
 print(sys.path)
-from examples.server.tests.unit.test_tool_call import *
+from examples.server.tests.utils import ServerProcess
+from examples.server.tests.unit.test_tool_call import TIMEOUT_SERVER_START, do_test_calc_result, do_test_hello_world, do_test_weather
 
 
 @contextmanager
