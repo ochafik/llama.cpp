@@ -30,7 +30,12 @@
         ./scripts/tool_bench.py run ${ARGS[@]} --model "DeepSeek R1 Distill Qwen 1.5B Q4_K_M"  --output dsqw1.5b.jsonl  --hf bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF --ollama deepseek-r1:1.5b ;
     )
     
-    ./scripts/tool_bench.py plot ../qw.jsonl --output ../qw.png
+    ./scripts/tool_bench.py plot qwen1.5b.jsonl
+    ./scripts/tool_bench.py plot *.jsonl --output all.png
+    
+    for f in *.jsonl; do
+        ./scripts/tool_bench.py plot $f --output ${f%.jsonl}.png
+    done
 
 '''
 
