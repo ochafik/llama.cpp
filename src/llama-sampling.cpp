@@ -1446,8 +1446,8 @@ static struct llama_sampler * llama_sampler_init_grammar_impl(
                       const char * grammar_str,
                       const char * grammar_root,
                               bool lazy,
-                     const char ** trigger_words,
-                            size_t num_trigger_words,
+                     const char ** trigger_regexes,
+                            size_t num_trigger_regexes,
                const llama_token * trigger_tokens,
                             size_t num_trigger_tokens);
 
@@ -1457,12 +1457,14 @@ static void llama_sampler_grammar_reset(struct llama_sampler * smpl) {
         return;
     }
 
-    std::vector<const char *>  trigger_words;
-    for (auto & word : ctx->grammar->trigger_words) {
-        trigger_words.push_back(word.c_str());
+    std::vector<const char *>  trigger_regexes_c;
+    trigger_regexes_c.reserve(ctx->grammar->trigger_regexes.size());
+    for (auto & [pattern, _] : ctx->grammar->trigger_regexes) {
+        trigger_regexes_c.push_back(pattern.c_str());
     }
+
     auto * grammar_new = llama_grammar_init_impl(ctx->grammar->vocab, ctx->grammar_str.c_str(), ctx->grammar_root.c_str(),
-                                                 ctx->grammar->lazy, trigger_words.data(), trigger_words.size(),
+                                                 ctx->grammar->lazy, trigger_regexes_c.data(), trigger_regexes_c.size(),
                                                  ctx->grammar->trigger_tokens.data(), ctx->grammar->trigger_tokens.size());
 
     llama_grammar_free_impl(ctx->grammar);
@@ -1513,8 +1515,8 @@ static struct llama_sampler * llama_sampler_init_grammar_impl(
                       const char * grammar_str,
                       const char * grammar_root,
                               bool lazy,
-                     const char ** trigger_words,
-                            size_t num_trigger_words,
+                     const char ** trigger_regexes,
+                            size_t num_trigger_regexes,
                const llama_token * trigger_tokens,
                             size_t num_trigger_tokens) {
     auto * ctx = new llama_sampler_grammar;
@@ -1524,7 +1526,7 @@ static struct llama_sampler * llama_sampler_init_grammar_impl(
             /* .vocab        = */ vocab,
             /* .grammar_str  = */ grammar_str,
             /* .grammar_root = */ grammar_root,
-            /* .grammar      = */ llama_grammar_init_impl(vocab, grammar_str, grammar_root, lazy, trigger_words, num_trigger_words, trigger_tokens, num_trigger_tokens),
+            /* .grammar      = */ llama_grammar_init_impl(vocab, grammar_str, grammar_root, lazy, trigger_regexes, num_trigger_regexes, trigger_tokens, num_trigger_tokens),
         };
     } else {
         *ctx = {
