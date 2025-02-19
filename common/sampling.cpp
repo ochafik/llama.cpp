@@ -165,9 +165,6 @@ struct common_sampler * common_sampler_init(const struct llama_model * model, co
         GGML_ABORT("llguidance (cmake -DLLAMA_LLGUIDANCE=ON) is not enabled");
 #endif // LLAMA_USE_LLGUIDANCE
     } else {
-        // ^(a|b|(?:[\s\S]*?)(c|d))(?:.*)
-        // ^[\s\S]*?(c|d)[\s\S]*
-        // ^(a|b)[\s\S]*
         std::vector<std::string> escaped_triggers_at_start;
         std::vector<std::string> escaped_triggers_anywhere;
         for (const auto & trigger : params.grammar_trigger_words) {

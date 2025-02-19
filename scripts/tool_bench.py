@@ -67,7 +67,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run tests for the chat server.')
     parser.add_argument('--model', type=str, help='Name of the model to test (implementation agnostic)', required=True)
     parser.add_argument('--hf', type=str, help='GGUF huggingface model repo id (+ optional quant) to test w/ llama-server')
-    parser.add_argument('--hfd', type=str, help='GGUF huggingface draft model repo id (+ optional quant) to test w/ llama-server')
     parser.add_argument('--chat-template', type=str, help='Chat template override for llama-server')
     parser.add_argument('--ollama', type=str, help='Ollama model tag to test')
     parser.add_argument('--n', type=int, help='Number of times to run each test', default=30)
@@ -162,7 +161,6 @@ if __name__ == "__main__":
                 server.n_predict = 512 # High because of DeepSeek R1
                 server.model_hf_repo = args.hf
                 server.model_hf_file = None
-                server.model_draft_hf_repo = args.hfd
                 server.chat_template = args.chat_template
                 if args.port is not None:
                     server.server_port = args.port

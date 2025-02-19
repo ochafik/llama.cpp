@@ -51,7 +51,6 @@ class ServerProcess:
     model_url: str | None = None
     model_file: str | None = None
     model_draft: str | None = None
-    model_draft_hf_repo: str | None = None
     n_threads: int | None = None
     n_gpu_layer: int | None = None
     n_batch: int | None = None
@@ -119,8 +118,6 @@ class ServerProcess:
             server_args.extend(["--model-draft", self.model_draft])
         if self.model_hf_repo:
             server_args.extend(["--hf-repo", self.model_hf_repo])
-        if self.model_draft_hf_repo:
-            server_args.extend(["--hf-repo-draft", self.model_draft_hf_repo])
         if self.model_hf_file:
             server_args.extend(["--hf-file", self.model_hf_file])
         if self.n_batch:
