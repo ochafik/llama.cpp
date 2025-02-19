@@ -3,6 +3,7 @@
 #include "common.h"
 
 #include <cmath>
+#include <regex>
 #include <unordered_map>
 
 // the ring buffer works similarly to std::deque, but with a fixed capacity
@@ -144,6 +145,11 @@ std::string common_params_sampling::print() const {
     return std::string(result);
 }
 
+inline std::string regex_escape(const std::string & literal) {
+    static const std::regex special_chars("[.^$|()*+?\\[\\]{}\\\\]");
+    return std::regex_replace(literal, special_chars, "\\$0");
+}
+  
 struct common_sampler * common_sampler_init(const struct llama_model * model, const struct common_params_sampling & params) {
     const llama_vocab * vocab = llama_model_get_vocab(model);
 
@@ -159,19 +165,33 @@ struct common_sampler * common_sampler_init(const struct llama_model * model, co
         GGML_ABORT("llguidance (cmake -DLLAMA_LLGUIDANCE=ON) is not enabled");
 #endif // LLAMA_USE_LLGUIDANCE
     } else {
-        std::vector<std::string> trigger_words;
-        std::vector<const char *> trigger_words_c;
-        trigger_words.reserve(params.grammar_trigger_words.size());
+        // ^(a|b|(?:[\s\S]*?)(c|d))(?:.*)
+        // ^[\s\S]*?(c|d)[\s\S]*
+        // ^(a|b)[\s\S]*
+        std::vector<std::string> escaped_triggers_at_start;
+        std::vector<std::string> escaped_triggers_anywhere;
         for (const auto & trigger : params.grammar_trigger_words) {
-            trigger_words.push_back((trigger.at_start ? "^" : trigger.word[0] == '^' ? "\\" : "") + trigger.word);
+            (trigger.at_start ? escaped_triggers_at_start : escaped_triggers_anywhere)
+                .push_back(regex_escape(trigger.word));
         }
-        for (const auto & word : trigger_words) {
-            trigger_words_c.push_back(word.c_str());
+
+        std::vector<std::string> trigger_regexes;
+        if (!escaped_triggers_at_start.empty()) {
+            trigger_regexes.push_back("^(" + string_join(escaped_triggers_at_start, "|") + ")[\\s\\S]*");
+        }
+        if (!escaped_triggers_anywhere.empty()) {
+            trigger_regexes.push_back("^[\\s\\S]*?(" + string_join(escaped_triggers_anywhere, "|") + ")[\\s\\S]*");
+        }
+
+        std::vector<const char *> trigger_regexes_c;
+        trigger_regexes_c.reserve(trigger_regexes.size());
+        for (const auto & regex : trigger_regexes) {
+            trigger_regexes_c.push_back(regex.c_str());
         }
 
         grmr = params.grammar_lazy
              ? llama_sampler_init_grammar_lazy(vocab, params.grammar.c_str(), "root",
-                                               trigger_words_c.data(), trigger_words.size(),
+                                               trigger_regexes_c.data(), trigger_regexes_c.size(),
                                                params.grammar_trigger_tokens.data(), params.grammar_trigger_tokens.size())
              :      llama_sampler_init_grammar(vocab, params.grammar.c_str(), "root");
     }
