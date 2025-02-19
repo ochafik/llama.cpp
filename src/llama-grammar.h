@@ -145,8 +145,8 @@ struct llama_grammar * llama_grammar_init_impl(
                       const char * grammar_str,
                       const char * grammar_root,
                               bool lazy,
-                     const char ** trigger_words,
-                            size_t num_trigger_words,
+                     const char ** trigger_regexes,
+                            size_t num_trigger_regexes,
                const llama_token * trigger_tokens,
                             size_t num_trigger_tokens);
 
