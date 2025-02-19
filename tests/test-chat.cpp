@@ -640,6 +640,86 @@ static void test_template_output_parsers() {
                 inputs_tools)
                 .format);
 
+        // Test parsing
+        assert_msg_equals(message_assist_call, common_chat_parse(
+            "<tool_call>\n"
+            "{\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+            "</tool_call>",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(message_assist_call, common_chat_parse(
+            "<function=special_function>{\"arg1\": 1}</function>",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(message_assist_call, common_chat_parse(
+            "<function name=\"special_function\">\n"
+            "{\"arg1\": 1}\n"
+            "</function>",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(message_assist_call, common_chat_parse(
+            "<tool>\n"
+            "  {\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+            "</tool>",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(message_assist_call, common_chat_parse(
+            "<tools>\n"
+            "  {\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+            "</tools>",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(message_assist_call, common_chat_parse(
+            "<response>\n"
+            "  {\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+            "</response>",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(message_assist_call, common_chat_parse(
+            "```xml\n"
+            "<response>\n"
+            "    {\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+            "</response>\n"
+            "```",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(message_assist_call, common_chat_parse(
+            "```xml\n"
+            "  {\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+            "```",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(message_assist_call, common_chat_parse(
+            "```\n"
+            "  {\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+            "```",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(message_assist_call, common_chat_parse(
+            "```\n"
+            "{\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+            "```",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(message_assist_call, common_chat_parse(
+            "```json\n"
+            "  {\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+            "```",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(message_assist_call, common_chat_parse(
+            "<json>\n"
+            "  {\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+            "</json>",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(message_assist_call, common_chat_parse(
+            "<xml>\n"
+            "  {\n"
+            "    \"name\": \"special_function\", \"arguments\": {\"arg1\": 1}\n"
+            "  }\n"
+            "</xml>",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(message_assist_call, common_chat_parse(
+            "<JSON>\n"
+            "  {\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
+            "</JSON>",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(message_assist_call, common_chat_parse(
+            "{\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+        assert_msg_equals(message_assist_call, common_chat_parse(
+            "{\n  \"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO));
+
         test_templates(tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
         test_templates(tmpls.get(), end_tokens, message_assist_call, tools,
                       "<tool_call>\n"

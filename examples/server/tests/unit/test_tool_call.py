@@ -142,13 +142,17 @@ def test_completion_with_required_tool_tiny_slow(template_name: str, tool: dict,
     (PYTHON_TOOL,  "code",     "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:Q4_K_M", None),
     (PYTHON_TOOL,  "code",     "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:Q4_K_M", "chatml"),
 
-    # Note: gemma-2-2b-it knows itself as "model", not "assistant", so we don't test the ill-suited chatml on it.
     (TEST_TOOL,    "success",  "bartowski/gemma-2-2b-it-GGUF:Q4_K_M",              None),
     (PYTHON_TOOL,  "code",     "bartowski/gemma-2-2b-it-GGUF:Q4_K_M",              None),
+    (PYTHON_TOOL,  "code",     "bartowski/gemma-2-2b-it-GGUF:Q4_K_M",              "chatml"),
 
     (TEST_TOOL,    "success",  "bartowski/Phi-3.5-mini-instruct-GGUF:Q4_K_M",      None),
     (PYTHON_TOOL,  "code",     "bartowski/Phi-3.5-mini-instruct-GGUF:Q4_K_M",      None),
     (PYTHON_TOOL,  "code",     "bartowski/Phi-3.5-mini-instruct-GGUF:Q4_K_M",      "chatml"),
+
+    (TEST_TOOL,    "success",  "bartowski/Qwen2.5-1.5B-Instruct-GGUF:Q4_K_M",      None),
+    (PYTHON_TOOL,  "code",     "bartowski/Qwen2.5-1.5B-Instruct-GGUF:Q4_K_M",      None),
+    (PYTHON_TOOL,  "code",     "bartowski/Qwen2.5-1.5B-Instruct-GGUF:Q4_K_M",      "chatml"),
 
     (TEST_TOOL,    "success",  "bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M",        None),
     (PYTHON_TOOL,  "code",     "bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M",        None),
@@ -156,11 +160,11 @@ def test_completion_with_required_tool_tiny_slow(template_name: str, tool: dict,
 
     (TEST_TOOL,    "success",  "bartowski/Hermes-2-Pro-Llama-3-8B-GGUF:Q4_K_M", ("NousResearch/Hermes-2-Pro-Llama-3-8B", "tool_use")),
     (PYTHON_TOOL,  "code",     "bartowski/Hermes-2-Pro-Llama-3-8B-GGUF:Q4_K_M", ("NousResearch/Hermes-2-Pro-Llama-3-8B", "tool_use")),
-    # (PYTHON_TOOL,  "code",     "bartowski/Hermes-2-Pro-Llama-3-8B-GGUF:Q4_K_M", "chatml"),
+    (PYTHON_TOOL,  "code",     "bartowski/Hermes-2-Pro-Llama-3-8B-GGUF:Q4_K_M", "chatml"),
 
     (TEST_TOOL,    "success",  "bartowski/Hermes-3-Llama-3.1-8B-GGUF:Q4_K_M",   ("NousResearch/Hermes-3-Llama-3.1-8B", "tool_use")),
     (PYTHON_TOOL,  "code",     "bartowski/Hermes-3-Llama-3.1-8B-GGUF:Q4_K_M",   ("NousResearch/Hermes-3-Llama-3.1-8B", "tool_use")),
-    # (PYTHON_TOOL,  "code",     "bartowski/Hermes-3-Llama-3.1-8B-GGUF:Q4_K_M",   "chatml"),
+    (PYTHON_TOOL,  "code",     "bartowski/Hermes-3-Llama-3.1-8B-GGUF:Q4_K_M",   "chatml"),
 
     (TEST_TOOL,    "success",  "bartowski/Mistral-Nemo-Instruct-2407-GGUF:Q4_K_M", None),
     (PYTHON_TOOL,  "code",     "bartowski/Mistral-Nemo-Instruct-2407-GGUF:Q4_K_M", None),
@@ -176,10 +180,10 @@ def test_completion_with_required_tool_tiny_slow(template_name: str, tool: dict,
 
     (TEST_TOOL,    "success",  "bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M",      ("meta-llama/Llama-3.2-3B-Instruct", None)),
     (PYTHON_TOOL,  "code",     "bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M",      ("meta-llama/Llama-3.2-3B-Instruct", None)),
-    # (PYTHON_TOOL,  "code",     "bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M",      "chatml"),
-    # TODO: fix these
-    # (TEST_TOOL,    "success",  "bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF:Q4_K_M", None),
-    # (PYTHON_TOOL,  "code",     "bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF:Q4_K_M", None),
+    (PYTHON_TOOL,  "code",     "bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M",      "chatml"),
+
+    (TEST_TOOL,    "success",  "bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF:Q4_K_M", None),
+    (PYTHON_TOOL,  "code",     "bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF:Q4_K_M", None),
 ])
 def test_completion_with_required_tool_real_model(tool: dict, argument_key: str | None, hf_repo: str, template_override: str | Tuple[str, str | None] | None):
     global server
@@ -280,6 +284,9 @@ def test_completion_without_tool_call_slow(template_name: str, n_predict: int, t
 
     ("bartowski/Phi-3.5-mini-instruct-GGUF:Q4_K_M",      None),
     ("bartowski/Phi-3.5-mini-instruct-GGUF:Q4_K_M",      "chatml"),
+
+    ("bartowski/Qwen2.5-1.5B-Instruct-GGUF:Q4_K_M",      None),
+    ("bartowski/Qwen2.5-1.5B-Instruct-GGUF:Q4_K_M",      "chatml"),
 
     ("bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M",        None),
     ("bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M",        "chatml"),
@@ -488,42 +495,45 @@ def test_thoughts(n_predict: int, reasoning_format: Literal['deepseek', 'none'] 
 
 
 @pytest.mark.slow
-@pytest.mark.parametrize("expected_arguments_override,hf_repo,template_override", [
-    (None,                 "bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF:Q4_K_M", None),
-    # (None,                 "bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF:Q4_K_M", "chatml"),
+@pytest.mark.parametrize("hf_repo,template_override", [
+    ("bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF:Q4_K_M", None),
+    # ("bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF:Q4_K_M", "chatml"),
 
-    (None,                 "bartowski/Phi-3.5-mini-instruct-GGUF:Q4_K_M",      None),
-    (None,                 "bartowski/Phi-3.5-mini-instruct-GGUF:Q4_K_M",      "chatml"),
+    ("bartowski/Phi-3.5-mini-instruct-GGUF:Q4_K_M",      None),
+    ("bartowski/Phi-3.5-mini-instruct-GGUF:Q4_K_M",      "chatml"),
 
-    (None,                 "bartowski/functionary-small-v3.2-GGUF:Q8_0",       ("meetkai-functionary-medium-v3.2", None)),
-    (None,                 "bartowski/functionary-small-v3.2-GGUF:Q8_0",       "chatml"),
+    ("bartowski/functionary-small-v3.2-GGUF:Q8_0",       ("meetkai-functionary-medium-v3.2", None)),
+    ("bartowski/functionary-small-v3.2-GGUF:Q8_0",       "chatml"),
 
-    ('{"code":"print("}',  "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:Q4_K_M", None),
-    (None,                 "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:Q4_K_M", "chatml"),
+    ("bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:Q4_K_M", None),
+    ("bartowski/Meta-Llama-3.1-8B-Instruct-GGUF:Q4_K_M", "chatml"),
 
-    (None,                 "bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M",      ("meta-llama-Llama-3.2-3B-Instruct", None)),
-    (None,                 "bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M",      "chatml"),
+    ("bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M",      ("meta-llama-Llama-3.2-3B-Instruct", None)),
+    ("bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M",      None),
+    ("bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M",      "chatml"),
 
-    ('{"code":"print("}',  "bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M",      ("meta-llama-Llama-3.2-3B-Instruct", None)),
-    (None,                 "bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M",      "chatml"),
+    ("bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M",      ("meta-llama-Llama-3.2-3B-Instruct", None)),
+    ("bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M",      None),
+    ("bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M",      "chatml"),
 
-    (None,                 "bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M",        None),
-    (None,                 "bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M",        "chatml"),
+    ("bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M",        None),
+    ("bartowski/Qwen2.5-7B-Instruct-GGUF:Q4_K_M",        "chatml"),
 
-    (None,                 "bartowski/Hermes-2-Pro-Llama-3-8B-GGUF:Q4_K_M",    ("NousResearch/Hermes-2-Pro-Llama-3-8B", "tool_use")),
-    (None,                 "bartowski/Hermes-2-Pro-Llama-3-8B-GGUF:Q4_K_M",    "chatml"),
+    ("bartowski/Hermes-2-Pro-Llama-3-8B-GGUF:Q4_K_M",    ("NousResearch/Hermes-2-Pro-Llama-3-8B", "tool_use")),
+    ("bartowski/Hermes-2-Pro-Llama-3-8B-GGUF:Q4_K_M",    "chatml"),
 
-    (None,                 "bartowski/Hermes-3-Llama-3.1-8B-GGUF:Q4_K_M",      ("NousResearch-Hermes-3-Llama-3.1-8B", "tool_use")),
-    (None,                 "bartowski/Hermes-3-Llama-3.1-8B-GGUF:Q4_K_M",      "chatml"),
+    ("bartowski/Hermes-3-Llama-3.1-8B-GGUF:Q4_K_M",      ("NousResearch-Hermes-3-Llama-3.1-8B", "tool_use")),
+    ("bartowski/Hermes-3-Llama-3.1-8B-GGUF:Q4_K_M",      "chatml"),
 
-    (None,                 "bartowski/Mistral-Nemo-Instruct-2407-GGUF:Q4_K_M", None),
-    (None,                 "bartowski/Mistral-Nemo-Instruct-2407-GGUF:Q4_K_M", "chatml"),
+    ("bartowski/Mistral-Nemo-Instruct-2407-GGUF:Q4_K_M", None),
+    ("bartowski/Mistral-Nemo-Instruct-2407-GGUF:Q4_K_M", "chatml"),
 
-    # Note: gemma-2-2b-it knows itself as "model", not "assistant", so we don't test the ill-suited chatml on it.
-    (None,                 "bartowski/gemma-2-2b-it-GGUF:Q4_K_M",              None),
+    ("bartowski/gemma-2-2b-it-GGUF:Q4_K_M",              None),
+    ("bartowski/gemma-2-2b-it-GGUF:Q4_K_M",              "chatml"),
 ])
-def test_hello_world(expected_arguments_override: str | None, hf_repo: str, template_override: str | Tuple[str, str | None] | None):
+def test_hello_world(hf_repo: str, template_override: str | Tuple[str, str | None] | None):
     global server
+    n_predict = 512 # High because of DeepSeek R1
     server.n_slots = 1
     server.jinja = True
     server.n_ctx = 8192
@@ -556,12 +566,8 @@ def test_hello_world(expected_arguments_override: str | None, hf_repo: str, temp
     tool_call = tool_calls[0]
     assert choice["message"].get("content") is None, f'Expected no content in {choice["message"]}'
     assert tool_call["function"]["name"] == PYTHON_TOOL["function"]["name"]
-    actual_arguments = tool_call["function"]["arguments"]
-    if expected_arguments_override is not None:
-        assert actual_arguments == expected_arguments_override
-    else:
-        actual_arguments = json.loads(actual_arguments)
-        assert 'code' in actual_arguments, f"code not found in {json.dumps(actual_arguments)}"
-        code = actual_arguments["code"]
-        assert isinstance(code, str), f"Expected code to be a string, got {type(code)}: {json.dumps(code)}"
-        assert re.match(r'''print\(("[Hh]ello,? [Ww]orld!?"|'[Hh]ello,? [Ww]orld!?')\)''', code), f'Expected hello world, got {code}'
+    actual_arguments = json.loads(tool_call["function"]["arguments"])
+    assert 'code' in actual_arguments, f"code not found in {json.dumps(actual_arguments)}"
+    code = actual_arguments["code"]
+    assert isinstance(code, str), f"Expected code to be a string, got {type(code)}: {json.dumps(code)}"
+    assert re.match(r'''((#.*)?\n)*print\(("[Hh]ello,? [Ww]orld!?"|'[Hh]ello,? [Ww]orld!?')\)''', code), f'Expected hello world, got {code}'
