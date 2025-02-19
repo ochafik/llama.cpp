@@ -969,7 +969,7 @@ struct llama_grammar * llama_grammar_init_impl(
         /* .awaiting_trigger = */ false,
         /* .trigger_buffer = */   "",
         /* .trigger_tokens   = */ {},
-        /* .trigger_regexes    = */ {},
+        /* .trigger_patterns    = */ {},
     };
 }
 
@@ -978,8 +978,8 @@ struct llama_grammar * llama_grammar_init_impl(
                       const char * grammar_str,
                       const char * grammar_root,
                               bool lazy,
-                     const char ** trigger_regexes,
-                            size_t num_trigger_regexes,
+                     const char ** trigger_patterns,
+                            size_t num_trigger_patterns,
                const llama_token * trigger_tokens,
                             size_t num_trigger_tokens) {
     llama_grammar_parser parser;
@@ -1050,14 +1050,14 @@ struct llama_grammar * llama_grammar_init_impl(
     } while (true);
 
     std::vector<llama_token>    vec_trigger_tokens;
-    std::vector<std::pair<std::string, std::regex>>     vec_trigger_regexes;
+    std::vector<std::pair<std::string, std::regex>>     vec_trigger_patterns;
     for (size_t i = 0; i < num_trigger_tokens; i++) {
         GGML_ASSERT(trigger_tokens != nullptr);
         vec_trigger_tokens.push_back(trigger_tokens[i]);
     }
-    for (size_t i = 0; i < num_trigger_regexes; i++) {
-        GGML_ASSERT(trigger_regexes != nullptr);
-        vec_trigger_regexes.emplace_back(trigger_regexes[i], trigger_regexes[i]);
+    for (size_t i = 0; i < num_trigger_patterns; i++) {
+        GGML_ASSERT(trigger_patterns != nullptr);
+        vec_trigger_patterns.emplace_back(trigger_patterns[i], trigger_patterns[i]);
     }
 
     // Important: vec_rules has to be moved here, not copied, because stacks contains
@@ -1072,7 +1072,7 @@ struct llama_grammar * llama_grammar_init_impl(
         /* .awaiting_trigger = */ lazy,
         /* .trigger_buffer = */   "",
         std::move(vec_trigger_tokens),
-        std::move(vec_trigger_regexes),
+        std::move(vec_trigger_patterns),
     };
 }
 
@@ -1094,7 +1094,7 @@ struct llama_grammar * llama_grammar_clone_impl(const struct llama_grammar & gra
         grammar.awaiting_trigger,
         grammar.trigger_buffer,
         grammar.trigger_tokens,
-        grammar.trigger_regexes,
+        grammar.trigger_patterns,
     };
 
     // redirect elements in stacks to point to new rules
@@ -1172,7 +1172,7 @@ void llama_grammar_accept_impl(struct llama_grammar & grammar, llama_token token
             grammar.trigger_buffer += piece;
 
             std::smatch match;
-            for (const auto & [_, regex] : grammar.trigger_regexes) {
+            for (const auto & [_, regex] : grammar.trigger_patterns) {
                 if (std::regex_match(grammar.trigger_buffer, match, regex)) {
                     grammar.awaiting_trigger = false;
                     // get from the first match to the end of the string

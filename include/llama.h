@@ -1210,10 +1210,24 @@ extern "C" {
             const struct llama_vocab * vocab,
                           const char * grammar_str,
                           const char * grammar_root,
-                         const char ** trigger_regexes,
-                                size_t num_trigger_regexes,
+                         const char ** trigger_words,
+                                size_t num_trigger_words,
                    const llama_token * trigger_tokens,
                                 size_t num_trigger_tokens);
+
+
+    /// @details Lazy grammar sampler, introduced in https://github.com/ggml-org/llama.cpp/pull/9639
+    /// @param trigger_regexes A list of (full-string) regexes that will trigger the grammar sampler. Grammar sampler will be fed content starting from the first match group.
+    /// @param trigger_tokens A list of tokens that will trigger the grammar sampler. Grammar sampler will be fed content starting from the trigger token included.
+    LLAMA_API struct llama_sampler * llama_sampler_init_grammar_lazy_patterns(
+        const struct llama_vocab * vocab,
+                      const char * grammar_str,
+                      const char * grammar_root,
+                     const char ** trigger_regexes,
+                            size_t num_trigger_regexes,
+               const llama_token * trigger_tokens,
+                            size_t num_trigger_tokens);
+                                
 
     /// NOTE: Avoid using on the full vocabulary as searching for repeated tokens can become slow. For example, apply top-k or top-p sampling first.
     LLAMA_API struct llama_sampler * llama_sampler_init_penalties(

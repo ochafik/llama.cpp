@@ -614,8 +614,10 @@ static json oaicompat_completion_params_parse(
     auto grammar_triggers = json::array();
     for (const auto & trigger : chat_params.grammar_triggers) {
         grammar_triggers.push_back({
-            {"word", trigger.word},
-            {"at_start", trigger.at_start},
+            {"type", (int) trigger.type},
+            {"value", trigger.type == COMMON_GRAMMAR_TRIGGER_TYPE_TOKEN
+                ? json((int) std::get<llama_token>(trigger.value))
+                : json(std::get<std::string>(trigger.value))},
         });
     }
     llama_params["grammar_triggers"] = grammar_triggers;

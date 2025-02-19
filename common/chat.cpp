@@ -804,7 +804,10 @@ static common_chat_params common_chat_params_init_mistral_nemo(const common_chat
         }
         builder.add_rule("root", "\"[TOOL_CALLS]\" " + builder.add_schema("tool_calls", schema));
     }, grammar_options);
-    data.grammar_triggers.push_back({"[TOOL_CALLS]", /* .at_start = */ true});
+    data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "[TOOL_CALLS]"});
+    data.preserved_tokens = {
+        "[TOOL_CALLS]",
+    };
     data.prompt = apply(tmpl, inputs.messages, inputs.tools.empty() ? json() : inputs.tools, inputs.add_generation_prompt);
     data.format = COMMON_CHAT_FORMAT_MISTRAL_NEMO;
     return data;
@@ -847,13 +850,17 @@ static common_chat_params common_chat_params_init_command_r7b(const common_chat_
         }
         builder.add_rule("root", "\"<|START_ACTION|>\" " + builder.add_schema("tool_calls", schema) + " \"<|END_ACTION|>\"");
     }, grammar_options);
-    data.grammar_triggers.push_back({"<|START_ACTION|>", /* .at_start = */ false});
+    data.grammar_triggers.push_back({
+        COMMON_GRAMMAR_TRIGGER_TYPE_WORD,
+        "<|START_ACTION|>",
+    });
     data.preserved_tokens = {
+        "<|START_ACTION|>",
+        "<|END_ACTION|>",
         "<|START_RESPONSE|>",
         "<|END_RESPONSE|>",
         "<|START_THINKING|>",
         "<|END_THINKING|>",
-        "<|END_ACTION|>",
     };
     auto adjusted_messages = json::array();
     for (const auto & msg : inputs.messages) {
@@ -1054,21 +1061,20 @@ static common_chat_params common_chat_params_init_llama_3_1_tool_calls(const com
                 builder.add_rule(
                     name + "-call",
                     "\"{\" space "
-                    "( \"\\\"type\\\":\" space \"\\\"function\\\",\" space )? "
-                    "\"\\\"name\\\": \\\"" + name + "\\\", \\\"parameters\\\": \" " +
-                    add_json_tool_args_rule(name, parameters, builder) +
-                    " \"}\""));
-            data.grammar_triggers.push_back({"{\"name\": \"" + name + "\"", /* .at_start = */ true});
+                    "( \"\\\"type\\\"\"       space \":\" space \"\\\"function\\\"\"     space \",\" space )? "
+                    "  \"\\\"name\\\"\"       space \":\" space \"\\\"" + name + "\\\"\" space \",\" space "
+                    "  \"\\\"parameters\\\"\" space \":\" space " + add_json_tool_args_rule(name, parameters, builder) + " "
+                    "\"}\" space"));
+            data.grammar_triggers.push_back({
+                COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_START,
+                "\\{\\s*(?:\"type\"\\s*:\\s*\"function\"\\s*,\\s*)?\"name\"\\s*:\\s*\"" + name + "\"[\\s\\S]*",
+            });
         });
-        data.grammar_triggers.push_back({"{\"name\":", /* .at_start = */ true});
-        data.grammar_triggers.push_back({"{\n  \"name\":", /* .at_start = */ true});
-        data.grammar_triggers.push_back({"{\n    \"name\":", /* .at_start = */ true});
-        data.grammar_triggers.push_back({"{\"type\": \"function\"", /* .at_start = */ true});
-        data.grammar_triggers.push_back({"{\n  \"type\": \"function\"", /* .at_start = */ true});
-        data.grammar_triggers.push_back({"{\n    \"type\": \"function\"", /* .at_start = */ true});
         if (!builtin_tools.empty()) {
-            data.grammar_triggers.push_back({"<|python_tag|>", /* .at_start = */ false});
+            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<|python_tag|>"});
+            data.preserved_tokens.push_back("<|python_tag|>");
         }
+        // Allow a few empty lines on top of the usual constrained json schema space rule.
         builder.add_rule("root", string_join(tool_rules, " | "));
     }, grammar_options);
     data.additional_stops.push_back("<|eom_id|>");
@@ -1084,8 +1090,8 @@ static common_chat_params common_chat_params_init_llama_3_1_tool_calls(const com
 static common_chat_msg common_chat_parse_llama_3_1(const std::string & input, bool with_builtin_tools = false) {
     // TODO: tighten & simplify the parser, don't accept leading text context.
     static std::regex function_regex(
-        "\\{\\s*(?:\"type\"\\s*:\\s*\"function\"\\s*,\\s*|\\s*)\"name\"\\s*:\\s*\"([^\"]+)\"\\s*,\\s*\"parameters\": ");
-    static std::regex close_regex("\\}");
+        "\\s*\\{\\s*(?:\"type\"\\s*:\\s*\"function\"\\s*,\\s*)?\"name\"\\s*:\\s*\"([^\"]+)\"\\s*,\\s*\"parameters\"\\s*: ");
+    static std::regex close_regex("\\}\\s*");
     static std::regex builtin_call_regex("<\\|python_tag\\|>\\s*([^.(]+)\\s*\\.\\s*call\\s*\\(\\s*([\\w]+)\\s*=\\s*([\\s\\S]*?)\\)");
 
     if (with_builtin_tools) {
@@ -1138,16 +1144,18 @@ static common_chat_params common_chat_params_init_deepseek_r1(const common_chat_
                 "(" + string_join(tool_rules, " | ") + ")" + (inputs.parallel_tool_calls ? "*" : "") + " "
                 "\"<｜tool▁calls▁end｜>\""
                 " space");
-            data.grammar_triggers.push_back({"<｜tool▁calls▁begin｜>", /* .at_start = */ false});
-            data.grammar_triggers.push_back({"<｜tool_calls_begin｜>", /* .at_start = */ false});
-            data.grammar_triggers.push_back({"<｜tool calls begin｜>", /* .at_start = */ false});
-            data.grammar_triggers.push_back({"<｜tool\\_calls\\_begin｜>", /* .at_start = */ false});
+            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<｜tool▁calls▁begin｜>"});
+            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<｜tool_calls_begin｜>"});
+            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<｜tool calls begin｜>"});
+            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<｜tool\\_calls\\_begin｜>"});
             data.preserved_tokens = {
                 "<think>",
                 "</think>",
+                "<｜tool▁calls▁begin｜>",
+                "<｜tool▁call▁begin｜>",
                 "<｜tool▁sep｜>",
-                "<｜tool▁calls▁end｜",
                 "<｜tool▁call▁end｜>",
+                "<｜tool▁calls▁end｜",
             };
         }, grammar_options);
     }
@@ -1239,7 +1247,10 @@ static common_chat_params common_chat_params_init_firefunction_v2(const common_c
             }
             builder.add_rule("root", "\" functools\"? " + builder.add_schema("tool_calls", schema));
         }, grammar_options);
-        data.grammar_triggers.push_back({" functools[", /* .at_start = */ false});
+        data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, " functools["});
+        data.preserved_tokens = {
+            " functools[",
+        };
         data.format = COMMON_CHAT_FORMAT_FIREFUNCTION_V2;
     } else {
         data.format = COMMON_CHAT_FORMAT_CONTENT_ONLY;
@@ -1269,10 +1280,22 @@ static common_chat_params common_chat_params_init_functionary_v3_2(const common_
                 auto args_rule = builder.add_schema(name + "-args", parameters);
                 first_tool_rules.push_back(builder.add_rule(name + "-call", "( \"assistant<|end_header_id|>\\n\" )? \"" + name + "\\n\" " + args_rule));
                 subsequent_tool_rules.push_back(builder.add_rule(name + "-call2", "\">>>" + name + "\\n\" " + args_rule));
-                data.grammar_triggers.push_back({name, /* .at_start = */ true});
-                data.grammar_triggers.push_back({"assistant<|end_header_id|>\n" + name, /* .at_start = */ true});
-                data.grammar_triggers.push_back({">>>" + name, /* .at_start = */ false});
-                data.grammar_triggers.push_back({">>>assistant<|end_header_id|>\n" + name, /* .at_start = */ false});
+                data.grammar_triggers.push_back({
+                    COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_START,
+                    regex_escape(name + "\n"),
+                });
+                data.grammar_triggers.push_back({
+                    COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_START,
+                    regex_escape("assistant<|end_header_id|>\n" + name + "\n"),
+                });
+                data.grammar_triggers.push_back({
+                    COMMON_GRAMMAR_TRIGGER_TYPE_WORD,
+                    regex_escape(">>>" + name + "\n"),
+                });
+                data.grammar_triggers.push_back({
+                    COMMON_GRAMMAR_TRIGGER_TYPE_WORD,
+                    ">>>assistant<|end_header_id|>\n" + name,
+                });
             });
             data.preserved_tokens = {
                 "<|end_header_id|>",
@@ -1366,11 +1389,12 @@ static common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1(con
         });
         if (has_raw_python) {
             tool_rules.push_back(builder.add_rule("python-call", "\"<|python_tag|>\" .*"));
-            data.grammar_triggers.push_back({"<|python_tag|>", /* .at_start = */ false});
+            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<|python_tag|>"});
+            data.preserved_tokens.push_back("<|python_tag|>");
         }
         auto tool_call = builder.add_rule("tool_call", string_join(tool_rules, " | ")) + " space";
         builder.add_rule("root", inputs.parallel_tool_calls ? "(" + tool_call + ")+" : tool_call);
-        data.grammar_triggers.push_back({"<function=", /* .at_start = */ false});
+        data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<function="});
     }, grammar_options);
 
     data.prompt = apply(tmpl, inputs.messages, inputs.tools.empty() ? json() : inputs.tools, inputs.add_generation_prompt);
@@ -1415,8 +1439,8 @@ static common_chat_params common_chat_params_init_hermes_2_pro(const common_chat
             if (name == "python" && parameters.contains("properties") && parameters.at("properties").contains("code") && parameters.at("properties").size() == 1) {
                 tool_rules.push_back(builder.add_rule(name + "-call",
                     "\"{\" space "
-                    "\"\\\"name\\\":\" space \"\\\"" + name + "\\\"\" space \",\" space "
-                    "\"\\\"arguments\\\":\" space " + add_python_code_arguments_rule(name + "-code-arguments", builder) + " "
+                    "\"\\\"name\\\"\"      space \":\" space \"\\\"" + name + "\\\"\" space \",\" space "
+                    "\"\\\"arguments\\\"\" space \":\" space " + add_python_code_arguments_rule(name + "-code-arguments", builder) + " "
                     "\"}\" space "));
             } else {
                 tool_rules.push_back(builder.add_schema(name + "-call", {
@@ -1433,6 +1457,21 @@ static common_chat_params common_chat_params_init_hermes_2_pro(const common_chat
                 "\"<function\" ( \"=" + name + "\" | \" name=\\\"" + name + "\\\"\" ) \">\" space " + 
                 builder.add_schema(name + "-args", parameters) + " "
                 "\"</function>\" space"));
+
+            data.grammar_triggers.push_back({
+                COMMON_GRAMMAR_TRIGGER_TYPE_WORD,
+                "<function=" + name + ">",
+            });
+            auto escaped_name = regex_escape(name);
+            data.grammar_triggers.push_back({
+                COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN,
+                "<function\\s+name\\s*=\\s*\"" + escaped_name + "\"",
+            });
+            // Trigger on some common known "good bad" outputs (only from the start and with a json that's about a specific argument name to avoid false positives)
+            data.grammar_triggers.push_back({
+                COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_START,
+                "(?:<function_call>|<tools>|<xml><json>|<response>)?(?:```(?:json|xml)?\n)?\\s*\\{\\s*\"name\"\\s*:\\s*\"" + escaped_name + "\"",
+            });
         });
         auto any_tool_call = builder.add_rule("any_tool_call", "( " + string_join(tool_rules, " | ") + " ) space");
         std::vector<std::string> alt_tags {
@@ -1452,29 +1491,21 @@ static common_chat_params common_chat_params_init_hermes_2_pro(const common_chat
             "( \"```\\n\" | \"```json\\n\" | \"```xml\\n\" ) space " + wrappable_tool_call + " space \"```\" space ");
         auto tool_call = builder.add_rule("tool_call", string_join(tool_call_alts, " | "));
         builder.add_rule("root", inputs.parallel_tool_calls ? "(" + tool_call + ")+" : tool_call);
-        data.grammar_triggers.push_back({"<tool_call>", /* .at_start = */ false});
-        data.grammar_triggers.push_back({"<function", /* .at_start = */ false});
-        // Trigger on some common known "good bad" outputs (only from the start to avoid false positives)
-        // data.grammar_triggers.push_back({"<function_call>", /* .at_start = */ true});
-        data.grammar_triggers.push_back({"<tools>", /* .at_start = */ true});
-        data.grammar_triggers.push_back({"<xml>", /* .at_start = */ true});
-        data.grammar_triggers.push_back({"<response>", /* .at_start = */ true});
-        data.grammar_triggers.push_back({"```\n{\"name\":", /* .at_start = */ true});
-        data.grammar_triggers.push_back({"```\n  {\"name\":", /* .at_start = */ true});
-        data.grammar_triggers.push_back({"```\n{\n  \"name\":", /* .at_start = */ true});
-        data.grammar_triggers.push_back({"```json\n{\"name\":", /* .at_start = */ true});
-        data.grammar_triggers.push_back({"```json\n  {\"name\":", /* .at_start = */ true});
-        data.grammar_triggers.push_back({"```json\n{\n  \"name\": \"", /* .at_start = */ true});
-        data.grammar_triggers.push_back({"```xml\n{\"name\":", /* .at_start = */ true});
-        data.grammar_triggers.push_back({"```xml\n  {\"name\":", /* .at_start = */ true});
-        data.grammar_triggers.push_back({"```xml\n{\n  \"name\":", /* .at_start = */ true});
-        data.grammar_triggers.push_back({"```xml\n<response>\n    {\"name\":", /* .at_start = */ true});
+        data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_call>"});
+        data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<function"});
         data.preserved_tokens = {
+            "<tool_call>",
             "</tool_call>",
+            "<function",
+            "<tools>",
             "</tools>",
+            "<response>",
             "</response>",
+            "<function_call>",
             "</function_call>",
+            "<json>",
             "</json>",
+            "<JSON>",
             "</JSON>",
             "```",
             "```json",
@@ -1489,7 +1520,7 @@ static common_chat_params common_chat_params_init_hermes_2_pro(const common_chat
 static common_chat_msg common_chat_parse_hermes_2_pro(const std::string& input) {
     const static std::regex open_regex(
         "(?:"
-        "(```(?:xml|json)?\\n)?"         // match 1 (block_start)
+        "(```(?:xml|json)?\\n\\s*)?"         // match 1 (block_start)
         "(<tool_call>"                   // match 2 (open_tag)
         "|<function_call>"
         "|<tool>"
@@ -1499,7 +1530,7 @@ static common_chat_msg common_chat_parse_hermes_2_pro(const std::string& input) 
         "|<xml>"
         "|<JSON>"
         ")?"
-        "(\\s*\\{\\s*\"name\":[\\s\\S]*)"    // match 3 (named tool call + rest)
+        "(\\s*\\{\\s*\"name\"\\s*:[\\s\\S]*)"    // match 3 (named tool call + rest)
         ")"
         "|"
         "(?:<function=([^>]+)>"            // match 4 (function name)
@@ -1545,6 +1576,7 @@ static common_chat_msg common_chat_parse_hermes_2_pro(const std::string& input) 
                         if (!block_end.empty() && !parse_literal(it, end, block_end)) {
                             throw std::runtime_error("Failed to parse block end");
                         }
+                        consume_spaces(it, end);
                     } else {
                         // Not a valid tool call, treat as content
                         msg.content += std::string(match[0].first, match[0].second);
@@ -1576,6 +1608,7 @@ static common_chat_msg common_chat_parse_hermes_2_pro(const std::string& input) 
                         if (!block_end.empty() && !parse_literal(it, end, block_end)) {
                             throw std::runtime_error("Failed to parse block end");
                         }
+                        consume_spaces(it, end);
                     } else {
                         // Not a valid tool call, treat as content
                         msg.content += std::string(match[0].first, match[0].second);
