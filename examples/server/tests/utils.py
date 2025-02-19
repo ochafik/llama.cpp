@@ -181,7 +181,7 @@ class ServerProcess:
             server_args.extend(["--chat-template-file", self.chat_template_file])
 
         args = [str(arg) for arg in [server_path, *server_args]]
-        print(f"bench: starting server with: {' '.join(args)}")
+        print(f"tests: starting server with: {' '.join(args)}")
 
         flags = 0
         if "nt" == os.name:
@@ -233,23 +233,32 @@ class ServerProcess:
         timeout: float | None = None,
     ) -> ServerResponse:
         url = f"http://{self.server_host}:{self.server_port}{path}"
-        parse_body = False
-        if method == "GET":
-            response = requests.get(url, headers=headers, timeout=timeout)
-            parse_body = True
-        elif method == "POST":
-            response = requests.post(url, headers=headers, json=data, timeout=timeout)
-            parse_body = True
-        elif method == "OPTIONS":
-            response = requests.options(url, headers=headers, timeout=timeout)
-        else:
-            raise ValueError(f"Unimplemented method: {method}")
-        result = ServerResponse()
-        result.headers = dict(response.headers)
-        result.status_code = response.status_code
-        result.body = response.json() if parse_body else None
-        print("Response from server", json.dumps(result.body, indent=2))
-        return result
+        retries = int(os.environ.get('RETRIES', '1'))
+        for remaining_attempts in range(retries, 0, -1):
+            # print(f"#\ncurl {url} -d '{json.dumps(data, indent=2)}'\n")
+            parse_body = False
+            if method == "GET":
+                response = requests.get(url, headers=headers, timeout=timeout)
+                parse_body = True
+            elif method == "POST":
+                response = requests.post(url, headers=headers, json=data, timeout=timeout)
+                parse_body = True
+            elif method == "OPTIONS":
+                response = requests.options(url, headers=headers, timeout=timeout)
+            else:
+                raise ValueError(f"Unimplemented method: {method}")
+
+            if (response is None or response.status_code != 200) and remaining_attempts > 0:
+                continue
+            result = ServerResponse()
+            result.headers = dict(response.headers)
+            result.status_code = response.status_code
+            result.body = response.json() if parse_body else None
+            # print("Response from server", json.dumps(result.body, indent=2))
+            return result
+
+        raise RuntimeError(f"Failed to make request to {url} after {retries} attempts")
+
 
     def make_stream_request(
         self,
