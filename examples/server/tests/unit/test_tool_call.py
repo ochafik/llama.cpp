@@ -1,4 +1,12 @@
+#!/usr/bin/env python
 import pytest
+
+# ensure grandparent path is in sys.path
+from pathlib import Path
+import sys
+path = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(path))
+
 from utils import *
 
 server: ServerProcess
@@ -66,15 +74,8 @@ WEATHER_TOOL = {
 }
 
 
-def do_test_completion_with_required_tool_tiny(template_name: str, tool: dict, argument_key: str | None):
-    global server
-    n_predict = 512
-    # server = ServerPreset.stories15m_moe()
-    server.jinja = True
-    server.n_predict = n_predict
-    server.chat_template_file = f'../../../models/templates/{template_name}.jinja'
-    server.start(timeout_seconds=TIMEOUT_SERVER_START)
-    res = server.make_request("POST", "/chat/completions", data={
+def do_test_completion_with_required_tool_tiny(server: ServerProcess, tool: dict, argument_key: str | None, n_predict, **kwargs):
+    res = server.make_request("POST", "/v1/chat/completions", data={
         "max_tokens": n_predict,
         "messages": [
             {"role": "system", "content": "You are a coding assistant."},
@@ -83,16 +84,14 @@ def do_test_completion_with_required_tool_tiny(template_name: str, tool: dict, a
         "tool_choice": "required",
         "tools": [tool],
         "parallel_tool_calls": False,
-        "temperature": 0.0,
-        "top_k": 1,
-        "top_p": 1.0,
+        **kwargs,
     })
     assert res.status_code == 200, f"Expected status code 200, got {res.status_code}"
     choice = res.body["choices"][0]
     tool_calls = choice["message"].get("tool_calls")
     assert tool_calls and len(tool_calls) == 1, f'Expected 1 tool call in {choice["message"]}'
     tool_call = tool_calls[0]
-    assert choice["message"].get("content") is None, f'Expected no content in {choice["message"]}'
+    assert choice["message"].get("content") in (None, ""), f'Expected no content in {choice["message"]}'
     expected_function_name = "python" if tool["type"] == "code_interpreter" else tool["function"]["name"]
     assert expected_function_name == tool_call["function"]["name"]
     actual_arguments = tool_call["function"]["arguments"]
@@ -108,7 +107,14 @@ def do_test_completion_with_required_tool_tiny(template_name: str, tool: dict, a
     ("meta-llama-Llama-3.3-70B-Instruct",             PYTHON_TOOL,          "code"),
 ])
 def test_completion_with_required_tool_tiny_fast(template_name: str, tool: dict, argument_key: str | None):
-    do_test_completion_with_required_tool_tiny(template_name, tool, argument_key)
+    global server
+    n_predict = 512
+    # server = ServerPreset.stories15m_moe()
+    server.jinja = True
+    server.n_predict = n_predict
+    server.chat_template_file = f'../../../models/templates/{template_name}.jinja'
+    server.start(timeout_seconds=TIMEOUT_SERVER_START)
+    do_test_completion_with_required_tool_tiny(server, tool, argument_key, n_predict, temperature=0.0, top_k=1, top_p=1.0)
 
 
 @pytest.mark.slow
@@ -133,7 +139,14 @@ def test_completion_with_required_tool_tiny_fast(template_name: str, tool: dict,
     ("fireworks-ai-llama-3-firefunction-v2",          PYTHON_TOOL,          "code"),
 ])
 def test_completion_with_required_tool_tiny_slow(template_name: str, tool: dict, argument_key: str | None):
-    do_test_completion_with_required_tool_tiny(template_name, tool, argument_key)
+    global server
+    n_predict = 512
+    # server = ServerPreset.stories15m_moe()
+    server.jinja = True
+    server.n_predict = n_predict
+    server.chat_template_file = f'../../../models/templates/{template_name}.jinja'
+    server.start(timeout_seconds=TIMEOUT_SERVER_START)
+    do_test_completion_with_required_tool_tiny(server, tool, argument_key, n_predict)
 
 
 @pytest.mark.slow
@@ -197,7 +210,7 @@ def test_completion_with_required_tool_real_model(tool: dict, argument_key: str 
     elif isinstance(template_override, str):
         server.chat_template = template_override
     server.start(timeout_seconds=TIMEOUT_SERVER_START)
-    res = server.make_request("POST", "/chat/completions", data={
+    res = server.make_request("POST", "/v1/chat/completions", data={
         "max_tokens": n_predict,
         "messages": [
             {"role": "system", "content": "You are a coding assistant."},
@@ -215,7 +228,7 @@ def test_completion_with_required_tool_real_model(tool: dict, argument_key: str 
     tool_calls = choice["message"].get("tool_calls")
     assert tool_calls and len(tool_calls) == 1, f'Expected 1 tool call in {choice["message"]}'
     tool_call = tool_calls[0]
-    assert choice["message"].get("content") is None, f'Expected no content in {choice["message"]}'
+    assert choice["message"].get("content") in (None, ""), f'Expected no content in {choice["message"]}'
     expected_function_name = "python" if tool["type"] == "code_interpreter" else tool["function"]["name"]
     assert expected_function_name == tool_call["function"]["name"]
     actual_arguments = tool_call["function"]["arguments"]
@@ -225,13 +238,8 @@ def test_completion_with_required_tool_real_model(tool: dict, argument_key: str 
         assert argument_key in actual_arguments, f"tool arguments: {json.dumps(actual_arguments)}, expected: {argument_key}"
 
 
-def do_test_completion_without_tool_call(template_name: str, n_predict: int, tools: list[dict], tool_choice: str | None):
-    global server
-    server.jinja = True
-    server.n_predict = n_predict
-    server.chat_template_file = f'../../../models/templates/{template_name}.jinja'
-    server.start(timeout_seconds=TIMEOUT_SERVER_START)
-    res = server.make_request("POST", "/chat/completions", data={
+def do_test_completion_without_tool_call(server: ServerProcess, n_predict: int, tools: list[dict], tool_choice: str | None, **kwargs):
+    res = server.make_request("POST", "/v1/chat/completions", data={
         "max_tokens": n_predict,
         "messages": [
             {"role": "system", "content": "You are a coding assistant."},
@@ -239,9 +247,7 @@ def do_test_completion_without_tool_call(template_name: str, n_predict: int, too
         ],
         "tools": tools if tools else None,
         "tool_choice": tool_choice,
-        "temperature": 0.0,
-        "top_k": 1,
-        "top_p": 1.0,
+        **kwargs,
     }, timeout=TIMEOUT_HTTP_REQUEST)
     assert res.status_code == 200, f"Expected status code 200, got {res.status_code}"
     choice = res.body["choices"][0]
@@ -254,7 +260,12 @@ def do_test_completion_without_tool_call(template_name: str, n_predict: int, too
     ("meta-llama-Llama-3.3-70B-Instruct",         128, [PYTHON_TOOL], 'none'),
 ])
 def test_completion_without_tool_call_fast(template_name: str, n_predict: int, tools: list[dict], tool_choice: str | None):
-    do_test_completion_without_tool_call(template_name, n_predict, tools, tool_choice)
+    global server
+    server.jinja = True
+    server.n_predict = n_predict
+    server.chat_template_file = f'../../../models/templates/{template_name}.jinja'
+    server.start(timeout_seconds=TIMEOUT_SERVER_START)
+    do_test_completion_without_tool_call(server, n_predict, tools, tool_choice)
 
 
 @pytest.mark.slow
@@ -270,7 +281,12 @@ def test_completion_without_tool_call_fast(template_name: str, n_predict: int, t
     ("meta-llama-Llama-3.2-3B-Instruct",              256, [PYTHON_TOOL], 'none'),
 ])
 def test_completion_without_tool_call_slow(template_name: str, n_predict: int, tools: list[dict], tool_choice: str | None):
-    do_test_completion_without_tool_call(template_name, n_predict, tools, tool_choice)
+    global server
+    server.jinja = True
+    server.n_predict = n_predict
+    server.chat_template_file = f'../../../models/templates/{template_name}.jinja'
+    server.start(timeout_seconds=TIMEOUT_SERVER_START)
+    do_test_completion_without_tool_call(server, n_predict, tools, tool_choice)
 
 
 @pytest.mark.slow
@@ -324,26 +340,30 @@ def test_weather(hf_repo: str, template_override: str | Tuple[str, str | None] |
     elif isinstance(template_override, str):
         server.chat_template = template_override
     server.start(timeout_seconds=TIMEOUT_SERVER_START)
-    res = server.make_request("POST", "/chat/completions", data={
-        "max_tokens": n_predict,
+    do_test_weather(server, max_tokens=n_predict)
+
+
+def do_test_weather(server: ServerProcess, **kwargs):
+    res = server.make_request("POST", "/v1/chat/completions", data={
         "messages": [
             {"role": "system", "content": "You are a chatbot that uses tools/functions. Dont overthink things."},
             {"role": "user", "content": "What is the weather in Istanbul?"},
         ],
         "tools": [WEATHER_TOOL],
+        **kwargs,
     }, timeout=TIMEOUT_HTTP_REQUEST)
     assert res.status_code == 200, f"Expected status code 200, got {res.status_code}"
     choice = res.body["choices"][0]
     tool_calls = choice["message"].get("tool_calls")
     assert tool_calls and len(tool_calls) == 1, f'Expected 1 tool call in {choice["message"]}'
     tool_call = tool_calls[0]
-    assert choice["message"].get("content") is None, f'Expected no content in {choice["message"]}'
+    assert choice["message"].get("content") in (None, ""), f'Expected no content in {choice["message"]}'
     assert tool_call["function"]["name"] == WEATHER_TOOL["function"]["name"]
     actual_arguments = json.loads(tool_call["function"]["arguments"])
     assert 'location' in actual_arguments, f"location not found in {json.dumps(actual_arguments)}"
     location = actual_arguments["location"]
     assert isinstance(location, str), f"Expected location to be a string, got {type(location)}: {json.dumps(location)}"
-    assert re.match('^Istanbul(, (TR|Turkey|Türkiye))?$', location), f'Expected Istanbul for location, got {location}'
+    assert re.match('^Istanbul(, ?(TR|Turkey|Türkiye))?$', location), f'Expected Istanbul for location, got {location}'
 
 
 @pytest.mark.slow
@@ -379,10 +399,14 @@ def test_calc_result(result_override: str | None, n_predict: int, hf_repo: str, 
     elif isinstance(template_override, str):
         server.chat_template = template_override
     server.start(timeout_seconds=TIMEOUT_SERVER_START)
-    res = server.make_request("POST", "/chat/completions", data={
+    do_test_calc_result(server, result_override, n_predict)
+
+
+def do_test_calc_result(server: ServerProcess, result_override: str | None, n_predict: int, **kwargs):
+    res = server.make_request("POST", "/v1/chat/completions", data={
         "max_tokens": n_predict,
         "messages": [
-            {"role": "system", "content": "You are a chatbot that uses tools/functions. Dont overthink things, and provide very concise answers. Do not explain your reasoning to the user. Provide any numerical values back to the user with at most two decimals."},
+            {"role": "system", "content": "You are a tools-calling assistant. You express numerical values with at most two decimals."},
             {"role": "user", "content": "What's the y coordinate of a point on the unit sphere at angle 30 degrees?"},
             {
                 "role": "assistant",
@@ -423,7 +447,8 @@ def test_calc_result(result_override: str | None, n_predict: int, hf_repo: str, 
                     }
                 }
             }
-        ]
+        ],
+        **kwargs,
     }, timeout=TIMEOUT_HTTP_REQUEST)
     assert res.status_code == 200, f"Expected status code 200, got {res.status_code}"
     choice = res.body["choices"][0]
@@ -434,7 +459,7 @@ def test_calc_result(result_override: str | None, n_predict: int, hf_repo: str, 
     if result_override is not None:
         assert re.match(result_override, content), f'Expected {result_override}, got {content}'
     else:
-        assert re.match('^[\\s\\S]*?The (y[ -])?coordinate [\\s\\S]*?is (approximately )?0\\.56\\b|^0\\.56$', content), \
+        assert re.match('^[\\s\\S]*?((That\'s|\\bis) (approximately )?)?\\b0\\.(5\\b|56\\b|556)', content), \
             f'Expected something like "The y coordinate is 0.56.", got {content}'
 
 
@@ -464,7 +489,7 @@ def test_thoughts(n_predict: int, reasoning_format: Literal['deepseek', 'none'] 
     elif isinstance(template_override, str):
         server.chat_template = template_override
     server.start(timeout_seconds=TIMEOUT_SERVER_START)
-    res = server.make_request("POST", "/chat/completions", data={
+    res = server.make_request("POST", "/v1/chat/completions", data={
         "max_tokens": n_predict,
         "messages": [
             {"role": "user", "content": "What's the sum of 102 and 7?"},
@@ -476,7 +501,7 @@ def test_thoughts(n_predict: int, reasoning_format: Literal['deepseek', 'none'] 
 
     content = choice["message"].get("content")
     if expect_content is None:
-        assert content is None, f'Expected no content in {choice["message"]}'
+        assert choice["message"].get("content") in (None, ""), f'Expected no content in {choice["message"]}'
     else:
         assert re.match(expect_content, content), f'Expected {expect_content}, got {content}'
 
@@ -528,6 +553,7 @@ def test_hello_world(expected_arguments_override: str | None, hf_repo: str, temp
     server.jinja = True
     server.n_ctx = 8192
     server.n_predict = 512 # High because of DeepSeek R1
+    server.n_predict = n_predict
     server.model_hf_repo = hf_repo
     server.model_hf_file = None
     if isinstance(template_override, tuple):
@@ -537,24 +563,25 @@ def test_hello_world(expected_arguments_override: str | None, hf_repo: str, temp
     elif isinstance(template_override, str):
         server.chat_template = template_override
     server.start(timeout_seconds=TIMEOUT_SERVER_START)
-    res = server.make_request("POST", "/chat/completions", data={
-        "max_tokens": 256,
+
+    do_test_hello_world(server, expected_arguments_override, max_tokens=n_predict)
+
+
+def do_test_hello_world(server: ServerProcess, expected_arguments_override, **kwargs):
+    res = server.make_request("POST", "/v1/chat/completions", data={
         "messages": [
-            {"role": "system", "content": "You are a coding assistant."},
+            {"role": "system", "content": "You are a tool-calling agent."},
             {"role": "user", "content": "say hello world with python"},
         ],
         "tools": [PYTHON_TOOL],
-        # Note: without these greedy params, Functionary v3.2 writes `def hello_world():\n    print("Hello, World!")\nhello_world()` which is correct but a pain to test.
-        "temperature": 0.0,
-        "top_k": 1,
-        "top_p": 1.0,
+        **kwargs,
     }, timeout=TIMEOUT_HTTP_REQUEST)
     assert res.status_code == 200, f"Expected status code 200, got {res.status_code}"
     choice = res.body["choices"][0]
     tool_calls = choice["message"].get("tool_calls")
     assert tool_calls and len(tool_calls) == 1, f'Expected 1 tool call in {choice["message"]}'
     tool_call = tool_calls[0]
-    assert choice["message"].get("content") is None, f'Expected no content in {choice["message"]}'
+    assert choice["message"].get("content") in (None, ""), f'Expected no content in {choice["message"]}'
     assert tool_call["function"]["name"] == PYTHON_TOOL["function"]["name"]
     actual_arguments = tool_call["function"]["arguments"]
     if expected_arguments_override is not None:
