@@ -1002,9 +1002,10 @@ static std::string add_python_code_arguments_rule(const std::string & name, cons
 }
 
 static std::string add_json_tool_args_rule(const std::string & name, const json & parameters, const common_grammar_builder & builder) {
-    if (name == "python" && parameters.contains("properties") && parameters.at("properties").contains("code") && parameters.at("properties").size() == 1) {
-        return add_python_code_arguments_rule(name + "-code-args", builder);
-    } else {
+    // if (name == "python" && parameters.contains("properties") && parameters.at("properties").contains("code") && parameters.at("properties").size() == 1) {
+    //     return add_python_code_arguments_rule(name + "-code-args", builder);
+    // } else 
+    {
         return builder.add_schema(name + "-args", parameters);
     }
 }
@@ -1031,9 +1032,10 @@ static common_chat_params common_chat_params_init_llama_3_1_tool_calls(const com
 
             std::vector<std::string> kvs;
             for (const auto & [key, value] : parameters.at("properties").items()) {
-                if (name == "python" && key == "code") {
-                    kvs.push_back("\"" + key + "=\\\"\" " + add_escaped_python_code_soup_rule(builder) + " \"\\\"\""); // NOLINT
-                } else {
+                // if (name == "python" && key == "code") {
+                //     kvs.push_back("\"" + key + "=\\\"\" " + add_escaped_python_code_soup_rule(builder) + " \"\\\"\""); // NOLINT
+                // } else 
+                {
                     kvs.push_back("\"" + key + "=\" " + builder.add_schema(name + "-args-" + key, value)); // NOLINT
                 }
             }
@@ -1436,13 +1438,14 @@ static common_chat_params common_chat_params_init_hermes_2_pro(const common_chat
             std::string name = function.at("name");
             auto parameters = function.at("parameters");
             builder.resolve_refs(parameters);
-            if (name == "python" && parameters.contains("properties") && parameters.at("properties").contains("code") && parameters.at("properties").size() == 1) {
-                tool_rules.push_back(builder.add_rule(name + "-call",
-                    "\"{\" space "
-                    "\"\\\"name\\\"\"      space \":\" space \"\\\"" + name + "\\\"\" space \",\" space "
-                    "\"\\\"arguments\\\"\" space \":\" space " + add_python_code_arguments_rule(name + "-code-arguments", builder) + " "
-                    "\"}\" space "));
-            } else {
+            // if (name == "python" && parameters.contains("properties") && parameters.at("properties").contains("code") && parameters.at("properties").size() == 1) {
+            //     tool_rules.push_back(builder.add_rule(name + "-call",
+            //         "\"{\" space "
+            //         "\"\\\"name\\\"\"      space \":\" space \"\\\"" + name + "\\\"\" space \",\" space "
+            //         "\"\\\"arguments\\\"\" space \":\" space " + add_python_code_arguments_rule(name + "-code-arguments", builder) + " "
+            //         "\"}\" space "));
+            // } else 
+            {
                 tool_rules.push_back(builder.add_schema(name + "-call", {
                     {"type", "object"},
                     {"properties", json {
