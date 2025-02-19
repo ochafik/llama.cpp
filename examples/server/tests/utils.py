@@ -181,7 +181,7 @@ class ServerProcess:
             server_args.extend(["--chat-template-file", self.chat_template_file])
 
         args = [str(arg) for arg in [server_path, *server_args]]
-        print(f"tests: starting server with: {' '.join(args)}", file=sys.stderr, flush=True)
+        print(f"tests: starting server with: {' '.join(args)}")
 
         flags = 0
         if "nt" == os.name:
@@ -192,14 +192,13 @@ class ServerProcess:
         self.process = subprocess.Popen(
             [str(arg) for arg in [server_path, *server_args]],
             creationflags=flags,
-            # Silent
             stdout=sys.stdout,
             stderr=sys.stdout,
             env={**os.environ, "LLAMA_CACHE": "tmp"} if "LLAMA_CACHE" not in os.environ else None,
         )
         server_instances.add(self)
 
-        print(f"server pid={self.process.pid}, pytest pid={os.getpid()}", file=sys.stderr, flush=True)
+        print(f"server pid={self.process.pid}, pytest pid={os.getpid()}")
 
         # wait for server to start
         start_time = time.time()
@@ -217,7 +216,7 @@ class ServerProcess:
             if self.process.poll() is not None:
                 raise RuntimeError(f"Server process died with return code {self.process.returncode}")
             
-            print(f"Waiting for server to start...", file=sys.stderr, flush=True)
+            print(f"Waiting for server to start...")
             time.sleep(0.5)
         raise TimeoutError(f"Server did not start within {timeout_seconds} seconds")
 
@@ -225,7 +224,7 @@ class ServerProcess:
         if self in server_instances:
             server_instances.remove(self)
         if self.process:
-            print(f"Stopping server with pid={self.process.pid}", file=sys.stderr, flush=True)
+            print(f"Stopping server with pid={self.process.pid}")
             self.process.kill()
             self.process = None
 
@@ -240,7 +239,7 @@ class ServerProcess:
     ) -> ServerResponse:
         url = f"http://{self.server_host}:{self.server_port}{path}"
         for remaining_attempts in range(retries, 0, -1):
-            # print(f"#\ncurl {url} -d '{json.dumps(data, indent=2)}'\n", file=sys.stderr, flush=True)
+            # print(f"#\ncurl {url} -d '{json.dumps(data, indent=2)}'\n")
             parse_body = False
             if method == "GET":
                 response = requests.get(url, headers=headers, timeout=timeout)
@@ -259,7 +258,7 @@ class ServerProcess:
             result.headers = dict(response.headers)
             result.status_code = response.status_code
             result.body = response.json() if parse_body else None
-            # print("Response from server", json.dumps(result.body, indent=2), file=sys.stderr, flush=True)
+            # print("Response from server", json.dumps(result.body, indent=2))
             return result
         
         raise RuntimeError(f"Failed to make request to {url} after {retries} attempts")
@@ -283,7 +282,7 @@ class ServerProcess:
                 break
             elif line.startswith('data: '):
                 data = json.loads(line[6:])
-                print("Partial response from server", json.dumps(data, indent=2), file=sys.stderr, flush=True)
+                print("Partial response from server", json.dumps(data, indent=2))
                 yield data
 
 
@@ -393,9 +392,9 @@ def parallel_function_calls(function_list: List[Tuple[Callable[..., Any], Tuple[
 
     # Check if there were any exceptions
     if exceptions:
-        print("Exceptions occurred:", file=sys.stderr, flush=True)
+        print("Exceptions occurred:")
         for index, error in exceptions:
-            print(f"Function at index {index}: {error}", file=sys.stderr, flush=True)
+            print(f"Function at index {index}: {error}")
 
     return results
 
