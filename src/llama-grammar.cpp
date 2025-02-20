@@ -1369,8 +1369,10 @@ void llama_grammar_apply_impl(struct llama_grammar & grammar, llama_token_data_a
         } else if (piece.empty() || piece[0] == 0) {
             cur_p->data[i].logit = -INFINITY;
         } else if (idx != std::string::npos && grammar.partial_utf8.n_remain == 0 && !accepted_ranges.contains(idx)) {
+            LLAMA_LOG_DEBUG("Rejecting masked token %u (`%s`)\n", id, piece.c_str());
             cur_p->data[i].logit = -INFINITY;
         } else {
+            LLAMA_LOG_DEBUG("Considering unmasked token %u (`%s`)\n", id, piece.c_str());
             candidates_decoded.push_back(decode_utf8(piece, grammar.partial_utf8));
             candidates_grammar.push_back({ i, candidates_decoded.back().first.data(), candidates_decoded.back().second });
         }
