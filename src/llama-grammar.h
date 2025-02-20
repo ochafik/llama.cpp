@@ -87,117 +87,71 @@ struct token_ranges {
         allowed_token_ranges.swap(new_ranges);
     }
 
-    token_ranges & operator+=(const token_range & other) {
+    // Helper function to merge overlapping or adjacent ranges
+    void merge_ranges() {
         if (allowed_token_ranges.empty()) {
-            allowed_token_ranges.push_back(other);
-            return *this;
+            return;
         }
-        if (allowed_token_ranges.back().to_sorted_index + 1 == other.from_sorted_index) {
-            allowed_token_ranges.back().to_sorted_index = other.to_sorted_index;
-            return *this;
-        }
-        // find nearest
-        auto it = std::lower_bound(allowed_token_ranges.begin(), allowed_token_ranges.end(), other.from_sorted_index,
-            [](const token_range & range, size_t idx) {
-                return range.to_sorted_index < idx;
+        
+        std::sort(allowed_token_ranges.begin(), allowed_token_ranges.end(),
+            [](const token_range& a, const token_range& b) {
+                return a.from_sorted_index < b.from_sorted_index;
             });
-        if (it != allowed_token_ranges.end() && it->from_sorted_index <= other.from_sorted_index && other.to_sorted_index <= it->to_sorted_index) {
-            return *this;
-        }
-        // Insert a new range and fuse it with the previous one and/or followin if possible
-        auto new_range = other;
-        if (it != allowed_token_ranges.begin() && it[-1].to_sorted_index + 1 >= other.from_sorted_index) {
-            it[-1].to_sorted_index = other.to_sorted_index;
-            new_range.from_sorted_index = it[-1].from_sorted_index;
-            it = allowed_token_ranges.erase(it);
-        }
-        if (it != allowed_token_ranges.end() && it->from_sorted_index <= other.to_sorted_index + 1) {
-            new_range.to_sorted_index = it->to_sorted_index;
-            it = allowed_token_ranges.erase(it);
-        }
-        allowed_token_ranges.insert(it, new_range);
-        return *this;
-    }
-    token_ranges & operator+=(const token_ranges & other) {
-        if (allowed_token_ranges.empty()) {
-            allowed_token_ranges = other.allowed_token_ranges;
-            return *this;
-        }
-        else if (other.allowed_token_ranges.empty()) {
-            return *this;
-        }
-        auto it1 = allowed_token_ranges.begin();
-        auto it2 = other.allowed_token_ranges.begin();
 
-        std::vector<token_range> result;
-        // Merge the two ranges, fusing [from,to] pairs that overlap
-        while (it1 != allowed_token_ranges.end() && it2 != other.allowed_token_ranges.end()) {
-            if (it1->to_sorted_index < it2->from_sorted_index) {
-                result.push_back(*it1);
-                it1++;
-            }
-            else if (it2->to_sorted_index < it1->from_sorted_index) {
-                result.push_back(*it2);
-                it2++;
-            }
-            else {
-                result.push_back({std::min(it1->from_sorted_index, it2->from_sorted_index), std::max(it1->to_sorted_index, it2->to_sorted_index)});
-                it1++;
-                it2++;
+        std::vector<token_range> merged;
+        merged.push_back(allowed_token_ranges[0]);
+
+        for (size_t i = 1; i < allowed_token_ranges.size(); i++) {
+            auto& current = allowed_token_ranges[i];
+            auto& last = merged.back();
+
+            // Check if ranges overlap or are adjacent
+            if (current.from_sorted_index <= last.to_sorted_index + 1) {
+                // Merge the ranges
+                last.to_sorted_index = std::max(last.to_sorted_index, current.to_sorted_index);
+            } else {
+                // Add new range
+                merged.push_back(current);
             }
         }
-        while (it1 != allowed_token_ranges.end()) {
-            result.push_back(*it1);
-            it1++;
-        }
-        while (it2 != other.allowed_token_ranges.end()) {
-            result.push_back(*it2);
-            it2++;
-        }
-        allowed_token_ranges = result;
+
+        allowed_token_ranges.swap(merged);
+    }
+
+    token_ranges& operator+=(const token_range& other) {
+        allowed_token_ranges.push_back(other);
+        merge_ranges();
         return *this;
     }
 
-    token_ranges & operator+=(size_t idx) {
-        if (allowed_token_ranges.empty()) {
-            allowed_token_ranges.push_back({idx, idx});
+    token_ranges& operator+=(const token_ranges& other) {
+        if (other.allowed_token_ranges.empty()) {
             return *this;
         }
-        if (allowed_token_ranges.back().to_sorted_index + 1 == idx) {
-            allowed_token_ranges.back().to_sorted_index = idx;
-            return *this;
-        }
-        // Find the range that contains the token
-        auto it = std::lower_bound(allowed_token_ranges.begin(), allowed_token_ranges.end(), idx, [](const token_range & range, size_t idx) {
-            return range.to_sorted_index < idx;
-        });
-        if (it != allowed_token_ranges.end() && it->from_sorted_index <= idx && idx <= it->to_sorted_index) {
-            return *this;
-        }
-        // Insert a new range and fuse it with the previous one and/or followin if possible
-        token_range new_range { idx, idx };
-        if (it != allowed_token_ranges.begin() && it[-1].to_sorted_index + 1 == idx) {
-            it[-1].to_sorted_index = idx;
-            new_range.from_sorted_index = it[-1].from_sorted_index;
-            it = allowed_token_ranges.erase(it);
-        }
-        if (it != allowed_token_ranges.end() && it->from_sorted_index == idx + 1) {
-            new_range.to_sorted_index = it->to_sorted_index;
-            it = allowed_token_ranges.erase(it);
-        }
-        allowed_token_ranges.insert(it, new_range);
+        
+        allowed_token_ranges.insert(
+            allowed_token_ranges.end(),
+            other.allowed_token_ranges.begin(),
+            other.allowed_token_ranges.end()
+        );
+        
+        merge_ranges();
         return *this;
+    }
+
+    token_ranges& operator+=(size_t idx) {
+        return operator+=({idx, idx});
     }
 
     bool contains(size_t idx) const {
         // find (sorted)
-        auto it = std::lower_bound(allowed_token_ranges.begin(), allowed_token_ranges.end(), idx, [](const token_range & range, size_t idx) {
-            return range.to_sorted_index < idx;
-        });
+        auto it = std::lower_bound(allowed_token_ranges.begin(), allowed_token_ranges.end(), idx,
+            [](const token_range& range, size_t idx) {
+                return range.to_sorted_index < idx;
+            });
         return it != allowed_token_ranges.end() && it->from_sorted_index <= idx && idx <= it->to_sorted_index;
     }
 };
-//*/
 
 using llama_grammar_rule  = std::vector<      llama_grammar_element>;
 using llama_grammar_stack = std::vector<const llama_grammar_element *>;

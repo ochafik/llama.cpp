@@ -1337,6 +1337,17 @@ static void test_token_ranges() {
         assert_equals(true, rngs.contains(25));
         assert_equals(false, rngs.contains(26));
     }
+    {
+        token_ranges rngs;
+        rngs += {10, 20};
+        rngs += {30, 40};
+        assert_equals<size_t>(2, rngs.allowed_token_ranges.size());
+        assert_equals(false, rngs.contains(9));
+        assert_equals(true, rngs.contains(10));
+        assert_equals(false, rngs.contains(29));
+        assert_equals(true, rngs.contains(30));
+        assert_equals(false, rngs.contains(41));
+    }
 }
 
 int main() {
