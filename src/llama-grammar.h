@@ -106,12 +106,12 @@ struct token_ranges {
         }
         // Insert a new range and fuse it with the previous one and/or followin if possible
         auto new_range = other;
-        if (it != allowed_token_ranges.begin() && it[-1].to_sorted_index + 1 == other.from_sorted_index) {
+        if (it != allowed_token_ranges.begin() && it[-1].to_sorted_index + 1 >= other.from_sorted_index) {
             it[-1].to_sorted_index = other.to_sorted_index;
             new_range.from_sorted_index = it[-1].from_sorted_index;
             it = allowed_token_ranges.erase(it);
         }
-        if (it != allowed_token_ranges.end() && it->from_sorted_index == other.to_sorted_index + 1) {
+        if (it != allowed_token_ranges.end() && it->from_sorted_index <= other.to_sorted_index + 1) {
             new_range.to_sorted_index = it->to_sorted_index;
             it = allowed_token_ranges.erase(it);
         }

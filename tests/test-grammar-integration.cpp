@@ -9,6 +9,7 @@
 #include <cassert>
 #include <string>
 #include <vector>
+#include <iostream>
 
 using json = nlohmann::ordered_json;
 
@@ -1292,8 +1293,55 @@ static void test_json_schema() {
     );
 }
 
+
+template <class T> static void assert_equals(const T & expected, const T & actual) {
+    if (expected != actual) {
+        std::cerr << "Expected: " << expected << std::endl;
+        std::cerr << "Actual: " << actual << std::endl;
+        std::cerr << std::flush;
+        throw std::runtime_error("Test failed");
+    }
+}
+
+static void test_token_ranges() {
+    {
+        token_ranges rngs;
+        rngs += 1;
+        assert_equals(true, rngs.contains(1));
+        assert_equals(false, rngs.contains(2));
+
+        rngs += 10;
+        assert_equals(true, rngs.contains(1));
+        assert_equals(false, rngs.contains(2));
+        assert_equals(false, rngs.contains(9));
+        assert_equals(true, rngs.contains(10));
+        assert_equals(false, rngs.contains(11));
+    }
+    {
+        token_ranges rngs;
+        rngs += {10, 20};
+        assert_equals<size_t>(1, rngs.allowed_token_ranges.size());
+        assert_equals(false, rngs.contains(9));
+        assert_equals(true, rngs.contains(10));
+        assert_equals(true, rngs.contains(11));
+        assert_equals(true, rngs.contains(20));
+        assert_equals(false, rngs.contains(21));
+    }
+    {
+        token_ranges rngs;
+        rngs += {10, 20};
+        rngs += {15, 25};
+        assert_equals<size_t>(1, rngs.allowed_token_ranges.size());
+        assert_equals(false, rngs.contains(9));
+        assert_equals(true, rngs.contains(10));
+        assert_equals(true, rngs.contains(25));
+        assert_equals(false, rngs.contains(26));
+    }
+}
+
 int main() {
     fprintf(stdout, "Running grammar integration tests...\n");
+    test_token_ranges();
     test_simple_grammar();
     test_complex_grammar();
     test_special_chars();
