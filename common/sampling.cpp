@@ -342,6 +342,7 @@ llama_token common_sampler_sample(struct common_sampler * gsmpl, struct llama_co
     auto & chain = gsmpl->chain;
     auto & cur_p = gsmpl->cur_p; // initialized by set_logits
 
+    grammar_first = true;
     if (grammar_first) {
         llama_sampler_apply(grmr, &cur_p);
     }
