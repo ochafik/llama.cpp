@@ -1357,8 +1357,8 @@ void llama_grammar_apply_impl(struct llama_grammar & grammar, llama_token_data_a
     llama_grammar_candidates candidates_grammar;
     candidates_grammar.reserve(cur_p->size);
 
-    fprintf(stderr, "# Grammar sampling %zu tokens\n", cur_p->size);
-    fflush(stderr);
+    // fprintf(stderr, "# Grammar sampling %zu tokens\n", cur_p->size);
+    // fflush(stderr);
 
     for (size_t i = 0; i < cur_p->size; ++i) {
         const llama_token id      = cur_p->data[i].id;
@@ -1372,12 +1372,12 @@ void llama_grammar_apply_impl(struct llama_grammar & grammar, llama_token_data_a
         } else if (piece.empty() || piece[0] == 0) {
             cur_p->data[i].logit = -INFINITY;
         } else if (idx != std::string::npos && grammar.partial_utf8.n_remain == 0 && !accepted_ranges.contains(idx)) {
-            fprintf(stderr, "- Rejecting masked token %u (`%s`)\n", id, piece.c_str());
-            fflush(stderr);
+            // fprintf(stderr, "- Rejecting masked token %u (`%s`)\n", id, piece.c_str());
+            // fflush(stderr);
             cur_p->data[i].logit = -INFINITY;
         } else {
-            fprintf(stderr, "- Considering unmasked token %u (`%s`)\n", id, piece.c_str());
-            fflush(stderr);
+            // fprintf(stderr, "- Considering unmasked token %u (`%s`)\n", id, piece.c_str());
+            // fflush(stderr);
             candidates_decoded.push_back(decode_utf8(piece, grammar.partial_utf8));
             candidates_grammar.push_back({ i, candidates_decoded.back().first.data(), candidates_decoded.back().second });
         }
@@ -1386,8 +1386,8 @@ void llama_grammar_apply_impl(struct llama_grammar & grammar, llama_token_data_a
     const auto rejects = llama_grammar_reject_candidates(grammar.rules, grammar.stacks, candidates_grammar);
     for (const auto & reject : rejects) {
         auto & token = cur_p->data[reject.index];
-        fprintf(stderr, "- Rejecting token %u (`%s`)\n", token.id, grammar.vocab->token_to_piece(token.id).c_str());
-        fflush(stderr);
+        // fprintf(stderr, "- Rejecting token %u (`%s`)\n", token.id, grammar.vocab->token_to_piece(token.id).c_str());
+        // fflush(stderr);
         cur_p->data[reject.index].logit = -INFINITY;
     }
 
@@ -1398,8 +1398,8 @@ void llama_grammar_apply_impl(struct llama_grammar & grammar, llama_token_data_a
         if (token.logit == -INFINITY) {
             continue;
         }
-        fprintf(stderr, "- Accepted token %u (`%s`)\n", token.id, grammar.vocab->token_to_piece(token.id).c_str());
-        fflush(stderr);
+        // fprintf(stderr, "- Accepted token %u (`%s`)\n", token.id, grammar.vocab->token_to_piece(token.id).c_str());
+        // fflush(stderr);
     }
 }
 

@@ -1320,33 +1320,48 @@ static void test_token_ranges() {
     {
         token_ranges rngs;
         rngs += {10, 20};
-        assert_equals<size_t>(1, rngs.allowed_token_ranges.size());
         assert_equals(false, rngs.contains(9));
         assert_equals(true, rngs.contains(10));
         assert_equals(true, rngs.contains(11));
         assert_equals(true, rngs.contains(20));
         assert_equals(false, rngs.contains(21));
+
+        assert_equals<size_t>(1, rngs.allowed_token_ranges.size());
     }
     {
         token_ranges rngs;
         rngs += {10, 20};
         rngs += {15, 25};
-        assert_equals<size_t>(1, rngs.allowed_token_ranges.size());
         assert_equals(false, rngs.contains(9));
         assert_equals(true, rngs.contains(10));
         assert_equals(true, rngs.contains(25));
         assert_equals(false, rngs.contains(26));
+
+        assert_equals<size_t>(1, rngs.allowed_token_ranges.size());
     }
     {
         token_ranges rngs;
         rngs += {10, 20};
         rngs += {30, 40};
-        assert_equals<size_t>(2, rngs.allowed_token_ranges.size());
         assert_equals(false, rngs.contains(9));
         assert_equals(true, rngs.contains(10));
         assert_equals(false, rngs.contains(29));
         assert_equals(true, rngs.contains(30));
         assert_equals(false, rngs.contains(41));
+
+        assert_equals<size_t>(2, rngs.allowed_token_ranges.size());
+    }
+    {
+        token_ranges rngs;
+        rngs += 10;
+        rngs.invert(100);
+        assert_equals(true, rngs.contains(9));
+        assert_equals(false, rngs.contains(10));
+        assert_equals(true, rngs.contains(11));
+
+        assert_equals<size_t>(2, rngs.allowed_token_ranges.size());
+        assert_equals<size_t>(0, rngs.allowed_token_ranges[0].from_sorted_index);
+        assert_equals<size_t>(99, rngs.allowed_token_ranges[1].to_sorted_index);
     }
 }
 
