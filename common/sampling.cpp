@@ -1,6 +1,7 @@
 #include "sampling.h"
 
 #include "common.h"
+#include "llama-impl.h"
 
 #include <cmath>
 #include <regex>
@@ -352,6 +353,9 @@ llama_token common_sampler_sample(struct common_sampler * gsmpl, struct llama_co
     const llama_token id = cur_p.data[cur_p.selected].id;
 
     if (grammar_first) {
+        LLAMA_LOG_DEBUG("sampled token %u (`%s`)\n", id, common_token_to_piece(ctx, id).c_str());
+        fflush(stdout);
+        fflush(stderr);
         return id;
     }
 
