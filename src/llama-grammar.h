@@ -6,6 +6,7 @@
 #include <regex>
 #include <string>
 #include <vector>
+#include <unordered_map>
 
 struct llama_vocab;
 
@@ -53,6 +54,150 @@ struct llama_grammar_candidate {
     const uint32_t     * code_points;
     llama_partial_utf8   partial_utf8;
 };
+
+//*
+struct token_range {
+    size_t from_sorted_index;
+    size_t to_sorted_index;
+};
+
+struct token_ranges {
+    std::vector<token_range> allowed_token_ranges;
+    std::vector<std::string> allowed_pieces;
+
+    void fetch_pieces_for_debug(const std::vector<struct llama_grammar_token> & sorted_tokens);
+
+    void invert(size_t size) {
+        // Go from positive matches to negative matches
+        // [[10, 20]] w/ size 30 -> [[0, 9], [21, 29]]
+        if (allowed_token_ranges.empty()) {
+            allowed_token_ranges.push_back({0, size - 1});
+            return;
+        }
+        std::vector<token_range> new_ranges;
+        if (allowed_token_ranges.front().from_sorted_index > 0) {
+            new_ranges.push_back({0, allowed_token_ranges.front().from_sorted_index - 1});
+        }
+        for (size_t i = 1; i < allowed_token_ranges.size(); i++) {
+            new_ranges.push_back({allowed_token_ranges[i - 1].to_sorted_index + 1, allowed_token_ranges[i].from_sorted_index - 1});
+        }
+        if (allowed_token_ranges.back().to_sorted_index < size - 1) {
+            new_ranges.push_back({allowed_token_ranges.back().to_sorted_index + 1, size - 1});
+        }
+        allowed_token_ranges.swap(new_ranges);
+    }
+
+    token_ranges & operator+=(const token_range & other) {
+        if (allowed_token_ranges.empty()) {
+            allowed_token_ranges.push_back(other);
+            return *this;
+        }
+        if (allowed_token_ranges.back().to_sorted_index + 1 == other.from_sorted_index) {
+            allowed_token_ranges.back().to_sorted_index = other.to_sorted_index;
+            return *this;
+        }
+        // find nearest
+        auto it = std::lower_bound(allowed_token_ranges.begin(), allowed_token_ranges.end(), other.from_sorted_index,
+            [](const token_range & range, size_t idx) {
+                return range.to_sorted_index < idx;
+            });
+        if (it != allowed_token_ranges.end() && it->from_sorted_index <= other.from_sorted_index && other.to_sorted_index <= it->to_sorted_index) {
+            return *this;
+        }
+        // Insert a new range and fuse it with the previous one and/or followin if possible
+        auto new_range = other;
+        if (it != allowed_token_ranges.begin() && it[-1].to_sorted_index + 1 == other.from_sorted_index) {
+            it[-1].to_sorted_index = other.to_sorted_index;
+            new_range.from_sorted_index = it[-1].from_sorted_index;
+            it = allowed_token_ranges.erase(it);
+        }
+        if (it != allowed_token_ranges.end() && it->from_sorted_index == other.to_sorted_index + 1) {
+            new_range.to_sorted_index = it->to_sorted_index;
+            it = allowed_token_ranges.erase(it);
+        }
+        allowed_token_ranges.insert(it, new_range);
+        return *this;
+    }
+    token_ranges & operator+=(const token_ranges & other) {
+        if (allowed_token_ranges.empty()) {
+            allowed_token_ranges = other.allowed_token_ranges;
+            return *this;
+        }
+        else if (other.allowed_token_ranges.empty()) {
+            return *this;
+        }
+        auto it1 = allowed_token_ranges.begin();
+        auto it2 = other.allowed_token_ranges.begin();
+
+        std::vector<token_range> result;
+        // Merge the two ranges, fusing [from,to] pairs that overlap
+        while (it1 != allowed_token_ranges.end() && it2 != other.allowed_token_ranges.end()) {
+            if (it1->to_sorted_index < it2->from_sorted_index) {
+                result.push_back(*it1);
+                it1++;
+            }
+            else if (it2->to_sorted_index < it1->from_sorted_index) {
+                result.push_back(*it2);
+                it2++;
+            }
+            else {
+                result.push_back({std::min(it1->from_sorted_index, it2->from_sorted_index), std::max(it1->to_sorted_index, it2->to_sorted_index)});
+                it1++;
+                it2++;
+            }
+        }
+        while (it1 != allowed_token_ranges.end()) {
+            result.push_back(*it1);
+            it1++;
+        }
+        while (it2 != other.allowed_token_ranges.end()) {
+            result.push_back(*it2);
+            it2++;
+        }
+        allowed_token_ranges = result;
+        return *this;
+    }
+
+    token_ranges & operator+=(size_t idx) {
+        if (allowed_token_ranges.empty()) {
+            allowed_token_ranges.push_back({idx, idx});
+            return *this;
+        }
+        if (allowed_token_ranges.back().to_sorted_index + 1 == idx) {
+            allowed_token_ranges.back().to_sorted_index = idx;
+            return *this;
+        }
+        // Find the range that contains the token
+        auto it = std::lower_bound(allowed_token_ranges.begin(), allowed_token_ranges.end(), idx, [](const token_range & range, size_t idx) {
+            return range.to_sorted_index < idx;
+        });
+        if (it != allowed_token_ranges.end() && it->from_sorted_index <= idx && idx <= it->to_sorted_index) {
+            return *this;
+        }
+        // Insert a new range and fuse it with the previous one and/or followin if possible
+        token_range new_range { idx, idx };
+        if (it != allowed_token_ranges.begin() && it[-1].to_sorted_index + 1 == idx) {
+            it[-1].to_sorted_index = idx;
+            new_range.from_sorted_index = it[-1].from_sorted_index;
+            it = allowed_token_ranges.erase(it);
+        }
+        if (it != allowed_token_ranges.end() && it->from_sorted_index == idx + 1) {
+            new_range.to_sorted_index = it->to_sorted_index;
+            it = allowed_token_ranges.erase(it);
+        }
+        allowed_token_ranges.insert(it, new_range);
+        return *this;
+    }
+
+    bool contains(size_t idx) const {
+        // find (sorted)
+        auto it = std::lower_bound(allowed_token_ranges.begin(), allowed_token_ranges.end(), idx, [](const token_range & range, size_t idx) {
+            return range.to_sorted_index < idx;
+        });
+        return it != allowed_token_ranges.end() && it->from_sorted_index <= idx && idx <= it->to_sorted_index;
+    }
+};
+//*/
 
 using llama_grammar_rule  = std::vector<      llama_grammar_element>;
 using llama_grammar_stack = std::vector<const llama_grammar_element *>;
@@ -106,12 +251,22 @@ struct llama_grammar_parser {
     void print(FILE * file);
 };
 
+struct llama_grammar_token {
+    llama_token token;
+    std::string piece;
+    std::pair<std::vector<uint32_t>, llama_partial_utf8> codepoints;
+};
+
 struct llama_grammar {
     // note: allow null vocab for testing (not great)
     const llama_vocab * vocab;
 
     const llama_grammar_rules  rules;  // TODO: shared ptr
           llama_grammar_stacks stacks;
+
+    std::vector<llama_grammar_token>                                sorted_tokens;
+    std::vector<size_t>                                             sorted_tokens_indices; // llama_token -> idx in sorted_token
+    std::unordered_map<const llama_grammar_element *, token_ranges> allowed_tokens;
 
     // buffer for partially generated UTF-8 sequence from accepted tokens
     llama_partial_utf8 partial_utf8;
@@ -156,7 +311,7 @@ struct llama_grammar * llama_grammar_clone_impl(const struct llama_grammar & gra
 
 // TODO: move the API below as member functions of llama_grammar
 void llama_grammar_apply_impl(
-        const struct llama_grammar & grammar,
+              struct llama_grammar & grammar,
             llama_token_data_array * cur_p);
 
 void llama_grammar_accept_impl(

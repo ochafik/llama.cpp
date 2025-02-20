@@ -7,6 +7,7 @@
 #include <cmath>
 #include <algorithm>
 #include <stdexcept>
+#include <set>
 
 //
 // helpers
@@ -603,6 +604,150 @@ static bool llama_grammar_is_end_of_sequence(const llama_grammar_element * pos) 
     }
 }
 
+void token_ranges::fetch_pieces_for_debug(const std::vector<struct llama_grammar_token> & sorted_tokens) {
+    std::set<std::string> pieces;
+    for (const auto & rng : allowed_token_ranges) {
+        for (size_t i = rng.from_sorted_index; i <= rng.to_sorted_index; i++) {
+            const auto & token = sorted_tokens[i];
+            pieces.insert(token.piece);
+        }
+    }
+    allowed_pieces.clear();
+    allowed_pieces.insert(allowed_pieces.end(), pieces.begin(), pieces.end());
+}
+
+static const token_ranges & llama_grammar_match_tokens(
+        struct llama_grammar & grammar,
+        const llama_grammar_element * pos) {
+        // const std::vector<llama_grammar_token> & sorted_tokens,
+        // std::unordered_map<const llama_grammar_element *, token_ranges> & allowed_tokens) {
+            
+    const auto & sorted_tokens = grammar.sorted_tokens;
+
+    auto it = grammar.allowed_tokens.find(pos);
+    if (it != grammar.allowed_tokens.end()) {
+        return it->second;
+    }
+
+    std::function<void(const token_range &, const llama_grammar_element *, size_t, token_ranges &)> explore_rng = [&](
+        const token_range & rng,
+        const llama_grammar_element * pos,
+        size_t char_offset,
+        token_ranges & out)
+    {
+        auto sorted_begin = sorted_tokens.begin() + rng.from_sorted_index;
+        auto sorted_end   = sorted_tokens.begin() + rng.to_sorted_index + 1;
+        auto find_lower = [&](uint32_t chr) {
+            // return std::lower_bound(sorted_begin, sorted_end, chr, [&](const std::vector<const uint32_t> & token_codepoints, uint32_t chr) {
+            //     if (token_codepoints.size() <= char_offset) {
+            //         return true;
+            //     }
+            //     return token_codepoints.codepoints.first[char_offset] < chr;
+            // });
+            for (auto it = sorted_begin; it != sorted_end; it++) {
+                if ((*it).codepoints.first[char_offset] >= chr) {
+                    return it;
+                }
+            }
+            return sorted_tokens.end();
+        };
+        auto find_upper = [&](uint32_t chr) {
+            for (auto it = sorted_begin; it != sorted_end; it++) {
+                if ((*it).codepoints.first[char_offset] > chr) {
+                    return it;
+                }
+            }
+            return sorted_tokens.end();
+        };
+
+        token_ranges res;
+        bool is_positive_char = pos->type == LLAMA_GRETYPE_CHAR || pos->type == LLAMA_GRETYPE_CHAR_ANY;
+        do {
+            if (pos[1].type == LLAMA_GRETYPE_CHAR_RNG_UPPER) {
+                // inclusive range, e.g. [a-z]
+                auto low_chr = pos->value;
+                auto high_chr = pos[1].value;
+                auto low = find_lower(low_chr);
+                if (low != sorted_tokens.end()) {
+                    auto high = find_upper(high_chr);
+                    res += {
+                        static_cast<size_t>(low - sorted_tokens.begin()),
+                        high == sorted_tokens.end()
+                            ? sorted_tokens.size() - 1
+                            : static_cast<size_t>(high - sorted_tokens.begin() - 1),
+                    };
+                }
+                pos += 2;
+            } else if (pos->type == LLAMA_GRETYPE_CHAR_ANY) {
+                // Any character matches "."
+                res += { 0, sorted_tokens.size() - 1 };
+                pos += 1;
+            } else {
+                // exact char match, e.g. [a] or "a"
+                auto chr = pos->value;
+                auto low = find_lower(chr);
+                if (low != sorted_tokens.end()) {
+                    auto high = find_upper(chr);
+                    res += {
+                        static_cast<size_t>(low - sorted_tokens.begin()),
+                        high == sorted_tokens.end()
+                            ? sorted_tokens.size() - 1
+                            : static_cast<size_t>(high - sorted_tokens.begin() - 1),
+                    };
+                }
+                pos += 1;
+            }
+        } while (pos->type == LLAMA_GRETYPE_CHAR_ALT);
+
+        if (!is_positive_char) {
+            res.invert(sorted_tokens.size());
+        }
+
+        res.fetch_pieces_for_debug(sorted_tokens);
+
+        if (llama_grammar_is_end_of_sequence(pos) || pos->type == LLAMA_GRETYPE_RULE_REF) {
+            // Any matches are plausible guesses. We don't know if they're atually good without looking into the alternatives or the calling context we return to.
+            // TODO: get the rule's allowed ranges, avoiding infinite recursion.
+            out += res;
+        } else {
+            // For each range in res: if a token ends at size offset + 1, add it to the output.
+            // Otherwise, recurse on the next offset.s
+            auto next_offset = char_offset + 1;
+
+            for (const auto & rng : res.allowed_token_ranges) {
+                if (sorted_tokens[rng.from_sorted_index].codepoints.first.size() == next_offset) {
+                    out += rng.from_sorted_index;
+                    if (rng.from_sorted_index != rng.to_sorted_index) {
+                        explore_rng({rng.from_sorted_index + 1, rng.to_sorted_index}, pos, next_offset, out);
+                    }
+                } else {
+                    explore_rng(rng, pos, next_offset, out);
+                }
+            }
+        }
+    };
+
+    auto & rngs = grammar.allowed_tokens[pos];
+
+    explore_rng({0, sorted_tokens.size() - 1}, pos, 0, rngs);
+
+    // Skip to end or alternative
+    while (!llama_grammar_is_end_of_sequence(pos)) {
+        pos++;
+    }
+
+    // Merge allowed tokens from alternative(s)
+    if (pos->type == LLAMA_GRETYPE_ALT) {
+        auto & alt_matches = llama_grammar_match_tokens(grammar, pos + 1);
+        rngs += alt_matches;
+    }
+
+    rngs.fetch_pieces_for_debug(sorted_tokens);
+
+    return rngs;
+}
+//*/
+
 // returns true iff chr satisfies the char range at pos (regular or inverse range)
 // asserts that pos is pointing to a char range element
 static std::pair<bool, const llama_grammar_element *> llama_grammar_match_char(
@@ -957,13 +1102,40 @@ struct llama_grammar * llama_grammar_init_impl(
         }
     } while (true);
 
+    std::vector<llama_grammar_token> sorted_tokens;
+    std::vector<size_t>              sorted_tokens_indices;
+
+    const bool mask = getenv("LLAMA_MASK") != nullptr && std::string(getenv("LLAMA_MASK")) == "1";
+    if (mask && vocab) {
+        printf("Masking %d tokens\n", llama_vocab_n_tokens(vocab));
+        for (size_t i = 0, n = llama_vocab_n_tokens(vocab); i < n; i++) {
+            auto & piece = vocab->token_to_piece(i);
+            sorted_tokens.push_back({
+                (llama_token) i,
+                piece,
+                decode_utf8(piece, {}),
+            });
+        }
+
+        std::sort(sorted_tokens.begin(), sorted_tokens.end(), [](const llama_grammar_token & a, const llama_grammar_token & b) {
+            return a.codepoints.first < b.codepoints.first;
+        });
+        sorted_tokens_indices.resize(sorted_tokens.size());
+        for (size_t i = 0; i < sorted_tokens.size(); i++) {
+            sorted_tokens_indices[sorted_tokens[i].token] = i;
+        }
+    }
+
     // Important: vec_rules has to be moved here, not copied, because stacks contains
     // pointers to elements of vec_rules. If vec_rules were copied into llama_grammar
     // then the pointers would be invalidated when the local vec_rules goes out of scope.
-    return new llama_grammar {
+    auto grammar = new llama_grammar {
         vocab,
         std::move(vec_rules),
         std::move(stacks),
+        std::move(sorted_tokens),
+        std::move(sorted_tokens_indices),
+        /* .allowed_tokens = */   {},
         /* .partial_utf8 = */     {},
         /* .lazy =*/              false,
         /* .awaiting_trigger = */ false,
@@ -971,6 +1143,13 @@ struct llama_grammar * llama_grammar_init_impl(
         /* .trigger_tokens   = */ {},
         /* .trigger_patterns    = */ {},
     };
+    // Prime allowed_tokens for each rule in the grammar
+    for (const auto & rule : vec_rules) {
+        for (const auto & elem : rule) {
+            llama_grammar_match_tokens(*grammar, &elem);
+        }
+    }
+    return grammar;
 }
 
 struct llama_grammar * llama_grammar_init_impl(
@@ -1028,6 +1207,7 @@ struct llama_grammar * llama_grammar_init_impl(
     }
 
     // loop over alternates of start rule to build initial stacks
+    // TODO: lazy, rely on llama_grammar_match_tokens for initial tokens, only build relevant stacks once we accept first token.
     llama_grammar_stacks stacks;
     pos = vec_rules[start_rule_index].data();
     do {
@@ -1060,13 +1240,40 @@ struct llama_grammar * llama_grammar_init_impl(
         vec_trigger_patterns.emplace_back(trigger_patterns[i], trigger_patterns[i]);
     }
 
+    std::vector<llama_grammar_token> sorted_tokens;
+    std::vector<size_t>              sorted_tokens_indices;
+
+    const bool mask = getenv("LLAMA_MASK") != nullptr && std::string(getenv("LLAMA_MASK")) == "1";
+    if (mask && vocab) {
+        printf("Masking %d tokens\n", llama_vocab_n_tokens(vocab));
+        for (size_t i = 0, n = llama_vocab_n_tokens(vocab); i < n; i++) {
+            auto & piece = vocab->token_to_piece(i);
+            sorted_tokens.push_back({
+                (llama_token) i,
+                piece,
+                decode_utf8(piece, {}),
+            });
+        }
+
+        std::sort(sorted_tokens.begin(), sorted_tokens.end(), [](const llama_grammar_token & a, const llama_grammar_token & b) {
+            return a.codepoints.first < b.codepoints.first;
+        });
+        sorted_tokens_indices.resize(sorted_tokens.size());
+        for (size_t i = 0; i < sorted_tokens.size(); i++) {
+            sorted_tokens_indices[sorted_tokens[i].token] = i;
+        }
+    }
+    
     // Important: vec_rules has to be moved here, not copied, because stacks contains
     // pointers to elements of vec_rules. If vec_rules were copied into llama_grammar
     // then the pointers would be invalidated when the local vec_rules goes out of scope.
-    return new llama_grammar {
+    auto grammar = new llama_grammar {
         vocab,
         std::move(vec_rules),
         std::move(stacks),
+        std::move(sorted_tokens),
+        std::move(sorted_tokens_indices),
+        /* .allowed_tokens = */   {},
         /* .partial_utf8 = */     {},
         /* .lazy = */             lazy,
         /* .awaiting_trigger = */ lazy,
@@ -1074,6 +1281,13 @@ struct llama_grammar * llama_grammar_init_impl(
         std::move(vec_trigger_tokens),
         std::move(vec_trigger_patterns),
     };
+    // Prime allowed_tokens for each rule in the grammar
+    for (const auto & rule : vec_rules) {
+        for (const auto & elem : rule) {
+            llama_grammar_match_tokens(*grammar, &elem);
+        }
+    }
+    return grammar;
 }
 
 void llama_grammar_free_impl(struct llama_grammar * grammar) {
@@ -1089,6 +1303,9 @@ struct llama_grammar * llama_grammar_clone_impl(const struct llama_grammar & gra
         grammar.vocab,
         grammar.rules,
         grammar.stacks,
+        grammar.sorted_tokens,
+        grammar.sorted_tokens_indices,
+        grammar.allowed_tokens,
         grammar.partial_utf8,
         grammar.lazy,
         grammar.awaiting_trigger,
@@ -1113,7 +1330,7 @@ struct llama_grammar * llama_grammar_clone_impl(const struct llama_grammar & gra
     return result;
 }
 
-void llama_grammar_apply_impl(const struct llama_grammar & grammar, llama_token_data_array * cur_p) {
+void llama_grammar_apply_impl(struct llama_grammar & grammar, llama_token_data_array * cur_p) {
     GGML_ASSERT(grammar.vocab != nullptr);
 
     if (grammar.awaiting_trigger) {
@@ -1121,10 +1338,16 @@ void llama_grammar_apply_impl(const struct llama_grammar & grammar, llama_token_
     }
 
     bool allow_eog = false;
-    for (const auto & stack : grammar.stacks) {
-        if (stack.empty()) {
-            allow_eog = true;
-            break;
+    token_ranges accepted_ranges;
+
+    if (!grammar.sorted_tokens_indices.empty()) {
+        for (const auto & stack : grammar.stacks) {
+            if (stack.empty()) {
+                allow_eog = true;
+                // break;
+            } else {
+                accepted_ranges += llama_grammar_match_tokens(grammar, stack.back());
+            }
         }
     }
 
@@ -1136,13 +1359,16 @@ void llama_grammar_apply_impl(const struct llama_grammar & grammar, llama_token_
 
     for (size_t i = 0; i < cur_p->size; ++i) {
         const llama_token id      = cur_p->data[i].id;
+        auto idx                  = grammar.sorted_tokens_indices.empty() ? std::string::npos : grammar.sorted_tokens_indices[id];
         const std::string & piece = grammar.vocab->token_to_piece(id);
-
+        
         if (grammar.vocab->is_eog(id)) {
             if (!allow_eog) {
                 cur_p->data[i].logit = -INFINITY;
             }
         } else if (piece.empty() || piece[0] == 0) {
+            cur_p->data[i].logit = -INFINITY;
+        } else if (idx != std::string::npos && grammar.partial_utf8.n_remain == 0 && !accepted_ranges.contains(idx)) {
             cur_p->data[i].logit = -INFINITY;
         } else {
             candidates_decoded.push_back(decode_utf8(piece, grammar.partial_utf8));
