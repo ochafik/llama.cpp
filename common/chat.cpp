@@ -976,10 +976,14 @@ static std::string add_escaped_python_code_soup_rule(const common_grammar_builde
         // Allow comments w/ (escaped) newline
         R"( ( [#] ( ( [^\\\t\r\n\uff00-\uffef] | [\\] [^n\n] )* [\\] [n] )? |                    )" 
         // Allow (escaped) double quoted strings, single quoted strings and their nested (double) escapes + f-string versions w/ nested expressions.
-        R"(      [\\] ["] (  [^"\\\t\r\n\uff00-\uffef]    | [\\] [\\] [\\] ["] | [\\] [trnu]                                                    )* [\\] ["] | )" 
-        R"(   [f][\\] ["] (  [^"\\\t\r\n\uff00-\uffef{}]  | [\\] [\\] [\\] ["] | [\\] [trnu]                  | [{] json-escaped-code-soup [}]  )* [\\] ["] | )" 
-        R"(           ['] (  [^"'\\\t\r\n\uff00-\uffef]   | [\\] [\\] [']      | [\\] [^'\t\r\n\uff00-\uffef]                                   )* [']      | )" 
-        R"(        [f]['] (  [^"'\\\t\r\n\uff00-\uffef{}] | [\\] [\\] [']      | [\\] [^'\t\r\n\uff00-\uffef] | [{] json-escaped-code-soup [}]  )* [']      | )"
+        R"(            "\\\"" (  [^"\\\t\r\n\uff00-\uffef]    | [\\] [\\] [\\] ["] | [\\] [trnu]                                                    )* [\\] ["]        | )" 
+        R"(           "f\\\"" (  [^"\\\t\r\n\uff00-\uffef{}]  | [\\] [\\] [\\] ["] | [\\] [trnu]                  | [{] json-escaped-code-soup [}]  )* [\\] ["]        | )" 
+        R"(              "'"  (  [^"'\\\t\r\n\uff00-\uffef]   | [\\] [\\] [']      | [\\] [^'\t\r\n\uff00-\uffef]                                   )* [']             | )" 
+        R"(              "f'" (  [^"'\\\t\r\n\uff00-\uffef{}] | [\\] [\\] [']      | [\\] [^'\t\r\n\uff00-\uffef] | [{] json-escaped-code-soup [}]  )* [']             | )"
+        R"(    "\\\"\\\"\\\"" (  [^"\\\t\r\n\uff00-\uffef]    | [\\] [\\] [\\] ["] | [\\] [trnu]                                                    )* "\\\"\\\"\\\""  | )"
+        R"(   "f\\\"\\\"\\\"" (  [^"\\\t\r\n\uff00-\uffef{}]  | [\\] [\\] [\\] ["] | [\\] [trnu]                  | [{] json-escaped-code-soup [}]  )* "\\\"\\\"\\\""  | )"
+        R"(             "'''" (  [^"'\\\t\r\n\uff00-\uffef]   | [\\] [\\] [']      | [\\] [^'\t\r\n\uff00-\uffef]                                   )* "'''"           | )"
+        R"(            "f'''" (  [^"'\\\t\r\n\uff00-\uffef{}] | [\\] [\\] [']      | [\\] [^'\t\r\n\uff00-\uffef] | [{] json-escaped-code-soup [}]  )* "'''"           | )"
         // Soup wrapped in parentheses, curly braces or square brackets
         R"(   [(] json-escaped-code-soup [)] |                              )"
         R"(   [{] json-escaped-code-soup [}] |                              )"
