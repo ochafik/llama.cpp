@@ -974,16 +974,16 @@ const bool constrain_python_tool_code = !getenv("CONSTRAIN_PYTHON_TOOL_CODE") ||
 static std::string add_escaped_python_code_soup_rule(const common_grammar_builder & builder) {
     return builder.add_rule("json-escaped-code-soup", 
         // Allow comments w/ (escaped) newline
-        R"( ( [#] ( ( [^\\\t\r\n\uff00-\uffef] | [\\] [^n\n] )* [\\] [n] )? |                    )" 
+        R"( ( [#] ( ( [^\\\t\r\n\uff00-\uffef\u0000-\u001F] | [\\] [^n\n] )* [\\] [n] )? |                    )" 
         // Allow (escaped) double quoted strings, single quoted strings and their nested (double) escapes + f-string versions w/ nested expressions.
-        R"(            "\\\"" (  [^"\\\t\r\n\uff00-\uffef]    | [\\] [\\] [\\] ["] | [\\] [trnu]                                                    )* [\\] ["]        | )" 
-        R"(           "f\\\"" (  [^"\\\t\r\n\uff00-\uffef{}]  | [\\] [\\] [\\] ["] | [\\] [trnu]                  | [{] json-escaped-code-soup [}]  )* [\\] ["]        | )" 
-        R"(              "'"  (  [^"'\\\t\r\n\uff00-\uffef]   | [\\] [\\] [']      | [\\] [^'\t\r\n\uff00-\uffef]                                   )* [']             | )" 
-        R"(              "f'" (  [^"'\\\t\r\n\uff00-\uffef{}] | [\\] [\\] [']      | [\\] [^'\t\r\n\uff00-\uffef] | [{] json-escaped-code-soup [}]  )* [']             | )"
-        R"(    "\\\"\\\"\\\"" (  [^"\\\t\r\n\uff00-\uffef]    | [\\] [\\] [\\] ["] | [\\] [trnu]                                                    )* "\\\"\\\"\\\""  | )"
-        R"(   "f\\\"\\\"\\\"" (  [^"\\\t\r\n\uff00-\uffef{}]  | [\\] [\\] [\\] ["] | [\\] [trnu]                  | [{] json-escaped-code-soup [}]  )* "\\\"\\\"\\\""  | )"
-        R"(             "'''" (  [^"'\\\t\r\n\uff00-\uffef]   | [\\] [\\] [']      | [\\] [^'\t\r\n\uff00-\uffef]                                   )* "'''"           | )"
-        R"(            "f'''" (  [^"'\\\t\r\n\uff00-\uffef{}] | [\\] [\\] [']      | [\\] [^'\t\r\n\uff00-\uffef] | [{] json-escaped-code-soup [}]  )* "'''"           | )"
+        R"(            "\\\"" (  [^"\\\t\r\n\uff00-\uffef\u0000-\u001F]    | [\\] [\\] [\\] ["] | [\\] [trnu]                                                    )* [\\] ["]        | )" 
+        R"(           "f\\\"" (  [^"\\\t\r\n\uff00-\uffef\u0000-\u001F{}]  | [\\] [\\] [\\] ["] | [\\] [trnu]                  | [{] json-escaped-code-soup [}]  )* [\\] ["]        | )" 
+        R"(              "'"  (  [^"'\\\t\r\n\uff00-\uffef\u0000-\u001F]   | [\\] [\\] [']      | [\\] [^'\t\r\n\uff00-\uffef\u0000-\u001F]                                   )* [']             | )" 
+        R"(              "f'" (  [^"'\\\t\r\n\uff00-\uffef\u0000-\u001F{}] | [\\] [\\] [']      | [\\] [^'\t\r\n\uff00-\uffef\u0000-\u001F] | [{] json-escaped-code-soup [}]  )* [']             | )"
+        R"(    "\\\"\\\"\\\"" (  [^"\\\t\r\n\uff00-\uffef\u0000-\u001F]    | [\\] [\\] [\\] ["] | [\\] [trnu]                                                    )* "\\\"\\\"\\\""  | )"
+        R"(   "f\\\"\\\"\\\"" (  [^"\\\t\r\n\uff00-\uffef\u0000-\u001F{}]  | [\\] [\\] [\\] ["] | [\\] [trnu]                  | [{] json-escaped-code-soup [}]  )* "\\\"\\\"\\\""  | )"
+        R"(             "'''" (  [^"'\\\t\r\n\uff00-\uffef\u0000-\u001F]   | [\\] [\\] [']      | [\\] [^'\t\r\n\uff00-\uffef\u0000-\u001F]                                   )* "'''"           | )"
+        R"(            "f'''" (  [^"'\\\t\r\n\uff00-\uffef\u0000-\u001F{}] | [\\] [\\] [']      | [\\] [^'\t\r\n\uff00-\uffef\u0000-\u001F] | [{] json-escaped-code-soup [}]  )* "'''"           | )"
         // Soup wrapped in parentheses, curly braces or square brackets
         R"(   [(] json-escaped-code-soup [)] |                              )"
         R"(   [{] json-escaped-code-soup [}] |                              )"
@@ -993,7 +993,8 @@ static std::string add_escaped_python_code_soup_rule(const common_grammar_builde
         // Allow other characters, minus code blocks for halfwidth & fullwidth forms (U+FF00 - U+FFEF)
         // (special tokens can use these to avoid prompt injections, as they will have to be unicode-escaped w/ \uXXXX
         // and won't be able to interfere w/ parsing)
-        R"(   [^#{}"'\[\]\\()\t\r\n\uff00-\uffef]+                                )" 
+        R"(        [^f#{}"'\[\]\\()\t\r\n\uff00-\uffef]+ |                  )" 
+        R"(   [f] [^'"#{}"'\[\]\\()\t\r\n\uff00-\uffef]+                    )" 
         // After any repetition of the previous, allow trailing comment w/o newline
         R"( )* ( [#] ( [^\\] | [\\] [^n] )* )?                              )" 
     );
