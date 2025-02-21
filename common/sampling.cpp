@@ -354,8 +354,7 @@ llama_token common_sampler_sample(struct common_sampler * gsmpl, struct llama_co
     const llama_token id = cur_p.data[cur_p.selected].id;
 
     if (grammar_first) {
-        // fprintf(stderr, "sampled token %u (`%s`)\n", id, common_token_to_piece(ctx, id).c_str());
-        // fflush(stderr);
+        // fprintf(stderr, "Sampled token %u (`%s`)\n", id, common_token_to_piece(ctx, id).c_str());
         return id;
     }
 
@@ -380,6 +379,11 @@ llama_token common_sampler_sample(struct common_sampler * gsmpl, struct llama_co
     llama_sampler_apply(chain, &cur_p);
 
     GGML_ASSERT(cur_p.selected != -1 && "no selected token during re-sampling - check your sampling configuration");
+
+    {
+        auto id = cur_p.data[cur_p.selected].id;
+        fprintf(stderr, "Sampled token %u (`%s`)\n", id, common_token_to_piece(ctx, id).c_str());
+    }
 
     return cur_p.data[cur_p.selected].id;
 }
