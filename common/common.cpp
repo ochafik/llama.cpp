@@ -1287,18 +1287,20 @@ static bool common_download_file(const std::string & url, const std::string & pa
         curl_easy_setopt(curl.get(), CURLOPT_HEADERFUNCTION, static_cast<CURLOPT_HEADERFUNCTION_PTR>(header_callback));
         curl_easy_setopt(curl.get(), CURLOPT_HEADERDATA, &headers);
 
-        bool was_perform_successful = curl_perform_with_retry(url, curl.get(), CURL_MAX_RETRY, CURL_RETRY_DELAY_SECONDS);
-        if (!was_perform_successful) {
-            return false;
-        }
-
-        long http_code = 0;
-        curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE, &http_code);
-        if (http_code != 200) {
-            // HEAD not supported, we don't know if the file has changed
-            // force trigger downloading
-            force_download = true;
-            LOG_ERR("%s: HEAD invalid http status code received: %ld\n", __func__, http_code);
+        if (curl_perform_with_retry(url, curl.get(), CURL_MAX_RETRY, CURL_RETRY_DELAY_SECONDS)) {
+            long http_code = 0;
+            curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE, &http_code);
+            if (http_code != 200) {
+                // HEAD not supported, we don't know if the file has changed
+                // force trigger downloading
+                force_download = true;
+                LOG_ERR("%s: HEAD invalid http status code received: %ld\n", __func__, http_code);
+            }
+        } else {
+            if (!file_exists) {
+                return false;
+            }
+            LOG_WRN("%s: using existing file as couldn't fetch fresh metadata\n", __func__);
         }
     }
 
