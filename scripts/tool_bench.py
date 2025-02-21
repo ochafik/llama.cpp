@@ -33,6 +33,7 @@
     )
 
     ./scripts/tool_bench.py plot qwen1.5b.jsonl --test-regex 'hello|weather'
+    ./scripts/tool_bench.py plot llama*.jsonl --test-regex 'hello|weather' --impl-regex '^(llama-server|ollama)$'
     ./scripts/tool_bench.py plot *.jsonl --output all.png
 
     for f in *.jsonl; do
@@ -87,7 +88,7 @@ logger = logging.getLogger(__name__)
 app = typer.Typer()
 
 @app.command()
-def plot(files: List[Path], output: Optional[Path] = None, test_regex: Optional[str] = None):
+def plot(files: List[Path], output: Optional[Path] = None, test_regex: Optional[str] = None, impl_regex: Optional[str] = None):
 
     lines: List[Dict] = []
     for file in files:
@@ -133,7 +134,10 @@ def plot(files: List[Path], output: Optional[Path] = None, test_regex: Optional[
             total_count = success_count + failure_count
             total_counts.add(total_count)
 
-            if test_regex and not re.match(test_regex, test):
+            if test_regex and not re.search(test_regex, test):
+                continue
+
+            if impl_regex and not re.search(impl_regex, impl):
                 continue
 
             data_dict[(model, temp, impl, test)] = success
