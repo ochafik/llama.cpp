@@ -224,7 +224,7 @@ def run(
 
     n_predict = 512
 
-    assert force or not output.exists(), f"Output file already exists: {output}; use --force to overwrite"
+    assert force or append or not output.exists(), f"Output file already exists: {output}; use --force to overwrite"
 
     with output.open('a' if append else 'w') as output_file:
 
