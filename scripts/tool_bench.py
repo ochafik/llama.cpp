@@ -32,7 +32,7 @@
         ./scripts/tool_bench.py run ${ARGS[@]} --model "DeepSeek R1 Distill Qwen 1.5B Q4_K_M"  --output dsqw1.5b.jsonl  --hf bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF --ollama deepseek-r1:1.5b ;
     )
 
-    ./scripts/tool_bench.py plot qwen1.5b.jsonl
+    ./scripts/tool_bench.py plot qwen1.5b.jsonl --test-regex 'hello|weather'
     ./scripts/tool_bench.py plot *.jsonl --output all.png
 
     for f in *.jsonl; do
@@ -44,6 +44,7 @@
 from contextlib import contextmanager
 from pathlib import Path
 from pathlib import Path
+import re
 from statistics import mean, median
 from typing import Annotated, List, Optional
 from typing import Dict, List, Tuple, Set, Any
@@ -86,7 +87,7 @@ logger = logging.getLogger(__name__)
 app = typer.Typer()
 
 @app.command()
-def plot(files: List[Path], output: Optional[Path] = None):
+def plot(files: List[Path], output: Optional[Path] = None, test_regex: Optional[str] = None):
 
     lines: List[Dict] = []
     for file in files:
@@ -131,6 +132,9 @@ def plot(files: List[Path], output: Optional[Path] = None):
             failure_count = rec["failure_count"]
             total_count = success_count + failure_count
             total_counts.add(total_count)
+
+            if test_regex and not re.match(test_regex, test):
+                continue
 
             data_dict[(model, temp, impl, test)] = success
 
@@ -219,6 +223,10 @@ def run(
     port: Annotated[int, typer.Option(help="llama-server port")] = 8084,
     force: Annotated[bool, typer.Option(help="Force overwrite of output file")] = False,
     append: Annotated[bool, typer.Option(help="Append to output file")] = False,
+
+    test_hello_world: Annotated[bool, typer.Option(help="Whether to run the hello world test")] = True,
+    test_weather: Annotated[bool, typer.Option(help="Whether to run the weather test")] = True,
+    test_calc_result: Annotated[bool, typer.Option(help="Whether to run the calc result test")] = False,
 ):
     # Check only one of output and append
 
@@ -241,11 +249,14 @@ def run(
 
             request_kwargs['cache_prompt'] = False
 
-            tests = {
-                "hello world": lambda server: do_test_hello_world(server, **request_kwargs),
-                "weather": lambda server: do_test_weather(server, **request_kwargs),
-                "calc result": lambda server: do_test_calc_result(server, None, 512, **request_kwargs),
-            }
+            tests = {}
+            if test_hello_world:
+                tests["hello world"] = lambda server: do_test_hello_world(server, **request_kwargs)
+            if test_weather:
+                tests["weather"] = lambda server: do_test_weather(server, **request_kwargs)
+            if test_calc_result:
+                tests["calc result"] = lambda server: do_test_calc_result(server, None, 512, **request_kwargs)
+
             for test_name, test in tests.items():
                 success_count = 0
                 failure_count = 0
