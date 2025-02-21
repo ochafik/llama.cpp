@@ -3,7 +3,6 @@
 # requires-python = ">=3.10"
 # dependencies = [
 #     "pytest",
-#     "numpy",
 #     "pandas",
 #     "matplotlib",
 #     "seaborn",
@@ -13,16 +12,19 @@
 # ]
 # ///
 '''
+    See ./scripts/tool_bench.sh for example usage.
+    
     cmake --build build -j && ( \
         export RETRIES=3 ;
+        export CONSTRAIN_PYTHON_TOOL_CODE=0 ;
         export LLAMA_CACHE=$HOME/Library/Caches/llama.cpp ;
         export LLAMA_SERVER_BIN_PATH=$PWD/build/bin/llama-server ;
-        export ARGS=( --n 30 --temp -1 --temp 0 --temp 0.5 --temp 0.75 --temp 1 --temp 1.5 --temp 2 --temp 5 ) ;
+        export ARGS=( --llama-baseline=/opt/homebrew/bin/llama-server --n 30 --temp -1 --temp 0 --temp 0.5 --temp 0.75 --temp 1 --temp 1.5 --temp 2 --temp 5 ) ;
         ./scripts/tool_bench.py run ${ARGS[@]} --model "Qwen 2.5 1.5B Q4_K_M"                  --output qwen1.5b.jsonl  --hf bartowski/Qwen2.5-1.5B-Instruct-GGUF         --ollama qwen2.5:1.5b-instruct-q4_K_M ;
+        ./scripts/tool_bench.py run ${ARGS[@]} --model "Qwen 2.5 Coder 7B Q4_K_M"              --output qwenc7b.jsonl   --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF     --ollama qwen2.5-coder:7b ;
         ./scripts/tool_bench.py run ${ARGS[@]} --model "Llama 3.2 Instruct 1B Q4_K_M"          --output llama1b.jsonl   --hf bartowski/Llama-3.2-1B-Instruct-GGUF         --ollama llama3.2:1b-instruct-q4_K_M ;
         ./scripts/tool_bench.py run ${ARGS[@]} --model "Llama 3.2 Instruct 3B Q4_K_M"          --output llama3b.jsonl   --hf bartowski/Llama-3.2-3B-Instruct-GGUF         --ollama llama3.1:3b ;
         ./scripts/tool_bench.py run ${ARGS[@]} --model "Llama 3.1 Instruct 8B Q4_K_M"          --output llama8b.jsonl   --hf bartowski/Meta-Llama-3.1-8B-Instruct-GGUF    --ollama llama3.1:8b ;
-        ./scripts/tool_bench.py run ${ARGS[@]} --model "Qwen 2.5 Coder 7B Q4_K_M"              --output qwenc7b.jsonl   --hf bartowski/Qwen2.5-Coder-7B-Instruct-GGUF     --ollama qwen2.5-coder:7b ;
         ./scripts/tool_bench.py run ${ARGS[@]} --model "Qwen 2.5 7B Q4_K_M"                    --output qwen7b.jsonl    --hf bartowski/Qwen2.5-7B-Instruct-GGUF ;
         ./scripts/tool_bench.py run ${ARGS[@]} --model "Llama 3.3 Instruct 70B Q4_K_M"         --output llama70b.jsonl  --hf bartowski/Llama-3.3-70B-Instruct-GGUF ;
         ./scripts/tool_bench.py run ${ARGS[@]} --model "Mistral Nemo 2407 Q4_K_M"              --output nemo.jsonl      --hf bartowski/Mistral-Nemo-Instruct-2407-GGUF    --ollama mistral-nemo:12b ;
@@ -117,6 +119,7 @@ def plot(files: List[Path], output: Optional[Path] = None):
     temps = set()
     tests = set()
     impls = set()
+    total_counts = set()
     for rec in lines:
         try:
             model = rec["model"]
@@ -124,7 +127,10 @@ def plot(files: List[Path], output: Optional[Path] = None):
             impl = rec["implementation"]
             test = rec["test"]
             success = rec["success_ratio"]
-
+            success_count = rec["success_count"]
+            failure_count = rec["failure_count"]
+            total_count = success_count + failure_count
+            total_counts.add(total_count)
 
             data_dict[(model, temp, impl, test)] = success
 
@@ -136,6 +142,9 @@ def plot(files: List[Path], output: Optional[Path] = None):
 
         except KeyError as e:
             logger.warning(f"Missing required field in record: {e}")
+
+    if len(total_counts) > 1:
+        logger.warning(f"Total counts are not consistent: {total_counts}")
 
     # Sort the collected values
     temps = list(sorted(temps, key=lambda x: x if x is not None else -1))
@@ -179,7 +188,7 @@ def plot(files: List[Path], output: Optional[Path] = None):
         cbar_kws={"label": "Success Ratio"},
     )
 
-    plt.title("Tool Call Bench\nSuccess Ratios by Implementation & Test", pad=20)
+    plt.title(f"Tool Call Bench (n = {str(min(total_counts)) if len(total_counts) == 1 else f'{min(total_counts)}-{max(total_counts)}'})\nSuccess Ratios by Implementation & Test", pad=20)
     plt.xlabel("Implementation and Test", labelpad=10)
     plt.ylabel("Model @ Temperature", labelpad=10)
 
@@ -201,6 +210,7 @@ def run(
     hf: Annotated[Optional[str], typer.Option(help="GGUF huggingface model repo id (+ optional quant) to test w/ llama-server")] = None,
     chat_template: Annotated[Optional[str], typer.Option(help="Chat template override for llama-server")] = None,
     ollama: Annotated[Optional[str], typer.Option(help="Ollama model tag to test")] = None,
+    llama_baseline: Annotated[Optional[str], typer.Option(help="llama-server baseline binary path to use as baseline")] = None,
     n: Annotated[int, typer.Option(help="Number of times to run each test")] = 10,
     temp: Annotated[Optional[List[float]], typer.Option(help="Set of temperatures to test")] = None,
     top_p: Annotated[Optional[float], typer.Option(help="top_p")] = None,
@@ -281,32 +291,34 @@ def run(
 
         for t in [None] if temp is None else [t if t >= 0 else None for t in temp]:
             if hf is not None:
-                server = ServerProcess()
-                server.n_slots = 1
-                server.jinja = True
-                server.n_predict = 512 # High because of DeepSeek R1
-                server.model_hf_repo = hf
-                server.model_hf_file = None
-                server.chat_template = chat_template
-                if port is not None:
-                    server.server_port = port
-                # server.debug = True
+                for implementation, server_path in [('llama-server', None)] if llama_baseline is None else [('llama-server (baseline)', llama_baseline), ('llama-server', None)]:
+                    server = ServerProcess()
+                    server.n_slots = 1
+                    server.jinja = True
+                    server.n_predict = 512 # High because of DeepSeek R1
+                    server.model_hf_repo = hf
+                    server.model_hf_file = None
+                    server.chat_template = chat_template
+                    server.server_path = server_path
+                    if port is not None:
+                        server.server_port = port
+                    # server.debug = True
 
-                with scoped_server(server):
-                    server.start(timeout_seconds=TIMEOUT_SERVER_START)
-                    for ignore_chat_grammar in [False]:
-                        run(
-                            server,
-                            implementation="llama-server" + (" (no grammar)" if ignore_chat_grammar else ""),
-                            model_id=hf,
-                            temp=t,
-                            output_kwargs=dict(
-                                chat_template=chat_template,
-                            ),
-                            request_kwargs=dict(
-                                ignore_chat_grammar=ignore_chat_grammar,
-                            ),
-                        )
+                    with scoped_server(server):
+                        server.start(timeout_seconds=TIMEOUT_SERVER_START)
+                        for ignore_chat_grammar in [False]:
+                            run(
+                                server,
+                                implementation=implementation,
+                                model_id=hf,
+                                temp=t,
+                                output_kwargs=dict(
+                                    chat_template=chat_template,
+                                ),
+                                request_kwargs=dict(
+                                    ignore_chat_grammar=ignore_chat_grammar,
+                                ),
+                            )
 
             if ollama is not None:
                 server = ServerProcess()
