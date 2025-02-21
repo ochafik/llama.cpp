@@ -81,6 +81,7 @@ class ServerProcess:
     reasoning_format: Literal['deepseek', 'none'] | None = None
     chat_template: str | None = None
     chat_template_file: str | None = None
+    server_path: str | None = None
 
     # session variables
     process: subprocess.Popen | None = None
@@ -94,7 +95,9 @@ class ServerProcess:
             self.server_port = int(os.environ["PORT"])
 
     def start(self, timeout_seconds: int | None = DEFAULT_HTTP_TIMEOUT) -> None:
-        if "LLAMA_SERVER_BIN_PATH" in os.environ:
+        if self.server_path is not None:
+            server_path = self.server_path
+        elif "LLAMA_SERVER_BIN_PATH" in os.environ:
             server_path = os.environ["LLAMA_SERVER_BIN_PATH"]
         elif os.name == "nt":
             server_path = "../../../build/bin/Release/llama-server.exe"
