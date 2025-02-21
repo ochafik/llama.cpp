@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <queue>
+#include <set>
 
 struct llama_vocab;
 
@@ -55,16 +57,19 @@ struct llama_grammar_candidate {
     llama_partial_utf8   partial_utf8;
 };
 
-//*
 struct token_range {
     size_t from_sorted_index;
     size_t to_sorted_index;
 };
 
+
 struct token_ranges {
     std::vector<token_range> allowed_token_ranges;
     std::vector<std::string> allowed_pieces;
 
+    bool empty() const {
+        return allowed_token_ranges.empty();
+    }
     void fetch_pieces_for_debug(const std::vector<struct llama_grammar_token> & sorted_tokens);
 
     void invert(size_t size) {
@@ -85,6 +90,68 @@ struct token_ranges {
             new_ranges.push_back({allowed_token_ranges.back().to_sorted_index + 1, size - 1});
         }
         allowed_token_ranges.swap(new_ranges);
+    }
+
+    void union_all(const std::vector<const token_ranges *> & ranges) {
+        if (!ranges.empty()) {
+            if (ranges.size() == 1) {
+                *this += *ranges.front();
+            } else {
+                // Priority queue to merge ranges
+                std::vector<token_range> merged_ranges;
+                struct queue_item {
+                    token_range range;
+                    std::vector<token_range>::const_iterator next;
+                    std::vector<token_range>::const_iterator end;
+
+                    bool operator>(const queue_item & other) const {
+                        return range.from_sorted_index > other.range.from_sorted_index;
+                    }
+                };
+                std::priority_queue<queue_item, std::vector<queue_item>, std::greater<queue_item>> pq;
+                
+                // Initialize priority queue with first range from each input
+                for (const auto* r : ranges) {
+                    if (!r->allowed_token_ranges.empty()) {
+                        pq.push({r->allowed_token_ranges.front(), 
+                                r->allowed_token_ranges.begin() + 1, 
+                                r->allowed_token_ranges.end()});
+                    }
+                }
+
+                // Merge ranges on the fly
+                while (!pq.empty()) {
+                    auto top = pq.top();
+                    pq.pop();
+
+                    // Merge with previous range if possible
+                    if (!merged_ranges.empty() && 
+                        merged_ranges.back().to_sorted_index + 1 >= top.range.from_sorted_index) {
+                        merged_ranges.back().to_sorted_index = 
+                            std::max(merged_ranges.back().to_sorted_index, top.range.to_sorted_index);
+                    } else {
+                        merged_ranges.push_back(top.range);
+                    }
+
+                    // Add next range from the same input if available
+                    if (top.next != top.end) {
+                        pq.push({*top.next, top.next + 1, top.end});
+                    }
+                }
+
+                allowed_token_ranges = std::move(merged_ranges);
+            }
+
+            // union all debug pieces
+            std::set<std::string> pieces(allowed_pieces.begin(), allowed_pieces.end());
+            for (const auto & rng : ranges) {
+                for (const auto & piece : rng->allowed_pieces) {
+                    pieces.insert(piece);
+                }
+            }
+            allowed_pieces.clear();
+            allowed_pieces.insert(allowed_pieces.end(), pieces.begin(), pieces.end());
+        }
     }
 
     // Helper function to merge overlapping or adjacent ranges
@@ -119,6 +186,7 @@ struct token_ranges {
     }
 
     token_ranges& operator+=(const token_range& other) {
+        GGML_ASSERT(other.from_sorted_index <= other.to_sorted_index);
         allowed_token_ranges.push_back(other);
         merge_ranges();
         return *this;
