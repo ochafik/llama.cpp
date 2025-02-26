@@ -133,6 +133,7 @@ endif()
 llama_target_and_test(test-log.cpp)
 llama_target_and_test(test-arg-parser.cpp)
 llama_target_and_test(test-chat-template.cpp)
+llama_target_and_test(test-regex.cpp)
 
 # llama_target_and_test(test-opt.cpp) # SLOW
 llama_target_and_test(test-gguf.cpp)
