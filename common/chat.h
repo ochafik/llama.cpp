@@ -124,7 +124,8 @@ std::string common_chat_format_example(
     bool use_jinja);
 
 std::string               common_chat_format_name(common_chat_format format);
-common_chat_msg           common_chat_parse(      const std::string & input, bool is_partial, common_chat_format format);
+
+std::optional<common_chat_msg> common_chat_parse(const std::string & input, bool is_partial, common_chat_format format, const std::vector<common_regex> & trigger_regexes = {});
 
 common_chat_tool_choice common_chat_tool_choice_parse_oaicompat(const std::string & tool_choice);
 
@@ -151,17 +152,4 @@ struct common_chat_msg_diff {
             && tool_call_index == other.tool_call_index
             && tool_call_delta == other.tool_call_delta;
     }
-};
-
-class common_chat_msg_differ {
-    // Config
-    common_chat_format format;
-    std::vector<common_regex> trigger_regexes;
-    // State
-    common_chat_msg previous_msg;
-
-  public:
-    common_chat_msg_differ(common_chat_format format, const std::vector<common_grammar_trigger> & triggers);
-
-    std::vector<common_chat_msg_diff> update(const std::string & input, bool is_partial);
 };

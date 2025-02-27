@@ -16,28 +16,6 @@ static std::string string_diff(const std::string & last, const std::string & cur
     return current.substr(last.size());
 }
 
-common_chat_msg_differ::common_chat_msg_differ(common_chat_format format, const std::vector<common_grammar_trigger> & triggers)
-    : format(format)
-{
-
-    for (const auto & trigger : triggers) {
-        switch (trigger.type) {
-            case COMMON_GRAMMAR_TRIGGER_TYPE_WORD:
-            case COMMON_GRAMMAR_TRIGGER_TYPE_TOKEN:
-                trigger_regexes.push_back(regex_escape(trigger.value));
-                break;
-            case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN:
-                trigger_regexes.push_back(common_regex(trigger.value));
-                break;
-            case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_START:
-                trigger_regexes.push_back(common_regex(trigger.value, /* at_start= */ true));;
-                break;
-            default:
-                throw std::runtime_error("Unsupported trigger type");
-        }
-    }
-}
-
 std::vector<common_chat_msg_diff> common_chat_msg_diff::compute_diffs(const common_chat_msg & previous_msg, const common_chat_msg & new_msg) {
     std::vector<common_chat_msg_diff> diffs;
     // if (previous_msg.reasoning_content != current.reasoning_content) {
@@ -75,54 +53,6 @@ std::vector<common_chat_msg_diff> common_chat_msg_diff::compute_diffs(const comm
         diff.tool_call_delta = new_msg.tool_calls[idx];
     }
     return diffs;
-}
-
-std::vector<common_chat_msg_diff> common_chat_msg_differ::update(const std::string & input, bool is_partial) {
-    auto parse_partial = [&]() -> std::optional<common_chat_msg> {
-        if (is_partial) {
-            bool found_trigger = false;
-            size_t earliest_partial_trigger = std::string::npos;
-
-            for (const auto & trigger_regex : trigger_regexes) {
-                if (auto match = trigger_regex.search(input)) {
-                    if (!match->is_partial) {
-                        found_trigger = true;
-                        break;
-                    }
-                    if (match->pos < earliest_partial_trigger) {
-                        earliest_partial_trigger = match->pos;
-                    }
-                }
-            }
-
-            if (!found_trigger && earliest_partial_trigger != std::string::npos) {
-                // Stop stopping at the earliest partial trigger to avoid messing the parsing big time.
-                try {
-                    auto before_trigger = input.substr(0, earliest_partial_trigger);
-                    auto parsed = common_chat_parse(before_trigger, /* is_partial= */ true, format);
-                    return parsed;
-                } catch (const std::exception &) {
-                    return std::nullopt;
-                }
-            }
-        }
-
-        try {
-            return common_chat_parse(input, is_partial, format);
-        } catch (const std::exception & ex) {
-            LOG_WRN("Failed to parse chat message (is_partial = %s): %s\n", is_partial ? "true" : "false", ex.what());
-            return std::nullopt;
-        }
-    };
-    if (auto parsed = parse_partial()) {
-        auto & new_msg = *parsed;
-
-        auto diffs = common_chat_msg_diff::compute_diffs(previous_msg, new_msg);
-        previous_msg = new_msg;
-        return diffs;
-    }
-    // No diffs, try again next time!
-    return {};
 }
 
 static std::vector<std::string> json_tool_calls_array_closers(const std::string & suffix = "") {
@@ -1966,7 +1896,7 @@ static common_chat_msg common_chat_parse_content_only(const std::string & input)
     return msg;
 }
 
-common_chat_msg common_chat_parse(const std::string & input, bool is_partial, common_chat_format format) {
+static common_chat_msg common_chat_parse(common_chat_format format, const std::string & input, bool is_partial) {
     LOG_DBG("Parsing input with format %s:\n%s\n", common_chat_format_name(format).c_str(), input.c_str());
     switch (format) {
         case COMMON_CHAT_FORMAT_CONTENT_ONLY:
@@ -1997,5 +1927,44 @@ common_chat_msg common_chat_parse(const std::string & input, bool is_partial, co
             return common_chat_parse_command_r7b(input, is_partial, /* extract_reasoning= */ true);
         default:
             throw std::runtime_error("Unsupported format: " + common_chat_format_name(format));
+    }
+}
+
+std::optional<common_chat_msg> common_chat_parse(const std::string & input, bool is_partial, common_chat_format format, const std::vector<common_regex> & trigger_regexes) {
+    if (is_partial) {
+        bool found_trigger = false;
+        size_t earliest_partial_trigger = std::string::npos;
+
+        for (const auto & trigger_regex : trigger_regexes) {
+            if (auto match = trigger_regex.search(input)) {
+                if (!match->is_partial) {
+                    found_trigger = true;
+                    break;
+                }
+                if (match->pos < earliest_partial_trigger) {
+                    earliest_partial_trigger = match->pos;
+                }
+            }
+        }
+
+        if (!found_trigger && earliest_partial_trigger != std::string::npos) {
+            // Stop stopping at the earliest partial trigger to avoid messing the parsing big time.
+            try {
+                auto before_trigger = input.substr(0, earliest_partial_trigger);
+                if (!before_trigger.empty()) {
+                    auto parsed = common_chat_parse(format, before_trigger, /* is_partial= */ true);
+                    return parsed;
+                }
+            } catch (const std::exception &) {
+                return std::nullopt;
+            }
+        }
+    }
+
+    try {
+        return common_chat_parse(format, input, is_partial);
+    } catch (const std::exception & ex) {
+        LOG_WRN("Failed to parse chat message (is_partial = %s): %s\n", is_partial ? "true" : "false", ex.what());
+        return std::nullopt;
     }
 }
