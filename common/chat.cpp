@@ -16,23 +16,20 @@ static std::string string_diff(const std::string & last, const std::string & cur
     return current.substr(last.size());
 }
 
-common_chat_msg_differ::common_chat_msg_differ(
-    common_chat_format format,
-    const std::vector<common_grammar_trigger> & grammar_triggers,
-    const std::vector<std::string> & closers)
-    : format(format), closers(closers)
+common_chat_msg_differ::common_chat_msg_differ(common_chat_format format, const std::vector<common_grammar_trigger> & triggers)
+    : format(format)
 {
 
-    for (const auto & trigger : grammar_triggers) {
+    for (const auto & trigger : triggers) {
         switch (trigger.type) {
             case COMMON_GRAMMAR_TRIGGER_TYPE_WORD:
-                triggers.push_back(regex_escape(trigger.value));
+                trigger_regexes.push_back(regex_escape(trigger.value));
                 break;
             case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN:
-                triggers.push_back(common_regex(trigger.value));
+                trigger_regexes.push_back(common_regex(trigger.value));
                 break;
             case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_START:
-                triggers.push_back(common_regex(trigger.value, /* at_start= */ true));;
+                trigger_regexes.push_back(common_regex(trigger.value, /* at_start= */ true));;
                 break;
             default:
                 throw std::runtime_error("Unsupported trigger type");
@@ -85,8 +82,8 @@ std::vector<common_chat_msg_diff> common_chat_msg_differ::update(const std::stri
             bool found_trigger = false;
             size_t earliest_partial_trigger = std::string::npos;
 
-            for (const auto & trigger : triggers) {
-                if (auto match = trigger.search(input)) {
+            for (const auto & trigger_regex : trigger_regexes) {
+                if (auto match = trigger_regex.search(input)) {
                     if (!match->is_partial) {
                         found_trigger = true;
                         break;
@@ -111,14 +108,8 @@ std::vector<common_chat_msg_diff> common_chat_msg_differ::update(const std::stri
 
         try {
             return common_chat_parse(input, is_partial, format);
-        } catch (const std::exception &) {
-            if (is_partial) {
-                for (const auto & closer : closers) {
-                    try {
-                        return common_chat_parse(input + closer, /* is_partial= */ true, format);
-                    } catch (const std::exception &) {}
-                }
-            }
+        } catch (const std::exception & ex) {
+            LOG_WRN("Failed to parse chat message (is_partial = %s): %s\n", is_partial ? "true" : "false", ex.what());
             return std::nullopt;
         }
     };

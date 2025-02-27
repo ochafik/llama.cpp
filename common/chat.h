@@ -156,16 +156,12 @@ struct common_chat_msg_diff {
 class common_chat_msg_differ {
     // Config
     common_chat_format format;
-    std::vector<common_regex> triggers;
-    const std::vector<std::string> closers;
+    std::vector<common_regex> trigger_regexes;
     // State
     common_chat_msg previous_msg;
 
   public:
-    common_chat_msg_differ(
-        common_chat_format format,
-        const std::vector<common_grammar_trigger> & grammar_triggers,
-        const std::vector<std::string> & closers);
+    common_chat_msg_differ(common_chat_format format, const std::vector<common_grammar_trigger> & triggers);
 
     std::vector<common_chat_msg_diff> update(const std::string & input, bool is_partial);
 };
