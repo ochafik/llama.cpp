@@ -6,6 +6,133 @@
 
 #include <optional>
 
+static std::string string_diff(const std::string & last, const std::string & current) {
+    if (last.empty()) {
+        return current;
+    }
+    if (!string_starts_with(current, last)) {
+        throw std::runtime_error("Invalid diff");
+    }
+    return current.substr(last.size());
+}
+
+common_chat_msg_differ::common_chat_msg_differ(
+    common_chat_format format,
+    const std::vector<common_grammar_trigger> & grammar_triggers,
+    const std::vector<std::string> & closers)
+    : format(format), closers(closers)
+{
+
+    for (const auto & trigger : grammar_triggers) {
+        switch (trigger.type) {
+            case COMMON_GRAMMAR_TRIGGER_TYPE_WORD:
+                triggers.push_back(regex_escape(trigger.value));
+                break;
+            case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN:
+                triggers.push_back(common_regex(trigger.value));
+                break;
+            case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_START:
+                triggers.push_back(common_regex(trigger.value, /* at_start= */ true));;
+                break;
+            default:
+                throw std::runtime_error("Unsupported trigger type");
+        }
+    }
+}
+
+std::vector<common_chat_msg_diff> common_chat_msg_diff::compute_diffs(const common_chat_msg & previous_msg, const common_chat_msg & new_msg) {
+    std::vector<common_chat_msg_diff> diffs;
+    // if (previous_msg.reasoning_content != current.reasoning_content) {
+    //     auto & diff = diffs.emplace_back();
+    //     diff.reasoning_content_delta = string_diff(previous_msg.reasoning_content, current.reasoning_content);
+    // }
+    if (previous_msg.content != new_msg.content) {
+        auto & diff = diffs.emplace_back();
+        diff.content_delta = string_diff(previous_msg.content, new_msg.content);
+    }
+
+    if (new_msg.tool_calls.size() < previous_msg.tool_calls.size()) {
+        throw std::runtime_error("Invalid diff: now finding less tool calls!");
+    }
+
+    if (!previous_msg.tool_calls.empty()) {
+        auto idx = previous_msg.tool_calls.size() - 1;
+        auto & pref = previous_msg.tool_calls[idx];
+        auto & newf = new_msg.tool_calls[idx];
+        if (pref.name != newf.name || pref.id != newf.id) {
+            throw std::runtime_error("Invalid diff: tool call mismatch!");
+        }
+        auto args_diff = string_diff(pref.arguments, newf.arguments);
+        if (!args_diff.empty()) {
+            auto & diff = diffs.emplace_back();
+            diff.tool_call_index = idx;
+            diff.tool_call_delta.name = newf.name;
+            diff.tool_call_delta.id = newf.id;
+            diff.tool_call_delta.arguments = args_diff;
+        }
+    }
+    for (size_t idx = previous_msg.tool_calls.size(); idx < new_msg.tool_calls.size(); ++idx) {
+        auto & diff = diffs.emplace_back();
+        diff.tool_call_index = idx;
+        diff.tool_call_delta = new_msg.tool_calls[idx];
+    }
+    return diffs;
+}
+
+std::vector<common_chat_msg_diff> common_chat_msg_differ::update(const std::string & input, bool is_partial) {
+    auto parse_partial = [&]() -> std::optional<common_chat_msg> {
+        if (is_partial) {
+            bool found_trigger = false;
+            size_t earliest_partial_trigger = std::string::npos;
+
+            for (const auto & trigger : triggers) {
+                if (auto match = trigger.search(input)) {
+                    if (!match->is_partial) {
+                        found_trigger = true;
+                        break;
+                    }
+                    if (match->pos < earliest_partial_trigger) {
+                        earliest_partial_trigger = match->pos;
+                    }
+                }
+            }
+
+            if (!found_trigger && earliest_partial_trigger != std::string::npos) {
+                // Stop stopping at the earliest partial trigger to avoid messing the parsing big time.
+                try {
+                    auto before_trigger = input.substr(0, earliest_partial_trigger);
+                    auto parsed = common_chat_parse(before_trigger, /* is_partial= */ true, format);
+                    return parsed;
+                } catch (const std::exception &) {
+                    return std::nullopt;
+                }
+            }
+        }
+
+        try {
+            return common_chat_parse(input, is_partial, format);
+        } catch (const std::exception &) {
+            if (is_partial) {
+                for (const auto & closer : closers) {
+                    try {
+                        return common_chat_parse(input + closer, /* is_partial= */ true, format);
+                    } catch (const std::exception &) {}
+                }
+            }
+            return std::nullopt;
+        }
+    };
+    if (auto parsed = parse_partial()) {
+        auto & new_msg = *parsed;
+
+        auto diffs = common_chat_msg_diff::compute_diffs(previous_msg, new_msg);
+        previous_msg = new_msg;
+        return diffs;
+    }
+    // No diffs, try again next time!
+    return {};
+}
+
 static std::vector<std::string> json_tool_calls_array_closers(const std::string & suffix = "") {
     return {
         "]" + suffix,
@@ -882,7 +1009,7 @@ static common_chat_msg common_chat_parse_mistral_nemo(const std::string & input,
     return common_chat_partial_parse(input, is_partial, [&](const std::string & input) {
         return common_chat_parse_mistral_nemo(input);
     }, closers);
-} 
+}
 
 static common_chat_params common_chat_params_init_command_r7b(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;

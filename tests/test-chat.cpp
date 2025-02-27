@@ -16,6 +16,27 @@
 
 using json = nlohmann::ordered_json;
 
+static std::ostream & operator<<(std::ostream & os, const common_chat_msg_diff & diff) {
+    // os << "reasoning_content_delta: " << diff.reasoning_content_delta << '\n';
+    os << "{ content_delta: " << diff.content_delta << "; ";
+    if (diff.tool_call_index != std::string::npos) {
+        os << "tool_call_index: " << diff.tool_call_index << "; ";
+        os << "tool_call_delta.name: " << diff.tool_call_delta.name << "; ";
+        os << "tool_call_delta.id: " << diff.tool_call_delta.id << "; ";
+        os << "tool_call_delta.arguments: " << diff.tool_call_delta.arguments << "; ";
+    }
+    os << "}";
+    return os;
+}
+// operator<< for vector<common_chat_msg_diff>:
+static std::ostream & operator<<(std::ostream & os, const std::vector<common_chat_msg_diff> & diffs) {
+    os << "[\n";
+    for (const auto & diff : diffs) {
+        os << "  " << diff << ",\n";
+    }
+    os << "]";
+    return os;
+}
 
 template <class T> static void assert_equals(const T & expected, const T & actual) {
     if (expected != actual) {
@@ -935,6 +956,90 @@ static void test_template_output_parsers() {
     }
 }
 
+static void test_msg_diffs_compute() {
+    {
+        common_chat_msg msg1;
+
+        common_chat_msg msg2;
+        msg2.content = "Hello, world!";
+
+        common_chat_msg_diff diff;
+        diff.content_delta = "Hello, world!";
+
+        assert_equals(
+            {diff},
+            common_chat_msg_diff::compute_diffs(msg1, msg2));
+    }
+    {
+        common_chat_msg msg1;
+        msg1.content = "Hello,";
+
+        common_chat_msg msg2;
+        msg2.content = "Hello, world!";
+
+        common_chat_msg_diff diff;
+        diff.content_delta = " world!";
+
+        assert_equals(
+            {diff},
+            common_chat_msg_diff::compute_diffs(msg1, msg2));
+    }
+    {
+        common_chat_msg msg0;
+
+        common_chat_msg msg1;
+        msg1.tool_calls = { { "special_function", "{\"ar", /* .id = */ "123" } };
+
+        common_chat_msg msg2;
+        msg2.tool_calls = { { "special_function", "{\"arg1\": 1}", /* .id = */ "123" } };
+
+        common_chat_msg_diff diff01;
+        diff01.tool_call_index = 0;
+        diff01.tool_call_delta.name = "special_function";
+        diff01.tool_call_delta.id = "123";
+        diff01.tool_call_delta.arguments = "{\"ar";
+
+        assert_equals(
+            {diff01},
+            common_chat_msg_diff::compute_diffs(msg0, msg1));
+
+        common_chat_msg_diff diff12;
+        diff12.tool_call_index = 0;
+        diff12.tool_call_delta.name = "special_function";
+        diff12.tool_call_delta.id = "123";
+        diff12.tool_call_delta.arguments = "g1\": 1}";
+
+        assert_equals(
+            {diff12},
+            common_chat_msg_diff::compute_diffs(msg1, msg2));
+    }
+    {
+        common_chat_msg msg0;
+
+        common_chat_msg msg2;
+        msg2.tool_calls = {
+            { "f1", "{\"arg1\": 1}", /* .id = */ "123" },
+            { "f2", "{\"arg2\": 2}", /* .id = */ "222" },
+        };
+
+        common_chat_msg_diff diff1;
+        diff1.tool_call_index = 0;
+        diff1.tool_call_delta.name = "f1";
+        diff1.tool_call_delta.id = "123";
+        diff1.tool_call_delta.arguments = "{\"arg1\": 1}";
+
+        common_chat_msg_diff diff2;
+        diff2.tool_call_index = 1;
+        diff2.tool_call_delta.name = "f2";
+        diff2.tool_call_delta.id = "222";
+        diff2.tool_call_delta.arguments = "{\"arg2\": 2}";
+
+        assert_equals(
+            {diff1, diff2},
+            common_chat_msg_diff::compute_diffs(msg0, msg2));
+    }
+}
+
 int main(int argc, char ** argv) {
     // try {
 #ifndef _WIN32
@@ -968,6 +1073,7 @@ int main(int argc, char ** argv) {
         } else
 #endif
         {
+            test_msg_diffs_compute();
             test_msgs_oaicompat_json_conversion();
             test_tools_oaicompat_json_conversion();
             test_template_output_parsers();

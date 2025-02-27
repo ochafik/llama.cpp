@@ -3,6 +3,7 @@
 #pragma once
 
 #include "common.h"
+#include "regex.h"
 #include <string>
 #include <vector>
 
@@ -12,6 +13,10 @@ struct common_chat_tool_call {
     std::string name;
     std::string arguments;
     std::string id;
+
+    bool operator==(const common_chat_tool_call & other) const {
+        return name == other.name && arguments == other.arguments && id == other.id;
+    }
 };
 
 struct common_chat_msg_content_part {
@@ -132,3 +137,35 @@ template <class T> T common_chat_msgs_to_json_oaicompat(const std::vector<common
 // T can be std::string containing JSON or nlohmann::ordered_json
 template <class T> std::vector<common_chat_tool> common_chat_tools_parse_oaicompat(const T & tools);
 template <class T> T common_chat_tools_to_json_oaicompat(const std::vector<common_chat_tool> & tools);
+
+struct common_chat_msg_diff {
+    // std::string reasoning_content_delta;
+    std::string content_delta;
+    size_t tool_call_index = std::string::npos;
+    common_chat_tool_call tool_call_delta;
+
+    static std::vector<common_chat_msg_diff> compute_diffs(const common_chat_msg & previous_msg, const common_chat_msg & new_msg);
+
+    bool operator==(const common_chat_msg_diff & other) const {
+        return content_delta == other.content_delta
+            && tool_call_index == other.tool_call_index
+            && tool_call_delta == other.tool_call_delta;
+    }
+};
+
+class common_chat_msg_differ {
+    // Config
+    common_chat_format format;
+    std::vector<common_regex> triggers;
+    const std::vector<std::string> closers;
+    // State
+    common_chat_msg previous_msg;
+
+  public:
+    common_chat_msg_differ(
+        common_chat_format format,
+        const std::vector<common_grammar_trigger> & grammar_triggers,
+        const std::vector<std::string> & closers);
+
+    std::vector<common_chat_msg_diff> update(const std::string & input, bool is_partial);
+};
