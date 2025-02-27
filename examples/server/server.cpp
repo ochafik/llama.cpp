@@ -825,7 +825,8 @@ struct server_task_result_cmpl_final : server_task_result {
         std::time_t t = std::time(0);
         std::string finish_reason = "length";
         if (stop == STOP_TYPE_WORD || stop == STOP_TYPE_EOS) {
-            finish_reason = "stop";
+            auto msg = common_chat_parse(content, /* is_partial= */ false, oaicompat_chat_format);
+            finish_reason = msg.tool_calls.empty() ? "stop" : "tool_calls";
         }
 
         json choice = json {
@@ -859,6 +860,7 @@ struct server_task_result_cmpl_final : server_task_result {
 struct server_task_result_cmpl_partial : server_task_result {
     int index = 0;
 
+    std::string  previous_content;
     std::string  content;
     llama_tokens tokens;
 
@@ -870,10 +872,12 @@ struct server_task_result_cmpl_partial : server_task_result {
     result_timings timings;
 
     // OAI-compat fields
-    bool           verbose   = false;
-    oaicompat_type oaicompat = OAICOMPAT_TYPE_NONE;
-    std::string    oaicompat_model;
-    std::string    oaicompat_cmpl_id;
+    bool                  verbose   = false;
+    oaicompat_type        oaicompat = OAICOMPAT_TYPE_NONE;
+    std::string           oaicompat_model;
+    std::string           oaicompat_cmpl_id;
+    common_chat_format    oaicompat_chat_format = COMMON_CHAT_FORMAT_CONTENT_ONLY;
+    std::unique_ptr<common_chat_msg_differ> oaicompat_chat_differ;
 
     virtual int get_index() override {
         return index;
@@ -957,70 +961,75 @@ struct server_task_result_cmpl_partial : server_task_result {
         std::time_t t = std::time(0);
         json choices;
 
-        if (first) {
-            if (content.empty()) {
-                choices = json::array({json{{"finish_reason", nullptr},
-                                            {"index", 0},
-                                            {"delta", json{{"role", "assistant"}}}}});
-            } else {
-                // We have to send this as two updates to conform to openai behavior
-                json initial_ret = json{{"choices", json::array({json{
-                                        {"finish_reason", nullptr},
-                                        {"index", 0},
-                                        {"delta", json{
-                                            {"role", "assistant"}
-                                        }}}})},
-                            {"created", t},
-                            {"id", oaicompat_cmpl_id},
-                            {"model", oaicompat_model},
-                            {"object", "chat.completion.chunk"}};
-
-                json second_ret = json{
-                            {"choices", json::array({json{{"finish_reason", nullptr},
-                                                            {"index", 0},
-                                                            {"delta", json {
-                                                            {"content", content}}}
-                                                            }})},
-                            {"created", t},
-                            {"id", oaicompat_cmpl_id},
-                            {"model", oaicompat_model},
-                            {"object", "chat.completion.chunk"}};
-
-                return std::vector<json>({initial_ret, second_ret});
-            }
-        } else {
-            choices = json::array({json{
-                {"finish_reason", nullptr},
-                {"index", 0},
-                {"delta",
-                json {
-                    {"content", content},
-                }},
-            }});
-        }
-
-        GGML_ASSERT(choices.size() >= 1);
-
-        if (prob_output.probs.size() > 0) {
-            choices[0]["logprobs"] = json{
-                {"content", completion_token_output::probs_vector_to_json({prob_output}, post_sampling_probs)},
-            };
-        }
-
-        json ret = json {
-            {"choices",            choices},
-            {"created",            t},
-            {"id",                 oaicompat_cmpl_id},
-            {"model",              oaicompat_model},
-            {"system_fingerprint", build_info},
-            {"object",             "chat.completion.chunk"}
+        std::vector<json> rets;
+        auto add_ret = [&](const json & delta) {
+            rets.push_back({
+                {"choices", json::array({
+                    json {
+                        {"finish_reason", nullptr},
+                        {"index", 0},
+                        {"delta", delta},
+                    },
+                })},
+                {"created", t},
+                {"id", oaicompat_cmpl_id},
+                {"model", oaicompat_model},
+                {"system_fingerprint", build_info},
+                {"object", "chat.completion.chunk"},
+            });
         };
-
-        if (timings.prompt_n >= 0) {
-            ret.push_back({"timings", timings.to_json()});
+        // We have to send an initial update to conform to openai behavior
+        if (first) {
+            add_ret({
+                {"role", "assistant"},
+                {"content", nullptr},
+            });
         }
 
-        return std::vector<json>({ret});
+        oaicompat_chat_differ->update(previous_content, /* is_partial= */ true);
+        auto diffs = oaicompat_chat_differ->update(previous_content + content, /* is_partial= */ true);
+        for (const auto & diff : diffs) {
+            json delta = json::object();
+            // if (!diff.reasoning_content_delta.empty()) {
+            //     delta["reasoning_content"] = msg.reasoning_content;
+            // }
+            if (!diff.content_delta.empty()) {
+                delta["content"] = diff.content_delta;
+            }
+            if (diff.tool_call_index != std::string::npos) {
+                json function = json::object();
+                if (!diff.tool_call_delta.name.empty()) {
+                    function["name"] = diff.tool_call_delta.name;
+                }
+                if (!diff.tool_call_delta.id.empty()) {
+                    function["id"] = diff.tool_call_delta.id;
+                }
+                function["arguments"] = diff.tool_call_delta.arguments;
+                delta["tool_calls"] = json::array({
+                    json {
+                        {"index", diff.tool_call_index},
+                        {"function", function}
+                    }
+                });
+            }
+            add_ret(delta);
+        }
+
+        if (!rets.empty()) {
+            GGML_ASSERT(rets[0].at("choices").size() >= 1);
+
+            if (prob_output.probs.size() > 0) {
+                rets[0].at("choices").at(0)["logprobs"] = json {
+                    {"content", completion_token_output::probs_vector_to_json({prob_output}, post_sampling_probs)},
+                };
+            }
+
+            if (timings.prompt_n >= 0) {
+                rets[0].push_back({"timings", timings.to_json()});
+            }
+        }
+
+        return rets;
     }
 };
 
@@ -2338,6 +2347,7 @@ struct server_context {
 
         res->id      = slot.id_task;
         res->index   = slot.index;
+        res->previous_content = slot.generated_text.substr(0, slot.generated_text.size() - tkn.text_to_send.size());
         res->content = tkn.text_to_send;
         res->tokens  = { tkn.tok };
 
@@ -2345,10 +2355,14 @@ struct server_context {
         res->n_prompt_tokens     = slot.n_prompt_tokens;
         res->post_sampling_probs = slot.params.post_sampling_probs;
 
-        res->verbose           = slot.params.verbose;
-        res->oaicompat         = slot.params.oaicompat;
-        res->oaicompat_model   = slot.params.oaicompat_model;
-        res->oaicompat_cmpl_id = slot.params.oaicompat_cmpl_id;
+        res->verbose               = slot.params.verbose;
+        res->oaicompat             = slot.params.oaicompat;
+        res->oaicompat_model       = slot.params.oaicompat_model;
+        res->oaicompat_cmpl_id     = slot.params.oaicompat_cmpl_id;
+        res->oaicompat_chat_format = slot.params.oaicompat_chat_format;
+        res->oaicompat_chat_differ = std::make_unique<common_chat_msg_differ>(
+            slot.params.oaicompat_chat_format,
+            slot.params.sampling.grammar_triggers);
 
         // populate res.probs_output
         if (slot.params.sampling.n_probs > 0) {
