@@ -55,63 +55,6 @@ std::vector<common_chat_msg_diff> common_chat_msg_diff::compute_diffs(const comm
     return diffs;
 }
 
-// static std::vector<std::string> json_tool_calls_array_closers(const std::string & suffix = "") {
-//     return {
-//         "]" + suffix,
-//         "}]" + suffix,
-//         "\"}]" + suffix,
-//         "\"\"}]" + suffix,
-//         ":\"\"}]" + suffix,
-//         "\":\"\"}]" + suffix,
-//     };
-// }
-
-// static std::vector<std::string> json_tool_call_object_closers(const std::string & suffix = "") {
-//     return {
-//         "}" + suffix,
-//         "\"}" + suffix,
-//         "\"\"}" + suffix,
-//         ":\"\"}" + suffix,
-//         "\":\"\"}" + suffix,
-//     };
-// }
-
-class common_chat_parse_failure_with_possible_closers : public std::runtime_error {
-public:
-    std::vector<std::string> possible_closers;
-    common_chat_parse_failure_with_possible_closers(const std::string & what, const std::vector<std::string> & possible_closers)
-        : std::runtime_error(what), possible_closers(possible_closers) {}
-};
-
-static common_chat_msg common_chat_partial_parse(
-    const std::string & input,
-    bool is_partial,
-    const std::function<common_chat_msg(const std::string & input)> & parser,
-    const std::vector<std::string> & closers)
-{
-    auto fallback_parse = [&](const std::vector<std::string> & closers = {}) {
-        for (const auto & closer : closers) {
-            try {
-                return parser(input + closer);
-            } catch (const std::exception &) {}
-        }
-        throw std::runtime_error("Failed to parse input");
-    };
-    try {
-        return parser(input);
-    } catch (const common_chat_parse_failure_with_possible_closers & e) {
-        if (is_partial) {
-            std::vector<std::string> all_closers(closers);
-            all_closers.insert(all_closers.end(), e.possible_closers.begin(), e.possible_closers.end());
-            return fallback_parse(all_closers);
-        } else {
-            return fallback_parse({});
-        }
-    } catch (const std::exception &) {
-        return fallback_parse(is_partial ? closers : std::vector<std::string> {});
-    }
-}
-
 typedef minja::chat_template common_chat_template;
 
 struct common_chat_templates {
@@ -976,12 +919,6 @@ static common_chat_msg common_chat_parse_generic(const std::string & input, bool
     }
     return result;
 }
-// static common_chat_msg common_chat_parse_generic(const std::string & input, bool is_partial) {
-//     static const std::vector<std::string> closers = json_tool_calls_array_closers("}");
-//     return common_chat_partial_parse(input, is_partial, [&](const std::string & input) {
-//         return common_chat_parse_generic(input);
-//     }, closers);
-// }
 
 static common_chat_params common_chat_params_init_mistral_nemo(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
@@ -1030,12 +967,6 @@ static common_chat_params common_chat_params_init_mistral_nemo(const common_chat
 static common_chat_msg common_chat_parse_mistral_nemo(const std::string & input, bool is_partial) {
     return parse_prefixed_json_tool_call_array(input, is_partial, "[TOOL_CALLS]");
 }
-// static common_chat_msg common_chat_parse_mistral_nemo(const std::string & input, bool is_partial) {
-//     static const std::vector<std::string> closers = json_tool_calls_array_closers();
-//     return common_chat_partial_parse(input, is_partial, [&](const std::string & input) {
-//         return common_chat_parse_mistral_nemo(input);
-//     }, closers);
-// }
 
 static common_chat_params common_chat_params_init_command_r7b(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
@@ -1147,12 +1078,6 @@ static common_chat_msg common_chat_parse_command_r7b(const std::string & input, 
     }
     return result;
 }
-// static common_chat_msg common_chat_parse_command_r7b(const std::string & input, bool is_partial, bool extract_reasoning) {
-//     static const std::vector<std::string> closers = json_tool_calls_array_closers("<|END_ACTION|>");
-//     return common_chat_partial_parse(input, is_partial, [&](const std::string & input) {
-//         return common_chat_parse_command_r7b(input, extract_reasoning);
-//     }, closers);
-// }
 
 static void expect_tool_parameters(const std::string & name, const json & parameters, const std::vector<std::string> & expected_properties) {
     if (!parameters.is_object() || !parameters.contains("type") || parameters.at("type") != "object" || !parameters.contains("properties") || !parameters.contains("required")) {
@@ -1283,18 +1208,6 @@ static common_chat_msg common_chat_parse_llama_3_1(const std::string & input, bo
     }
     return parse_json_tool_calls(input, is_partial, std::nullopt, function_regex, close_regex);
 }
-// static common_chat_msg common_chat_parse_llama_3_1(const std::string & input, bool is_partial, bool with_builtin_tools = false) {
-//     static const std::vector<std::string> closers = []() {
-//         auto closers = json_tool_call_object_closers();
-//         // This allows builtin tools syntax to close.
-//         closers.push_back(")");
-//         closers.push_back("\")");
-//         return closers;
-//     }();
-//     return common_chat_partial_parse(input, is_partial, [&](const std::string & input) {
-//         return common_chat_parse_llama_3_1_(input, with_builtin_tools);
-//     }, closers);
-// }
 
 static common_chat_params common_chat_params_init_deepseek_r1(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
@@ -1386,12 +1299,6 @@ static common_chat_msg common_chat_parse_deepseek_r1(const std::string & input, 
     }
     return msg;
 }
-// static common_chat_msg common_chat_parse_deepseek_r1(const std::string & input, bool is_partial, bool extract_reasoning) {
-//     static const std::vector<std::string> closers = json_tool_call_object_closers("```<｜tool▁call▁end｜><｜tool▁calls▁end｜>");
-//     return common_chat_partial_parse(input, is_partial, [&](const std::string & input) {
-//         return common_chat_parse_deepseek_r1(input, extract_reasoning);
-//     }, closers);
-// }
 
 static common_chat_params common_chat_params_init_firefunction_v2(const common_chat_template & tmpl, const struct templates_params & inputs) {
     LOG_DBG("%s\n", __func__);
@@ -1441,12 +1348,6 @@ static common_chat_params common_chat_params_init_firefunction_v2(const common_c
 static common_chat_msg common_chat_parse_firefunction_v2(const std::string & input, bool is_partial) {
     return parse_prefixed_json_tool_call_array(input, is_partial, " functools[", /* rstrip_prefix= */ 1);
 }
-// static common_chat_msg common_chat_parse_firefunction_v2(const std::string & input, bool is_partial) {
-//     static const std::vector<std::string> closers = json_tool_calls_array_closers();
-//     return common_chat_partial_parse(input, is_partial, [&](const std::string & input) {
-//         return common_chat_parse_firefunction_v2(input);
-//     }, closers);
-// }
 
 static common_chat_params common_chat_params_init_functionary_v3_2(const common_chat_template & tmpl, const struct templates_params & inputs) {
     // >>>all\nlet's call functions>>>fn1\n{"arg1": 1...}\n>>>fn2\n{"arg1": 1...}...
@@ -1533,12 +1434,6 @@ static common_chat_msg common_chat_parse_functionary_v3_2(const std::string & in
     //     return res;
     // }
 }
-// static common_chat_msg common_chat_parse_functionary_v3_2(const std::string & input, bool is_partial) {
-//     static const std::vector<std::string> closers = json_tool_call_object_closers();
-//     return common_chat_partial_parse(input, is_partial, [&](const std::string & input) {
-//         return common_chat_parse_functionary_v3_2(input);
-//     }, closers);
-// }
 
 static common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1(const common_chat_template & tmpl, const struct templates_params & inputs) {
     // https://github.com/MeetKai/functionary/blob/main/tests/prompt_test_v3-llama3.1.txt
@@ -1615,12 +1510,6 @@ static common_chat_msg common_chat_parse_functionary_v3_1_llama_3_1(const std::s
     // TODO: tighten & simplify.
     return parse_json_tool_calls(input, is_partial, std::nullopt, function_regex, close_regex);
 }
-// static common_chat_msg common_chat_parse_functionary_v3_1_llama_3_1(const std::string & input, bool is_partial) {
-//     static const std::vector<std::string> closers = json_tool_call_object_closers("</function>");
-//     return common_chat_partial_parse(input, is_partial, [&](const std::string & input) {
-//         return common_chat_parse_functionary_v3_1_llama_3_1(input);
-//     }, closers);
-// }
 
 static common_chat_params common_chat_params_init_hermes_2_pro(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
@@ -1749,30 +1638,26 @@ static common_chat_msg common_chat_parse_hermes_2_pro(const std::string& input, 
             if (match[3].matched) {
                 close_tag = open_tag.empty() ? "" : "</" + open_tag.substr(1);
                 auto json_it = match[3].first;
-                try {
-                    auto tool_call = parse_json_with_arguments(json_it, end, is_partial, [](const json & value) { return value.size() == 1 && value.at(0) == "arguments"; });
-                    if (tool_call && tool_call->contains("name") && tool_call->contains("arguments")) {
+                auto tool_call = parse_json_with_arguments(json_it, end, is_partial, [](const json & value) { return value.size() == 1 && value.at(0) == "arguments"; });
+                if (tool_call && tool_call->contains("name") && tool_call->contains("arguments")) {
 
-                        msg.tool_calls.emplace_back(process_tool_call(*tool_call));
-                        it = json_it;  // Move iterator past parsed JSON
+                    msg.tool_calls.emplace_back(process_tool_call(*tool_call));
+                    it = json_it;  // Move iterator past parsed JSON
 
-                        // Handle close tags
-                        consume_spaces(it, end);
-                        if (!close_tag.empty() && !parse_literal(it, end, close_tag)) {
-                            throw std::runtime_error("Failed to parse closing tag");
-                        }
-                        consume_spaces(it, end);
-                        if (!block_end.empty() && !parse_literal(it, end, block_end)) {
-                            throw std::runtime_error("Failed to parse block end");
-                        }
-                        consume_spaces(it, end);
-                    } else {
-                        // Not a valid tool call, treat as content
-                        msg.content += std::string(match[0].first, match[0].second);
-                        it = match[0].second;
+                    // Handle close tags
+                    consume_spaces(it, end);
+                    if (!close_tag.empty() && !parse_literal(it, end, close_tag)) {
+                        throw std::runtime_error("Failed to parse closing tag");
                     }
-                } catch (const std::exception & e) {
-                    throw common_chat_parse_failure_with_possible_closers(e.what(), {close_tag + block_end});
+                    consume_spaces(it, end);
+                    if (!block_end.empty() && !parse_literal(it, end, block_end)) {
+                        throw std::runtime_error("Failed to parse block end");
+                    }
+                    consume_spaces(it, end);
+                } else {
+                    // Not a valid tool call, treat as content
+                    msg.content += std::string(match[0].first, match[0].second);
+                    it = match[0].second;
                 }
             } else {
                 auto function_name = match[4].str();
@@ -1783,33 +1668,29 @@ static common_chat_msg common_chat_parse_hermes_2_pro(const std::string& input, 
 
                 close_tag = "</function>";
 
-                try {
-                    // Start parsing from after the opening tags
-                    auto json_it = match[6].first;
-                    if (auto arguments = parse_json_with_arguments(json_it, end, is_partial, [](const json & value) { return value.empty(); })) {
-                        msg.tool_calls.emplace_back(process_tool_call({
-                            {"name", function_name},
-                            {"arguments", *arguments},
-                        }));
-                        it = json_it;  // Move iterator past parsed JSON
+                // Start parsing from after the opening tags
+                auto json_it = match[6].first;
+                if (auto arguments = parse_json_with_arguments(json_it, end, is_partial, [](const json & value) { return value.empty(); })) {
+                    msg.tool_calls.emplace_back(process_tool_call({
+                        {"name", function_name},
+                        {"arguments", *arguments},
+                    }));
+                    it = json_it;  // Move iterator past parsed JSON
 
-                        // Handle close tags
-                        consume_spaces(it, end);
-                        if (!close_tag.empty() && !parse_literal(it, end, close_tag)) {
-                            throw std::runtime_error("Failed to parse closing tag");
-                        }
-                        consume_spaces(it, end);
-                        if (!block_end.empty() && !parse_literal(it, end, block_end)) {
-                            throw std::runtime_error("Failed to parse block end");
-                        }
-                        consume_spaces(it, end);
-                    } else {
-                        // Not a valid tool call, treat as content
-                        msg.content += std::string(match[0].first, match[0].second);
-                        it = match[0].second;
+                    // Handle close tags
+                    consume_spaces(it, end);
+                    if (!close_tag.empty() && !parse_literal(it, end, close_tag)) {
+                        throw std::runtime_error("Failed to parse closing tag");
                     }
-                } catch (const std::exception & e) {
-                    throw common_chat_parse_failure_with_possible_closers(e.what(), {close_tag + block_end});
+                    consume_spaces(it, end);
+                    if (!block_end.empty() && !parse_literal(it, end, block_end)) {
+                        throw std::runtime_error("Failed to parse block end");
+                    }
+                    consume_spaces(it, end);
+                } else {
+                    // Not a valid tool call, treat as content
+                    msg.content += std::string(match[0].first, match[0].second);
+                    it = match[0].second;
                 }
             }
         } else {
@@ -1820,12 +1701,6 @@ static common_chat_msg common_chat_parse_hermes_2_pro(const std::string& input, 
     }
     return msg;
 }
-// static common_chat_msg common_chat_parse_hermes_2_pro(const std::string& input, bool is_partial) {
-//     // Note: closers are passed dynamically through exceptions
-//     return common_chat_partial_parse(input, is_partial, [&](const std::string & input) {
-//         return common_chat_parse_hermes_2_pro(input);
-//     }, /* closers= */ {});
-// }
 
 static common_chat_params common_chat_params_init_without_tools(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
