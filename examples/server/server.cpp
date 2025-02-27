@@ -750,7 +750,7 @@ struct server_task_result_cmpl_final : server_task_result {
         common_chat_msg msg;
         if (stop == STOP_TYPE_WORD || stop == STOP_TYPE_EOS) {
             SRV_DBG("Parsing chat message: %s\n", content.c_str());
-            msg = common_chat_parse(content, oaicompat_chat_format);
+            msg = common_chat_parse(content, /* is_partial= */ false, oaicompat_chat_format);
             finish_reason = msg.tool_calls.empty() ? "stop" : "tool_calls";
         } else {
             msg.content = content;
