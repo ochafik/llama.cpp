@@ -144,7 +144,7 @@ struct slot_params {
                     grammar_triggers.push_back({{"pattern_start", trigger.value}});
                     break;
                 case COMMON_GRAMMAR_TRIGGER_TYPE_TOKEN:
-                    grammar_triggers.push_back({{"token", trigger.token}});
+                    grammar_triggers.push_back({{"token", trigger.value}});
                     break;
             }
         }
@@ -389,21 +389,22 @@ struct server_task {
                     switch (type) {
                         case COMMON_GRAMMAR_TRIGGER_TYPE_WORD:
                         {
-                            const std::string & word = t.at("value");
-                            auto ids = common_tokenize(vocab, word, /* add_special= */ false, /* parse_special= */ true);
+                            const std::string & value = t.at("value");
+                            auto ids = common_tokenize(vocab, value, /* add_special= */ false, /* parse_special= */ true);
                             if (ids.size() == 1) {
                                 auto token = ids[0];
                                 if (std::find(params.sampling.preserved_tokens.begin(), params.sampling.preserved_tokens.end(), (llama_token) token) == params.sampling.preserved_tokens.end()) {
-                                    throw std::runtime_error("Grammar trigger word should be marked as preserved token: " + word);
+                                    throw std::runtime_error("Grammar trigger word should be marked as preserved token: " + value);
                                 }
-                                SRV_DBG("Grammar trigger token: %d (`%s`)\n", token, word.c_str());
+                                SRV_DBG("Grammar trigger token: %d (`%s`)\n", token, value.c_str());
                                 common_grammar_trigger trigger;
                                 trigger.type = COMMON_GRAMMAR_TRIGGER_TYPE_TOKEN;
-                                trigger.value = token;
+                                trigger.token = token;
+                                trigger.value = value;
                                 params.sampling.grammar_triggers.push_back(trigger);
                             } else {
-                                SRV_DBG("Grammar trigger word: `%s`\n", word.c_str());
-                                params.sampling.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, word});
+                                SRV_DBG("Grammar trigger word: `%s`\n", value.c_str());
+                                params.sampling.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, value});
                             }
                             break;
                         }

@@ -23,6 +23,7 @@ common_chat_msg_differ::common_chat_msg_differ(common_chat_format format, const 
     for (const auto & trigger : triggers) {
         switch (trigger.type) {
             case COMMON_GRAMMAR_TRIGGER_TYPE_WORD:
+            case COMMON_GRAMMAR_TRIGGER_TYPE_TOKEN:
                 trigger_regexes.push_back(regex_escape(trigger.value));
                 break;
             case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN:
@@ -1238,7 +1239,13 @@ static common_chat_msg common_chat_parse_llama_3_1_(const std::string & input, b
     return parse_json_tool_calls(input, std::nullopt, function_regex, close_regex);
 }
 static common_chat_msg common_chat_parse_llama_3_1(const std::string & input, bool is_partial, bool with_builtin_tools = false) {
-    static const std::vector<std::string> closers = json_tool_call_object_closers();
+    static const std::vector<std::string> closers = []() {
+        auto closers = json_tool_call_object_closers();
+        // This allows builtin tools syntax to close.
+        closers.push_back(")");
+        closers.push_back("\")");
+        return closers;
+    }();
     return common_chat_partial_parse(input, is_partial, [&](const std::string & input) {
         return common_chat_parse_llama_3_1_(input, with_builtin_tools);
     }, closers);
