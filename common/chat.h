@@ -32,6 +32,10 @@ struct common_chat_msg {
     std::string reasoning_content;
     std::string tool_name;
     std::string tool_call_id;
+
+    bool empty() const {
+        return content.empty() && content_parts.empty() && tool_calls.empty() && reasoning_content.empty() && tool_name.empty() && tool_call_id.empty();
+    }
 };
 
 struct common_chat_tool {

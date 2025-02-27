@@ -95,12 +95,7 @@ static common_chat_msg common_chat_partial_parse(
                 return parser(input + closer);
             } catch (const std::exception &) {}
         }
-        common_chat_msg msg;
-        msg.role = "assistant";
-        if (!is_partial) {
-            msg.content = input;
-        }
-        return msg;
+        throw std::runtime_error("Failed to parse input");
     };
     try {
         return parser(input);
@@ -655,8 +650,7 @@ static common_chat_msg parse_json_tool_calls(
 
     if (trigger_opt) {
         if (!std::regex_search(it, end, match, *trigger_opt)) {
-            result.content = input;
-            return result;
+            throw std::runtime_error("Failed to parse json tool calls");
         }
         result.content = match.prefix().str();
         it = match.suffix().first;
@@ -666,8 +660,7 @@ static common_chat_msg parse_json_tool_calls(
         std::sregex_iterator rend;
         std::sregex_iterator rit(it, end, function_regex);
         if (rit == rend) {
-            result.content += std::string(it, end);
-            break;
+            throw std::runtime_error("Failed to parse json tool calls");
         }
         auto name = rit->str(1);
         result.content += std::string(it, rit->prefix().second);
@@ -712,7 +705,7 @@ static common_chat_msg parse_prefixed_json_tool_call_array(const std::string& in
     common_chat_msg result;
     result.role = "assistant";
     if (content_end == std::string::npos) {
-        result.content = input;
+        throw std::runtime_error("Failed to parse json tool calls");
     } else {
         tc_start = content_end + prefix.size() - rstrip_prefix;
         result.content = input.substr(0, content_end);
@@ -1140,13 +1133,16 @@ static common_chat_msg common_chat_parse_llama_3_1_(const std::string & input, b
     static std::regex function_regex(
         "\\s*\\{\\s*(?:\"type\"\\s*:\\s*\"function\"\\s*,\\s*)?\"name\"\\s*:\\s*\"([^\"]+)\"\\s*,\\s*\"parameters\"\\s*: ");
     static std::regex close_regex("\\}\\s*");
-    static std::regex builtin_call_regex("<\\|python_tag\\|>\\s*([^.(]+)\\s*\\.\\s*call\\s*\\(\\s*([\\w]+)\\s*=\\s*([\\s\\S]*?)\\)");
+    static std::regex builtin_call_regex("<\\|python_tag\\|>(?:\\s*([^.(]+)\\s*\\.\\s*call\\s*\\(\\s*([\\w]+)\\s*=\\s*([\\s\\S]*?)\\))?");
 
     if (with_builtin_tools) {
         std::smatch match;
         if (std::regex_match(input, match, builtin_call_regex)) {
             try {
                 auto name = match[1].str();
+                if (name.empty()) {
+                    throw std::runtime_error("Failed to parse builtin tool call");
+                }
                 auto arg_name = match[2].str();
                 auto arg_value_str = match[3].str();
                 auto arg_value = json::parse(arg_value_str);
@@ -1951,10 +1947,11 @@ std::optional<common_chat_msg> common_chat_parse(const std::string & input, bool
             // Stop stopping at the earliest partial trigger to avoid messing the parsing big time.
             try {
                 auto before_trigger = input.substr(0, earliest_partial_trigger);
-                if (!before_trigger.empty()) {
-                    auto parsed = common_chat_parse(format, before_trigger, /* is_partial= */ true);
-                    return parsed;
+                if (before_trigger.empty()) {
+                    return std::nullopt;
                 }
+                auto parsed = common_chat_parse(format, before_trigger, /* is_partial= */ true);
+                return parsed;
             } catch (const std::exception &) {
                 return std::nullopt;
             }
@@ -1962,7 +1959,11 @@ std::optional<common_chat_msg> common_chat_parse(const std::string & input, bool
     }
 
     try {
-        return common_chat_parse(format, input, is_partial);
+        auto parsed = common_chat_parse(format, input, is_partial);
+        if (parsed.empty()) {
+            return std::nullopt;
+        }
+        return parsed;
     } catch (const std::exception & ex) {
         LOG_WRN("Failed to parse chat message (is_partial = %s): %s\n", is_partial ? "true" : "false", ex.what());
         return std::nullopt;
