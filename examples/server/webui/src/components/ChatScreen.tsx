@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CallbackGeneratedChunk, useAppContext } from '../utils/app.context';
 import ChatMessage from './ChatMessage';
 import { CanvasType, Message, PendingMessage } from '../utils/types';
-import { classNames, throttle } from '../utils/misc';
+import { classNames, cleanCurrentUrl, throttle } from '../utils/misc';
 import CanvasPyInterpreter from './CanvasPyInterpreter';
 import StorageUtils from '../utils/storage';
+import { useVSCodeContext } from '../utils/llama-vscode';
 
 /**
  * A message display is a message node with additional information for rendering.
@@ -16,6 +17,24 @@ export interface MessageDisplay {
   siblingCurrIdx: number;
   isPending?: boolean;
 }
+
+/**
+ * If the current URL contains "?m=...", prefill the message input with the value.
+ * If the current URL contains "?q=...", prefill and SEND the message.
+ */
+const prefilledMsg = {
+  content() {
+    const url = new URL(window.location.href);
+    return url.searchParams.get('m') ?? url.searchParams.get('q') ?? '';
+  },
+  shouldSend() {
+    const url = new URL(window.location.href);
+    return url.searchParams.has('q');
+  },
+  clear() {
+    cleanCurrentUrl(['m', 'q']);
+  },
+};
 
 function getListMessageDisplay(
   msgs: Readonly<Message[]>,
@@ -80,7 +99,15 @@ export default function ChatScreen() {
     canvasData,
     replaceMessageAndGenerate,
   } = useAppContext();
-  const [inputMsg, setInputMsg] = useState('');
+  const [inputMsg, setInputMsg] = useState(prefilledMsg.content());
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const { extraContext, clearExtraContext } = useVSCodeContext(
+    inputRef,
+    setInputMsg
+  );
+  // TODO: improve this when we have "upload file" feature
+  const currExtra: Message['extra'] = extraContext ? [extraContext] : undefined;
 
   // keep track of leaf node for rendering
   const [currNodeId, setCurrNodeId] = useState<number>(-1);
@@ -115,10 +142,20 @@ export default function ChatScreen() {
     setCurrNodeId(-1);
     // get the last message node
     const lastMsgNodeId = messages.at(-1)?.msg.id ?? null;
-    if (!(await sendMessage(currConvId, lastMsgNodeId, inputMsg, onChunk))) {
+    if (
+      !(await sendMessage(
+        currConvId,
+        lastMsgNodeId,
+        inputMsg,
+        currExtra,
+        onChunk
+      ))
+    ) {
       // restore the input message if failed
       setInputMsg(lastInpMsg);
     }
+    // OK
+    clearExtraContext();
   };
 
   const handleEditMessage = async (msg: Message, content: string) => {
@@ -129,6 +166,7 @@ export default function ChatScreen() {
       viewingChat.conv.id,
       msg.parent,
       content,
+      msg.extra,
       onChunk
     );
     setCurrNodeId(-1);
@@ -143,6 +181,7 @@ export default function ChatScreen() {
       viewingChat.conv.id,
       msg.parent,
       null,
+      msg.extra,
       onChunk
     );
     setCurrNodeId(-1);
@@ -150,6 +189,22 @@ export default function ChatScreen() {
   };
 
   const hasCanvas = !!canvasData;
+
+  useEffect(() => {
+    if (prefilledMsg.shouldSend()) {
+      // send the prefilled message if needed
+      sendNewMessage();
+    } else {
+      // otherwise, focus on the input and move the cursor to the end
+      if (inputRef.current) {
+        inputRef.current.focus();
+        inputRef.current.selectionStart = inputRef.current.value.length;
+      }
+    }
+    prefilledMsg.clear();
+    // no need to keep track of sendNewMessage
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputRef]);
 
   // due to some timing issues of StorageUtils.appendMsg(), we need to make sure the pendingMsg is not duplicated upon rendering (i.e. appears once in the saved conversation and once in the pendingMsg)
   const pendingMsgDisplay: MessageDisplay[] =
@@ -203,9 +258,11 @@ export default function ChatScreen() {
           <textarea
             className="textarea textarea-bordered w-full"
             placeholder="Type a message (Shift+Enter to add a new line)"
+            ref={inputRef}
             value={inputMsg}
             onChange={(e) => setInputMsg(e.target.value)}
             onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
               if (e.key === 'Enter' && e.shiftKey) return;
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
