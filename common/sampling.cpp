@@ -168,20 +168,20 @@ struct common_sampler * common_sampler_init(const struct llama_model * model, co
             switch (trigger.type) {
                 case COMMON_GRAMMAR_TRIGGER_TYPE_WORD:
                 {
-                    const auto & word = std::get<std::string>(trigger.value);
+                    const auto & word = trigger.value;
                     patterns_anywhere.push_back(regex_escape(word));
                     break;
                 }
                 case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN:
                 case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_START:
                 {
-                    const auto & pattern = std::get<std::string>(trigger.value);
+                    const auto & pattern = trigger.value;
                     (trigger.type == COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_START ? patterns_at_start : patterns_anywhere).push_back(pattern);
                     break;
                 }
                 case COMMON_GRAMMAR_TRIGGER_TYPE_TOKEN:
                 {
-                    const auto & token = std::get<llama_token>(trigger.value);
+                    const auto token = trigger.token;
                     trigger_tokens.push_back(token);
                     break;
                 }

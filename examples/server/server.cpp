@@ -135,16 +135,16 @@ struct slot_params {
         for (const auto & trigger : sampling.grammar_triggers) {
             switch (trigger.type) {
                 case COMMON_GRAMMAR_TRIGGER_TYPE_WORD:
-                    grammar_triggers.push_back({{"word", std::get<std::string>(trigger.value)}});
+                    grammar_triggers.push_back({{"word", trigger.value}});
                     break;
                 case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN:
-                    grammar_triggers.push_back({{"pattern", std::get<std::string>(trigger.value)}});
+                    grammar_triggers.push_back({{"pattern", trigger.value}});
                     break;
                 case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_START:
-                    grammar_triggers.push_back({{"pattern_start", std::get<std::string>(trigger.value)}});
+                    grammar_triggers.push_back({{"pattern_start", trigger.value}});
                     break;
                 case COMMON_GRAMMAR_TRIGGER_TYPE_TOKEN:
-                    grammar_triggers.push_back({{"token", std::get<llama_token>(trigger.value)}});
+                    grammar_triggers.push_back({{"token", trigger.token}});
                     break;
             }
         }

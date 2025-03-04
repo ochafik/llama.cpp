@@ -119,7 +119,8 @@ enum common_grammar_trigger_type {
 
 struct common_grammar_trigger {
     common_grammar_trigger_type type;
-    std::variant<llama_token, std::string> value;
+    std::string value;
+    llama_token token = LLAMA_TOKEN_NULL;
 };
 
 // sampling parameters

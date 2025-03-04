@@ -242,13 +242,13 @@ static void test_templates(const struct common_chat_templates * tmpls, const std
                 switch (trigger.type) {
                     case COMMON_GRAMMAR_TRIGGER_TYPE_WORD:
                     {
-                        const auto & word = std::get<std::string>(trigger.value);
+                        const auto & word = trigger.value;
                         pos = constrained.find(word);
                         break;
                     }
                     case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN:
                     {
-                        const auto & pattern = std::get<std::string>(trigger.value);
+                        const auto & pattern = trigger.value;
                         if (std::regex_search(constrained, match, std::regex(pattern))) {
                             pos = match.position();
                         }
@@ -256,7 +256,7 @@ static void test_templates(const struct common_chat_templates * tmpls, const std
                     }
                     case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_START:
                     {
-                        const auto & pattern = std::get<std::string>(trigger.value);
+                        const auto & pattern = trigger.value;
                         if (std::regex_search(constrained, match, std::regex(pattern)) && match.position() == 0) {
                             pos = 0;
                         }
