@@ -29,6 +29,7 @@ export ARGS=(
     "$@"
 )
 
+./scripts/tool_bench.py run --temp -1 --temp 0 --temp 0.5 --temp 0.75 --temp 1 --temp 1.5 --temp 2 --temp 5 --n 30 --output qwenc2.5-kv4.jsonl --hf unsloth/Qwen2.5-Coder-7B-Instruct-128K-GGUF --ctk q4_0 --ctv q4_0
 ./scripts/tool_bench.py run ${ARGS[@]} --model "Qwen 2.5 Coder 0.5B Q4_K_M"           --output ../qwenc0.5b.jsonl --hf bartowski/Qwen2.5-Coder-0.5B-Instruct-GGUF:Q4_K_M --ollama qwen2.5-coder:0.5b-instruct-q4_K_M
 ./scripts/tool_bench.py run ${ARGS[@]} --model "Qwen 2.5 Coder 1.5B Q4_K_M"           --output ../qwenc1.5b.jsonl --hf bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF:Q4_K_M --ollama qwen2.5-coder:1.5b-instruct-q4_K_M
 ./scripts/tool_bench.py run ${ARGS[@]} --model "Qwen 2.5 Coder 3B Q4_K_M"             --output ../qwenc3b.jsonl   --hf bartowski/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M   --ollama qwen2.5-coder:3b-instruct-q4_K_M
