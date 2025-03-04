@@ -1141,7 +1141,7 @@ struct llama_grammar * llama_grammar_init_impl(
     // Important: vec_rules has to be moved here, not copied, because stacks contains
     // pointers to elements of vec_rules. If vec_rules were copied into llama_grammar
     // then the pointers would be invalidated when the local vec_rules goes out of scope.
-    auto grammar = new llama_grammar {
+    auto * grammar = new llama_grammar {
         vocab,
         std::move(vec_rules),
         std::move(stacks),
@@ -1242,14 +1242,16 @@ struct llama_grammar * llama_grammar_init_impl(
     } while (true);
 
     std::vector<llama_token>    vec_trigger_tokens;
-    std::vector<std::pair<std::string, std::regex>>     vec_trigger_patterns;
+    std::vector<llama_grammar_trigger_pattern> vec_trigger_patterns;
     for (size_t i = 0; i < num_trigger_tokens; i++) {
         GGML_ASSERT(trigger_tokens != nullptr);
         vec_trigger_tokens.push_back(trigger_tokens[i]);
     }
     for (size_t i = 0; i < num_trigger_patterns; i++) {
         GGML_ASSERT(trigger_patterns != nullptr);
-        vec_trigger_patterns.emplace_back(trigger_patterns[i], trigger_patterns[i]);
+        auto & trigger = vec_trigger_patterns.back();
+        trigger.pattern = trigger_patterns[i];
+        trigger.regex = std::regex(trigger.pattern);
     }
 
     std::vector<llama_grammar_token> sorted_tokens;
@@ -1259,7 +1261,7 @@ struct llama_grammar * llama_grammar_init_impl(
     if (mask && vocab) {
         printf("Masking %d tokens\n", llama_vocab_n_tokens(vocab));
         for (size_t i = 0, n = llama_vocab_n_tokens(vocab); i < n; i++) {
-            auto & piece = vocab->token_to_piece(i);
+            const auto & piece = vocab->token_to_piece(i);
             sorted_tokens.push_back({
                 (llama_token) i,
                 piece,
@@ -1279,7 +1281,7 @@ struct llama_grammar * llama_grammar_init_impl(
     // Important: vec_rules has to be moved here, not copied, because stacks contains
     // pointers to elements of vec_rules. If vec_rules were copied into llama_grammar
     // then the pointers would be invalidated when the local vec_rules goes out of scope.
-    auto grammar = new llama_grammar {
+    auto * grammar = new llama_grammar {
         vocab,
         std::move(vec_rules),
         std::move(stacks),
@@ -1311,7 +1313,7 @@ void llama_grammar_free_impl(struct llama_grammar * grammar) {
 }
 
 struct llama_grammar * llama_grammar_clone_impl(const struct llama_grammar & grammar) {
-    llama_grammar * result = new llama_grammar {
+    auto * result = new llama_grammar {
         grammar.vocab,
         grammar.rules,
         grammar.stacks,
@@ -1370,8 +1372,8 @@ void llama_grammar_apply_impl(struct llama_grammar & grammar, llama_token_data_a
                     LLAMA_LOG_ERROR("  EOG\n");
                 } else {
                     LLAMA_LOG_ERROR("  %d\n", stack.back()->type);
-                    auto & res = llama_grammar_match_tokens(grammar, stack.back());
-                    LLAMA_LOG_ERROR("res: %d\n", res.allowed_token_ranges.size());
+                    const auto & res = llama_grammar_match_tokens(grammar, stack.back());
+                    LLAMA_LOG_ERROR("res: %zu\n", res.allowed_token_ranges.size());
                 }
                 // for (const auto & elem : stack) {
                 //     LLAMA_LOG_ERROR("  %d", elem->type);
@@ -1416,9 +1418,6 @@ void llama_grammar_apply_impl(struct llama_grammar & grammar, llama_token_data_a
 
     const auto rejects = llama_grammar_reject_candidates(grammar.rules, grammar.stacks, candidates_grammar);
     for (const auto & reject : rejects) {
-        auto & token = cur_p->data[reject.index];
-        // fprintf(stderr, "- Rejecting token %u (`%s`)\n", token.id, grammar.vocab->token_to_piece(token.id).c_str());
-        // fflush(stderr);
         cur_p->data[reject.index].logit = -INFINITY;
     }
 
@@ -1450,8 +1449,8 @@ void llama_grammar_accept_impl(struct llama_grammar & grammar, llama_token token
             grammar.trigger_buffer += piece;
 
             std::smatch match;
-            for (const auto & [_, regex] : grammar.trigger_patterns) {
-                if (std::regex_match(grammar.trigger_buffer, match, regex)) {
+            for (const auto & trigger_pattern : grammar.trigger_patterns) {
+                if (std::regex_match(grammar.trigger_buffer, match, trigger_pattern.regex)) {
                     grammar.awaiting_trigger = false;
                     // get from the first match to the end of the string
                     auto constrained_str = grammar.trigger_buffer.substr(match.position(1));

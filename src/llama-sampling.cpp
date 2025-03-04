@@ -1461,8 +1461,8 @@ static void llama_sampler_grammar_reset(struct llama_sampler * smpl) {
 
     std::vector<const char *>  trigger_patterns_c;
     trigger_patterns_c.reserve(ctx->grammar->trigger_patterns.size());
-    for (auto & [pattern, _] : ctx->grammar->trigger_patterns) {
-        trigger_patterns_c.push_back(pattern.c_str());
+    for (auto & trigger_pattern : ctx->grammar->trigger_patterns) {
+        trigger_patterns_c.push_back(trigger_pattern.pattern.c_str());
     }
 
     auto * grammar_new = llama_grammar_init_impl(ctx->grammar->vocab, ctx->grammar_str.c_str(), ctx->grammar_root.c_str(),
