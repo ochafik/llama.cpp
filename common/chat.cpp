@@ -1,5 +1,7 @@
 #include "chat.h"
 #include "json-schema-to-grammar.h"
+#include "llama-model.h"
+#include "llama-vocab.h"
 #include "log.h"
 #include "minja/chat-template.hpp"
 #include "minja/minja.hpp"
@@ -1560,6 +1562,145 @@ static common_chat_params common_chat_params_init_without_tools(const common_cha
     return data;
 }
 
+struct format_matcher {
+    std::function<common_chat_params(const common_chat_template &, const struct templates_params &)> handler;
+    std::function<bool(const common_chat_template &)> template_matcher;
+    std::function<bool(const llama_model *)> model_matcher;
+    bool supports_json_schema = false;
+    bool supports_tools = false;
+    std::string canonical_hf_template;
+};
+
+static bool contains_all(const common_chat_template & tmpl, const std::vector<std::string> & strs) {
+    const auto & src = tmpl.source();
+    return std::all_of(strs.begin(), strs.end(), [&src](const std::string & str) {
+        return src.find(str) != std::string::npos;
+    });
+}
+
+static bool has_tokens(const llama_model * model, const std::vector<std::string> & strs) {
+    if (!model) {
+        return false;
+    }
+    const auto * vocab = llama_model_get_vocab(model);
+    if (!vocab) {
+        return false;
+    }
+    for (const auto & str : strs) {
+        auto tokens = common_tokenize(vocab, str, /* add_special= */ false, /* parse_special= */ true);
+        if (tokens.size() != 1 || tokens[0] == 0) {
+            return false;
+        }
+    }
+    return true;
+};
+
+const std::vector<format_matcher> FORMAT_MATCHERS {
+    format_matcher {
+        // DeepSeek R1: use handler in all cases except json schema (thinking / tools).
+        common_chat_params_init_deepseek_r1,
+        [](const auto & tmpl) { return contains_all(tmpl, {"<｜tool▁calls▁begin｜>"}); },
+        [](const auto * model) { return has_tokens(model, {"<｜tool▁calls▁begin｜>"}); },
+        /* .supports_json_schema = */ false,
+        /* .supports_tools = */ true,
+        "deepseek/DeepSeek-R1-Distill-Qwen-7B",
+    },
+    {
+        // Command R7B: : use handler in all cases except json schema (thinking / tools).
+        common_chat_params_init_command_r7b,
+        [](const auto & tmpl) { return contains_all(tmpl, {"<|END_THINKING|>", "<|START_ACTION|>"}); },
+        [](const auto * model) { return has_tokens(model, {"<|END_THINKING|>", "<|START_ACTION|>"}); },
+        /* .supports_json_schema = */ false,
+        /* .supports_tools = */ true,
+        "CohereForAI/c4ai-command-r7b-12-2024",
+    },
+    {
+        // Default when no tools and no schema
+        common_chat_params_init_without_tools,
+        nullptr,
+        nullptr,
+        /* .supports_json_schema = */ true,
+        /* .supports_tools = */ false,
+        "",
+    },
+    {
+        // Qwen 2.5 Instruct (w/ tools)
+        common_chat_params_init_hermes_2_pro,
+        [](const auto & tmpl) { return contains_all(tmpl, {"<tool_call>", "<tool_response>"}); },
+        [](const auto * model) { return has_tokens(model, {"<tool_call>", "<tool_response>", "<|object_ref_start|>"}); },
+        /* .supports_json_schema = */ false,
+        /* .supports_tools = */ false,
+        "qwen/Qwen2.5-Coder-7B-Instruct",
+    },
+    {
+        // Hermes 2/3 Pro (w/ tools)
+        common_chat_params_init_hermes_2_pro,
+        [](const auto & tmpl) { return contains_all(tmpl, {"<tool_call>", "<tool_response>"}); },
+        [](const auto * model) { return has_tokens(model, {"<tool_call>", "<tool_response>"}); },
+        /* .supports_json_schema = */ false,
+        /* .supports_tools = */ false,
+        "nousresearch/Hermes-2-Pro-Llama-3-8B",
+    },
+    {
+        // Functionary prepends "all\n" to plain content outputs, so we use its handler in all cases.
+        common_chat_params_init_functionary_v3_2,
+        [](const auto & tmpl) { return contains_all(tmpl, {">>>all"}); },
+        nullptr,
+        /* .supports_json_schema = */ false,
+        /* .supports_tools = */ false,
+        "meetkai/functionary-medium-v3.2",
+    },
+    {
+        // Functionary v3.1 (w/ tools)
+        common_chat_params_init_functionary_v3_1_llama_3_1,
+        [](const auto & tmpl) { return contains_all(tmpl, {"<|start_header_id|>", "<function="}); },
+        nullptr,
+        /* .supports_json_schema = */ false,
+        /* .supports_tools = */ false,
+        "meetkai/functionary-medium-v3.1",
+    },
+    {
+        // Llama 3.1, 3.2, 3.3 (w/ tools)
+        [](const auto & tmpl, const auto & inputs) {
+            return common_chat_params_init_llama_3_1_tool_calls(tmpl, inputs, /* allow_python_tag_builtin_tools= */ true);
+        },
+        [](const auto & tmpl) { return contains_all(tmpl, {"<|start_header_id|>ipython<|end_header_id|>", "<|python_tag|>"}); },
+        nullptr,
+        /* .supports_json_schema = */ false,
+        /* .supports_tools = */ false,
+        "meta-llama/Meta-Llama-3.3-8B-Instruct",    
+    },
+    {
+        // Llama 3.1, 3.2, 3.3 (w/ tools)
+        [](const auto & tmpl, const auto & inputs) {
+            return common_chat_params_init_llama_3_1_tool_calls(tmpl, inputs, /* allow_python_tag_builtin_tools= */ false);
+        },
+        [](const auto & tmpl) { return contains_all(tmpl, {"<|start_header_id|>ipython<|end_header_id|>"}); },
+        nullptr,
+        /* .supports_json_schema = */ false,
+        /* .supports_tools = */ false,
+        "meta-llama/Meta-Llama-3.3-8B-Instruct",    
+    },
+    {
+        // Firefunction v2 requires datetime and functions in the context even w/o tools, so we also use its handler in all cases.
+        common_chat_params_init_firefunction_v2,
+        [](const auto & tmpl) { return contains_all(tmpl, {" functools["}); },
+        nullptr,
+        /* .supports_json_schema = */ false,
+        /* .supports_tools = */ false,
+        "fireworks-ai/llama-3-firefunction-v2",
+    },
+    {
+        // Mistral Nemo (w/ tools)
+        common_chat_params_init_mistral_nemo,
+        [](const auto & tmpl) { return contains_all(tmpl, {"[TOOL_CALLS]"}); },
+        nullptr,
+        /* .supports_json_schema = */ false,
+        /* .supports_tools = */ false,
+        "mistralai/Mistral-Nemo-Instruct-2407",
+    },
+};
+
 static common_chat_params common_chat_templates_apply_jinja(
     const struct common_chat_templates * tmpls,
     const struct common_chat_templates_inputs & inputs)
@@ -1596,57 +1737,32 @@ static common_chat_params common_chat_templates_apply_jinja(
         }
     }
 
-    // DeepSeek R1: use handler in all cases except json schema (thinking / tools).
-    if (src.find("<｜tool▁calls▁begin｜>") != std::string::npos && params.json_schema.is_null()) {
-        return common_chat_params_init_deepseek_r1(tmpl, params);
+    for (const auto & matcher : FORMAT_MATCHERS) {
+        if (matcher.template_matcher && matcher.template_matcher(tmpl)) {
+            if ((params.json_schema.is_object() && !matcher.supports_json_schema) ||
+                (params.tools.is_array() && !matcher.supports_tools)) {
+                continue;
+            }
+            return matcher.handler(tmpl, params);
+        }
     }
 
-    // Command R7B: : use handler in all cases except json schema (thinking / tools).
-    if (src.find("<|END_THINKING|><|START_ACTION|>") != std::string::npos && params.json_schema.is_null()) {
-        return common_chat_params_init_command_r7b(tmpl, params);
-    }
-
-    // Use generic handler when mixing tools + JSON schema.
-    // TODO: support that mix in handlers below.
-    if ((params.tools.is_array() && params.json_schema.is_object())) {
-        return common_chat_params_init_generic(tmpl, params);
-    }
-
-    // Functionary prepends "all\n" to plain content outputs, so we use its handler in all cases.
-    if (src.find(">>>all") != std::string::npos) {
-        return common_chat_params_init_functionary_v3_2(tmpl, params);
-    }
-
-    // Firefunction v2 requires datetime and functions in the context even w/o tools, so we also use its handler in all cases.
-    if (src.find(" functools[") != std::string::npos) {
-        return common_chat_params_init_firefunction_v2(tmpl, params);
-    }
-
-    // Plain handler (no tools)
-    if (params.tools.is_null() || inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_NONE) {
-        return common_chat_params_init_without_tools(tmpl, params);
-    }
-
-    // Hermes 2/3 Pro, Qwen 2.5 Instruct (w/ tools)
-    if (src.find("<tool_call>") != std::string::npos) {
-        return common_chat_params_init_hermes_2_pro(tmpl, params);
-    }
-
-    // Functionary v3.1 (w/ tools)
-    if (src.find("<|start_header_id|>") != std::string::npos
-        && src.find("<function=") != std::string::npos) {
-        return common_chat_params_init_functionary_v3_1_llama_3_1(tmpl, params);
-    }
-
-    // Llama 3.1, 3.2, 3.3 (w/ tools)
-    if (src.find("<|start_header_id|>ipython<|end_header_id|>") != std::string::npos) {
-        auto allow_python_tag_builtin_tools = src.find("<|python_tag|>") != std::string::npos;
-        return common_chat_params_init_llama_3_1_tool_calls(tmpl, params, allow_python_tag_builtin_tools);
-    }
-
-    // Mistral Nemo (w/ tools)
-    if (src.find("[TOOL_CALLS]") != std::string::npos) {
-        return common_chat_params_init_mistral_nemo(tmpl, params);
+    // If tools are provided and the template doesn't support tool calls or tool responses,
+    // try and detect a "good" template that is likely to match the model's native tool call style,
+    // based on its vocabulary.
+    if (!inputs.tools.empty() && (!tmpl.original_caps().supports_tools || !tmpl.original_caps().supports_tool_responses) && inputs.model) {
+        for (const auto & matcher : FORMAT_MATCHERS) {
+            if (matcher.model_matcher && matcher.model_matcher(inputs.model)) {
+                if ((params.json_schema.is_object() && !matcher.supports_json_schema) ||
+                    (params.tools.is_array() && !matcher.supports_tools)) {
+                    continue;
+                }
+                throw std::runtime_error(
+                    "The chat template doesn't support tools but the model probably does. "
+                    "Please try a chat template that matches your model's native tool call style, "
+                    "e.g. restart with the flag `-hft " + matcher.canonical_hf_template + "`");
+            }
+        }
     }
 
     // Generic fallback

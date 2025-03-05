@@ -70,6 +70,7 @@ struct common_chat_templates_inputs {
     common_chat_tool_choice tool_choice = COMMON_CHAT_TOOL_CHOICE_AUTO;
     bool parallel_tool_calls = false;
     bool extract_reasoning     = true;
+    const llama_model * model  = nullptr;
 };
 
 struct common_chat_params {
