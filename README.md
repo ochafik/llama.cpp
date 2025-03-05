@@ -25,7 +25,7 @@ Inference of Meta's [LLaMA](https://arxiv.org/abs/2302.13971) model (and others)
 
 - **How to use [MTLResidencySet](https://developer.apple.com/documentation/metal/mtlresidencyset?language=objc) to keep the GPU memory active?** https://github.com/ggml-org/llama.cpp/pull/11427
 - **VS Code extension for FIM completions:** https://github.com/ggml-org/llama.vscode
-- Universal tool call support in `llama-server`: https://github.com/ggml-org/llama.cpp/pull/9639
+- Universal [tool call support](./docs/function-calling.md) in `llama-server` https://github.com/ggml-org/llama.cpp/pull/9639
 - Vim/Neovim plugin for FIM completions: https://github.com/ggml-org/llama.vim
 - Introducing GGUF-my-LoRA https://github.com/ggml-org/llama.cpp/discussions/10123
 - Hugging Face Inference Endpoints now support GGUF out of the box! https://github.com/ggml-org/llama.cpp/discussions/9669
@@ -219,7 +219,7 @@ Instructions for adding support for new models: [HOWTO-add-model.md](docs/develo
 - [llama_cpp_canister](https://github.com/onicai/llama_cpp_canister) - llama.cpp as a smart contract on the Internet Computer, using WebAssembly
 - [llama-swap](https://github.com/mostlygeek/llama-swap) - transparent proxy that adds automatic model switching with llama-server
 - [Kalavai](https://github.com/kalavai-net/kalavai-client) - Crowdsource end to end LLM deployment at any scale
-
+- [llmaz](https://github.com/InftyAI/llmaz) - ☸️ Easy, advanced inference platform for large language models on Kubernetes.
 </details>
 
 <details>

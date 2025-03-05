@@ -501,8 +501,13 @@ static json oaicompat_completion_params_parse(const json & body) {
         throw std::runtime_error("Only one completion choice is allowed");
     }
 
+    // Handle "echo" field
+    if (json_value(body, "echo", false)) {
+        throw std::runtime_error("Only no echo is supported");
+    }
+
     // Params supported by OAI but unsupported by llama.cpp
-    static const std::vector<std::string> unsupported_params { "best_of", "echo", "suffix" };
+    static const std::vector<std::string> unsupported_params { "best_of", "suffix" };
     for (const auto & param : unsupported_params) {
         if (body.contains(param)) {
             throw std::runtime_error("Unsupported param: " + param);
@@ -592,10 +597,7 @@ static json oaicompat_completion_params_parse(
     llama_params["grammar_lazy"]     = chat_params.grammar_lazy;
     auto grammar_triggers = json::array();
     for (const auto & trigger : chat_params.grammar_triggers) {
-        grammar_triggers.push_back({
-            {"type", (int) trigger.type},
-            {"value", trigger.value},
-        });
+        grammar_triggers.push_back(trigger.to_json<json>());
     }
     llama_params["grammar_triggers"] = grammar_triggers;
     llama_params["preserved_tokens"] = chat_params.preserved_tokens;

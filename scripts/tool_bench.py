@@ -211,6 +211,9 @@ def run(
     temp: Annotated[Optional[List[float]], typer.Option(help="Set of temperatures to test")] = None,
     top_p: Annotated[Optional[float], typer.Option(help="top_p")] = None,
     top_k: Annotated[Optional[int], typer.Option(help="top_k")] = None,
+    ctk: Annotated[Optional[str], typer.Option(help="ctk")] = None,
+    ctv: Annotated[Optional[str], typer.Option(help="ctv")] = None,
+    fa: Annotated[Optional[bool], typer.Option(help="fa")] = None,
     seed: Annotated[Optional[int], typer.Option(help="Random seed")] = None,
     port: Annotated[int, typer.Option(help="llama-server port")] = 8084,
     force: Annotated[bool, typer.Option(help="Force overwrite of output file")] = False,
@@ -284,6 +287,9 @@ def run(
                     temp=t,
                     top_p=top_p,
                     top_k=top_k,
+                    ctk=ctk,
+                    ctv=ctv,
+                    seed=seed,
                     success_ratio=float(success_count) / n,
                     avg_time=mean(success_times + failure_times),
                     median_time=median(success_times + failure_times),
@@ -307,6 +313,9 @@ def run(
                     server.n_ctx = n_ctx
                     server.n_slots = 1
                     server.jinja = True
+                    server.ctk = ctk
+                    server.ctv = ctv
+                    server.fa = fa
                     server.n_predict = n_predict
                     server.model_hf_repo = hf
                     server.model_hf_file = None

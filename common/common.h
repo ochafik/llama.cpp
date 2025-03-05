@@ -8,7 +8,6 @@
 #include <string>
 #include <vector>
 #include <sstream>
-#include <variant>
 
 #ifdef _WIN32
 #define DIRECTORY_SEPARATOR '\\'
@@ -122,6 +121,9 @@ struct common_grammar_trigger {
     common_grammar_trigger_type type;
     std::string value;
     llama_token token = LLAMA_TOKEN_NULL;
+
+    template <class T> T to_json() const;
+    template <class T> static common_grammar_trigger from_json(const T & in);
 };
 
 // sampling parameters
@@ -172,7 +174,7 @@ struct common_params_sampling {
 
     std::string                         grammar; // optional BNF-like grammar to constrain sampling
     bool                                grammar_lazy = false;
-    std::vector<common_grammar_trigger> grammar_triggers;  // optional trigger words to trigger lazy grammar
+    std::vector<common_grammar_trigger> grammar_triggers; // optional triggers (for lazy grammars)
     std::set<llama_token>               preserved_tokens;
 
     std::vector<llama_logit_bias> logit_bias; // logit biases to apply
@@ -207,6 +209,8 @@ struct common_params_vocoder {
 
     std::string model     = ""; // model path                                                // NOLINT
     std::string model_url = ""; // model url to download                                     // NOLINT
+
+    std::string speaker_file = ""; // speaker file path                                      // NOLINT
 
     bool use_guide_tokens = false; // enable guide tokens to improve TTS accuracy            // NOLINT
 };
@@ -269,6 +273,7 @@ struct common_params {
     std::string hf_repo              = ""; // HF repo                                                       // NOLINT
     std::string hf_file              = ""; // HF file                                                       // NOLINT
     std::string prompt               = "";                                                                  // NOLINT
+    std::string system_prompt        = "";                                                                  // NOLINT
     std::string prompt_file          = ""; // store the external prompt file name                           // NOLINT
     std::string path_prompt_cache    = ""; // path to file for saving/loading prompt eval state             // NOLINT
     std::string input_prefix         = ""; // string to prefix user inputs with                             // NOLINT
