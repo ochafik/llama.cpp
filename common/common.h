@@ -122,6 +122,7 @@ struct common_grammar_trigger {
     std::string value;
     llama_token token = LLAMA_TOKEN_NULL;
 
+    // T can only be nlohmann::ordered_json
     template <class T> T to_json() const;
     template <class T> static common_grammar_trigger from_json(const T & in);
 };
@@ -337,6 +338,8 @@ struct common_params {
     bool no_kv_offload     = false; // disable KV offloading
     bool warmup            = true;  // warmup run
     bool check_tensors     = false; // validate tensor data
+
+    bool single_turn       = false; // single turn chat conversation
 
     ggml_type cache_type_k = GGML_TYPE_F16; // KV cache data type for the K
     ggml_type cache_type_v = GGML_TYPE_F16; // KV cache data type for the V

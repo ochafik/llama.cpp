@@ -1182,7 +1182,7 @@ void llama_grammar_accept_impl(struct llama_grammar & grammar, llama_token token
                     // std::string constrained_str(match[1].first, grammar.trigger_buffer.end());
                     grammar.trigger_buffer.clear();
                     llama_grammar_accept_str(grammar, constrained_str);
-                    LLAMA_LOG_DEBUG("Grammar triggered on regex: %s", constrained_str.c_str());
+                    LLAMA_LOG_DEBUG("Grammar triggered on regex: '%s'\n", constrained_str.c_str());
                     return;
                 }
             }

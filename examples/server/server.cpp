@@ -388,32 +388,33 @@ struct server_task {
                             trigger.value = (llama_token) token;
                             params.sampling.grammar_triggers.push_back(trigger);
                         } else {
+                            SRV_DBG("Grammar trigger word: `%s`\n", word.c_str());
                             params.sampling.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, word});
                         }
                     } else {
                         params.sampling.grammar_triggers.push_back(ct);
                     }
                 }
-                params.oaicompat_trigger_regexes.clear();
-                for (const auto & trigger : params.sampling.grammar_triggers) {
-                    switch (trigger.type) {
-                        case COMMON_GRAMMAR_TRIGGER_TYPE_WORD:
-                        case COMMON_GRAMMAR_TRIGGER_TYPE_TOKEN:
-                            params.oaicompat_trigger_regexes.push_back(regex_escape(trigger.value));
-                            break;
-                        case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN:
-                            params.oaicompat_trigger_regexes.push_back(common_regex(trigger.value));
-                            break;
-                        case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_START:
-                            params.oaicompat_trigger_regexes.push_back(common_regex(trigger.value, /* at_start= */ true));;
-                            break;
-                        default:
-                            throw std::runtime_error("Unsupported trigger type");
-                    }
+            }
+            params.oaicompat_trigger_regexes.clear();
+            for (const auto & trigger : params.sampling.grammar_triggers) {
+                switch (trigger.type) {
+                    case COMMON_GRAMMAR_TRIGGER_TYPE_WORD:
+                    case COMMON_GRAMMAR_TRIGGER_TYPE_TOKEN:
+                        params.oaicompat_trigger_regexes.push_back(regex_escape(trigger.value));
+                        break;
+                    case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN:
+                        params.oaicompat_trigger_regexes.push_back(common_regex(trigger.value));
+                        break;
+                    case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_START:
+                        params.oaicompat_trigger_regexes.push_back(common_regex(trigger.value, /* at_start= */ true));;
+                        break;
+                    default:
+                        throw std::runtime_error("Unsupported trigger type");
                 }
             }
-            if (params.sampling.grammar_lazy) {
-                GGML_ASSERT(!params.sampling.grammar_triggers.empty());
+            if (params.sampling.grammar_lazy && params.sampling.grammar_triggers.empty()) {
+                throw std::runtime_error("Error: no triggers set for lazy grammar!");
             }
         }
 
@@ -3066,7 +3067,7 @@ struct server_context {
                                             const int64_t kv_shift = (int64_t) head_p - (int64_t) head_c;
 
                                             llama_kv_cache_seq_rm (ctx, slot.id, head_p, head_c);
-                                            llama_kv_cache_seq_add(ctx, slot.id, head_c, -1,     kv_shift);
+                                            llama_kv_cache_seq_add(ctx, slot.id, head_c, head_c + n_match, kv_shift);
 
                                             for (size_t i = 0; i < n_match; i++) {
                                                 slot.cache_tokens[head_p + i] = slot.cache_tokens[head_c + i];
