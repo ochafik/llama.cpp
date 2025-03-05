@@ -498,7 +498,7 @@ std::string common_chat_format_name(common_chat_format format) {
     }
 }
 
-static std::optional<json> parse_json(std::string::const_iterator & it, const std::string::const_iterator & end) {
+static bool parse_json(std::string::const_iterator & it, const std::string::const_iterator & end, json & out) {
     // // https://json.nlohmann.me/features/parsing/sax_interface/
     struct json_error_locator : public nlohmann::json_sax<json> {
         std::size_t position;
@@ -535,11 +535,11 @@ static std::optional<json> parse_json(std::string::const_iterator & it, const st
     }
     std::string json_sub {it, temptative_end};
     try {
-        auto out = json::parse(json_sub);
+        out = json::parse(json_sub);
         it = temptative_end;
-        return out;
+        return true;
     } catch (const std::exception &) {
-        return std::nullopt;
+        return false;
     }
 }
 
@@ -572,93 +572,98 @@ static void consume_spaces(std::string::const_iterator & it, const std::string::
     }
 }
 
-static std::optional<json> parse_json_with_arguments(std::string::const_iterator & it, const std::string::const_iterator & end, bool is_partial, const std::function<bool(const json &)> & is_arguments_path) {
+static bool parse_json_with_arguments(std::string::const_iterator & it, const std::string::const_iterator & end, bool is_partial, const std::function<bool(const json &)> & is_arguments_path, json & out) {
     if (!is_partial) {
-        return parse_json(it, end);
-    } else {
-        std::function<std::optional<json>(json & path)> aux = [&](json & path) -> std::optional<json> {
-            consume_spaces(it, end);
-            if (parse_literal(it, end, "{")) {
-                GGML_ASSERT(!path.is_null());
-                json out = json::object();
-                while (it != end) {
-                    consume_spaces(it, end);
-                    const auto name = parse_json(it, end);
-                    if (!name || !name->is_string()) {
-                        break;
+        return parse_json(it, end, out);
+    }
+    std::function<bool(json & path, json & out)> aux = [&](json & path, json & out) -> bool {
+        consume_spaces(it, end);
+        if (parse_literal(it, end, "{")) {
+            GGML_ASSERT(!path.is_null());
+            out = json::object();
+            while (it != end) {
+                consume_spaces(it, end);
+                json name;
+                if (!parse_json(it, end, name) || !name.is_string()) {
+                    break;
+                }
+                consume_spaces(it, end);
+                if (!parse_literal(it, end, ":")) {
+                    break;
+                }
+                consume_spaces(it, end);
+                json value;
+                if (is_arguments_path(path)) {
+                    path.push_back(name);
+                    json sub;
+                    if (aux(path, sub)) {
+                        value = sub;
+                    } else {
+                        throw std::runtime_error("Failed to parse arguments at the current path");
                     }
-                    consume_spaces(it, end);
-                    if (!parse_literal(it, end, ":")) {
-                        break;
-                    }
-                    consume_spaces(it, end);
-                    json value;
-                    if (is_arguments_path(path)) {
-                        path.push_back(*name);
-                        if (auto sub = aux(path)) {
-                            value = *sub;
-                        } else {
-                            throw std::runtime_error("Failed to parse arguments at the current path");
-                        }
-                        // pop_back, json version
-                        path.erase(path.end() - 1);
-                    } else if (auto sub = parse_json(it, end)) {
-                        value = *sub;
+                    // pop_back, json version
+                    path.erase(path.end() - 1);
+                } else {
+                    json sub;
+                    if (parse_json(it, end, sub)) {
+                        value = sub;
                     } else if (is_partial) {
-                        return std::nullopt;
+                        return false;
                     } else {
                         throw std::runtime_error("Failed to parse json value at the current path");
                     }
-                    // if (!value) {
-                    //     break;
-                    // }
-                    out[*name] = value;
-                    consume_spaces(it, end);
-                    if (parse_literal(it, end, "}") || !parse_literal(it, end, ",")) {
-                        break;
-                    }
                 }
-                return out;
-            } else if (!path.is_null() && !path.empty() && path.at(0).is_number_integer() && path.at(0).get<int>() == -1 && parse_literal(it, end, "[")) {
-                json out = json::array();
-                size_t i = 0;
-                while (it != end) {
-                    consume_spaces(it, end);
-                    if (parse_literal(it, end, "]") || (it == end && is_partial)) {
-                        return out;
-                    }
-                    path.push_back(i++);
-                    auto value = aux(path);
-                    path.erase(path.end() - 1);
-                    if (!value) {
-                        if (is_partial) {
-                            return out;
-                        }
-                        throw std::runtime_error("Failed to parse element of json array at index " + std::to_string(out.size()));
-                    }
-                    out.push_back(*value);
-                    consume_spaces(it, end);
-                    if (!parse_literal(it, end, ",")) {
-                        if ((it == end && is_partial)) {
-                            return out;
-                        }
-                    }
-                    // TODO?
+                // if (!value) {
+                //     break;
+                // }
+                out[name] = value;
+                consume_spaces(it, end);
+                if (parse_literal(it, end, "}") || !parse_literal(it, end, ",")) {
+                    break;
                 }
-                if (is_partial) {
+            }
+            return true;
+        }
+        if (!path.is_null() && !path.empty() && path.at(0).is_number_integer() && path.at(0).get<int>() == -1 && parse_literal(it, end, "[")) {
+            out = json::array();
+            size_t i = 0;
+            while (it != end) {
+                consume_spaces(it, end);
+                if (parse_literal(it, end, "]") || (it == end && is_partial)) {
                     return out;
                 }
-                throw std::runtime_error("Failed to close json array");
-            } else if (!path.is_null() && path.empty()) {
-                // Failed to parse arguments at the current path.
-                return std::nullopt;
-            } else {
-                return parse_json(it, end);
+                path.push_back(i++);
+                json value;
+                auto got_value = aux(path, value);
+                path.erase(path.end() - 1);
+                if (!got_value) {
+                    if (is_partial) {
+                        return true;
+                    }
+                    throw std::runtime_error("Failed to parse element of json array at index " + std::to_string(out.size()));
+                }
+                out.push_back(value);
+                consume_spaces(it, end);
+                if (!parse_literal(it, end, ",")) {
+                    if ((it == end && is_partial)) {
+                        return out;
+                    }
+                }
+                // TODO?
             }
-        };
-        json path = json::array();
-        return aux(path);
-    }
+            if (is_partial) {
+                return true;
+            }
+            throw std::runtime_error("Failed to close json array");
+        } 
+        if (!path.is_null() && path.empty()) {
+            // Failed to parse arguments at the current path.
+            return false;
+        }
+        return parse_json(it, end, out);
+    };
+    json path = json::array();
+    return aux(path, out);
 }
 /**
  * Takes a prefix regex that must have 1 group to capture the function name, a closing suffix, and expects json parameters in between.
@@ -698,8 +703,8 @@ static common_chat_msg parse_json_tool_calls(
         result.content += std::string(it, rit->prefix().second);
         it = rit->suffix().first;
 
-        if (auto arguments = parse_json_with_arguments(it, end, is_partial, [](const json & value) { return value.empty(); })) {
-            consume_spaces(it, end);
+        json arguments;
+        if (parse_json(it, end, arguments)) {
             if (!std::regex_search(it, end, match, close_regex)) {
                 if (!is_partial) {
                     throw std::runtime_error("Malformed input, missing closing pattern: " + input);
@@ -709,7 +714,7 @@ static common_chat_msg parse_json_tool_calls(
             } else {
                 it = match.suffix().first;
             }
-            result.tool_calls.push_back({name, arguments->is_string() ? arguments->get<std::string>() : arguments->dump(), /* id= */ ""});
+            result.tool_calls.push_back({name, arguments.is_string() ? arguments.get<std::string>() : arguments.dump(), /* id= */ ""});
         } else {
             if (allow_raw_python && name == "python") {
                 auto arguments = json({{"code", std::string(it, end)}}).dump();
@@ -751,12 +756,13 @@ static common_chat_msg parse_prefixed_json_tool_call_array(const std::string& in
         auto sub_input = input.substr(tc_start);
         std::string::const_iterator it = sub_input.begin();
         const std::string::const_iterator end = sub_input.end();
-        auto tool_calls = parse_json_with_arguments(it, end, is_partial, [](const json & value) { return value.size() == 2 && value.at(1) == "arguments"; });
+        json tool_calls;
+        auto got_tool_calls = parse_json_with_arguments(it, end, is_partial, [](const json & value) { return value.size() == 2 && value.at(1) == "arguments"; }, tool_calls);
         consume_spaces(it, end);
-        if (!tool_calls || it != end) {
+        if (!got_tool_calls || it != end) {
             throw std::runtime_error("Failed to parse json tool calls: " + std::string(it, end));
         }
-        for (const auto & tool_call : *tool_calls) {
+        for (const auto & tool_call : tool_calls) {
             result.tool_calls.emplace_back(process_tool_call(tool_call));
         }
     }
@@ -890,31 +896,32 @@ static common_chat_params common_chat_params_init_generic(const common_chat_temp
 static common_chat_msg common_chat_parse_generic(const std::string & input, bool is_partial) {
     std::string::const_iterator it = input.begin();
     const std::string::const_iterator end = input.end();
-    auto data = parse_json_with_arguments(it, end, is_partial, [&](const json & value) {
+    json data;
+    auto got_data = parse_json_with_arguments(it, end, is_partial, [&](const json & value) {
         return (value.size() == 2 && value.at(0) == "tool_call" && value.at(1) == "arguments")
             || (value.size() == 3 && value.at(0) == "tool_calls" && value.at(2) == "arguments");
-    });
-    if (!data || it != end) {
+    }, data);
+    if (!got_data || it != end) {
         throw std::runtime_error("Failed to parse json tool calls: " + input);
     }
     common_chat_msg result;
     result.role = "assistant";
-    if (data->contains("tool_calls")) {
-        for (const auto & tool_call : data->at("tool_calls")) {
+    if (data.contains("tool_calls")) {
+        for (const auto & tool_call : data.at("tool_calls")) {
             result.tool_calls.push_back({
                 tool_call.at("name"),
                 tool_call.at("arguments").dump(),
                 tool_call.contains("id") ? tool_call.at("id") : "",
             });
         }
-    } else if (data->contains("tool_call")) {
+    } else if (data.contains("tool_call")) {
         result.tool_calls.push_back({
-            data->at("tool_call").at("name"),
-            data->at("tool_call").at("arguments").dump(),
+            data.at("tool_call").at("name"),
+            data.at("tool_call").at("arguments").dump(),
             /* id= */ "",
         });
-    } else if (data->contains("response")) {
-        const auto & response = data->at("response");
+    } else if (data.contains("response")) {
+        const auto & response = data.at("response");
         result.content = response.is_string() ? response.get<std::string>() : response.dump(2);
     }
     return result;
@@ -1056,14 +1063,15 @@ static common_chat_msg common_chat_parse_command_r7b(const std::string & input, 
         auto actions_str = match[1].str();
         std::string::const_iterator it = actions_str.begin();
         const std::string::const_iterator end = actions_str.end();
-        auto actions = parse_json_with_arguments(it, end, is_partial, [&](const json & value) {
+        json actions;
+        auto got_actions = parse_json_with_arguments(it, end, is_partial, [&](const json & value) {
             return (value.size() == 2 && value.at(1) == "parameters");
-        });
-        if (!actions || it != end) {
+        }, actions);
+        if (!got_actions || it != end) {
             throw std::runtime_error("Failed to parse json tool calls: " + actions_str);
         }
         // auto actions = json::parse(actions_str);
-        for (const auto & action : *actions) {
+        for (const auto & action : actions) {
             result.tool_calls.push_back({
                 /* .name = */      action.at("tool_name"),
                 /* .arguments = */ action.at("parameters").dump(),
@@ -1638,10 +1646,11 @@ static common_chat_msg common_chat_parse_hermes_2_pro(const std::string& input, 
             if (match[3].matched) {
                 close_tag = open_tag.empty() ? "" : "</" + open_tag.substr(1);
                 auto json_it = match[3].first;
-                auto tool_call = parse_json_with_arguments(json_it, end, is_partial, [](const json & value) { return value.size() == 1 && value.at(0) == "arguments"; });
-                if (tool_call && tool_call->contains("name") && tool_call->contains("arguments")) {
+                json tool_call;
+                auto got_tool_call = parse_json_with_arguments(json_it, end, is_partial, [](const json & value) { return value.size() == 1 && value.at(0) == "arguments"; }, tool_call);
+                if (got_tool_call && tool_call.contains("name") && tool_call.contains("arguments")) {
 
-                    msg.tool_calls.emplace_back(process_tool_call(*tool_call));
+                    msg.tool_calls.emplace_back(process_tool_call(tool_call));
                     it = json_it;  // Move iterator past parsed JSON
 
                     // Handle close tags
@@ -1670,10 +1679,11 @@ static common_chat_msg common_chat_parse_hermes_2_pro(const std::string& input, 
 
                 // Start parsing from after the opening tags
                 auto json_it = match[6].first;
-                if (auto arguments = parse_json_with_arguments(json_it, end, is_partial, [](const json & value) { return value.empty(); })) {
+                json arguments;
+                if (parse_json_with_arguments(json_it, end, is_partial, [](const json & value) { return value.empty(); }, arguments)) {
                     msg.tool_calls.emplace_back(process_tool_call({
                         {"name", function_name},
-                        {"arguments", *arguments},
+                        {"arguments", arguments},
                     }));
                     it = json_it;  // Move iterator past parsed JSON
 

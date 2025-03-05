@@ -597,10 +597,7 @@ static json oaicompat_completion_params_parse(
     llama_params["grammar_lazy"]     = chat_params.grammar_lazy;
     auto grammar_triggers = json::array();
     for (const auto & trigger : chat_params.grammar_triggers) {
-        grammar_triggers.push_back({
-            {"type", (int) trigger.type},
-            {"value", trigger.value},
-        });
+        grammar_triggers.push_back(trigger.to_json<json>());
     }
     llama_params["grammar_triggers"] = grammar_triggers;
     llama_params["preserved_tokens"] = chat_params.preserved_tokens;
