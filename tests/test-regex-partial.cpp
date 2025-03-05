@@ -1,6 +1,6 @@
 //  Tests common_regex (esp. its partial final matches support).
 
-#include "regex.h"
+#include "regex-partial.h"
 
 #include <sstream>
 #include <iostream>

@@ -1,4 +1,4 @@
-#include "regex.h"
+#include "regex-partial.h"
 #include "common.h"
 #include <functional>
 
