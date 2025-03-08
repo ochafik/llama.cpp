@@ -1,8 +1,10 @@
 #include "chat.h"
 #include "json-schema-to-grammar.h"
 #include "log.h"
+#include "json-partial.h"
 #include "minja/chat-template.hpp"
 #include "minja/minja.hpp"
+#include "regex-partial.h"
 
 #include <optional>
 
@@ -1605,7 +1607,7 @@ static common_chat_params common_chat_params_init_hermes_2_pro(const common_chat
     return data;
 }
 static common_chat_msg common_chat_parse_hermes_2_pro(const std::string& input, bool is_partial) {
-    const static std::regex open_regex(
+    const static common_regex open_regex(
         "(?:"
         "(```(?:xml|json)?\\n\\s*)?"         // match 1 (block_start)
         "(<tool_call>"                   // match 2 (open_tag)
@@ -1630,22 +1632,21 @@ static common_chat_msg common_chat_parse_hermes_2_pro(const std::string& input, 
 
     std::string::const_iterator it = input.begin();
     const std::string::const_iterator end = input.end();
-    std::smatch match;
 
     while (it != end) {
-        if (std::regex_search(it, end, match, open_regex)) {
-            // Add content before the match
-            msg.content += std::string(it, match[0].first);
+        auto match = open_regex.search(std::string(it, end));
+        if (match.type == COMMON_REGEX_MATCH_TYPE_FULL) {
+            msg.content += std::string(it, it + match.groups[0].start_pos);
 
-            auto block_start = match[1].str();
-            std::string block_end = block_start.empty() ? "" : "```";
+            const auto & block_start = match.groups[1];
+            std::string block_end = block_start.str.empty() ? "" : "```";
 
-            auto open_tag = match[2].str();
+            const auto & open_tag = match.groups[2];
             std::string close_tag;
 
-            if (match[3].matched) {
-                close_tag = open_tag.empty() ? "" : "</" + open_tag.substr(1);
-                auto json_it = match[3].first;
+            if (!match.groups[3].str.empty()) {
+                close_tag = open_tag.str.empty() ? "" : "</" + open_tag.str.substr(1);
+                auto json_it = it + match.groups[3].start_pos;
                 json tool_call;
                 auto got_tool_call = parse_json_with_arguments(json_it, end, is_partial, [](const json & value) { return value.size() == 1 && value.at(0) == "arguments"; }, tool_call);
                 if (got_tool_call && tool_call.contains("name") && tool_call.contains("arguments")) {
@@ -1665,20 +1666,20 @@ static common_chat_msg common_chat_parse_hermes_2_pro(const std::string& input, 
                     consume_spaces(it, end);
                 } else {
                     // Not a valid tool call, treat as content
-                    msg.content += std::string(match[0].first, match[0].second);
-                    it = match[0].second;
+                    msg.content += match.groups[0].str;//std::string(match[0].first, match[0].second);
+                    it += match.groups[0].end_pos;
                 }
             } else {
-                auto function_name = match[4].str();
+                auto function_name = match.groups[4].str;
                 if (function_name.empty()) {
-                    function_name = match[5].str();
+                    function_name = match.groups[5].str;
                 }
                 GGML_ASSERT(!function_name.empty());
 
                 close_tag = "</function>";
 
                 // Start parsing from after the opening tags
-                auto json_it = match[6].first;
+                auto json_it = it + match.groups[6].start_pos;
                 json arguments;
                 if (parse_json_with_arguments(json_it, end, is_partial, [](const json & value) { return value.empty(); }, arguments)) {
                     msg.tool_calls.emplace_back(process_tool_call({
@@ -1699,10 +1700,13 @@ static common_chat_msg common_chat_parse_hermes_2_pro(const std::string& input, 
                     consume_spaces(it, end);
                 } else {
                     // Not a valid tool call, treat as content
-                    msg.content += std::string(match[0].first, match[0].second);
-                    it = match[0].second;
+                    msg.content += match.groups[0].str;//std::string(match[0].first, match[0].second);
+                    it += match.groups[0].end_pos;
                 }
             }
+        } else if (match.type == COMMON_REGEX_MATCH_TYPE_PARTIAL && is_partial) {
+            // Partially matched opening regex in partial mode, skipping until there's more data.
+            break;
         } else {
             // Add remaining content
             msg.content += std::string(it, end);
@@ -1936,13 +1940,12 @@ std::optional<common_chat_msg> common_chat_parse(const std::string & input, bool
         size_t earliest_partial_trigger = std::string::npos;
 
         for (const auto & trigger_regex : trigger_regexes) {
-            if (auto match = trigger_regex.search(input)) {
-                if (!match->is_partial) {
-                    found_trigger = true;
-                    break;
-                }
-                if (match->pos < earliest_partial_trigger) {
-                    earliest_partial_trigger = match->pos;
+            auto match = trigger_regex.search(input);
+            if (match.type == COMMON_REGEX_MATCH_TYPE_PARTIAL) {
+                earliest_partial_trigger = std::min(earliest_partial_trigger, match.groups[0].start_pos);
+            } else if (match.type == COMMON_REGEX_MATCH_TYPE_FULL) {
+                if (match.groups[0].start_pos < earliest_partial_trigger) {
+                    earliest_partial_trigger = match.groups[0].start_pos;
                 }
             }
         }

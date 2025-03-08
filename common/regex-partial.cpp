@@ -8,32 +8,35 @@ common_regex::common_regex(const std::string & pattern, bool at_start) :
     rx_reversed_partial(regex_to_reversed_partial_regex(pattern)),
     at_start_(at_start) {}
 
-std::optional<common_regex_match> common_regex::search(const std::string & input) const {
+common_regex_match common_regex::search(const std::string & input) const {
     std::smatch match;
     if (std::regex_search(input, match, rx)) {
-        auto position = static_cast<size_t>(match.position());
-        if (at_start_ && position != 0) {
-            return std::nullopt;
+        if (!at_start_ || match.position() == 0) {
+            common_regex_match res;
+            res.type = COMMON_REGEX_MATCH_TYPE_FULL;
+            for (size_t i = 0; i < match.size(); ++i) {
+                common_regex_match_group group;
+                group.str = match[i].str();
+                group.start_pos = match.position(i);
+                group.end_pos = match.position(i) + match.length(i);
+                res.groups.push_back(group);
+            }
+            return res;
         }
-        return common_regex_match {
-            /* .pos = */ position,
-            /* .is_partial = */ false
-        };
     }
     std::match_results<std::string::const_reverse_iterator> srmatch;
     if (std::regex_match(input.rbegin(), input.rend(), srmatch, rx_reversed_partial)) {
         auto group = srmatch[1].str();
         auto it = srmatch[1].second.base();
         auto position = static_cast<size_t>(std::distance(input.begin(), it));
-        if (at_start_ && position != 0) {
-            return std::nullopt;
+        if (!at_start_ || position == 0) {
+            common_regex_match res;
+            res.type = COMMON_REGEX_MATCH_TYPE_PARTIAL;
+            res.groups.push_back({input.substr(position), position, input.size()});
+            return res;
         }
-        return common_regex_match {
-            /* .pos = */ position,
-            /* .is_partial = */ true
-        };
     }
-    return std::nullopt;
+    return {};
 }
 
 /*
@@ -75,11 +78,15 @@ std::string regex_to_reversed_partial_regex(const std::string &pattern) {
                         break;
                     }
                 }
-                if (it == end) throw std::runtime_error("Unmatched '[' in pattern");
+                if (it == end) {
+                    throw std::runtime_error("Unmatched '[' in pattern");
+                }
                 ++it;
                 sequence->push_back(std::string(start, it));
             } else if (*it == '*' || *it == '?') {
-                if (sequence->empty()) throw std::runtime_error("Quantifier without preceding element");
+                if (sequence->empty()) {
+                    throw std::runtime_error("Quantifier without preceding element");
+                }
                 sequence->back() += *it;
                 ++it;
                 if (*it == '?') {
@@ -93,19 +100,27 @@ std::string regex_to_reversed_partial_regex(const std::string &pattern) {
                     sequence->back() += '?';
                 }
             } else if (*it == '{') {
-                if (sequence->empty()) throw std::runtime_error("Repetition without preceding element");
+                if (sequence->empty()) {
+                    throw std::runtime_error("Repetition without preceding element");
+                }
                 ++it;
                 auto start = it;
                 while (it != end && *it != '}') {
                     ++it;
                 }
-                if (it == end) throw std::runtime_error("Unmatched '{' in pattern");
+                if (it == end) {
+                    throw std::runtime_error("Unmatched '{' in pattern");
+                }
                 auto parts = string_split(std::string(start, it), ",");
                 ++it;
-                if (parts.size() > 2) throw std::runtime_error("Invalid repetition range in pattern");
+                if (parts.size() > 2) {
+                    throw std::runtime_error("Invalid repetition range in pattern");
+                }
 
                 auto parseOptInt = [&](const std::string & s, const std::optional<int> & def = std::nullopt) -> std::optional<int> {
-                    if (s.empty()) return def;
+                    if (s.empty()) {
+                        return def;
+                    }
                     return std::stoi(s);
                 };
                 auto min = parseOptInt(parts[0], 0);
@@ -132,9 +147,11 @@ std::string regex_to_reversed_partial_regex(const std::string &pattern) {
                     it += 2;
                 }
                 auto sub = process();
-                if (*it != ')') throw std::runtime_error("Unmatched '(' in pattern");
+                if (*it != ')') {
+                    throw std::runtime_error("Unmatched '(' in pattern");
+                }
                 ++it;
-                auto & part = sequence->emplace_back("(");
+                auto & part = sequence->emplace_back("(?:");
                 part += sub;
                 part += ")";
             } else if (*it == ')') {
@@ -172,7 +189,9 @@ std::string regex_to_reversed_partial_regex(const std::string &pattern) {
         return string_join(res_alts, "|");
     };
     auto res = process();
-    if (it != end) throw std::runtime_error("Unmatched '(' in pattern");
+    if (it != end) {
+        throw std::runtime_error("Unmatched '(' in pattern");
+    }
 
     return "(" + res + ").*";
 }

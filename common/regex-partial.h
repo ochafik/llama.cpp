@@ -1,14 +1,29 @@
 #pragma once
 
-#include <optional>
 #include <regex>
 #include <string>
 
+enum common_regex_match_type {
+    COMMON_REGEX_MATCH_TYPE_NONE,
+    COMMON_REGEX_MATCH_TYPE_PARTIAL,
+    COMMON_REGEX_MATCH_TYPE_FULL,
+};
+
+struct common_regex_match_group {
+    std::string str;
+    size_t start_pos = std::string::npos;
+    size_t end_pos = std::string::npos;
+    bool operator==(const common_regex_match_group & other) const {
+        return str == other.str && start_pos == other.start_pos && end_pos == other.end_pos;
+    }
+};
+
 struct common_regex_match {
-    size_t pos;
-    bool is_partial;
+    common_regex_match_type type = COMMON_REGEX_MATCH_TYPE_NONE;
+    std::vector<common_regex_match_group> groups;
+
     bool operator==(const common_regex_match & other) const {
-        return pos == other.pos && is_partial == other.is_partial;
+        return type == other.type && groups == other.groups;
     }
     bool operator!=(const common_regex_match & other) const {
         return !(*this == other);
@@ -24,7 +39,7 @@ class common_regex {
   public:
     common_regex(const std::string & pattern, bool at_start = false);
 
-    std::optional<common_regex_match> search(const std::string & input) const;
+    common_regex_match search(const std::string & input) const;
 
     const std::string & str() const { return pattern; }
     bool at_start() const { return at_start_; }
