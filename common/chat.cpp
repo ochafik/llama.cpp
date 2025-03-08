@@ -1664,6 +1664,8 @@ static common_chat_msg common_chat_parse_hermes_2_pro(const std::string& input, 
                         throw std::runtime_error("Failed to parse block end");
                     }
                     consume_spaces(it, end);
+                } else if (is_partial) {
+                    break;
                 } else {
                     // Not a valid tool call, treat as content
                     msg.content += match.groups[0].str;//std::string(match[0].first, match[0].second);
@@ -1945,7 +1947,8 @@ std::optional<common_chat_msg> common_chat_parse(const std::string & input, bool
                 earliest_partial_trigger = std::min(earliest_partial_trigger, match.groups[0].start_pos);
             } else if (match.type == COMMON_REGEX_MATCH_TYPE_FULL) {
                 if (match.groups[0].start_pos < earliest_partial_trigger) {
-                    earliest_partial_trigger = match.groups[0].start_pos;
+                    found_trigger = true;
+                    break;
                 }
             }
         }
