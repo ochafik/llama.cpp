@@ -71,11 +71,14 @@ std::string regex_to_reversed_partial_regex(const std::string &pattern) {
         while (it != end) {
             if (*it == '[') {
                 auto start = it;
+                ++it;
                 while (it != end) {
                     if (*it == '\\' && (++it != end)) {
                         ++it;
                     } else if (*it == ']') {
                         break;
+                    } else {
+                        ++it;
                     }
                 }
                 if (it == end) {
@@ -83,21 +86,24 @@ std::string regex_to_reversed_partial_regex(const std::string &pattern) {
                 }
                 ++it;
                 sequence->push_back(std::string(start, it));
-            } else if (*it == '*' || *it == '?') {
+            } else if (*it == '*' || *it == '?' || *it == '+') {
                 if (sequence->empty()) {
                     throw std::runtime_error("Quantifier without preceding element");
                 }
                 sequence->back() += *it;
+                auto is_star = *it == '*';
                 ++it;
-                if (*it == '?') {
-                    ++it;
-                    // Convert initial reluctant quantifier to greedy to match as early as possible
-                    if (sequence->size() > 1) {
+                if (is_star) {
+                    if (*it == '?') {
+                        ++it;
+                        // Convert initial reluctant quantifier to greedy to match as early as possible
+                        if (sequence->size() > 1) {
+                            sequence->back() += '?';
+                        }
+                    } else {
+                        // Convert greedy quantifiers to reluctant to not miss any matches
                         sequence->back() += '?';
                     }
-                } else {
-                    // Convert greedy quantifiers to reluctant to not miss any matches
-                    sequence->back() += '?';
                 }
             } else if (*it == '{') {
                 if (sequence->empty()) {

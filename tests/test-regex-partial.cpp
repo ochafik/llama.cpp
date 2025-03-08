@@ -160,6 +160,26 @@ static void test_regex() {
 
 static void test_regex_to_reversed_partial_regex() {
     assert_equals<std::string>(
+        "(a+).*",
+        regex_to_reversed_partial_regex("a+"));
+
+    assert_equals<std::string>(
+        "(a*?).*",
+        regex_to_reversed_partial_regex("a*"));
+
+    assert_equals<std::string>(
+        "(a?).*",
+        regex_to_reversed_partial_regex("a?"));
+            
+    assert_equals<std::string>(
+        "([a-z]).*",
+        regex_to_reversed_partial_regex("[a-z]"));
+        
+    assert_equals<std::string>(
+        "((?:\\w+)?[a-z]).*",
+        regex_to_reversed_partial_regex("[a-z]\\w+"));
+    
+    assert_equals<std::string>(
         "((?:a|b)).*",
         regex_to_reversed_partial_regex("(?:a|b)"));
     assert_equals<std::string>(
@@ -183,7 +203,6 @@ static void test_regex_to_reversed_partial_regex() {
     assert_equals<std::string>(
         "((?:(?:(?:(?:(?:c)?b?)?b?)?b)?b)?a).*",
         regex_to_reversed_partial_regex("ab{2,4}c"));
-
 }
 
 int main() {
