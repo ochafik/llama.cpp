@@ -8,7 +8,7 @@
 template <class T> static void assert_equals(const T & expected, const T & actual) {
     if (expected != actual) {
         std::cerr << "Expected: " << expected << std::endl;
-        std::cerr << "Actual: " << actual << std::endl;
+        std::cerr << "  Actual: " << actual << std::endl;
         std::cerr << std::flush;
         throw std::runtime_error("Test failed");
     }
@@ -159,20 +159,31 @@ static void test_regex() {
 }
 
 static void test_regex_to_reversed_partial_regex() {
-    // - /abcd/ -> (dcba|cba|ba|a).* -> ((?:(?:(?:(?:d)?c)?b)?a).*
-    // - /a|b/ -> (a|b).*
-    // - /a*?/ -> error, could match ""
-    // - /a*b/ -> ((?:b)?a*+).* (final repetitions become eager)
-    // - /.*?ab/ -> ((?:b)?a).* (merge .*)
-    // - /a.*?b/ -> ((?:b)?.*?a).* (keep reluctant matches)
-    // - /a.*b/ ->  ((?:b)?.*?a).* (in fact any repetition becomes a reluctant match!)
-    // - /a(bc)d/ -> ((?:(?:d)?(?:(?:c)?b))?a).*
-    // - /a(bc|de)/ -> ((?:(?:(?:e)?d)?|(?:(?:c)?b)?)?a).*
-    // - /ab{2,4}c/ -> abbb?b?c -> ((?:(?:(?:(?:(?:c)?b)?b)?b?)?b?)?a).*
+    assert_equals<std::string>(
+        "((?:a|b)).*",
+        regex_to_reversed_partial_regex("(?:a|b)"));
+    assert_equals<std::string>(
+        "((?:(?:(?:d)?c)?b)?a).*",
+        regex_to_reversed_partial_regex("abcd"));
+    assert_equals<std::string>(
+        "((?:b)?a*?).*", // TODO: ((?:b)?a*+).* ??
+        regex_to_reversed_partial_regex("a*b"));
+    assert_equals<std::string>(
+        "((?:(?:b)?a)?.*).*",
+        regex_to_reversed_partial_regex(".*?ab"));
+    assert_equals<std::string>(
+        "((?:(?:b)?.*?)?a).*",
+        regex_to_reversed_partial_regex("a.*?b"));
+    assert_equals<std::string>(
+        "((?:(?:d)?(?:(?:c)?b))?a).*",
+        regex_to_reversed_partial_regex("a(bc)d"));
+    assert_equals<std::string>(
+        "((?:(?:(?:c)?b|(?:e)?d))?a).*",
+        regex_to_reversed_partial_regex("a(bc|de)"));
+    assert_equals<std::string>(
+        "((?:(?:(?:(?:(?:c)?b?)?b?)?b)?b)?a).*",
+        regex_to_reversed_partial_regex("ab{2,4}c"));
 
-    // std::string pattern = R"((?:(```(?:xml|json)?\\n\\s*)?(<tool_call>|<function_call>|<tool>|<tools>|<response>|<json>|<xml>|<JSON>)?(\\s*\\{\\s*\"name\"\\s*:[\\s\\S]*))|(?:<function=([^>]+)>|<function name=\"([^\"]+)\">)([\\s\\S]*))";
-    // const auto res = regex_to_reversed_partial_regex(pattern);
-    assert_equals<std::string>("((?:a|b)).*", regex_to_reversed_partial_regex("(?:a|b)"));
 }
 
 int main() {
