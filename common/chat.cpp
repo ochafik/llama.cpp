@@ -580,10 +580,7 @@ static common_chat_msg parse_json_tool_calls(
     }
 
     if (!result.tool_calls.empty()) {
-        if (!string_strip(result.content).empty()) {
-            LOG_WRN("Content found with tool calls: %s\n", result.content.c_str());
-        }
-        result.content = "";
+        result.content = string_strip(result.content);
     }
     return result;
 }
