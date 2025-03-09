@@ -1377,6 +1377,9 @@ static common_chat_params common_chat_params_init_phi_4(const common_chat_templa
         data.preserved_tokens = {
             "<|tool_call|>",
             "</|tool_call|>",
+            "<|tool_response|>",
+            "<|tool|>",
+            "</|tool|>",
         };
     });
 
