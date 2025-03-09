@@ -1359,14 +1359,15 @@ static common_chat_params common_chat_params_init_phi_4(const common_chat_templa
             std::string name = function.at("name");
             auto parameters = function.at("parameters");
             builder.resolve_refs(parameters);
-            tool_rules.push_back(builder.add_schema(name + "-call", {
+            auto call_rule = builder.add_schema(name + "-call", {
                 {"type", "object"},
                 {"properties", {
                     {"name", {{"const", name}}},
                     {"arguments", parameters},
                 }},
                 {"required", json::array({"name", "arguments"})},
-            }));
+            });
+            tool_rules.push_back(builder.add_rule(name + "-call", "\"<|tool_call|>\" " + call_rule + " \"<|/tool_call|>\""));
         });
         auto any_tool_call = builder.add_rule("any_tool_call", "( " + string_join(tool_rules, " | ") + " ) space");
         std::vector<std::string> alt_tags {
