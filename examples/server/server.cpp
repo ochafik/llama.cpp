@@ -1344,9 +1344,12 @@ struct server_slot {
         n_past             = 0;
         n_sent_text        = 0;
         task_type          = SERVER_TASK_TYPE_COMPLETION;
+        chat_format        = COMMON_CHAT_FORMAT_CONTENT_ONLY;
 
         generated_tokens.clear();
         generated_token_probs.clear();
+        generated_msg = std::nullopt;
+        json_schema = json();
     }
 
     bool is_non_causal() const {
