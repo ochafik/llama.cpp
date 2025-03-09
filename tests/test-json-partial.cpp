@@ -1,15 +1,41 @@
+#include "common.h"
 #include "json-partial.h"
+#include <exception>
 #include <iostream>
+#include <stdexcept>
 
 static void test_json_sax() {
   auto parse = [](const std::string & str) {
       std::cerr << "# Parsing: " << str << '\n';
       std::string::const_iterator it = str.begin();
       const auto end = str.end();
-      return common_json::parse(it, end);
+      common_json out;
+      if (common_json_parse(it, end, /* allow_healing= */ true, out)) {
+          auto dump = out.json.dump();
+          std::cerr << "Parsed: " << dump << '\n';
+          std::cerr << "Magic: " << out.json_healing_marker << '\n';
+          std::string result;
+          if (!out.json_healing_marker.empty()) {
+              auto i = dump.find(out.json_healing_marker);
+              if (i == std::string::npos) {
+                  throw std::runtime_error("Failed to find magic in dump " + dump + " (magic: " + out.json_healing_marker + ")");
+              }
+              result = dump.substr(0, i);
+          } else {
+            result = dump;
+          }
+          std::cerr << "Result: " << result << '\n';
+          if (string_starts_with(str, result)) {
+            std::cerr << "Failure!\n";
+          }
+        //   return dump;
+      } else {
+        throw std::runtime_error("Failed to parse: " + str);
+      }
+      
   };
   auto parse_all = [&](const std::string & str) {
-      for (size_t i = 1; i < str.size() - 1; i++) {
+      for (size_t i = 1; i < str.size(); i++) {
           parse(str.substr(0, i));
       }
   };
