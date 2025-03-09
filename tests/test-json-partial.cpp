@@ -10,7 +10,8 @@ static void test_json_sax() {
       std::string::const_iterator it = str.begin();
       const auto end = str.end();
       common_json out;
-      if (common_json_parse(it, end, /* allow_healing= */ true, out)) {
+      std::string healing_marker = "$llama.cpp.json$";
+      if (common_json_parse(it, end, healing_marker, out)) {
           auto dump = out.json.dump();
           std::cerr << "Parsed: " << dump << '\n';
           std::cerr << "Magic: " << out.json_healing_marker << '\n';

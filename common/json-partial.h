@@ -1,6 +1,4 @@
 #include <json.hpp>
-#include <variant>
-#include <optional>
 
 struct common_json {
     nlohmann::ordered_json json;
@@ -11,5 +9,5 @@ struct common_json {
 bool common_json_parse(
     std::string::const_iterator & it,
     const std::string::const_iterator & end,
-    bool allow_healing,
+    const std::string & healing_marker,
     common_json & out);

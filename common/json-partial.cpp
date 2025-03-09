@@ -1,16 +1,26 @@
-#include "common.h"
 #include <json-partial.h>
-#include <variant>
-#include <optional>
+#include "ggml.h"
+#include <string>
 
 #include <json.hpp>
 
 using json = nlohmann::ordered_json;
 
+enum common_json_stack_element_type {
+    COMMON_JSON_STACK_ELEMENT_OBJECT,
+    COMMON_JSON_STACK_ELEMENT_KEY,
+    COMMON_JSON_STACK_ELEMENT_ARRAY,
+};
+
+struct common_json_stack_element {
+    common_json_stack_element_type type;
+    std::string key;
+};
+
 bool common_json_parse(
     std::string::const_iterator & it,
     const std::string::const_iterator & end,
-    bool allow_healing,
+    const std::string & healing_marker,
     common_json & out)
 {
     // // https://json.nlohmann.me/features/parsing/sax_interface/
@@ -19,8 +29,7 @@ bool common_json_parse(
         bool found_error;
         std::string last_token;
         std::string exception_message;
-        std::vector<std::optional<std::string>> name_stack;
-        std::vector<std::string> closing_stack;
+        std::vector<common_json_stack_element> stack;
 
         json_error_locator() : position(0), found_error(false) {}
 
@@ -32,8 +41,8 @@ bool common_json_parse(
             return false;
         }
         void close_value() {
-            if (!closing_stack.empty() && closing_stack.back().empty()) {
-                closing_stack.pop_back();
+            if (!stack.empty() && (stack.back().type == COMMON_JSON_STACK_ELEMENT_KEY)) {
+                stack.pop_back();
             }
         }
         bool null() override { // NOLINT
@@ -65,31 +74,26 @@ bool common_json_parse(
             return true;
         }
         bool start_object(std::size_t) override { // NOLINT
-            closing_stack.push_back("}");
-            // name_stack.emplace_back(std::nullopt);
+            stack.push_back({COMMON_JSON_STACK_ELEMENT_OBJECT, ""});
             return true;
         }
         bool end_object() override { 
-            GGML_ASSERT(closing_stack.back() == "}");
-            closing_stack.pop_back();
-            // name_stack.pop_back();
+            GGML_ASSERT(!stack.empty() && stack.back().type == COMMON_JSON_STACK_ELEMENT_OBJECT);
+            stack.pop_back();
             close_value();
             return true;
         }
-        bool key(string_t &) override { // NOLINT
-            closing_stack.emplace_back("");
-            // name_stack.back() = key;
+        bool key(string_t & key) override { // NOLINT
+            stack.push_back({COMMON_JSON_STACK_ELEMENT_KEY, key});
             return true;
         }
         bool start_array(std::size_t) override { // NOLINT
-            closing_stack.push_back("]");
-            // name_stack.emplace_back(std::nullopt);
+            stack.push_back({COMMON_JSON_STACK_ELEMENT_ARRAY, ""});
             return true;
         }
         bool end_array() override {
-            GGML_ASSERT(closing_stack.back() == "]");
-            closing_stack.pop_back();
-            // name_stack.pop_back();
+            GGML_ASSERT(!stack.empty() && stack.back().type == COMMON_JSON_STACK_ELEMENT_ARRAY);
+            stack.pop_back();
             close_value();
             return true;
         }
@@ -110,7 +114,7 @@ bool common_json_parse(
                 return false;
             }
         };
-        if (allow_healing && !err_loc.closing_stack.empty()) {
+        if (!healing_marker.empty() && !err_loc.stack.empty()) {
             std::string str(it, temptative_end);
             auto last_non_sp_pos = str.find_last_not_of(" \n\r\t");
             if (last_non_sp_pos == std::string::npos) {
@@ -118,28 +122,35 @@ bool common_json_parse(
             }
             auto last_non_sp_char = str[last_non_sp_pos];
 
-            auto rstack = err_loc.closing_stack;
-            std::reverse(rstack.begin(), rstack.end());
-            auto closing = string_join(rstack, "");
-            fprintf(stderr, "Closing: '%s'\n", closing.c_str());
+            std::string closing;
+            for (size_t i = err_loc.stack.size(); i > 0; i--) {
+                auto & el = err_loc.stack[i - 1];
+                if (el.type == COMMON_JSON_STACK_ELEMENT_OBJECT) {
+                    closing += "}";
+                } else if (el.type == COMMON_JSON_STACK_ELEMENT_ARRAY) {
+                    closing += "]";
+                } else if (el.type != COMMON_JSON_STACK_ELEMENT_KEY) {
+                    throw std::runtime_error("Unexpected stack element type");
+                }
+            }
 
-            const auto & magic_seed = out.healing_marker = "$llama.cpp.json$";
+            const auto & magic_seed = out.healing_marker = healing_marker;//"$llama.cpp.json$";
             
-            if (err_loc.closing_stack.back().empty()) {
+            if (err_loc.stack.back().type == COMMON_JSON_STACK_ELEMENT_KEY) {
                 // We're inside an object value
                 if (last_non_sp_char == ':') {
-                    fprintf(stderr, "Was about to create an object value\n");
+                    // Was about to create an object value
                     str += (out.json_healing_marker = "\"" + magic_seed) + "\"" + closing;
                 } else if (can_parse(str + ": 1" + closing)) {
                     str += (out.json_healing_marker = ":\"" + magic_seed) + "\"" + closing;
                 } else if (last_non_sp_char == '{') {
-                    fprintf(stderr, "Was about to create an object\n");
+                    // Was about to create an object
                     str += (out.json_healing_marker = "\"" + magic_seed) + "\": 1" + closing;
                 } else if (can_parse(str + "\"" + closing)) {
-                    fprintf(stderr, "Was inside an object value string\n");
+                    // Was inside an object value string
                     str += (out.json_healing_marker = magic_seed) + "\"" + closing;
                 } else if (str[str.length() - 1] == '\\' && can_parse(str + "\\\"" + closing)) {
-                    fprintf(stderr, "Was inside an object value string after an escape\n");
+                    // Was inside an object value string after an escape
                     str += (out.json_healing_marker = "\\" + magic_seed) + "\"" + closing;
                 } else {
                     // find last :
@@ -147,39 +158,39 @@ bool common_json_parse(
                     if (last_pos == std::string::npos) {
                         throw std::runtime_error("Cannot heal a truncated JSON that stopped in an unknown location");
                     }
-                    fprintf(stderr, "Cutting back to opening : for object value\n");
+                    // Cutting back to opening : for object value
                     str = str.substr(0, last_pos + 1) + (out.json_healing_marker = "\\" + magic_seed) + "\": 1" + closing;
                 }
-            } else if (err_loc.closing_stack.back() == "]") {
+            } else if (err_loc.stack.back().type == COMMON_JSON_STACK_ELEMENT_ARRAY) {
                 if (last_non_sp_char == ',' || last_non_sp_char == '[') {
-                    fprintf(stderr, "Was about to create an array value\n");
+                    // Was about to create an array value
                     str += (out.json_healing_marker = "\"" + magic_seed) + "\"" + closing;
                 } else if (can_parse(str + "\"" + closing)) {
-                    fprintf(stderr, "Was inside an array value string\n");
+                    // Was inside an array value string
                     str += (out.json_healing_marker = magic_seed) + "\"" + closing;
                 } else if (str[str.length() - 1] == '\\' && can_parse(str + "\\\"" + closing)) {
-                    fprintf(stderr, "Was inside an array value string after an escape\n");
+                    // Was inside an array value string after an escape
                     str += (out.json_healing_marker = "\\" + magic_seed) + "\"" + closing;
                 } else {
                     auto last_pos = str.find_last_of("[,");
                     if (last_pos == std::string::npos) {
                         throw std::runtime_error("Cannot heal a truncated JSON array stopped in an unknown location");
                     }
-                    fprintf(stderr, "Cutting back to last [ or , for array value\n");
+                    // Cutting back to last [ or , for array value
                     str = str.substr(0, last_pos + 1) + (out.json_healing_marker = "\"" + magic_seed) + "\"" + closing;
                 }
-            } else if (err_loc.closing_stack.back() == "}") {
+            } else if (err_loc.stack.back().type == COMMON_JSON_STACK_ELEMENT_OBJECT) {
                 if (last_non_sp_char == ',' || last_non_sp_char == '{') {
-                    fprintf(stderr, "Was about to create an object key+value\n");
+                    // Was about to create an object key+value
                     str += (out.json_healing_marker = "\"" + magic_seed) + "\": 1" + closing;
                 } else if (can_parse(str + ",\"\": 1" + closing)) {
-                    fprintf(stderr, "Was about to create an object key+value\n");
+                    // Was about to create an object key+value
                     str += (out.json_healing_marker = ",\"" + magic_seed) + "\": 1" + closing;
                 } else if (can_parse(str + "\": 1" + closing)) {
-                    fprintf(stderr, "Was inside an object key string\n");
+                    // Was inside an object key string
                     str += (out.json_healing_marker = magic_seed) + "\": 1" + closing;
                 } else if (str[str.length() - 1] == '\\' && can_parse(str + "\\\"" + closing)) {
-                    fprintf(stderr, "Was inside an object key string after an escape\n");
+                    // Was inside an object key string after an escape
                     str += (out.json_healing_marker = "\\" + magic_seed) + "\": 1" + closing;
                 } else {
                     auto last_pos = str.find_last_of(':');
@@ -188,7 +199,6 @@ bool common_json_parse(
                     }
                     fprintf(stderr, "Cutting back to last : for object key+value\n");
                     str = str.substr(0, last_pos + 1) + (out.json_healing_marker = "\"" + magic_seed) + "\"" + closing;
-                    // throw std::runtime_error("Cannot heal a truncated JSON object stopped in an unknown location");
                 }
             } else {
                 throw std::runtime_error("Cannot heal a truncated JSON object stopped in an unknown location");
@@ -203,7 +213,6 @@ bool common_json_parse(
     } else {
         temptative_end = end;
     }
-    // std::string json_sub {it, temptative_end};
     try {
         out.json = json::parse(it, temptative_end);
         it = temptative_end;
