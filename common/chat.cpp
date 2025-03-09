@@ -1438,89 +1438,9 @@ static common_chat_params common_chat_params_init_phi_4(const common_chat_templa
 }
 
 static common_chat_msg common_chat_parse_phi_4(const std::string & input) {
-    common_chat_msg result;
-    result.role = "assistant";
-    
-    std::string final_content = "";
-    
-    const std::string opening_tag = "<|tool_call|>";
-    const std::string closing_tag = "</|tool_call|>";
-    
-    size_t start_pos = 0;
-    while (true) {
-        // Find next tool call
-        size_t tool_start = input.find(opening_tag, start_pos);
-        if (tool_start == std::string::npos) {
-            // No more tool calls.
-
-            // Is start_pos within string bounds?
-            if (start_pos < input.length()) {
-                // Add the rest of the string to final_content
-                final_content += input.substr(start_pos);
-            }
-            break;
-        }
-        
-        // Add content before the tool call to final_content
-        final_content += input.substr(start_pos, tool_start - start_pos);
-
-        // Find closing tag
-        size_t content_start = tool_start + opening_tag.length();
-        size_t tool_end = input.find(closing_tag, content_start);
-        
-        if (tool_end == std::string::npos) {
-            // No closing tag found, so just include the rest of the string as tool.
-            tool_end = input.length();
-        }
-        
-        // Extract tool call content
-        std::string tool_content = input.substr(
-            content_start,
-            tool_end - content_start
-        );
-        
-        // Try to parse the tool call
-        try {
-            auto tool_call = json::parse(tool_content);
-            
-            // Verify the required fields exist
-            if (!tool_call.contains("name")) {
-                throw std::runtime_error("Missing 'name' field in tool call");
-            }
-            
-            if (!tool_call.contains("arguments")) {
-                throw std::runtime_error("Missing 'arguments' field in tool call");
-            }
-            
-            std::string name = tool_call["name"].get<std::string>();
-            
-            std::string arguments;
-            try {
-                arguments = tool_call["arguments"].dump();
-            } catch (const std::exception & e) {
-                LOG_ERR("Failed to serialize arguments: %s\n", e.what());
-                arguments = "{}";
-            }
-            
-            result.tool_calls.push_back({
-                name,
-                arguments,
-                /* id= */ "",
-            });
-        } catch (const std::exception & e) {
-            // If parsing fails, include the entire tool call in the content
-            final_content += input.substr(
-                tool_start,
-                tool_end + closing_tag.length() - tool_start
-            );
-        }
-        
-        // Move past this tool call for next iteration
-        start_pos = tool_end + closing_tag.length();
-    }
-    
-    result.content = final_content;
-    return result;
+    static std::regex function_regex("<\\|tool_call\\|>\\s*\\{\\s*\"name\"\\s*:\\s*\"([^\"]+)\"\\s*,\\s*\"arguments\"\\s*:");
+    static std::regex close_regex(R"(\}\s*(</\|tool_call\|>)?)");
+    return parse_json_tool_calls(input, std::nullopt, function_regex, close_regex);
 }
 
 
