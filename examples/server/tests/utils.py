@@ -24,14 +24,84 @@ from typing import (
 )
 from re import RegexFlag
 import wget
-
+from dataclasses import dataclass
 
 DEFAULT_HTTP_TIMEOUT = 12
 
 if "LLAMA_SANITIZE" in os.environ or "GITHUB_ACTION" in os.environ:
     DEFAULT_HTTP_TIMEOUT = 30
 
+@dataclass
+class ReconstructedChatCompletion:
+    completion: str #ChatCompletion
+    content_parts: int
+    tool_call_parts: int
+    arguments_parts: int
 
+def collect_stream(*, base_url: str, **kwargs) -> ReconstructedChatCompletion:
+    from openai import OpenAI
+    from openai.types.chat.chat_completion import Choice
+    from openai.types.chat import ChatCompletion, ChatCompletionMessage
+    from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall, Function
+
+    client = OpenAI(base_url=base_url, api_key="...")
+    stream = client.chat.completions.create(**kwargs)
+    content: list[str] = []
+    tool_calls: list[ChatCompletionMessageToolCall] = []
+    finish_reason: Optional[str] = None
+    
+    content_parts = 0
+    tool_call_parts = 0
+    arguments_parts = 0
+    
+    for chunk in stream:
+        assert len(chunk.choices) == 1, f'Expected 1 choice, got {len(chunk.choices)}'
+        choice = chunk.choices[0]
+        if choice.delta.content is not None:
+            assert len(choice.delta.content) > 0, f'Expected non empty content delta!'
+            content.append(choice.delta.content)
+            content_parts += 1
+        if choice.delta.finish_reason is not None:
+            finish_reason = choice.delta.finish_reason
+        for tc in choice.delta.tool_call or []:
+            if tc.index >= len(tool_calls):
+                tool_calls.append(ChatCompletionMessageToolCall(
+                    id="",
+                    type="function",
+                    function=Function(
+                        name="",
+                        arguments="",
+                    )
+                ))
+            tool_call = tool_calls[tc.index]
+            if tc.name is not None:
+                tool_call.name = tc.name
+            if tc.id is not None:
+                tool_call.id = tc.id
+            if tc.arguments is not None:
+                assert len(tc.arguments) > 0, f'Expected non empty arguments delta!'
+                tool_call.arguments += tc.arguments
+        
+    return ReconstructedChatCompletion(
+        completion=ChatCompletion(
+            choices=[
+                Choice(
+                    index=0,
+                    finish_reason=finish_reason,
+                    message=ChatCompletionMessage(
+                        role='assistant',
+                        content=''.join(content),
+                        tool_calls=tool_calls,
+                    ),
+                )
+            ],
+        ).to_json(),
+        content_parts=content_parts,
+        tool_call_parts=tool_call_parts,
+        arguments_parts=arguments_parts,
+    )
+    
+    
 class ServerResponse:
     headers: dict
     status_code: int
