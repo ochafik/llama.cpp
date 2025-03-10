@@ -2378,8 +2378,9 @@ struct server_context {
         auto previous_msg = slot.generated_msg;
         SRV_DBG("Parsing chat message: %s\n", slot.generated_text.c_str());
         auto new_msg = common_chat_parse(slot.generated_text, /* is_partial= */ true, slot.params.oaicompat_chat_format, slot.params.oaicompat_trigger_regexes);
-        slot.generated_msg = new_msg;
-
+        if (new_msg) {
+            slot.generated_msg = new_msg;
+        }
         res->oaicompat_previous_msg = previous_msg;
         res->oaicompat_new_msg      = new_msg ? new_msg : previous_msg;
 
