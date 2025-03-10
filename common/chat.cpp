@@ -916,7 +916,7 @@ static common_chat_msg common_chat_parse_generic(const std::string & input, bool
             }
         }
     } else if (data.json.contains("tool_call")) {
-        const auto & tc = data.json;
+        const auto & tc = data.json.at("tool_call");
 
         common_chat_tool_call tool_call;
         if (process_tool_call(
