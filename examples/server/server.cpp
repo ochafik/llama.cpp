@@ -1012,7 +1012,9 @@ struct server_task_result_cmpl_partial : server_task_result {
                     if (!diff.tool_call_delta.id.empty()) {
                         function["id"] = diff.tool_call_delta.id;
                     }
-                    function["arguments"] = diff.tool_call_delta.arguments;
+                    if (!diff.tool_call_delta.arguments.empty()) {
+                        function["arguments"] = diff.tool_call_delta.arguments;
+                    }
                     delta["tool_calls"] = json::array({
                         json {
                             {"index", diff.tool_call_index},
