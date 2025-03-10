@@ -13,7 +13,7 @@ static std::string string_diff(const std::string & last, const std::string & cur
         return current;
     }
     if (!string_starts_with(current, last)) {
-        throw std::runtime_error("Invalid diff");
+        throw std::runtime_error("Invalid diff: '" + last + "' not found at start of '" + current + "'");
     }
     return current.substr(last.size());
 }
@@ -711,26 +711,36 @@ static common_chat_msg parse_json_tool_calls(
     return result;
 }
 
-static bool process_tool_call(const std::string & name, const std::string & id, const std::string & arguments, const std::string & json_healing_marker, common_chat_tool_call & out) {
+static bool process_tool_call(const std::string & name, const std::string & id, const std::string & arguments, const common_json & healed_json, common_chat_tool_call & out) {
     if (name.empty()) {
         return false;
     }
 
-    auto marker_idx = json_healing_marker.empty() ? std::string::npos : arguments.find(json_healing_marker);
+    auto marker_idx = std::string::npos;
+    if (!arguments.empty() && !healed_json.healing_marker.empty()) {
+        marker_idx = arguments.find(healed_json.json_healing_marker);
+        if (marker_idx == std::string::npos) {
+            marker_idx = arguments.find(healed_json.healing_marker);
+        }
+    }
     out = {
         /* .name = */ name,
         /* .arguments = */ marker_idx != std::string::npos ? arguments.substr(0, marker_idx) : arguments,
         /* .id = */ id,
     };
+    if (out.arguments == "\"") {
+        // This happens because of completing `:"$magic` after `"arguments"`
+        out.arguments = "";
+    }
     return true;
 }
 
-static bool process_tool_call(const json & tool_call, const std::string & json_healing_marker, common_chat_tool_call & out) {
+static bool process_tool_call(const json & tool_call, const common_json & healed_json, common_chat_tool_call & out) {
     return process_tool_call(
         tool_call.contains("name") ? tool_call.at("name") : "",
         tool_call.contains("id") ? tool_call.at("id") : "",
         tool_call.contains("arguments") ? tool_call.at("arguments").dump() : "",
-        json_healing_marker,
+        healed_json,
         out);
 }
 
@@ -756,7 +766,7 @@ static common_chat_msg parse_prefixed_json_tool_call_array(const std::string& in
         }
         for (const auto & tool_call : tool_calls.json) {
             common_chat_tool_call json_tool_call;
-            if (!process_tool_call(tool_call, tool_calls.json_healing_marker, json_tool_call)) {
+            if (!process_tool_call(tool_call, tool_calls, json_tool_call)) {
                 continue;
             }
             result.tool_calls.push_back(json_tool_call);
@@ -909,7 +919,7 @@ static common_chat_msg common_chat_parse_generic(const std::string & input, bool
                 tc.contains("name") ? tc.at("name") : "",
                 tc.contains("id") ? tc.at("id") : "",
                 tc.contains("arguments") ? tc.at("arguments").dump() : "",
-                data.json_healing_marker,
+                data,
                 tool_call))
             {
                 result.tool_calls.push_back(tool_call);
@@ -923,7 +933,7 @@ static common_chat_msg common_chat_parse_generic(const std::string & input, bool
             tc.contains("name") ? tc.at("name") : "",
             tc.contains("id") ? tc.at("id") : "",
             tc.contains("arguments") ? tc.at("arguments").dump() : "",
-            data.json_healing_marker,
+            data,
             tool_call))
         {
             result.tool_calls.push_back(tool_call);
@@ -1668,7 +1678,7 @@ static common_chat_msg common_chat_parse_hermes_2_pro(const std::string& input, 
                 common_json partial_tool_call;
                 common_chat_tool_call tool_call;
                 if (parse_json_with_arguments(json_it, end, is_partial, [](const std::vector<std::string> & path) { return path.size() == 1 && path[0] == "arguments"; }, partial_tool_call) &&
-                    process_tool_call(partial_tool_call.json, partial_tool_call.json_healing_marker, tool_call))
+                    process_tool_call(partial_tool_call.json, partial_tool_call, tool_call))
                 {
                     msg.tool_calls.emplace_back(std::move(tool_call));
                     it = json_it;  // Move iterator past parsed JSON
@@ -1708,7 +1718,7 @@ static common_chat_msg common_chat_parse_hermes_2_pro(const std::string& input, 
                     it = json_it;  // Move iterator past parsed JSON
 
                     common_chat_tool_call tool_call;
-                    if (process_tool_call(function_name, "", arguments.json.dump(), arguments.json_healing_marker, tool_call)) {
+                    if (process_tool_call(function_name, "", arguments.json.dump(), arguments, tool_call)) {
                         msg.tool_calls.emplace_back(tool_call);
 
                         // Handle close tags
