@@ -670,7 +670,6 @@ static common_chat_msg parse_json_tool_calls(
     common_chat_msg result;
     result.role = "assistant";
 
-
     auto end = input.end();
     auto it = input.begin();
 
@@ -683,14 +682,15 @@ static common_chat_msg parse_json_tool_calls(
             }
             it = input.begin() + match.groups[0].end_pos;
         } else {
-            throw std::runtime_error("Failed to parse json tool calls");
+            result.content = input;
+            return result;
         }
     }
 
     while (it != end) {
         auto match = function_regex.search(std::string(it, end));
         if (match.type == COMMON_REGEX_MATCH_TYPE_NONE && !is_partial) {
-            throw std::runtime_error("Failed to parse json tool calls");
+            break;
         }
         result.content += std::string(it, it + match.groups[0].start_pos);
         if (match.type == COMMON_REGEX_MATCH_TYPE_PARTIAL && is_partial) {
@@ -751,10 +751,7 @@ static common_chat_msg parse_json_tool_calls(
     }
 
     if (!result.tool_calls.empty()) {
-        if (!string_strip(result.content).empty()) {
-            LOG_WRN("Content found with tool calls: %s\n", result.content.c_str());
-        }
-        result.content = "";
+        result.content = string_strip(result.content);
     }
     return result;
 }
