@@ -10,8 +10,13 @@ common_regex::common_regex(const std::string & pattern, bool at_start) :
 
 common_regex_match common_regex::search(const std::string & input, size_t pos, bool as_match) const {
     std::smatch match;
+    if (pos > input.size()) {
+        throw std::runtime_error("Position out of bounds");
+    }
     auto start = input.begin() + pos;
-    auto found = as_match ? std::regex_match(start, input.end(), match, rx) : std::regex_search(start, input.end(), match, rx);
+    auto found = as_match
+        ? std::regex_match(start, input.end(), match, rx)
+        : std::regex_search(start, input.end(), match, rx);
     if (found) {
         if (as_match || !at_start_ || match.position() == 0) {
             common_regex_match res;
