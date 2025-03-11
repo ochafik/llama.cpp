@@ -95,9 +95,18 @@ struct common_chat_msg_parser {
         return rest;
     }
 
+    // Tries to find the regex, consumes it (pos right after it) and gives the prelude (right before it) and the groups to the callback.
     bool try_find_regex(const common_regex & regex, const std::function<void(const std::string & prelude, const common_regex_match_groups & groups)> & callback);
 
-    void consume_regex(const common_regex & regex, const std::function<void(const common_regex_match_groups & groups)> & callback);
+    // Consumes the regex from the current pos.
+    void consume_regex(const common_regex & regex, const std::function<void(const common_regex_match_groups & groups)> & callback) {
+        if (!regex.at_start()) {
+            throw std::runtime_error("consume_regex requires a common_regex w/ at_start=true");
+        }
+        auto m = regex.find(input, pos);
+        
+        throw std::runtime_error("Not implemented");
+    }
 
     bool try_consume_regex(const common_regex & regex, const std::function<void(const common_regex_match_groups & groups)> & callback);
 
