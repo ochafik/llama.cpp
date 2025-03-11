@@ -129,7 +129,9 @@ struct common_chat_msg_parser {
         auto prelude = input.substr(pos, m.groups[0].begin);
         pos += m.groups[0].end;
 
-        callback(prelude, m.groups);
+        if (callback) {
+            callback(prelude, m.groups);
+        }
         return true;
     }
 
@@ -153,7 +155,9 @@ struct common_chat_msg_parser {
         }
         pos += m.groups[0].end;
 
-        callback(m.groups);
+        if (callback) {
+            callback(m.groups);
+        }
         return true;
     }
 
@@ -181,7 +185,9 @@ struct common_chat_msg_parser {
         pos = std::distance(input.begin(), it);
         if (result.healing_marker.empty()) {
             // No healing marker, just return the parsed json
-            callback(result);
+            if (callback) {
+                callback(result);
+            }
             return true;
         }
         if (!is_partial) {
@@ -253,8 +259,9 @@ struct common_chat_msg_parser {
             result.json = remove_unsupported_healings(result.json);
         }
         fprintf(stderr, "Half-healed json: %s\n", result.json.dump().c_str());
-        callback(result);
-
+        if (callback) {
+            callback(result);
+        }
         return true;
     }
 };
