@@ -778,10 +778,14 @@ static bool parse_json(std::string::const_iterator & it, const std::string::cons
     }
 }
 
-static bool process_tool_call(const std::string & name, const std::string & id, const std::string & arguments, const common_json & healed_json, common_chat_tool_call & out) {
+static bool process_tool_call(const json & tool_call, const common_json & healed_json, common_chat_tool_call & out) {
+    auto name = tool_call.contains("name") ? tool_call.at("name") : "";
     if (name.empty()) {
         return false;
     }
+
+    auto id = tool_call.contains("id") ? tool_call.at("id") : "";
+    auto arguments = tool_call.contains("arguments") ? tool_call.at("arguments").dump() : "";
 
     auto marker_idx = std::string::npos;
     if (!arguments.empty() && !healed_json.healing_marker.empty()) {
@@ -800,15 +804,6 @@ static bool process_tool_call(const std::string & name, const std::string & id, 
         out.arguments = "";
     }
     return true;
-}
-
-static bool process_tool_call(const json & tool_call, const common_json & healed_json, common_chat_tool_call & out) {
-    return process_tool_call(
-        tool_call.contains("name") ? tool_call.at("name") : "",
-        tool_call.contains("id") ? tool_call.at("id") : "",
-        tool_call.contains("arguments") ? tool_call.at("arguments").dump() : "",
-        healed_json,
-        out);
 }
 
 static void process_tool_call_array(const json & arr, const common_json & partial, std::vector<common_chat_tool_call> & tool_calls) {
@@ -1007,27 +1002,14 @@ static void common_chat_parse_generic(common_chat_msg_parser & builder) {
         if (data.json.contains("tool_calls")) {
             for (const auto & tc : data.json.at("tool_calls")) {
                 common_chat_tool_call tool_call;
-                if (process_tool_call(
-                    tc.contains("name") ? tc.at("name") : "",
-                    tc.contains("id") ? tc.at("id") : "",
-                    tc.contains("arguments") ? tc.at("arguments").dump() : "",
-                    data,
-                    tool_call))
-                {
+                if (process_tool_call(tc, data, tool_call)) {
                     builder.result.tool_calls.push_back(tool_call);
                 }
             }
         } else if (data.json.contains("tool_call")) {
             const auto & tc = data.json.at("tool_call");
-
             common_chat_tool_call tool_call;
-            if (process_tool_call(
-                tc.contains("name") ? tc.at("name") : "",
-                tc.contains("id") ? tc.at("id") : "",
-                tc.contains("arguments") ? tc.at("arguments").dump() : "",
-                data,
-                tool_call))
-            {
+            if (process_tool_call(tc, data, tool_call)) {
                 builder.result.tool_calls.push_back(tool_call);
             }
         } else if (data.json.contains("response")) {
@@ -1751,7 +1733,7 @@ static void common_chat_parse_hermes_2_pro(common_chat_msg_parser & builder) {
 
             builder.try_consume_json([&](const auto & partial) {
                 common_chat_tool_call tool_call;
-                if (!process_tool_call(function_name, "", partial.json.dump(), partial, tool_call)) {
+                if (!process_tool_call({{"name", function_name}, {"arguments", partial.json}}, partial, tool_call)) {
                     builder.incomplete("incomplete tool call");
                     return;
                 }
