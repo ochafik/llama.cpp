@@ -36,8 +36,8 @@ std::vector<common_chat_msg_diff> common_chat_msg_diff::compute_diffs(const comm
 
     if (!previous_msg.tool_calls.empty()) {
         auto idx = previous_msg.tool_calls.size() - 1;
-        auto & pref = previous_msg.tool_calls[idx];
-        auto & newf = new_msg.tool_calls[idx];
+        const auto & pref = previous_msg.tool_calls[idx];
+        const auto & newf = new_msg.tool_calls[idx];
         if (pref.name != newf.name || pref.id != newf.id) {
             throw std::runtime_error("Invalid diff: tool call mismatch!");
         }
@@ -1794,8 +1794,9 @@ static common_chat_msg common_chat_parse_hermes_2_pro(const std::string& input, 
         std::string::const_iterator it = input.begin();
         const std::string::const_iterator end = input.end();
 
-        while (it != end) {
-            auto match = open_regex.search(it, end);
+        // while (it != end) {
+        do {
+            auto match = open_regex.search(it, end, /* as_match= */ true);
             if (match.type == COMMON_REGEX_MATCH_TYPE_FULL) {
                 msg.content += std::string(it, match.groups[0].begin);
 
@@ -1820,10 +1821,16 @@ static common_chat_msg common_chat_parse_hermes_2_pro(const std::string& input, 
                             // Handle close tags
                             consume_spaces(it, end);
                             if (!close_tag.empty() && !parse_literal(it, end, close_tag)) {
+                                if (is_partial && string_find_partial_stop(std::string(it, end), close_tag)) {
+                                    break;
+                                }
                                 throw std::runtime_error("Failed to parse closing tag");
                             }
                             consume_spaces(it, end);
                             if (!block_end.empty() && !parse_literal(it, end, block_end)) {
+                                if (is_partial && string_find_partial_stop(std::string(it, end), block_end)) {
+                                    break;
+                                }
                                 throw std::runtime_error("Failed to parse block end");
                             }
                             consume_spaces(it, end);
@@ -1858,10 +1865,16 @@ static common_chat_msg common_chat_parse_hermes_2_pro(const std::string& input, 
                             // Handle close tags
                             consume_spaces(it, end);
                             if (!close_tag.empty() && !parse_literal(it, end, close_tag)) {
+                                if (is_partial && string_find_partial_stop(std::string(it, end), close_tag)) {
+                                    break;
+                                }
                                 throw std::runtime_error("Failed to parse closing tag");
                             }
                             consume_spaces(it, end);
                             if (!block_end.empty() && !parse_literal(it, end, block_end)) {
+                                if (is_partial && string_find_partial_stop(std::string(it, end), block_end)) {
+                                    break;
+                                }
                                 throw std::runtime_error("Failed to parse block end");
                             }
                             consume_spaces(it, end);
@@ -1884,6 +1897,7 @@ static common_chat_msg common_chat_parse_hermes_2_pro(const std::string& input, 
                 break;
             }
         }
+        while (false);
         return msg;
     });
 }

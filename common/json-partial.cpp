@@ -101,11 +101,19 @@ bool common_json_parse(
     json_error_locator err_loc;
     json::sax_parse(it, end, &err_loc);
 
-    std::string::const_iterator temptative_end;
+    // std::string::const_iterator temptative_end;
     if (err_loc.found_error) {
-        temptative_end = it + err_loc.position;
+        auto temptative_end = it + err_loc.position;
         fprintf(stderr, "Error at position %zu (is_end = %s): %s\n", err_loc.position, temptative_end == end ? "true" : "false", err_loc.exception_message.c_str());
 
+        try {
+            out.json = json::parse(it, temptative_end);
+            it = temptative_end;
+            return true;
+        } catch (const std::exception & ex) {
+            // No, needs healing.
+            fprintf(stderr, "Failed to parse up to error: %s: <<<%s>>>\n", ex.what(), std::string(it, temptative_end).c_str());
+        }
         auto can_parse = [](const std::string & str) {
             try {
                 json::parse(str); // NOLINT
@@ -209,15 +217,18 @@ bool common_json_parse(
             return true;
         }
         // TODO: handle unclosed top-level primitive if the stack was empty but we got an error (e.g. "tru", "\"", etc...)
-        fprintf(stderr, "Closing: TODO\n"); 
-    } else {
-        temptative_end = end;
-    }
-    try {
-        out.json = json::parse(it, temptative_end);
-        it = temptative_end;
-        return true;
-    } catch (const std::exception &) {
+        // fprintf(stderr, "Closing: TODO\n"); 
         return false;
+    } else {
+        out.json = json::parse(it, end);
+        it = end;
+        return true;
     }
+    // try {
+    //     out.json = json::parse(it, temptative_end);
+    //     it = temptative_end;
+    //     return true;
+    // } catch (const std::exception &) {
+    //     return false;
+    // }
 }
