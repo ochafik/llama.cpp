@@ -34,7 +34,7 @@ common_regex_match common_regex::search(const std::string::const_iterator & begi
             common_regex_match res;
             res.type = COMMON_REGEX_MATCH_TYPE_PARTIAL;
             //res.groups.push_back({input.substr(position), position, input.size()});
-            res.groups.push_back({it, input.end()});
+            res.groups.push_back({begin + std::distance(input.begin(), it), end});
             return res;
         }
     }

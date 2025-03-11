@@ -579,6 +579,39 @@ static void consume_spaces(std::string::const_iterator & it, const std::string::
     }
 }
 
+static bool process_tool_call(const std::string & name, const std::string & id, const std::string & arguments, const common_json & healed_json, common_chat_tool_call & out) {
+    if (name.empty()) {
+        return false;
+    }
+
+    auto marker_idx = std::string::npos;
+    if (!arguments.empty() && !healed_json.healing_marker.empty()) {
+        marker_idx = arguments.find(healed_json.json_healing_marker);
+        if (marker_idx == std::string::npos) {
+            marker_idx = arguments.find(healed_json.healing_marker);
+        }
+    }
+    out = {
+        /* .name = */ name,
+        /* .arguments = */ marker_idx != std::string::npos ? arguments.substr(0, marker_idx) : arguments,
+        /* .id = */ id,
+    };
+    if (out.arguments == "\"") {
+        // This happens because of completing `:"$magic` after `"arguments"`
+        out.arguments = "";
+    }
+    return true;
+}
+
+static bool process_tool_call(const json & tool_call, const common_json & healed_json, common_chat_tool_call & out) {
+    return process_tool_call(
+        tool_call.contains("name") ? tool_call.at("name") : "",
+        tool_call.contains("id") ? tool_call.at("id") : "",
+        tool_call.contains("arguments") ? tool_call.at("arguments").dump() : "",
+        healed_json,
+        out);
+}
+
 static bool parse_json_with_arguments(std::string::const_iterator & it, const std::string::const_iterator & end, bool is_partial, const std::function<bool(const std::vector<std::string> &)> & is_arguments_path, common_json & out) {
     if (!is_partial) {
         return parse_json(it, end, out.json);
@@ -589,6 +622,7 @@ static bool parse_json_with_arguments(std::string::const_iterator & it, const st
     if (!common_json_parse(it, end, healing_marker, jout)) {
         return false;
     }
+    fprintf(stderr, "Parsed json: %s\n", jout.json.dump().c_str());
 
     if (jout.healing_marker.empty()) {
         // No healing marker, just return the parsed json
@@ -649,11 +683,14 @@ static bool parse_json_with_arguments(std::string::const_iterator & it, const st
     //         return true;
     //     }
     // }
-    out.json = remove_unsupported_healings(jout.json);
+    out.json = !is_arguments_path || is_arguments_path(path) ? jout.json : remove_unsupported_healings(jout.json);
     out.healing_marker = jout.healing_marker;
     out.json_healing_marker = jout.json_healing_marker;
+    fprintf(stderr, "Half-healed json: %s\n", out.json.dump().c_str());
+
     return true;
 }
+
 /**
  * Takes a prefix regex that must have 1 group to capture the function name, a closing suffix, and expects json parameters in between.
  * Aggregates the prefix, suffix and in-between text into the content.
@@ -689,10 +726,13 @@ static common_chat_msg parse_json_tool_calls(
 
     while (it != end) {
         auto match = function_regex.search(it, end);
-        if (match.type == COMMON_REGEX_MATCH_TYPE_NONE && !is_partial) {
-            break;
+        if (match.type == COMMON_REGEX_MATCH_TYPE_NONE) {
+            if (!is_partial) {
+                break;
+            }
+        } else {
+            result.content += std::string(it, match.groups[0].begin);
         }
-        result.content += std::string(it, match.groups[0].begin);
         if (match.type == COMMON_REGEX_MATCH_TYPE_PARTIAL && is_partial) {
             return result;
         }
@@ -708,8 +748,9 @@ static common_chat_msg parse_json_tool_calls(
         auto name = match.groups[1].str();
         it = match.groups[0].end;
 
-        json arguments;
-        if (parse_json(it, end, arguments)) {
+        common_json json_tool_call;
+        auto got_tool_call = parse_json_with_arguments(it, end, is_partial, [](const std::vector<std::string> & path) { return path.empty(); }, json_tool_call);
+        if (got_tool_call) {
             match = close_regex.search(it, end);
             if (match.type == COMMON_REGEX_MATCH_TYPE_PARTIAL && is_partial) {
                 return result;
@@ -720,16 +761,44 @@ static common_chat_msg parse_json_tool_calls(
                 } else {
                     it = end;
                 }
+            } else {
+                it = match.groups[0].end;
             }
-            it = match.groups[0].end;
-            result.tool_calls.push_back({name, arguments.is_string() ? arguments.get<std::string>() : arguments.dump(), /* id= */ ""});
+            common_chat_tool_call tool_call;
+            if (process_tool_call(name, "", json_tool_call.json.dump(), json_tool_call, tool_call)) {
+                result.tool_calls.push_back(tool_call);
+            }
         } else {
             if (allow_raw_python && name == "python") {
-                auto arguments = json({{"code", std::string(it, end)}}).dump();
-                result.tool_calls.push_back({name, arguments, /* id= */ ""});
+                std::string arguments;
+                if (is_partial) {
+                    std::string healing_magic = "$llama.cpp.json$";
+                    arguments = json({{"code", std::string(it, end) + healing_magic}}).dump();
+                    auto idx = arguments.find(healing_magic);
+                    if (idx != std::string::npos) {
+                        arguments = arguments.substr(0, idx);
+                    }
+                } else {
+                    arguments = json({{"code", std::string(it, end)}}).dump();
+                }
+                common_chat_tool_call tool_call;
+                if (process_tool_call(name, "", arguments, json_tool_call, tool_call)) {
+                    result.tool_calls.push_back(tool_call);
+                }
+                // result.tool_calls.push_back({name, arguments, /* id= */ ""});
                 break;
             }
+            if (is_partial) {
+                return result;
+            }
             throw std::runtime_error("Failed to parse json tool call arguments: " + input);
+        }
+        consume_spaces(it, end);
+        if (!got_tool_call || it != end) {
+            if (is_partial) {
+                return result;
+            }
+            throw std::runtime_error("Failed to parse json tool calls: " + std::string(it, end));
         }
     }
 
@@ -754,39 +823,6 @@ static common_chat_msg parse_json_tool_calls(
         result.content = string_strip(result.content);
     }
     return result;
-}
-
-static bool process_tool_call(const std::string & name, const std::string & id, const std::string & arguments, const common_json & healed_json, common_chat_tool_call & out) {
-    if (name.empty()) {
-        return false;
-    }
-
-    auto marker_idx = std::string::npos;
-    if (!arguments.empty() && !healed_json.healing_marker.empty()) {
-        marker_idx = arguments.find(healed_json.json_healing_marker);
-        if (marker_idx == std::string::npos) {
-            marker_idx = arguments.find(healed_json.healing_marker);
-        }
-    }
-    out = {
-        /* .name = */ name,
-        /* .arguments = */ marker_idx != std::string::npos ? arguments.substr(0, marker_idx) : arguments,
-        /* .id = */ id,
-    };
-    if (out.arguments == "\"") {
-        // This happens because of completing `:"$magic` after `"arguments"`
-        out.arguments = "";
-    }
-    return true;
-}
-
-static bool process_tool_call(const json & tool_call, const common_json & healed_json, common_chat_tool_call & out) {
-    return process_tool_call(
-        tool_call.contains("name") ? tool_call.at("name") : "",
-        tool_call.contains("id") ? tool_call.at("id") : "",
-        tool_call.contains("arguments") ? tool_call.at("arguments").dump() : "",
-        healed_json,
-        out);
 }
 
 static common_chat_msg parse_prefixed_json_tool_call_array(const std::string& input, bool is_partial, const std::string & prefix, size_t rstrip_prefix = 0) {
@@ -1348,16 +1384,19 @@ static common_chat_msg common_chat_parse_llama_3_1(const std::string & input, bo
         auto match = builtin_call_regex.search(input, /* as_match= */ true);
         if (match.type == COMMON_REGEX_MATCH_TYPE_FULL) {
             common_chat_msg msg;
+            msg.role = "assistant";
 
             auto name = match.groups[1].str();
             if (name.empty()) {
+                if (is_partial) {
+                    return msg;
+                }
                 throw std::runtime_error("Failed to parse builtin tool call");
             }
             auto arg_name = match.groups[2].str();
             auto arg_value_str = match.groups[3].str();
             auto arg_value = json::parse(arg_value_str);
 
-            msg.role = "assistant";
             msg.tool_calls.push_back({
                 /* .name = */ name,
                 /* .arguments = */ (json {
