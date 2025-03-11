@@ -56,7 +56,7 @@ struct common_chat_msg_parser {
         if (is_partial) {
             finish();
         }
-        throw std::runtime_error("Unexpected early end of input");
+        throw std::runtime_error(message);
     }
 
     bool consume_spaces() {
@@ -829,7 +829,7 @@ static void parse_json_tool_calls(
 
     auto parse_tool_calls = [&]() {
         while (true) {
-            if (!builder.try_find_regex(function_regex, [&](const auto & prelude, const auto & groups) {
+            if (!builder.try_find_regex(function_regex, [&](const auto & prelude, const auto & /* groups */) {
                 builder.result.content += prelude;
                 builder.consume_json([&](const auto & partial) {
                     common_chat_tool_call tool_call;
@@ -861,6 +861,10 @@ static void parse_json_tool_calls(
 
 static void parse_prefixed_json_tool_call_array(common_chat_msg_parser & builder, const std::string & prefix, size_t rstrip_prefix = 0) {
     if (!builder.try_consume_regex(prefix, [&](const auto & /* groups */) {
+        if (builder.pos < rstrip_prefix) {
+            throw std::runtime_error("Invalid prefix length");
+        }
+        builder.pos -= rstrip_prefix;
         builder.consume_json([&](const auto & partial) {
             process_tool_call_array(partial.json, partial, builder.result.tool_calls);
         }, {{}});
