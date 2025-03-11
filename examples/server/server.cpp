@@ -113,11 +113,11 @@ struct slot_params {
     struct common_params_speculative speculative;
 
     // OAI-compat fields
-    bool                  verbose                   = false;
-    oaicompat_type        oaicompat                 = OAICOMPAT_TYPE_NONE;
-    std::string           oaicompat_model;
-    std::string           oaicompat_cmpl_id;
-    common_chat_format    oaicompat_chat_format     = COMMON_CHAT_FORMAT_CONTENT_ONLY;
+    bool                      verbose                   = false;
+    oaicompat_type            oaicompat                 = OAICOMPAT_TYPE_NONE;
+    std::string               oaicompat_model;
+    std::string               oaicompat_cmpl_id;
+    common_chat_format        oaicompat_chat_format     = COMMON_CHAT_FORMAT_CONTENT_ONLY;
     std::vector<common_regex> oaicompat_trigger_regexes;
 
     json to_json() const {
