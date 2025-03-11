@@ -8,6 +8,7 @@ path = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(path))
 
 from utils import *
+from enum import Enum
 
 server: ServerProcess
 
@@ -21,6 +22,9 @@ def create_server():
     server.model_alias = "tinyllama-2-tool-call"
     server.server_port = 8081
 
+class CompletionMode(Enum):
+    NORMAL = "normal"
+    STREAMED = "streamed"
 
 TEST_TOOL = {
     "type":"function",
@@ -73,7 +77,7 @@ WEATHER_TOOL = {
   }
 }
 
-def do_test_completion_with_required_tool_tiny(server: ServerProcess, tool: dict, argument_key: str | None, n_predict, stream: bool, **kwargs):
+def do_test_completion_with_required_tool_tiny(server: ServerProcess, tool: dict, argument_key: str | None, n_predict, stream: CompletionMode, **kwargs):
     body = server.make_any_request("POST", "/v1/chat/completions", data={
         "max_tokens": n_predict,
         "messages": [
@@ -83,7 +87,7 @@ def do_test_completion_with_required_tool_tiny(server: ServerProcess, tool: dict
         "tool_choice": "required",
         "tools": [tool],
         "parallel_tool_calls": False,
-        "stream": stream,
+        "stream": stream == CompletionMode.STREAMED,
         **kwargs,
     })
     # assert res.status_code == 200, f"Expected status code 200, got {res.status_code}"
@@ -103,12 +107,12 @@ def do_test_completion_with_required_tool_tiny(server: ServerProcess, tool: dict
 
 
 @pytest.mark.parametrize("template_name,tool,argument_key,stream", [
-    ("google-gemma-2-2b-it",                          TEST_TOOL,            "success",  False),
-    ("google-gemma-2-2b-it",                          TEST_TOOL,            "success",  True),
-    ("meta-llama-Llama-3.3-70B-Instruct",             TEST_TOOL,            "success",  False),
-    ("meta-llama-Llama-3.3-70B-Instruct",             TEST_TOOL,            "success",  True),
-    ("meta-llama-Llama-3.3-70B-Instruct",             PYTHON_TOOL,          "code",     False),
-    ("meta-llama-Llama-3.3-70B-Instruct",             PYTHON_TOOL,          "code",     True),
+    ("google-gemma-2-2b-it",                          TEST_TOOL,            "success",  CompletionMode.NORMAL),
+    ("google-gemma-2-2b-it",                          TEST_TOOL,            "success",  CompletionMode.STREAMED),
+    ("meta-llama-Llama-3.3-70B-Instruct",             TEST_TOOL,            "success",  CompletionMode.NORMAL),
+    ("meta-llama-Llama-3.3-70B-Instruct",             TEST_TOOL,            "success",  CompletionMode.STREAMED),
+    ("meta-llama-Llama-3.3-70B-Instruct",             PYTHON_TOOL,          "code",     CompletionMode.NORMAL),
+    ("meta-llama-Llama-3.3-70B-Instruct",             PYTHON_TOOL,          "code",     CompletionMode.STREAMED),
 ])
 def test_completion_with_required_tool_tiny_fast(template_name: str, tool: dict, argument_key: str | None, stream: bool):
     global server
@@ -123,44 +127,44 @@ def test_completion_with_required_tool_tiny_fast(template_name: str, tool: dict,
 
 @pytest.mark.slow
 @pytest.mark.parametrize("template_name,tool,argument_key,stream", [
-    ("meta-llama-Llama-3.1-8B-Instruct",              TEST_TOOL,            "success", False),
-    ("meta-llama-Llama-3.1-8B-Instruct",              PYTHON_TOOL,          "code",    False),
-    ("meta-llama-Llama-3.1-8B-Instruct",              PYTHON_TOOL,          "code",    True),
+    ("meta-llama-Llama-3.1-8B-Instruct",              TEST_TOOL,            "success", CompletionMode.NORMAL),
+    ("meta-llama-Llama-3.1-8B-Instruct",              PYTHON_TOOL,          "code",    CompletionMode.NORMAL),
+    ("meta-llama-Llama-3.1-8B-Instruct",              PYTHON_TOOL,          "code",    CompletionMode.STREAMED),
 
-    ("meetkai-functionary-medium-v3.1",               TEST_TOOL,            "success", False),
-    ("meetkai-functionary-medium-v3.1",               PYTHON_TOOL,          "code",    False),
-    ("meetkai-functionary-medium-v3.1",               PYTHON_TOOL,          "code",    True),
+    ("meetkai-functionary-medium-v3.1",               TEST_TOOL,            "success", CompletionMode.NORMAL),
+    ("meetkai-functionary-medium-v3.1",               PYTHON_TOOL,          "code",    CompletionMode.NORMAL),
+    ("meetkai-functionary-medium-v3.1",               PYTHON_TOOL,          "code",    CompletionMode.STREAMED),
 
-    ("meetkai-functionary-medium-v3.2",               TEST_TOOL,            "success", False),
-    ("meetkai-functionary-medium-v3.2",               PYTHON_TOOL,          "code",    False),
-    ("meetkai-functionary-medium-v3.2",               PYTHON_TOOL,          "code",    True),
+    ("meetkai-functionary-medium-v3.2",               TEST_TOOL,            "success", CompletionMode.NORMAL),
+    ("meetkai-functionary-medium-v3.2",               PYTHON_TOOL,          "code",    CompletionMode.NORMAL),
+    ("meetkai-functionary-medium-v3.2",               PYTHON_TOOL,          "code",    CompletionMode.STREAMED),
 
-    ("NousResearch-Hermes-2-Pro-Llama-3-8B-tool_use", TEST_TOOL,            "success", False),
-    ("NousResearch-Hermes-2-Pro-Llama-3-8B-tool_use", PYTHON_TOOL,          "code",    False),
-    ("NousResearch-Hermes-2-Pro-Llama-3-8B-tool_use", PYTHON_TOOL,          "code",    True),
+    ("NousResearch-Hermes-2-Pro-Llama-3-8B-tool_use", TEST_TOOL,            "success", CompletionMode.NORMAL),
+    ("NousResearch-Hermes-2-Pro-Llama-3-8B-tool_use", PYTHON_TOOL,          "code",    CompletionMode.NORMAL),
+    ("NousResearch-Hermes-2-Pro-Llama-3-8B-tool_use", PYTHON_TOOL,          "code",    CompletionMode.STREAMED),
 
-    ("meta-llama-Llama-3.2-3B-Instruct",              TEST_TOOL,            "success", False),
-    ("meta-llama-Llama-3.2-3B-Instruct",              PYTHON_TOOL,          "code",    False),
-    ("meta-llama-Llama-3.2-3B-Instruct",              PYTHON_TOOL,          "code",    True),
+    ("meta-llama-Llama-3.2-3B-Instruct",              TEST_TOOL,            "success", CompletionMode.NORMAL),
+    ("meta-llama-Llama-3.2-3B-Instruct",              PYTHON_TOOL,          "code",    CompletionMode.NORMAL),
+    ("meta-llama-Llama-3.2-3B-Instruct",              PYTHON_TOOL,          "code",    CompletionMode.STREAMED),
 
-    ("mistralai-Mistral-Nemo-Instruct-2407",          TEST_TOOL,            "success", False),
-    ("mistralai-Mistral-Nemo-Instruct-2407",          PYTHON_TOOL,          "code",    False),
-    ("mistralai-Mistral-Nemo-Instruct-2407",          PYTHON_TOOL,          "code",    True),
+    ("mistralai-Mistral-Nemo-Instruct-2407",          TEST_TOOL,            "success", CompletionMode.NORMAL),
+    ("mistralai-Mistral-Nemo-Instruct-2407",          PYTHON_TOOL,          "code",    CompletionMode.NORMAL),
+    ("mistralai-Mistral-Nemo-Instruct-2407",          PYTHON_TOOL,          "code",    CompletionMode.STREAMED),
 
-    ("NousResearch-Hermes-3-Llama-3.1-8B-tool_use",   TEST_TOOL,            "success", False),
-    ("NousResearch-Hermes-3-Llama-3.1-8B-tool_use",   PYTHON_TOOL,          "code",    False),
-    ("NousResearch-Hermes-3-Llama-3.1-8B-tool_use",   PYTHON_TOOL,          "code",    True),
+    ("NousResearch-Hermes-3-Llama-3.1-8B-tool_use",   TEST_TOOL,            "success", CompletionMode.NORMAL),
+    ("NousResearch-Hermes-3-Llama-3.1-8B-tool_use",   PYTHON_TOOL,          "code",    CompletionMode.NORMAL),
+    ("NousResearch-Hermes-3-Llama-3.1-8B-tool_use",   PYTHON_TOOL,          "code",    CompletionMode.STREAMED),
 
-    ("deepseek-ai-DeepSeek-R1-Distill-Llama-8B",      TEST_TOOL,            "success", False),
-    ("deepseek-ai-DeepSeek-R1-Distill-Llama-8B",      PYTHON_TOOL,          "code",    False),
-    ("deepseek-ai-DeepSeek-R1-Distill-Llama-8B",      PYTHON_TOOL,          "code",    True),
+    ("deepseek-ai-DeepSeek-R1-Distill-Llama-8B",      TEST_TOOL,            "success", CompletionMode.NORMAL),
+    ("deepseek-ai-DeepSeek-R1-Distill-Llama-8B",      PYTHON_TOOL,          "code",    CompletionMode.NORMAL),
+    ("deepseek-ai-DeepSeek-R1-Distill-Llama-8B",      PYTHON_TOOL,          "code",    CompletionMode.STREAMED),
 
-    ("fireworks-ai-llama-3-firefunction-v2",          TEST_TOOL,            "success", False),
+    ("fireworks-ai-llama-3-firefunction-v2",          TEST_TOOL,            "success", CompletionMode.NORMAL),
     # ("fireworks-ai-llama-3-firefunction-v2",          PYTHON_TOOL,          "codeFalse), True),
     # ("fireworks-ai-llama-3-firefunction-v2",          PYTHON_TOOL,          "code"),
 
 ])
-def test_completion_with_required_tool_tiny_slow(template_name: str, tool: dict, argument_key: str | None, stream: bool):
+def test_completion_with_required_tool_tiny_slow(template_name: str, tool: dict, argument_key: str | None, stream: CompletionMode):
     global server
     n_predict = 512
     # server = ServerPreset.stories15m_moe()
