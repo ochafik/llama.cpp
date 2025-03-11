@@ -127,7 +127,7 @@ struct common_chat_msg_parser {
             return false;
         }
         auto prelude = input.substr(pos, m.groups[0].begin);
-        pos += m.groups[0].end;
+        pos = m.groups[0].end;
 
         if (callback) {
             callback(prelude, m.groups);
@@ -153,7 +153,7 @@ struct common_chat_msg_parser {
             incomplete(regex.str());
             return false;
         }
-        pos += m.groups[0].end;
+        pos = m.groups[0].end;
 
         if (callback) {
             callback(m.groups);
