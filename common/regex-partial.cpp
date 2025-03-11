@@ -8,25 +8,25 @@ common_regex::common_regex(const std::string & pattern, bool at_start) :
     rx_reversed_partial(regex_to_reversed_partial_regex(pattern)),
     at_start_(at_start) {}
 
-common_regex_match common_regex::search(const std::string::const_iterator & begin, const std::string::const_iterator & end, bool as_match) const {
+common_regex_match common_regex::search(const std::string & input, size_t pos, bool as_match) const {
     std::smatch match;
-    auto found = as_match ? std::regex_match(begin, end, match, rx) : std::regex_search(begin, end, match, rx);
+    auto start = input.begin() + pos;
+    auto found = as_match ? std::regex_match(start, input.end(), match, rx) : std::regex_search(start, input.end(), match, rx);
     if (found) {
         if (as_match || !at_start_ || match.position() == 0) {
             common_regex_match res;
             res.type = COMMON_REGEX_MATCH_TYPE_FULL;
             for (size_t i = 0; i < match.size(); ++i) {
                 common_regex_match_group group;
-                group.begin = begin + match.position(i);
-                group.end = group.begin + match.length(i);
+                group.begin = pos + match.position(i);
+                group.end = pos + match.length(i);
                 res.groups.push_back(group);
             }
             return res;
         }
     }
-    const std::string input(begin, end);
     std::match_results<std::string::const_reverse_iterator> srmatch;
-    if (std::regex_match(input.rbegin(), input.rend(), srmatch, rx_reversed_partial)) {
+    if (std::regex_match(input.rbegin(), input.rend() - pos, srmatch, rx_reversed_partial)) {
         auto group = srmatch[1].str();
         auto it = srmatch[1].second.base();
         // auto position = static_cast<size_t>(std::distance(input.begin(), it));
@@ -34,7 +34,7 @@ common_regex_match common_regex::search(const std::string::const_iterator & begi
             common_regex_match res;
             res.type = COMMON_REGEX_MATCH_TYPE_PARTIAL;
             //res.groups.push_back({input.substr(position), position, input.size()});
-            res.groups.push_back({begin + std::distance(input.begin(), it), end});
+            res.groups.push_back({pos + std::distance(input.begin(), it), input.size()});
             return res;
         }
     }

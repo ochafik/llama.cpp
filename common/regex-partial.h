@@ -41,13 +41,7 @@ class common_regex {
   public:
     common_regex(const std::string & pattern, bool at_start = false);
 
-    common_regex_match search(const std::string & input, bool as_match = false) const {
-        return search(input.begin(), input.end(), as_match);
-    }
-    common_regex_match search(
-        const std::string::const_iterator & begin, 
-        const std::string::const_iterator & end,
-        bool as_match = false) const;
+    common_regex_match search(const std::string & input, size_t pos, bool as_match = false) const;
 
     const std::string & str() const { return pattern; }
     bool at_start() const { return at_start_; }
