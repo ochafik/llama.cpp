@@ -13,9 +13,7 @@
 
 using common_regex_match_groups = std::vector<common_regex_match_group>;
 
-class common_chat_msg_partial_exception : public std::exception {
-    common_chat_msg msg;
-};
+class common_chat_msg_partial_exception : public std::exception {};
 
 static const common_regex default_start_think_regex("<think>", /* at_start= */ true);
 static const common_regex default_end_think_regex("</think>");
@@ -39,11 +37,18 @@ struct common_chat_msg_parser {
         return input.substr(group.begin, group.end - group.begin);
     }
 
-    // Throws if pos not at end.
-    void finish();
+    void finish() {
+        if (pos != input.size()) {
+            throw std::runtime_error("Unexpected content at end of input: " + input.substr(pos));
+        }
+    }
 
-    // Throws if not in partial mode and not at end. Else throws partial msg if needed.
-    void incomplete();
+    void incomplete() {
+        if (is_partial) {
+            finish();
+        }
+        throw std::runtime_error("Unexpected early end of input");
+    }
 
     bool consume_spaces() {
         const auto length = input.size();
@@ -55,7 +60,18 @@ struct common_chat_msg_parser {
         return consumed;
     }
 
-    void consume_literal(const std::string & literal);
+    void consume_literal(const std::string & literal) {
+        for (auto i = 0u; i < literal.size(); ++i) {
+            if (pos >= input.size()) {
+                incomplete();
+            }
+            if (input[pos] != literal[i]) {
+                throw std::runtime_error("Expected char '" + std::string(1, literal[i]) + "' at position " + std::to_string(pos));
+            }
+            ++pos;
+        }
+    }
+
     void try_consume_thinking_tags(const common_regex & start_think_regex = default_start_think_regex, const common_regex end_think_regex = default_end_think_regex) {
         if (extract_reasoning) {
             if (!try_consume_regex(start_think_regex, [&](const auto & /* groups */) {
@@ -1968,6 +1984,7 @@ static bool common_chat_parse(common_chat_msg_parser & builder, common_chat_form
             default:
                 throw std::runtime_error("Unsupported format: " + common_chat_format_name(format));
         }
+        builder.finish();
     } catch (const common_chat_msg_partial_exception & ex) {
         if (!builder.is_partial) {
             return false;
