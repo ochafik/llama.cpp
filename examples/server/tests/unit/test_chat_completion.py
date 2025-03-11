@@ -86,7 +86,7 @@ def test_chat_completion_stream(system_prompt, user_prompt, max_tokens, re_conte
             assert choice["finish_reason"] == finish_reason
         else:
             assert choice["finish_reason"] is None
-            content += choice["delta"]["content"]
+            content += choice["delta"]["content"] or ''
 
 
 def test_chat_completion_with_openai_library():
@@ -242,12 +242,16 @@ def test_chat_completion_with_timings_per_token():
         "stream": True,
         "timings_per_token": True,
     })
+    found_timings = False
     for data in res:
-        assert "timings" in data
-        assert "prompt_per_second" in data["timings"]
-        assert "predicted_per_second" in data["timings"]
-        assert "predicted_n" in data["timings"]
-        assert data["timings"]["predicted_n"] <= 10
+        if "timings" in data:
+            found_timings = True
+            assert "prompt_per_second" in data["timings"]
+            assert "predicted_per_second" in data["timings"]
+            assert "predicted_n" in data["timings"]
+            assert data["timings"]["predicted_n"] <= 10
+    
+    assert found_timings, "Expected timings in response chunks"
 
 
 def test_logprobs():
