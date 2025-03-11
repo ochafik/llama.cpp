@@ -18,50 +18,6 @@ class common_chat_msg_partial_exception : public std::exception {};
 static const common_regex default_start_think_regex("<think>", /* at_start= */ true);
 static const common_regex default_end_think_regex("</think>");
 
-// To simplify the control flow of parsers w/ partial support, we use exceptions to return partial results.
-
-static bool process_tool_call(const std::string & name, const std::string & id, const std::string & arguments, const common_json & healed_json, common_chat_tool_call & out) {
-    if (name.empty()) {
-        return false;
-    }
-
-    auto marker_idx = std::string::npos;
-    if (!arguments.empty() && !healed_json.healing_marker.empty()) {
-        marker_idx = arguments.find(healed_json.json_healing_marker);
-        if (marker_idx == std::string::npos) {
-            marker_idx = arguments.find(healed_json.healing_marker);
-        }
-    }
-    out = {
-        /* .name = */ name,
-        /* .arguments = */ marker_idx != std::string::npos ? arguments.substr(0, marker_idx) : arguments,
-        /* .id = */ id,
-    };
-    if (out.arguments == "\"") {
-        // This happens because of completing `:"$magic` after `"arguments"`
-        out.arguments = "";
-    }
-    return true;
-}
-
-static bool process_tool_call(const json & tool_call, const common_json & healed_json, common_chat_tool_call & out) {
-    return process_tool_call(
-        tool_call.contains("name") ? tool_call.at("name") : "",
-        tool_call.contains("id") ? tool_call.at("id") : "",
-        tool_call.contains("arguments") ? tool_call.at("arguments").dump() : "",
-        healed_json,
-        out);
-}
-
-static void process_tool_call_array(const json & arr, const common_json & partial, std::vector<common_chat_tool_call> & tool_calls) {
-    for (const auto & item : arr) {
-        common_chat_tool_call tool_call;
-        if (process_tool_call(item, partial, tool_call)) {
-           tool_calls.emplace_back(tool_call);
-        }
-    }
-}
-
 static std::string string_diff(const std::string & last, const std::string & current) {
     if (last.empty()) {
         return current;
@@ -819,6 +775,48 @@ static bool parse_json(std::string::const_iterator & it, const std::string::cons
         return true;
     } catch (const std::exception &) {
         return false;
+    }
+}
+
+static bool process_tool_call(const std::string & name, const std::string & id, const std::string & arguments, const common_json & healed_json, common_chat_tool_call & out) {
+    if (name.empty()) {
+        return false;
+    }
+
+    auto marker_idx = std::string::npos;
+    if (!arguments.empty() && !healed_json.healing_marker.empty()) {
+        marker_idx = arguments.find(healed_json.json_healing_marker);
+        if (marker_idx == std::string::npos) {
+            marker_idx = arguments.find(healed_json.healing_marker);
+        }
+    }
+    out = {
+        /* .name = */ name,
+        /* .arguments = */ marker_idx != std::string::npos ? arguments.substr(0, marker_idx) : arguments,
+        /* .id = */ id,
+    };
+    if (out.arguments == "\"") {
+        // This happens because of completing `:"$magic` after `"arguments"`
+        out.arguments = "";
+    }
+    return true;
+}
+
+static bool process_tool_call(const json & tool_call, const common_json & healed_json, common_chat_tool_call & out) {
+    return process_tool_call(
+        tool_call.contains("name") ? tool_call.at("name") : "",
+        tool_call.contains("id") ? tool_call.at("id") : "",
+        tool_call.contains("arguments") ? tool_call.at("arguments").dump() : "",
+        healed_json,
+        out);
+}
+
+static void process_tool_call_array(const json & arr, const common_json & partial, std::vector<common_chat_tool_call> & tool_calls) {
+    for (const auto & item : arr) {
+        common_chat_tool_call tool_call;
+        if (process_tool_call(item, partial, tool_call)) {
+           tool_calls.emplace_back(tool_call);
+        }
     }
 }
 
