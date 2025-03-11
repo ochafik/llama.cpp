@@ -43,7 +43,7 @@ struct common_chat_msg_parser {
         }
     }
 
-    void incomplete() {
+    void incomplete(const std::string & message) {
         if (is_partial) {
             finish();
         }
@@ -61,9 +61,10 @@ struct common_chat_msg_parser {
     }
 
     void consume_literal(const std::string & literal) {
+        auto start = pos;
         for (auto i = 0u; i < literal.size(); ++i) {
             if (pos >= input.size()) {
-                incomplete();
+                incomplete("Expected literal '" + literal + "' at position " + std::to_string(start));
             }
             if (input[pos] != literal[i]) {
                 throw std::runtime_error("Expected char '" + std::string(1, literal[i]) + "' at position " + std::to_string(pos));
@@ -79,7 +80,7 @@ struct common_chat_msg_parser {
                     result.reasoning_content = prelude;
                 })) {
                     result.reasoning_content = consume_rest();
-                    incomplete();
+                    incomplete("Failed to find end of reasoning tag " + end_think_regex.str());
                 }
             })) {
                 try_find_regex(end_think_regex, [&](const std::string & prelude, const common_regex_match_groups & /* groups */) {
@@ -96,19 +97,46 @@ struct common_chat_msg_parser {
     }
 
     // Tries to find the regex, consumes it (pos right after it) and gives the prelude (right before it) and the groups to the callback.
-    bool try_find_regex(const common_regex & regex, const std::function<void(const std::string & prelude, const common_regex_match_groups & groups)> & callback);
-
-    // Consumes the regex from the current pos.
-    void consume_regex(const common_regex & regex, const std::function<void(const common_regex_match_groups & groups)> & callback) {
+    bool try_find_regex(const common_regex & regex, const std::function<void(const std::string & prelude, const common_regex_match_groups & groups)> & callback) {
         if (!regex.at_start()) {
-            throw std::runtime_error("consume_regex requires a common_regex w/ at_start=true");
+            throw std::runtime_error("try_find_regex requires a common_regex w/ at_start=true");
         }
-        auto m = regex.find(input, pos);
-        
-        throw std::runtime_error("Not implemented");
+        auto m = regex.search(input, pos);
+        if (m.type == COMMON_REGEX_MATCH_TYPE_NONE) {
+            return false;
+        }
+        if (m.type == COMMON_REGEX_MATCH_TYPE_PARTIAL) {
+            throw common_chat_msg_partial_exception();
+        }
+        auto prelude = input.substr(pos, m.groups[0].begin);
+        pos += m.groups[0].end;
+
+        callback(prelude, m.groups);
+        return true;
     }
 
-    bool try_consume_regex(const common_regex & regex, const std::function<void(const common_regex_match_groups & groups)> & callback);
+    void consume_regex(const common_regex & regex, const std::function<void(const common_regex_match_groups & groups)> & callback) {
+        if (!try_consume_regex(regex, callback)) {
+            incomplete("Failed to consume regex: " + regex.str());
+        }
+    }
+
+    bool try_consume_regex(const common_regex & regex, const std::function<void(const common_regex_match_groups & groups)> & callback) {
+        if (!regex.at_start()) {
+            throw std::runtime_error("try_consume_regex requires a common_regex w/ at_start=true");
+        }
+        auto m = regex.search(input, pos);
+        if (m.type == COMMON_REGEX_MATCH_TYPE_NONE) {
+            return false;
+        }
+        if (m.type == COMMON_REGEX_MATCH_TYPE_PARTIAL) {
+            throw common_chat_msg_partial_exception();
+        }
+        pos += m.groups[0].end;
+
+        callback(m.groups);
+        return true;
+    }
 
     // Calls the callback, *then* explodes w/ a partial match exception if it's partial
     void consume_json(
@@ -1030,7 +1058,7 @@ static void common_chat_parse_generic(common_chat_msg_parser & builder) {
             const auto & response = data.json.at("response");
             builder.result.content = response.is_string() ? response.template get<std::string>() : response.dump(2);
         } else {
-            builder.incomplete();
+            builder.incomplete("Expected 'tool_call', 'tool_calls' or 'response' in JSON");
         }
     }, args_paths);
 }
@@ -1177,7 +1205,7 @@ static void common_chat_parse_command_r7b(common_chat_msg_parser & builder) {
                 builder.result.content += prelude;
             })) {
                 builder.result.content += builder.input.substr(builder.pos);
-                builder.incomplete();
+                builder.incomplete("Expected end of response tag " + end_response_regex.str());
             }
         })) {
             builder.result.content = builder.input.substr(builder.pos);
@@ -1291,7 +1319,8 @@ static void common_chat_parse_llama_3_1(common_chat_msg_parser & builder, bool w
 
         auto name = builder.str(groups[1]);
         if (name.empty()) {
-            builder.incomplete();
+            builder.incomplete("Expected builtin function name");
+            return;
         }
         auto arg_name = builder.str(groups[2]);
         auto arg_value_str = builder.str(groups[3]);
@@ -1719,7 +1748,8 @@ static void common_chat_parse_hermes_2_pro(common_chat_msg_parser & builder) {
             if (!builder.try_consume_json([&](const auto & partial) {
                 common_chat_tool_call tool_call;
                 if (!process_tool_call(partial.json, partial, tool_call)) {
-                    builder.incomplete();
+                    builder.incomplete("incomplete tool call");
+                    return;
                 }
                 builder.result.tool_calls.push_back(tool_call);
 
@@ -1748,7 +1778,8 @@ static void common_chat_parse_hermes_2_pro(common_chat_msg_parser & builder) {
             builder.try_consume_json([&](const auto & partial) {
                 common_chat_tool_call tool_call;
                 if (!process_tool_call(function_name, "", partial.json.dump(), partial, tool_call)) {
-                    builder.incomplete();
+                    builder.incomplete("incomplete tool call");
+                    return;
                 }
                 builder.result.tool_calls.push_back(tool_call);
 
@@ -2012,7 +2043,7 @@ std::optional<common_chat_msg> common_chat_parse(const std::string & input, bool
         auto earliest_partial_trigger = std::string::npos;
 
         for (const auto & trigger_regex : trigger_regexes) {
-            auto match = trigger_regex.search(input);
+            auto match = trigger_regex.search(input, 0);
             if (match.type == COMMON_REGEX_MATCH_TYPE_PARTIAL) {
                 earliest_partial_trigger = std::min(earliest_partial_trigger, match.groups[0].begin);
             } else if (match.type == COMMON_REGEX_MATCH_TYPE_FULL) {
