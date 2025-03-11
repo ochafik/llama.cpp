@@ -14,34 +14,12 @@ template <class T> static void assert_equals(const T & expected, const T & actua
     }
 }
 
-struct test_regex_match_group {
-    // std::string str;
-    size_t begin;
-    size_t end;
-};
-struct test_regex_match {
-    common_regex_match_type type = COMMON_REGEX_MATCH_TYPE_NONE;
-    std::vector<test_regex_match_group> groups;
-
-    common_regex_match to_common_regex_match(const std::string & input) const {
-        common_regex_match res;
-        res.type = type;
-        for (const auto & group : groups) {
-            common_regex_match_group g;
-            g.begin = input.begin() + group.begin;
-            g.end = input.begin() + group.end;
-            res.groups.emplace_back(g);
-        }
-        return res;
-    }    
-};
-
 struct test_case {
     std::string pattern;
     bool at_start = false;
     struct input_output {
         std::string input;
-        test_regex_match output;
+        common_regex_match output;
         // bool operator==(const input_output & other) const {
         //     return input == other.input && output == other.output;
         // }
@@ -159,9 +137,8 @@ static void test_regex() {
         // std::cout << "    partial rev: " << cr.reversed_partial_pattern.str() << '\n';
         for (const auto & input_output : test_case.inputs_outputs) {
             std::cout << "  Input: " << input_output.input << '\n';
-            auto m = cr.search(input_output.input);
-            auto expected_m = input_output.output.to_common_regex_match(input_output.input);
-            if (m != expected_m) {
+            auto m = cr.search(input_output.input, 0);
+            if (m != input_output.output) {
                 auto match_to_str = [&](const std::optional<common_regex_match> & m) {
                     std::ostringstream ss;
                     if (m->type != COMMON_REGEX_MATCH_TYPE_NONE) {
@@ -171,7 +148,7 @@ static void test_regex() {
                     }
                     return ss.str();
                 };
-                std::cout << "    Expected: " << match_to_str(expected_m) << '\n';
+                std::cout << "    Expected: " << match_to_str(input_output.output) << '\n';
                 std::cout << "         Got: " << match_to_str(m) << '\n';
                 std::cout << " Inverted pattern: /" << regex_to_reversed_partial_regex(test_case.pattern) << "/\n";
 
