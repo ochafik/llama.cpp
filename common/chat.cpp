@@ -72,51 +72,6 @@ static std::string string_diff(const std::string & last, const std::string & cur
     return current.substr(last.size());
 }
 
-static bool parse_json(std::string::const_iterator & it, const std::string::const_iterator & end, json & out) {
-    // // https://json.nlohmann.me/features/parsing/sax_interface/
-    struct json_error_locator : public nlohmann::json_sax<json> {
-        std::size_t position;
-        bool found_error;
-
-        json_error_locator() : position(0), found_error(false) {}
-
-        bool parse_error(std::size_t position, const std::string &, const json::exception &) override { // NOLINT
-            this->position = position - 1;
-            this->found_error = true;
-            return false;
-        }
-        bool null() override { return true; } // NOLINT
-        bool boolean(bool) override { return true; } // NOLINT
-        bool number_integer(number_integer_t) override { return true; } // NOLINT
-        bool number_unsigned(number_unsigned_t) override { return true; } // NOLINT
-        bool number_float(number_float_t, const string_t &) override { return true; } // NOLINT
-        bool string(string_t &) override { return true; } // NOLINT
-        bool binary(binary_t &) override { return true; } // NOLINT
-        bool start_object(std::size_t) override { return true; } // NOLINT
-        bool key(string_t &) override { return true; } // NOLINT
-        bool end_object() override { return true; }
-        bool start_array(std::size_t) override { return true; } // NOLINT
-        bool end_array() override { return true; }
-    };
-    json_error_locator err_loc;
-    json::sax_parse(it, end, &err_loc);
-
-    std::string::const_iterator temptative_end;
-    if (err_loc.found_error) {
-        temptative_end = it + err_loc.position;
-    } else {
-        temptative_end = end;
-    }
-    std::string json_sub {it, temptative_end};
-    try {
-        out = json::parse(json_sub);
-        it = temptative_end;
-        return true;
-    } catch (const std::exception &) {
-        return false;
-    }
-}
-
 struct common_chat_msg_parser {
     const std::string input;
     bool is_partial;
@@ -822,6 +777,51 @@ std::string common_chat_format_name(common_chat_format format) {
     }
 }
 
+static bool parse_json(std::string::const_iterator & it, const std::string::const_iterator & end, json & out) {
+    // // https://json.nlohmann.me/features/parsing/sax_interface/
+    struct json_error_locator : public nlohmann::json_sax<json> {
+        std::size_t position;
+        bool found_error;
+
+        json_error_locator() : position(0), found_error(false) {}
+
+        bool parse_error(std::size_t position, const std::string &, const json::exception &) override { // NOLINT
+            this->position = position - 1;
+            this->found_error = true;
+            return false;
+        }
+        bool null() override { return true; } // NOLINT
+        bool boolean(bool) override { return true; } // NOLINT
+        bool number_integer(number_integer_t) override { return true; } // NOLINT
+        bool number_unsigned(number_unsigned_t) override { return true; } // NOLINT
+        bool number_float(number_float_t, const string_t &) override { return true; } // NOLINT
+        bool string(string_t &) override { return true; } // NOLINT
+        bool binary(binary_t &) override { return true; } // NOLINT
+        bool start_object(std::size_t) override { return true; } // NOLINT
+        bool key(string_t &) override { return true; } // NOLINT
+        bool end_object() override { return true; }
+        bool start_array(std::size_t) override { return true; } // NOLINT
+        bool end_array() override { return true; }
+    };
+    json_error_locator err_loc;
+    json::sax_parse(it, end, &err_loc);
+
+    std::string::const_iterator temptative_end;
+    if (err_loc.found_error) {
+        temptative_end = it + err_loc.position;
+    } else {
+        temptative_end = end;
+    }
+    std::string json_sub {it, temptative_end};
+    try {
+        out = json::parse(json_sub);
+        it = temptative_end;
+        return true;
+    } catch (const std::exception &) {
+        return false;
+    }
+}
+
 /**
  * Takes a prefix regex that must have 1 group to capture the function name, a closing suffix, and expects json parameters in between.
  * Aggregates the prefix, suffix and in-between text into the content.
@@ -1285,8 +1285,6 @@ static common_chat_params common_chat_params_init_llama_3_1_tool_calls(const com
     return data;
 }
 static void common_chat_parse_llama_3_1(common_chat_msg_parser & builder, bool with_builtin_tools = false) {
-    // throw std::runtime_error("Llama 3.1 parsing not implemented yet");
-    // TODO: tighten & simplify the parser, don't accept leading text context.
     static const common_regex function_regex(
         "\\s*\\{\\s*(?:\"type\"\\s*:\\s*\"function\"\\s*,\\s*)?\"name\"\\s*:\\s*\"([^\"]+)\"\\s*,\\s*\"parameters\"\\s*: ");
     static const common_regex close_regex("\\}\\s*");
