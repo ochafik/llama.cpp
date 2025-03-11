@@ -19,7 +19,7 @@ common_regex_match common_regex::search(const std::string & input, size_t pos, b
             for (size_t i = 0; i < match.size(); ++i) {
                 common_regex_match_group group;
                 group.begin = pos + match.position(i);
-                group.end = pos + match.length(i);
+                group.end = group.begin + match.length(i);
                 res.groups.push_back(group);
             }
             return res;

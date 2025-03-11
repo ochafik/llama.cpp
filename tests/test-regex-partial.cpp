@@ -20,9 +20,6 @@ struct test_case {
     struct input_output {
         std::string input;
         common_regex_match output;
-        // bool operator==(const input_output & other) const {
-        //     return input == other.input && output == other.output;
-        // }
     };
     std::vector<input_output> inputs_outputs;
 };
@@ -141,10 +138,10 @@ static void test_regex() {
             if (m != input_output.output) {
                 auto match_to_str = [&](const std::optional<common_regex_match> & m) {
                     std::ostringstream ss;
-                    if (m->type != COMMON_REGEX_MATCH_TYPE_NONE) {
-                        ss << "pos = " << input_output.output.groups[0].begin << ", type = " << (m->type == COMMON_REGEX_MATCH_TYPE_PARTIAL ? "partial" : m->type == COMMON_REGEX_MATCH_TYPE_FULL ? "full" : "none") << ", groups.length = " << m->groups.size();
-                    } else {
+                    if (m->type == COMMON_REGEX_MATCH_TYPE_NONE) {
                         ss << "<no match>";
+                    } else {
+                        ss << "begin = " << input_output.output.groups[0].begin << ", end =" << input_output.output.groups[0].end << ", type = " << (m->type == COMMON_REGEX_MATCH_TYPE_PARTIAL ? "partial" : m->type == COMMON_REGEX_MATCH_TYPE_FULL ? "full" : "none") << ", groups.length = " << m->groups.size();
                     }
                     return ss.str();
                 };
