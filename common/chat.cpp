@@ -82,7 +82,7 @@ struct common_chat_msg_parser {
         }
     }
 
-    void try_consume_thinking_tags(const common_regex & start_think_regex = default_start_think_regex, const common_regex end_think_regex = default_end_think_regex) {
+    void try_consume_think_tags(const common_regex & start_think_regex = default_start_think_regex, const common_regex end_think_regex = default_end_think_regex) {
         if (extract_reasoning) {
             if (!try_consume_regex(start_think_regex, [&](const auto & /* groups */) {
                 if (!try_find_regex(end_think_regex, [&](const std::string & prelude, const common_regex_match_groups & /* groups */) {
@@ -1137,7 +1137,7 @@ static void common_chat_parse_command_r7b(common_chat_msg_parser & builder) {
     static const common_regex start_thinking_regex("<\\|START_THINKING\\|>", /* at_start= */ true);
     static const common_regex end_thinking_regex("<\\|END_THINKING\\|>");
     
-    builder.try_consume_thinking_tags(start_thinking_regex, end_thinking_regex);
+    builder.try_consume_think_tags(start_thinking_regex, end_thinking_regex);
 
     static const common_regex start_action_regex("<\\|START_ACTION\\|>", /* at_start= */ true);
     static const common_regex end_action_regex("<\\|END_ACTION\\|>");
@@ -1358,7 +1358,7 @@ static common_chat_params common_chat_params_init_deepseek_r1(const common_chat_
     return data;
 }
 static void common_chat_parse_deepseek_r1(common_chat_msg_parser & builder) {
-    builder.try_consume_thinking_tags();
+    builder.try_consume_think_tags();
 
     static const common_regex tool_calls_begin("[\\s\\r\\n]*(?:<｜tool▁calls▁begin｜>|<｜tool_calls_begin｜>|<｜tool calls begin｜>|<｜tool\\\\_calls\\\\_begin｜>)");
     static const common_regex tool_calls_end("<｜tool▁calls▁end｜>");
@@ -1665,7 +1665,7 @@ static common_chat_params common_chat_params_init_hermes_2_pro(const common_chat
     return data;
 }
 static void common_chat_parse_hermes_2_pro(common_chat_msg_parser & builder) {
-    builder.try_consume_thinking_tags();
+    builder.try_consume_think_tags();
     
     static const common_regex open_regex(
         "(?:"
