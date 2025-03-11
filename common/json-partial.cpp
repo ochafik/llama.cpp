@@ -99,15 +99,19 @@ bool common_json_parse(
         }
     };
     json_error_locator err_loc;
+    auto start = it;
     json::sax_parse(it, end, &err_loc);
 
     // std::string::const_iterator temptative_end;
     if (err_loc.found_error) {
+        it = start;
         auto temptative_end = it + err_loc.position;
         fprintf(stderr, "Error at position %zu (is_end = %s): %s\n", err_loc.position, temptative_end == end ? "true" : "false", err_loc.exception_message.c_str());
 
+        auto input = std::string(it, temptative_end);
         try {
-            out.json = json::parse(it, temptative_end);
+            out.json = json::parse(input);
+            // out.json = json::parse(it, temptative_end);
             it = temptative_end;
             return true;
         } catch (const std::exception & ex) {
