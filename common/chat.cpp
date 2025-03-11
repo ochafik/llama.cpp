@@ -848,11 +848,12 @@ static void parse_json_tool_calls(
 
     auto parse_tool_calls = [&]() {
         while (true) {
-            if (!builder.try_find_regex(function_regex, [&](const auto & prelude, const auto & /* groups */) {
+            if (!builder.try_find_regex(function_regex, [&](const auto & prelude, const auto & groups) {
+                auto name = builder.str(groups[1]);
                 builder.result.content += prelude;
                 builder.consume_json([&](const auto & partial) {
                     common_chat_tool_call tool_call;
-                    if (process_tool_call(partial.json, partial, tool_call)) {
+                    if (process_tool_call({{"name", name}, {"arguments", partial.json.dump()}}, partial, tool_call)) {
                         builder.result.tool_calls.push_back(tool_call);
                     }
                     builder.consume_regex(close_regex, nullptr);
