@@ -159,7 +159,7 @@ bool common_json_parse(
                         throw std::runtime_error("Cannot heal a truncated JSON that stopped in an unknown location");
                     }
                     // Cutting back to opening : for object value
-                    str = str.substr(0, last_pos + 1) + (out.json_healing_marker = "\\" + magic_seed) + "\": 1" + closing;
+                    str = str.substr(0, last_pos + 1) + (out.json_healing_marker = "\"" + magic_seed) + "\"" + closing;
                 }
             } else if (err_loc.stack.back().type == COMMON_JSON_STACK_ELEMENT_ARRAY) {
                 if (last_non_sp_char == ',' || last_non_sp_char == '[') {
