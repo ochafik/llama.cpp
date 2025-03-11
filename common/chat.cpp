@@ -1385,6 +1385,7 @@ static common_chat_msg common_chat_parse_llama_3_1(const std::string & input, bo
         if (match.type == COMMON_REGEX_MATCH_TYPE_FULL) {
             common_chat_msg msg;
             msg.role = "assistant";
+            msg.content = std::string(input.begin(), match.groups[0].begin);
 
             auto name = match.groups[1].str();
             if (name.empty()) {
@@ -1404,6 +1405,11 @@ static common_chat_msg common_chat_parse_llama_3_1(const std::string & input, bo
                 }).dump(),
                 /* .id = */ "",
             });
+            return msg;
+        } else if (match.type == COMMON_REGEX_MATCH_TYPE_PARTIAL && is_partial) {
+            common_chat_msg msg;
+            msg.role = "assistant";
+            msg.content = std::string(input.begin(), match.groups[0].begin);
             return msg;
         }
     }
@@ -2126,7 +2132,7 @@ static common_chat_msg common_chat_parse_content_only(const std::string & input)
 }
 
 static common_chat_msg common_chat_parse(common_chat_format format, const std::string & input, bool is_partial) {
-    LOG_DBG("Parsing input with format %s:\n%s\n", common_chat_format_name(format).c_str(), input.c_str());
+    LOG_DBG("Parsing input with format %s: %s\n", common_chat_format_name(format).c_str(), input.c_str());
     switch (format) {
         case COMMON_CHAT_FORMAT_CONTENT_ONLY:
             return common_chat_parse_content_only(input);
@@ -2180,14 +2186,15 @@ std::optional<common_chat_msg> common_chat_parse(const std::string & input, bool
 
         if (!found_trigger && earliest_partial_trigger != input.end()) {
             // Stop stopping at the earliest partial trigger to avoid messing the parsing big time.
+            auto before_trigger = std::string(input.begin(), earliest_partial_trigger);
             try {
-                auto before_trigger = std::string(input.begin(), earliest_partial_trigger);
                 if (before_trigger.empty()) {
                     return std::nullopt;
                 }
                 auto parsed = common_chat_parse(format, before_trigger, /* is_partial= */ true);
                 return parsed;
-            } catch (const std::exception &) {
+            } catch (const std::exception & ex) {
+                fprintf(stderr, "Parsing failed (is_partial = true): %s\n%s\n", ex.what(), before_trigger.c_str());
                 return std::nullopt;
             }
         }
