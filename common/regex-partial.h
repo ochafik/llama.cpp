@@ -10,20 +10,13 @@ enum common_regex_match_type {
 };
 
 struct common_regex_match_group {
-    // std::string str;
-    std::string::const_iterator begin;
-    std::string::const_iterator end;
-    std::string str() const {
-        return std::string(begin, end);
-    }
+    size_t begin;
+    size_t end;
     bool empty() const {
         return begin == end;
     }
-    // size_t start_pos = std::string::npos;
-    // size_t end_pos = std::string::npos;
     bool operator==(const common_regex_match_group & other) const {
         return begin == other.begin && end == other.end;
-        // return str == other.str && start_pos == other.start_pos && end_pos == other.end_pos;
     }
 };
 
