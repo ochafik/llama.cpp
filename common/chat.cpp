@@ -19,6 +19,104 @@ static const common_regex default_start_think_regex("<think>", /* at_start= */ t
 static const common_regex default_end_think_regex("</think>");
 
 // To simplify the control flow of parsers w/ partial support, we use exceptions to return partial results.
+
+static bool process_tool_call(const std::string & name, const std::string & id, const std::string & arguments, const common_json & healed_json, common_chat_tool_call & out) {
+    if (name.empty()) {
+        return false;
+    }
+
+    auto marker_idx = std::string::npos;
+    if (!arguments.empty() && !healed_json.healing_marker.empty()) {
+        marker_idx = arguments.find(healed_json.json_healing_marker);
+        if (marker_idx == std::string::npos) {
+            marker_idx = arguments.find(healed_json.healing_marker);
+        }
+    }
+    out = {
+        /* .name = */ name,
+        /* .arguments = */ marker_idx != std::string::npos ? arguments.substr(0, marker_idx) : arguments,
+        /* .id = */ id,
+    };
+    if (out.arguments == "\"") {
+        // This happens because of completing `:"$magic` after `"arguments"`
+        out.arguments = "";
+    }
+    return true;
+}
+
+static bool process_tool_call(const json & tool_call, const common_json & healed_json, common_chat_tool_call & out) {
+    return process_tool_call(
+        tool_call.contains("name") ? tool_call.at("name") : "",
+        tool_call.contains("id") ? tool_call.at("id") : "",
+        tool_call.contains("arguments") ? tool_call.at("arguments").dump() : "",
+        healed_json,
+        out);
+}
+
+static void process_tool_call_array(const json & arr, const common_json & partial, std::vector<common_chat_tool_call> & tool_calls) {
+    for (const auto & item : arr) {
+        common_chat_tool_call tool_call;
+        if (process_tool_call(item, partial, tool_call)) {
+           tool_calls.emplace_back(tool_call);
+        }
+    }
+}
+
+static std::string string_diff(const std::string & last, const std::string & current) {
+    if (last.empty()) {
+        return current;
+    }
+    if (!string_starts_with(current, last)) {
+        throw std::runtime_error("Invalid diff: '" + last + "' not found at start of '" + current + "'");
+    }
+    return current.substr(last.size());
+}
+
+static bool parse_json(std::string::const_iterator & it, const std::string::const_iterator & end, json & out) {
+    // // https://json.nlohmann.me/features/parsing/sax_interface/
+    struct json_error_locator : public nlohmann::json_sax<json> {
+        std::size_t position;
+        bool found_error;
+
+        json_error_locator() : position(0), found_error(false) {}
+
+        bool parse_error(std::size_t position, const std::string &, const json::exception &) override { // NOLINT
+            this->position = position - 1;
+            this->found_error = true;
+            return false;
+        }
+        bool null() override { return true; } // NOLINT
+        bool boolean(bool) override { return true; } // NOLINT
+        bool number_integer(number_integer_t) override { return true; } // NOLINT
+        bool number_unsigned(number_unsigned_t) override { return true; } // NOLINT
+        bool number_float(number_float_t, const string_t &) override { return true; } // NOLINT
+        bool string(string_t &) override { return true; } // NOLINT
+        bool binary(binary_t &) override { return true; } // NOLINT
+        bool start_object(std::size_t) override { return true; } // NOLINT
+        bool key(string_t &) override { return true; } // NOLINT
+        bool end_object() override { return true; }
+        bool start_array(std::size_t) override { return true; } // NOLINT
+        bool end_array() override { return true; }
+    };
+    json_error_locator err_loc;
+    json::sax_parse(it, end, &err_loc);
+
+    std::string::const_iterator temptative_end;
+    if (err_loc.found_error) {
+        temptative_end = it + err_loc.position;
+    } else {
+        temptative_end = end;
+    }
+    std::string json_sub {it, temptative_end};
+    try {
+        out = json::parse(json_sub);
+        it = temptative_end;
+        return true;
+    } catch (const std::exception &) {
+        return false;
+    }
+}
+
 struct common_chat_msg_parser {
     const std::string input;
     bool is_partial;
@@ -142,68 +240,101 @@ struct common_chat_msg_parser {
     void consume_json(
         const std::function<void(const common_json & result)> & callback,
         const std::vector<std::vector<std::string>> & args_paths = {}
-    );
+    ) {
+        if (!try_consume_json(callback, args_paths)) {
+            incomplete("Failed to consume JSON");
+        }
+    }
 
     bool try_consume_json(
         const std::function<void(const common_json & result)> & callback,
         const std::vector<std::vector<std::string>> & args_paths = {}
-    );
+    ) {
+        auto it = input.begin() + pos;
+        const auto end = input.end();
+        common_json result;
+        std::string healing_marker = "$llama.cpp.json$";
+        if (!common_json_parse(it, end, healing_marker, result)) {
+            return false;
+        }
+        if (result.healing_marker.empty()) {
+            // No healing marker, just return the parsed json
+            callback(result);
+            return true;
+        }
+        if (!is_partial) {
+            incomplete("JSON is incomplete");
+            return false; // Actually unreachable
+        }
 
-    
+        // Healing marker found, we need to visit the json and removed objects that we didn't want to heal
+        auto is_arguments_path = [&](const std::vector<std::string> & path) {
+            return std::find(args_paths.begin(), args_paths.end(), path) != args_paths.end();
+            // return std::any_of(args_paths.begin(), args_paths.end(), [&](const auto & args_path) {
+            //     return path == args_path;
+            // });
+        };
+
+        std::vector<std::string> path;
+        std::function<json(const json &)> remove_unsupported_healings = [&](const json & j) {
+            if (j.is_object()) {
+                auto obj = json::object();
+                for (const auto & [key, value] : j.items()) {
+                    std::string key_str = key;
+                    if (key_str.find(healing_marker) != std::string::npos) {
+                        // Don't heal keys, and discard the rest of the object.
+                        break;
+                    }
+                    path.push_back(key_str);
+                    auto is_args = is_arguments_path(path);
+                    if (is_args) {
+                        obj[key] = value;
+                    } else if (value.is_string()) {
+                        if (value.get<std::string>().find(healing_marker) == std::string::npos) {
+                            obj[key] = value;
+                        }
+                    } else {
+                        obj[key] = remove_unsupported_healings(value);
+                    }
+                    path.pop_back();
+                }
+                return obj;
+            }
+            if (j.is_array()) {
+                auto arr = json::array();
+                for (const auto & value : j) {
+                    if (value.is_string()) {
+                        std::string str = value;
+                        if (str.find(healing_marker) != std::string::npos) {
+                            // Don't heal array values, and discard the rest of the array.
+                            break;
+                        }
+                    }
+                    arr.push_back(remove_unsupported_healings(value));
+                }
+                return arr;
+            }
+            return j;
+        };
+
+        // if (jout.json.is_string()) {
+        //     auto str = jout.json.get<std::string>();
+        //     auto idx = str.find(healing_marker);
+        //     if (idx != std::string::npos) {
+        //         out.json = str.substr(0, idx);
+        //         out.healing_marker = jout.healing_marker;
+        //         out.json_healing_marker = jout.json_healing_marker;
+        //         return true;
+        //     }
+        // }
+        if (!is_arguments_path({})) {
+            result.json = remove_unsupported_healings(result.json);
+        }
+        fprintf(stderr, "Half-healed json: %s\n", result.json.dump().c_str());
+
+        return true;
+    }
 };
-
-static bool process_tool_call(const std::string & name, const std::string & id, const std::string & arguments, const common_json & healed_json, common_chat_tool_call & out) {
-    if (name.empty()) {
-        return false;
-    }
-
-    auto marker_idx = std::string::npos;
-    if (!arguments.empty() && !healed_json.healing_marker.empty()) {
-        marker_idx = arguments.find(healed_json.json_healing_marker);
-        if (marker_idx == std::string::npos) {
-            marker_idx = arguments.find(healed_json.healing_marker);
-        }
-    }
-    out = {
-        /* .name = */ name,
-        /* .arguments = */ marker_idx != std::string::npos ? arguments.substr(0, marker_idx) : arguments,
-        /* .id = */ id,
-    };
-    if (out.arguments == "\"") {
-        // This happens because of completing `:"$magic` after `"arguments"`
-        out.arguments = "";
-    }
-    return true;
-}
-
-static bool process_tool_call(const json & tool_call, const common_json & healed_json, common_chat_tool_call & out) {
-    return process_tool_call(
-        tool_call.contains("name") ? tool_call.at("name") : "",
-        tool_call.contains("id") ? tool_call.at("id") : "",
-        tool_call.contains("arguments") ? tool_call.at("arguments").dump() : "",
-        healed_json,
-        out);
-}
-
-static void process_tool_call_array(const json & arr, const common_json & partial, std::vector<common_chat_tool_call> & tool_calls) {
-    for (const auto & item : arr) {
-        common_chat_tool_call tool_call;
-        if (process_tool_call(item, partial, tool_call)) {
-           tool_calls.emplace_back(tool_call);
-        }
-    }
-}
-
-
-static std::string string_diff(const std::string & last, const std::string & current) {
-    if (last.empty()) {
-        return current;
-    }
-    if (!string_starts_with(current, last)) {
-        throw std::runtime_error("Invalid diff: '" + last + "' not found at start of '" + current + "'");
-    }
-    return current.substr(last.size());
-}
 
 std::vector<common_chat_msg_diff> common_chat_msg_diff::compute_diffs(const common_chat_msg & previous_msg, const common_chat_msg & new_msg) {
     std::vector<common_chat_msg_diff> diffs;
@@ -689,159 +820,6 @@ std::string common_chat_format_name(common_chat_format format) {
         default:
             throw std::runtime_error("Unknown chat format");
     }
-}
-
-static bool parse_json(std::string::const_iterator & it, const std::string::const_iterator & end, json & out) {
-    // // https://json.nlohmann.me/features/parsing/sax_interface/
-    struct json_error_locator : public nlohmann::json_sax<json> {
-        std::size_t position;
-        bool found_error;
-
-        json_error_locator() : position(0), found_error(false) {}
-
-        bool parse_error(std::size_t position, const std::string &, const json::exception &) override { // NOLINT
-            this->position = position - 1;
-            this->found_error = true;
-            return false;
-        }
-        bool null() override { return true; } // NOLINT
-        bool boolean(bool) override { return true; } // NOLINT
-        bool number_integer(number_integer_t) override { return true; } // NOLINT
-        bool number_unsigned(number_unsigned_t) override { return true; } // NOLINT
-        bool number_float(number_float_t, const string_t &) override { return true; } // NOLINT
-        bool string(string_t &) override { return true; } // NOLINT
-        bool binary(binary_t &) override { return true; } // NOLINT
-        bool start_object(std::size_t) override { return true; } // NOLINT
-        bool key(string_t &) override { return true; } // NOLINT
-        bool end_object() override { return true; }
-        bool start_array(std::size_t) override { return true; } // NOLINT
-        bool end_array() override { return true; }
-    };
-    json_error_locator err_loc;
-    json::sax_parse(it, end, &err_loc);
-
-    std::string::const_iterator temptative_end;
-    if (err_loc.found_error) {
-        temptative_end = it + err_loc.position;
-    } else {
-        temptative_end = end;
-    }
-    std::string json_sub {it, temptative_end};
-    try {
-        out = json::parse(json_sub);
-        it = temptative_end;
-        return true;
-    } catch (const std::exception &) {
-        return false;
-    }
-}
-
-static bool parse_literal(std::string::const_iterator & it, const std::string::const_iterator & end, const std::string & expected) {
-    auto expected_it = expected.begin();
-    auto tmp_it = it;
-    while (tmp_it != end && expected_it != expected.end() && *tmp_it == *expected_it) {
-        ++tmp_it;
-        ++expected_it;
-    }
-    if (expected_it == expected.end()) {
-        it = tmp_it;
-        return true;
-    }
-    return false;
-}
-
-static std::optional<std::smatch> parse_pattern(std::string::const_iterator & it, const std::string::const_iterator & end, const std::regex & expected) {
-    std::smatch match;
-    if (std::regex_match(it, end, match, expected)) {
-        it = match.suffix().first;
-        return match;
-    }
-    return std::nullopt;
-}
-
-static void consume_spaces(std::string::const_iterator & it, const std::string::const_iterator & end) {
-    while (it != end && std::isspace(*it)) {
-        ++it;
-    }
-}
-
-static bool parse_json_with_arguments(std::string::const_iterator & it, const std::string::const_iterator & end, bool is_partial, const std::function<bool(const std::vector<std::string> &)> & is_arguments_path, common_json & out) {
-    if (!is_partial) {
-        return parse_json(it, end, out.json);
-    }
-
-    std::string healing_marker = "$llama.cpp.json$";
-    common_json jout;
-    if (!common_json_parse(it, end, healing_marker, jout)) {
-        return false;
-    }
-    fprintf(stderr, "Parsed json: %s\n", jout.json.dump().c_str());
-
-    if (jout.healing_marker.empty()) {
-        // No healing marker, just return the parsed json
-        out.json = jout.json;
-        return true;
-    }
-    // Healing marker found, we need to visit the json and removed objects that we didn't want to heal
-
-    std::vector<std::string> path;
-    std::function<json(const json &)> remove_unsupported_healings = [&](const json & j) {
-        if (j.is_object()) {
-            auto obj = json::object();
-            for (const auto & [key, value] : j.items()) {
-                std::string key_str = key;
-                if (key_str.find(healing_marker) != std::string::npos) {
-                    // Don't heal keys, and discard the rest of the object.
-                    break;
-                }
-                path.push_back(key_str);
-                auto is_args = is_arguments_path && is_arguments_path(path);
-                if (is_args) {
-                    obj[key] = value;
-                } else if (value.is_string()) {
-                    if (value.get<std::string>().find(healing_marker) == std::string::npos) {
-                        obj[key] = value;
-                    }
-                } else {
-                    obj[key] = remove_unsupported_healings(value);
-                }
-                path.pop_back();
-            }
-            return obj;
-        }
-        if (j.is_array()) {
-            auto arr = json::array();
-            for (const auto & value : j) {
-                if (value.is_string()) {
-                    std::string str = value;
-                    if (str.find(healing_marker) != std::string::npos) {
-                        // Don't heal array values, and discard the rest of the array.
-                        break;
-                    }
-                }
-                arr.push_back(remove_unsupported_healings(value));
-            }
-            return arr;
-        }
-        return j;
-    };
-
-    // if (jout.json.is_string()) {
-    //     auto str = jout.json.get<std::string>();
-    //     auto idx = str.find(healing_marker);
-    //     if (idx != std::string::npos) {
-    //         out.json = str.substr(0, idx);
-    //         out.healing_marker = jout.healing_marker;
-    //         out.json_healing_marker = jout.json_healing_marker;
-    //         return true;
-    //     }
-    // }
-    out.json = !is_arguments_path || is_arguments_path(path) ? jout.json : remove_unsupported_healings(jout.json);
-    out.healing_marker = jout.healing_marker;
-    out.json_healing_marker = jout.json_healing_marker;
-    fprintf(stderr, "Half-healed json: %s\n", out.json.dump().c_str());
-
-    return true;
 }
 
 /**
