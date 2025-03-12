@@ -7,6 +7,11 @@ struct common_json {
 };
 
 bool common_json_parse(
+    const std::string & input,
+    const std::string & healing_marker,
+    common_json & out);
+
+bool common_json_parse(
     std::string::const_iterator & it,
     const std::string::const_iterator & end,
     const std::string & healing_marker,

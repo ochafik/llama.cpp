@@ -4,7 +4,16 @@
 #include <iostream>
 #include <stdexcept>
 
-static void test_json_sax() {
+template <class T> static void assert_equals(const T & expected, const T & actual) {
+  if (expected != actual) {
+      std::cerr << "Expected: " << expected << std::endl;
+      std::cerr << "Actual: " << actual << std::endl;
+      std::cerr << std::flush;
+      throw std::runtime_error("Test failed");
+  }
+}
+
+static void test_json_healing() {
   auto parse = [](const std::string & str) {
       std::cerr << "# Parsing: " << str << '\n';
       std::string::const_iterator it = str.begin();
@@ -42,9 +51,16 @@ static void test_json_sax() {
   };
   parse_all("{\"a\": \"b\"}");
   parse_all("{\"hey\": 1, \"ho\\\"ha\": [1]}");
+
+  parse_all("[{\"a\": \"b\"}]");
+
+  common_json out;
+  assert_equals(true, common_json_parse("[{\"a\": \"b\"}", "$foo", out));
+  assert_equals<std::string>("[{\"a\":\"b\"},\"$foo\"]", out.json.dump());
+
 }
 
 int main() {
-    test_json_sax();
+    test_json_healing();
     return 0;
 }

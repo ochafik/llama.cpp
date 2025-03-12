@@ -18,6 +18,16 @@ struct common_json_stack_element {
 };
 
 bool common_json_parse(
+    const std::string & input,
+    const std::string & healing_marker,
+    common_json & out)
+{
+    std::string::const_iterator it = input.begin();
+    const auto end = input.end();
+    return common_json_parse(it, end, healing_marker, out);
+}
+
+bool common_json_parse(
     std::string::const_iterator & it,
     const std::string::const_iterator & end,
     const std::string & healing_marker,
@@ -120,7 +130,7 @@ bool common_json_parse(
         }
         auto can_parse = [](const std::string & str) {
             try {
-                json::parse(str); // NOLINT
+                auto _ = json::parse(str); // NOLINT
                 return true;
             } catch (const std::exception &) {
                 return false;
@@ -183,6 +193,9 @@ bool common_json_parse(
                 } else if (str[str.length() - 1] == '\\' && can_parse(str + "\\\"" + closing)) {
                     // Was inside an array value string after an escape
                     str += (out.json_healing_marker = "\\" + magic_seed) + "\"" + closing;
+                } else if (!std::isdigit(last_non_sp_char) && last_non_sp_char != '.' && last_non_sp_char != 'e' && last_non_sp_char != 'E' && last_non_sp_char != '-' && can_parse(str + ", 1" + closing)) {
+                    // Had just finished a value
+                    str += (out.json_healing_marker = ",\"" + magic_seed) + "\"" + closing;
                 } else {
                     auto last_pos = str.find_last_of("[,");
                     if (last_pos == std::string::npos) {
@@ -223,16 +236,8 @@ bool common_json_parse(
         // TODO: handle unclosed top-level primitive if the stack was empty but we got an error (e.g. "tru", "\"", etc...)
         // fprintf(stderr, "Closing: TODO\n"); 
         return false;
-    } else {
-        out.json = json::parse(it, end);
-        it = end;
-        return true;
-    }
-    // try {
-    //     out.json = json::parse(it, temptative_end);
-    //     it = temptative_end;
-    //     return true;
-    // } catch (const std::exception &) {
-    //     return false;
-    // }
+    } 
+    out.json = json::parse(it, end);
+    it = end;
+    return true;
 }
