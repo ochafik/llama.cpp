@@ -813,11 +813,10 @@ static bool process_tool_call(const json & tool_call, const common_json & healed
             marker_idx = arguments.find(healed_json.healing_marker);
         }
     }
-    out = {
-        /* .name = */ name,
-        /* .arguments = */ marker_idx != std::string::npos ? arguments.substr(0, marker_idx) : arguments,
-        /* .id = */ id,
-    };
+    out.name = name;
+    out.arguments = marker_idx != std::string::npos ? arguments.substr(0, marker_idx) : arguments;
+    out.id = id;
+    
     if (out.arguments == "\"") {
         // This happens because of completing `:"$magic` after `"arguments"`
         out.arguments = "";
@@ -853,7 +852,7 @@ static void parse_json_tool_calls(
                 builder.result.content += prelude;
                 builder.consume_json([&](const auto & partial) {
                     common_chat_tool_call tool_call;
-                    if (process_tool_call({{"name", name}, {"arguments", partial.json.dump()}}, partial, tool_call)) {
+                    if (process_tool_call({{"name", name}, {"arguments", partial.json}}, partial, tool_call)) {
                         builder.result.tool_calls.push_back(tool_call);
                     }
                     builder.consume_regex(close_regex, nullptr);
