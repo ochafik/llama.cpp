@@ -115,9 +115,6 @@ struct common_chat_msg_parser {
 
     // Tries to find the regex, consumes it (pos right after it) and gives the prelude (right before it) and the groups to the callback.
     bool try_find_regex(const common_regex & regex, const std::function<void(const std::string & prelude, const common_regex_match_groups & groups)> & callback) {
-        if (!regex.at_start()) {
-            throw std::runtime_error("try_find_regex requires a common_regex w/ at_start=true");
-        }
         auto m = regex.search(input, pos);
         if (m.type == COMMON_REGEX_MATCH_TYPE_NONE) {
             return false;
@@ -198,9 +195,6 @@ struct common_chat_msg_parser {
         // Healing marker found, we need to visit the json and removed objects that we didn't want to heal
         auto is_arguments_path = [&](const std::vector<std::string> & path) {
             return std::find(args_paths.begin(), args_paths.end(), path) != args_paths.end();
-            // return std::any_of(args_paths.begin(), args_paths.end(), [&](const auto & args_path) {
-            //     return path == args_path;
-            // });
         };
 
         std::vector<std::string> path;
@@ -245,16 +239,6 @@ struct common_chat_msg_parser {
             return j;
         };
 
-        // if (jout.json.is_string()) {
-        //     auto str = jout.json.get<std::string>();
-        //     auto idx = str.find(healing_marker);
-        //     if (idx != std::string::npos) {
-        //         out.json = str.substr(0, idx);
-        //         out.healing_marker = jout.healing_marker;
-        //         out.json_healing_marker = jout.json_healing_marker;
-        //         return true;
-        //     }
-        // }
         if (!is_arguments_path({})) {
             result.json = remove_unsupported_healings(result.json);
         }
@@ -878,15 +862,17 @@ static void parse_json_tool_calls(
     }
 }
 
-static void parse_prefixed_json_tool_call_array(common_chat_msg_parser & builder, const std::string & prefix, size_t rstrip_prefix = 0) {
-    if (!builder.try_consume_regex(prefix, [&](const auto & /* groups */) {
+static void parse_prefixed_json_tool_call_array(common_chat_msg_parser & builder, const common_regex & prefix, size_t rstrip_prefix = 0) {
+    static const std::vector<std::vector<std::string>> args_paths = {{"arguments"}};
+    if (!builder.try_find_regex(prefix, [&](const auto & prelude, const auto & /* groups */) {
+        builder.result.content += prelude;
         if (builder.pos < rstrip_prefix) {
             throw std::runtime_error("Invalid prefix length");
         }
         builder.pos -= rstrip_prefix;
         builder.consume_json([&](const auto & partial) {
             process_tool_call_array(partial.json, partial, builder.result.tool_calls);
-        }, {{}});
+        }, args_paths);
     })) {
         builder.result.content = builder.consume_rest();
     }
@@ -1089,7 +1075,8 @@ static common_chat_params common_chat_params_init_mistral_nemo(const common_chat
     return data;
 }
 static void common_chat_parse_mistral_nemo(common_chat_msg_parser & builder) {
-    parse_prefixed_json_tool_call_array(builder, "[TOOL_CALLS]");
+    static const common_regex prefix(regex_escape("[TOOL_CALLS]"));
+    parse_prefixed_json_tool_call_array(builder, prefix);
 }
 
 static common_chat_params common_chat_params_init_command_r7b(const common_chat_template & tmpl, const struct templates_params & inputs) {
@@ -1384,10 +1371,9 @@ static void common_chat_parse_deepseek_r1(common_chat_msg_parser & builder) {
     builder.try_consume_think_tags();
 
     static const common_regex tool_calls_begin("[\\s\\r\\n]*(?:<｜tool▁calls▁begin｜>|<｜tool_calls_begin｜>|<｜tool calls begin｜>|<｜tool\\\\_calls\\\\_begin｜>)");
-    static const common_regex tool_calls_end("<｜tool▁calls▁end｜>");
+    static const common_regex tool_calls_end("<｜tool▁calls▁end｜>", /* at_start= */ true);
     static const common_regex function_regex("<｜tool▁call▁begin｜>function<｜tool▁sep｜>([^\n]+)\n```json\n");
-    static const common_regex close_regex("```[\\s\\r\\n]*<｜tool▁call▁end｜>");
-    static const common_regex reasoning_content_regex("((?:<think>)?([\\s\\S\\r\\n]*?)</think>)?([\\s\\S\\r\\n]*)");
+    static const common_regex close_regex("```[\\s\\r\\n]*<｜tool▁call▁end｜>", /* at_start= */ true);
 
     parse_json_tool_calls(builder, tool_calls_begin, function_regex, close_regex, tool_calls_end);
 }
@@ -1438,7 +1424,8 @@ static common_chat_params common_chat_params_init_firefunction_v2(const common_c
     return data;
 }
 static void common_chat_parse_firefunction_v2(common_chat_msg_parser & builder) {
-    parse_prefixed_json_tool_call_array(builder, " functools[", /* rstrip_prefix= */ 1);
+    static const common_regex prefix(regex_escape(" functools["));
+    parse_prefixed_json_tool_call_array(builder, prefix, /* rstrip_prefix= */ 1);
 }
 
 static common_chat_params common_chat_params_init_functionary_v3_2(const common_chat_template & tmpl, const struct templates_params & inputs) {
