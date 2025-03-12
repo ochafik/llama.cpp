@@ -204,7 +204,9 @@ struct common_chat_msg_parser {
                 for (const auto & [key, value] : j.items()) {
                     std::string key_str = key;
                     if (key_str.find(healing_marker) != std::string::npos) {
-                        // Don't heal keys, and discard the rest of the object.
+                        // Don't heal keys halfway, cut just after their opening quotes
+                        obj[result.healing_marker] = 1;
+                        result.json_healing_marker = result.healing_marker;
                         break;
                     }
                     path.push_back(key_str);
@@ -225,13 +227,13 @@ struct common_chat_msg_parser {
             if (j.is_array()) {
                 auto arr = json::array();
                 for (const auto & value : j) {
-                    if (value.is_string()) {
-                        std::string str = value;
-                        if (str.find(healing_marker) != std::string::npos) {
-                            // Don't heal array values, and discard the rest of the array.
-                            break;
-                        }
-                    }
+                    // if (value.is_string()) {
+                    //     std::string str = value;
+                    //     if (str.find(healing_marker) != std::string::npos) {
+                    //         // Don't heal array values, and discard the rest of the array.
+                    //         break;
+                    //     }
+                    // }
                     arr.push_back(remove_unsupported_healings(value));
                 }
                 return arr;
@@ -269,11 +271,11 @@ std::vector<common_chat_msg_diff> common_chat_msg_diff::compute_diffs(const comm
         auto idx = previous_msg.tool_calls.size() - 1;
         const auto & pref = previous_msg.tool_calls[idx];
         const auto & newf = new_msg.tool_calls[idx];
-        if (pref.name != newf.name || pref.id != newf.id) {
+        if (pref.name != newf.name) {
             throw std::runtime_error("Invalid diff: tool call mismatch!");
         }
         auto args_diff = string_diff(pref.arguments, newf.arguments);
-        if (!args_diff.empty()) {
+        if (!args_diff.empty() || pref.id != newf.id) {
             auto & diff = diffs.emplace_back();
             diff.tool_call_index = idx;
             diff.tool_call_delta.name = newf.name;
