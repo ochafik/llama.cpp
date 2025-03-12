@@ -58,6 +58,10 @@ struct common_chat_msg_parser {
         if (!is_partial && pos != input.size()) {
             throw std::runtime_error("Unexpected content at end of input: " + input.substr(pos));
         }
+        result.reasoning_content = string_strip(result.reasoning_content);
+        if (!result.tool_calls.empty()) {
+            result.content = string_strip(result.content);
+        }
     }
 
     void incomplete(const std::string & message) {
@@ -123,7 +127,7 @@ struct common_chat_msg_parser {
             incomplete(regex.str());
             return false;
         }
-        auto prelude = input.substr(pos, m.groups[0].begin);
+        auto prelude = input.substr(pos, m.groups[0].begin - pos);
         pos = m.groups[0].end;
 
         if (callback) {
@@ -849,19 +853,19 @@ static void parse_json_tool_calls(
 
                 }, {{}});
             })) {
-                builder.result.content = builder.consume_rest();
                 break;
             }
         }
         if (block_close) {
             builder.consume_regex(*block_close, nullptr);
         }
+        builder.result.content += builder.consume_rest();
     };
     if (block_open) {
         if (!builder.try_consume_regex(*block_open, [&](const auto & /* groups */) {
             parse_tool_calls();
         })) {
-            builder.result.content = builder.consume_rest();
+            builder.result.content += builder.consume_rest();
         }
     } else {
         parse_tool_calls();
@@ -1376,9 +1380,9 @@ static common_chat_params common_chat_params_init_deepseek_r1(const common_chat_
 static void common_chat_parse_deepseek_r1(common_chat_msg_parser & builder) {
     builder.try_consume_think_tags();
 
-    static const common_regex tool_calls_begin("[\\s\\r\\n]*(?:<｜tool▁calls▁begin｜>|<｜tool_calls_begin｜>|<｜tool calls begin｜>|<｜tool\\\\_calls\\\\_begin｜>)");
+    static const common_regex tool_calls_begin("[\\s\\r\\n]*(?:<｜tool▁calls▁begin｜>|<｜tool_calls_begin｜>|<｜tool calls begin｜>|<｜tool\\\\_calls\\\\_begin｜>)", /* at_start= */ true);
     static const common_regex tool_calls_end("<｜tool▁calls▁end｜>", /* at_start= */ true);
-    static const common_regex function_regex("<｜tool▁call▁begin｜>function<｜tool▁sep｜>([^\n]+)\n```json\n");
+    static const common_regex function_regex("<｜tool▁call▁begin｜>function<｜tool▁sep｜>([^\n]+)\n```json\n", /* at_start= */ true);
     static const common_regex close_regex("```[\\s\\r\\n]*<｜tool▁call▁end｜>", /* at_start= */ true);
 
     parse_json_tool_calls(builder, tool_calls_begin, function_regex, close_regex, tool_calls_end);
@@ -1489,7 +1493,11 @@ static void common_chat_parse_functionary_v3_2(common_chat_msg_parser & builder)
     static const common_regex function_regex(R"(>>>(\w+)\n)", /* at_start= */ true);
     static const common_regex close_regex(R"(\s*)", /* at_start= */ true);
 
-    builder.input = ">>>" + builder.input;
+    std::string prefix_to_remove = "assistant<|end_header_id|>\n";
+    std::string prefix_to_add = ">>>";
+    if (string_starts_with(builder.input, prefix_to_remove)) {
+        builder.input = prefix_to_add + builder.input.substr(prefix_to_remove.size());
+    }
 
     parse_json_tool_calls(builder, std::nullopt, function_regex, close_regex, std::nullopt, /* allow_raw_python= */ true,
         /* is_function= */ [&](const auto & name) {
