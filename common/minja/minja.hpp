@@ -28,7 +28,7 @@
 #include <utility>
 #include <vector>
 
-#include <nlohmann/json.hpp>
+#include <json.hpp>
 
 using json = nlohmann::ordered_json;
 
