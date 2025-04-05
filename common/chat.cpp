@@ -6,6 +6,15 @@
 
 #include <optional>
 
+static std::string format_time(const std::chrono::system_clock::time_point & now, const std::string & format) {
+    auto time = std::chrono::system_clock::to_time_t(now);
+    auto local_time = *std::localtime(&time);
+    std::ostringstream ss;
+    ss << std::put_time(&local_time, format.c_str());
+    auto res = ss.str();
+    return res;
+}
+
 typedef minja::chat_template common_chat_template;
 
 struct common_chat_templates {
@@ -24,6 +33,7 @@ struct templates_params {
     std::string grammar;
     bool add_generation_prompt = true;
     bool extract_reasoning     = true;
+    std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
 };
 
 common_chat_tool_choice common_chat_tool_choice_parse_oaicompat(const std::string & tool_choice) {
@@ -937,57 +947,58 @@ static void expect_tool_parameters(const std::string & name, const json & parame
     }
 }
 
-static common_chat_params common_chat_params_init_llama_3_1_tool_calls(const common_chat_template & tmpl, const struct templates_params & inputs, bool allow_python_tag_builtin_tools) {
+static common_chat_params common_chat_params_init_llama_3_x(const common_chat_template & tmpl, const struct templates_params & inputs, bool allow_python_tag_builtin_tools) {
     auto builtin_tools = json::array();
     common_chat_params data;
-    data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
-    data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-        std::vector<std::string> tool_rules;
+    if (!inputs.tools.is_null()) {
+        data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
+            std::vector<std::string> tool_rules;
 
-        auto handle_builtin_tool = [&](const std::string & name, const json & parameters) {
-            if (name == "wolfram_alpha" || name == "web_search" || name == "brave_search") {
-                // https://github.com/meta-llama/llama-stack/blob/main/llama_stack/providers/remote/tool_runtime/wolfram_alpha/wolfram_alpha.py
-                // https://github.com/meta-llama/llama-stack/blob/main/llama_stack/providers/remote/tool_runtime/brave_search/brave_search.py
-                expect_tool_parameters(name, parameters, {"query"});
-            } else if (name == "python" || name == "code_interpreter") {
-                // https://github.com/meta-llama/llama-stack/blob/main/llama_stack/providers/inline/tool_runtime/code_interpreter/code_interpreter.py
-                expect_tool_parameters(name, parameters, {"code"});
-            } else {
-                return false;
-            }
+            auto handle_builtin_tool = [&](const std::string & name, const json & parameters) {
+                if (name == "wolfram_alpha" || name == "web_search" || name == "brave_search") {
+                    // https://github.com/meta-llama/llama-stack/blob/main/llama_stack/providers/remote/tool_runtime/wolfram_alpha/wolfram_alpha.py
+                    // https://github.com/meta-llama/llama-stack/blob/main/llama_stack/providers/remote/tool_runtime/brave_search/brave_search.py
+                    expect_tool_parameters(name, parameters, {"query"});
+                } else if (name == "python" || name == "code_interpreter") {
+                    // https://github.com/meta-llama/llama-stack/blob/main/llama_stack/providers/inline/tool_runtime/code_interpreter/code_interpreter.py
+                    expect_tool_parameters(name, parameters, {"code"});
+                } else {
+                    return false;
+                }
 
-            std::vector<std::string> kvs;
-            for (const auto & [key, value] : parameters.at("properties").items()) {
-                kvs.push_back("\"" + key + "=\" " + builder.add_schema(name + "-args-" + key, value)); // NOLINT
-            }
+                std::vector<std::string> kvs;
+                for (const auto & [key, value] : parameters.at("properties").items()) {
+                    kvs.push_back("\"" + key + "=\" " + builder.add_schema(name + "-args-" + key, value)); // NOLINT
+                }
 
-            tool_rules.push_back(
-                builder.add_rule(
-                    name + "-call",
-                    "\"<|python_tag|>" + name + ".call(\" " + string_join(kvs, " \", \" ") + " \")\""));
-            builtin_tools.push_back(name);
+                tool_rules.push_back(
+                    builder.add_rule(
+                        name + "-call",
+                        "\"<|python_tag|>" + name + ".call(\" " + string_join(kvs, " \", \" ") + " \")\""));
+                builtin_tools.push_back(name);
 
-            return true;
-        };
+                return true;
+            };
 
-        foreach_function(inputs.tools, [&](const json & tool) {
-            const auto & function = tool.at("function");
-            std::string name = function.at("name");
-            auto parameters = function.at("parameters");
-            builder.resolve_refs(parameters);
+            foreach_function(inputs.tools, [&](const json & tool) {
+                const auto & function = tool.at("function");
+                std::string name = function.at("name");
+                auto parameters = function.at("parameters");
+                builder.resolve_refs(parameters);
 
-            // https://github.com/meta-llama/llama-stack/tree/main/llama_stack/providers/remote/tool_runtime
-            if (allow_python_tag_builtin_tools) {
-                handle_builtin_tool(name, parameters);
-            }
-            tool_rules.push_back(
-                builder.add_rule(
-                    name + "-call",
-                    "\"{\" space "
-                    "( \"\\\"type\\\"\"       space \":\" space \"\\\"function\\\"\"     space \",\" space )? "
-                    "  \"\\\"name\\\"\"       space \":\" space \"\\\"" + name + "\\\"\" space \",\" space "
-                    "  \"\\\"parameters\\\"\" space \":\" space " + builder.add_schema(name + "-args", parameters) + " "
-                    "\"}\" space"));
+                // https://github.com/meta-llama/llama-stack/tree/main/llama_stack/providers/remote/tool_runtime
+                if (allow_python_tag_builtin_tools) {
+                    handle_builtin_tool(name, parameters);
+                }
+                tool_rules.push_back(
+                    builder.add_rule(
+                        name + "-call",
+                        "\"{\" space "
+                        "( \"\\\"type\\\"\"       space \":\" space \"\\\"function\\\"\"     space \",\" space )? "
+                        "  \"\\\"name\\\"\"       space \":\" space \"\\\"" + name + "\\\"\" space \",\" space "
+                        "  \"\\\"parameters\\\"\" space \":\" space " + builder.add_schema(name + "-args", parameters) + " "
+                        "\"}\" space"));
         });
         // Small models may hallucinate function names so we match anything (*at the start*) that looks like the JSON of a function call, regardless of the name.
         data.grammar_triggers.push_back({
@@ -1003,6 +1014,7 @@ static common_chat_params common_chat_params_init_llama_3_1_tool_calls(const com
     });
     data.additional_stops.push_back("<|eom_id|>");
     data.prompt = apply(tmpl, inputs.messages, inputs.tools.empty() ? json() : inputs.tools, inputs.add_generation_prompt, {
+        {"date_string", format_time(inputs.now, "%d %b %Y")},
         {"tools_in_user_message", false},
         {"builtin_tools", builtin_tools.empty() ? json() : builtin_tools},
     });
@@ -1148,7 +1160,7 @@ static common_chat_params common_chat_params_init_firefunction_v2(const common_c
     LOG_DBG("%s\n", __func__);
     common_chat_params data;
     data.prompt = apply(tmpl, inputs.messages, /* tools= */ nullptr, inputs.add_generation_prompt, {
-        {"datetime", "Jan 29 2025 13:00:00 GMT"},
+        {"datetime", format_time(inputs.now, "%b %d %Y %H:%M:%S GMT")},
         {"functions", json(inputs.tools.empty() ? "" : inputs.tools.dump(2))},
     });
     if (inputs.tools.is_array() && !inputs.tools.empty()) {
@@ -1591,6 +1603,7 @@ static common_chat_params common_chat_templates_apply_jinja(
     params.extract_reasoning = inputs.extract_reasoning;
     params.tool_choice = inputs.tool_choice;
     params.grammar = inputs.grammar;
+    params.now = inputs.now;
     if (!inputs.json_schema.empty()) {
         params.json_schema = json::parse(inputs.json_schema);
     }
@@ -1621,7 +1634,7 @@ static common_chat_params common_chat_templates_apply_jinja(
         return common_chat_params_init_command_r7b(tmpl, params);
     }
 
-    // Hermes 2/3 Pro, Qwen 2.5 Instruct (w/ tools)
+    // Hermes 2/3 Pro, Qwen 2.5 Instruct
     if (src.find("<tool_call>") != std::string::npos && params.json_schema.is_null()) {
         return common_chat_params_init_hermes_2_pro(tmpl, params);
     }
@@ -1642,6 +1655,12 @@ static common_chat_params common_chat_templates_apply_jinja(
         return common_chat_params_init_firefunction_v2(tmpl, params);
     }
 
+    // Llama 3.1, 3.2, 3.3 (also requires date_string so using it even w/o tools)
+    if (src.find("<|start_header_id|>ipython<|end_header_id|>") != std::string::npos) {
+        auto allow_python_tag_builtin_tools = src.find("<|python_tag|>") != std::string::npos;
+        return common_chat_params_init_llama_3_x(tmpl, params, allow_python_tag_builtin_tools);
+    }
+
     // Plain handler (no tools)
     if (params.tools.is_null() || inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_NONE) {
         return common_chat_params_init_without_tools(tmpl, params);
@@ -1651,12 +1670,6 @@ static common_chat_params common_chat_templates_apply_jinja(
     if (src.find("<|start_header_id|>") != std::string::npos
         && src.find("<function=") != std::string::npos) {
         return common_chat_params_init_functionary_v3_1_llama_3_1(tmpl, params);
-    }
-
-    // Llama 3.1, 3.2, 3.3 (w/ tools)
-    if (src.find("<|start_header_id|>ipython<|end_header_id|>") != std::string::npos) {
-        auto allow_python_tag_builtin_tools = src.find("<|python_tag|>") != std::string::npos;
-        return common_chat_params_init_llama_3_1_tool_calls(tmpl, params, allow_python_tag_builtin_tools);
     }
 
     // Mistral Nemo (w/ tools)
