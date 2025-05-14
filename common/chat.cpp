@@ -1302,7 +1302,6 @@ static common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1(con
     common_chat_params data;
 
     if (!inputs.tools.is_null()) {
-        json tools = inputs.tools.is_null() ? inputs.tools : json::array();
         std::string python_code_argument_name;
         auto has_raw_python = false;
 
