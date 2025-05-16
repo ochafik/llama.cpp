@@ -133,6 +133,7 @@ struct templates_params {
     bool stream;
     std::string grammar;
     bool add_generation_prompt = true;
+    bool enable_thinking = true;
     std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
 };
 
@@ -918,7 +919,11 @@ static common_chat_params common_chat_params_init_command_r7b(const common_chat_
     data.prompt = apply(tmpl, adjusted_messages, inputs.tools.empty() ? json() : inputs.tools, inputs.add_generation_prompt, {});
     data.format = COMMON_CHAT_FORMAT_COMMAND_R7B;
     if (string_ends_with(data.prompt, "<|START_THINKING|>")) {
-        data.thinking_forced_open = true;
+        if (!inputs.enable_thinking) {
+            data.prompt += "<|END_THINKING|>";
+        } else {
+            data.thinking_forced_open = true;
+        }
     }
 
     data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
@@ -1186,7 +1191,11 @@ static common_chat_params common_chat_params_init_deepseek_r1(const common_chat_
     data.prompt = prompt;
     data.format = COMMON_CHAT_FORMAT_DEEPSEEK_R1;
     if (string_ends_with(data.prompt, "<think>\n")) {
-        data.thinking_forced_open = true;
+        if (!inputs.enable_thinking) {
+            data.prompt += "</think>";
+        } else {
+            data.thinking_forced_open = true;
+        }
     }
 
     if (inputs.tools.is_array() && !inputs.tools.empty()) {
@@ -1460,10 +1469,18 @@ static void common_chat_parse_functionary_v3_1_llama_3_1(common_chat_msg_parser 
 static common_chat_params common_chat_params_init_hermes_2_pro(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
 
-    data.prompt = apply(tmpl, inputs.messages, inputs.tools.empty() ? json() : inputs.tools, inputs.add_generation_prompt);
+    json additional_context = {
+        {"enable_thinking", inputs.enable_thinking},
+    };
+
+    data.prompt = apply(tmpl, inputs.messages, inputs.tools.empty() ? json() : inputs.tools, inputs.add_generation_prompt, additional_context);
     data.format = COMMON_CHAT_FORMAT_HERMES_2_PRO;
     if (string_ends_with(data.prompt, "<think>\n")) {
-        data.thinking_forced_open = true;
+        if (!inputs.enable_thinking) {
+            data.prompt += "</think>";
+        } else {
+            data.thinking_forced_open = true;
+        }
     }
 
     // (content)?(<tool_call>{"name": "foo", "arguments": {"a": 1}}</tool_call>)*
@@ -1669,6 +1686,7 @@ static common_chat_params common_chat_templates_apply_jinja(
     params.messages = common_chat_msgs_to_json_oaicompat<json>(inputs.messages, /* concat_text= */ !tmpl.original_caps().requires_typed_content);
     params.add_generation_prompt = inputs.add_generation_prompt;
     params.tool_choice = inputs.tool_choice;
+    params.enable_thinking = inputs.enable_thinking;
     params.grammar = inputs.grammar;
     params.now = inputs.now;
     if (!inputs.json_schema.empty()) {
