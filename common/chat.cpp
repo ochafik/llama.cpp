@@ -934,6 +934,8 @@ static common_chat_params common_chat_params_init_command_r7b(const common_chat_
         } else {
             data.thinking_forced_open = true;
         }
+    } else if (!inputs.enable_thinking && string_ends_with(data.prompt, "<|CHATBOT_TOKEN|>")) {
+        data.prompt += "<|START_THINKING|><|END_THINKING|>";
     }
 
     data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;

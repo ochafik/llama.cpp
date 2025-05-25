@@ -36,8 +36,8 @@ def create_server():
     ("Qwen-QwQ-32B", False,  "<|im_start|>assistant\n<think>\n"),
     ("Qwen-QwQ-32B", True, "<|im_start|>assistant\n<think>\n</think>"),
 
-    ("CohereForAI-c4ai-command-r7b-12-2024-tool_use-think", False,  "<|START_THINKING|>"),
-    ("CohereForAI-c4ai-command-r7b-12-2024-tool_use-think", True, "<|START_THINKING|><|END_THINKING|>"),
+    ("CohereForAI-c4ai-command-r7b-12-2024-tool_use", False,  "<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>"),
+    ("CohereForAI-c4ai-command-r7b-12-2024-tool_use", True, "<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|><|START_THINKING|><|END_THINKING|>"),
 ])
 def test_nothink(template_name: str, nothink: bool, expected_end: str, tools: list[dict]):
     global server
