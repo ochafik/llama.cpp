@@ -654,7 +654,6 @@ static void parse_json_tool_calls(
                 }
                 from = std::string::npos;
 
-                builder.add_content(res->prelude);
                 auto maybe_raw_python = name == "python" && allow_raw_python;
                 if (builder.input()[builder.pos()] == '{' || !maybe_raw_python) {
                     if (auto arguments = builder.try_consume_json_with_dumped_args({{}})) {
@@ -684,7 +683,6 @@ static void parse_json_tool_calls(
     };
     if (block_open) {
         if (auto res = builder.try_find_regex(*block_open)) {
-            builder.add_content(res->prelude);
             parse_tool_calls();
         } else {
             builder.add_content(builder.consume_rest());
@@ -697,7 +695,6 @@ static void parse_json_tool_calls(
 static void parse_prefixed_json_tool_call_array(common_chat_msg_parser & builder, const common_regex & prefix, size_t rstrip_prefix = 0) {
     static const std::vector<std::vector<std::string>> args_paths = {{"arguments"}};
     if (auto res = builder.try_find_regex(prefix)) {
-        builder.add_content(res->prelude);
         builder.move_back(rstrip_prefix);
         auto tool_calls = builder.consume_json_with_dumped_args(args_paths);
         if (!builder.add_tool_calls(tool_calls.value) || tool_calls.is_partial) {
@@ -999,7 +996,6 @@ static void common_chat_parse_command_r7b(common_chat_msg_parser & builder) {
 
     if (auto res = builder.try_find_regex(start_action_regex)) {
         // If we didn't extract thoughts, prelude includes them.
-        builder.add_content(res->prelude);
         auto tool_calls = builder.consume_json_with_dumped_args({{"parameters"}});
         for (const auto & tool_call : tool_calls.value) {
             std::string name = tool_call.contains("tool_name") ? tool_call.at("tool_name") : "";
@@ -1014,10 +1010,8 @@ static void common_chat_parse_command_r7b(common_chat_msg_parser & builder) {
         }
         builder.consume_regex(end_action_regex);
     } else if (auto res = builder.try_find_regex(start_response_regex)) {
-        // If we didn't extract thoughts, prelude includes them.
-        builder.add_content(res->prelude);
         if (auto res = builder.try_find_regex(end_response_regex)) {
-            builder.add_content(res->prelude);
+            // If we didn't extract thoughts, prelude includes them.
         } else {
             builder.add_content(builder.consume_rest());
             throw common_chat_msg_partial_exception(end_response_regex.str());
@@ -1136,8 +1130,6 @@ static void common_chat_parse_llama_3_1(common_chat_msg_parser & builder, bool w
     if (with_builtin_tools) {
         static const common_regex builtin_call_regex("<\\|python_tag\\|>");
         if (auto res = builder.try_find_regex(builtin_call_regex)) {
-            builder.add_content(res->prelude);
-
             auto fun_res = builder.consume_regex(function_name_regex);
             auto function_name = builder.str(fun_res.groups[1]);
 
@@ -1459,7 +1451,6 @@ static void common_chat_parse_functionary_v3_1_llama_3_1(common_chat_msg_parser 
     static const common_regex python_tag_regex(regex_escape("<|python_tag|>"));
 
     if (auto res = builder.try_find_regex(python_tag_regex)) {
-        builder.add_content(res->prelude);
         auto arguments = wrap_code_as_arguments(builder, builder.consume_rest());
         builder.add_tool_call("python", "", arguments);
         return;
@@ -1614,8 +1605,6 @@ static void common_chat_parse_hermes_2_pro(common_chat_msg_parser & builder) {
     );
 
     if (auto res = builder.try_find_regex(open_regex)) {
-        builder.add_content(res->prelude);
-
         const auto & block_start = res->groups[1];
         std::string block_end = block_start.empty() ? "" : "```";
 

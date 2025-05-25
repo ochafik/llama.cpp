@@ -780,7 +780,7 @@ static void test_template_output_parsers() {
                     /* .thinking_forced_open = */ false,
                 }));
         assert_msg_equals(
-            simple_assist_msg(""),
+            simple_assist_msg("Let's call something\n"),
             common_chat_parse(
                 "Let's call something\n"
                 "<tool_call>{\"name",
