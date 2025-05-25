@@ -2250,14 +2250,15 @@ struct server_context {
             bool send_text = true;
 
             size_t stop_pos = slot.find_stopping_strings(str_test, token_str.size(), true);
+            if ((stop_pos == std::string::npos) && slot.has_next_token) {
+                stop_pos = slot.find_stopping_strings(str_test, token_str.size(), false);
+                send_text = stop_pos == std::string::npos;
+            }
             if (stop_pos != std::string::npos) {
                 slot.generated_text.erase(
                     slot.generated_text.begin() + pos + stop_pos,
                     slot.generated_text.end());
                 pos = std::min(slot.n_sent_text, slot.generated_text.size());
-            } else if (slot.has_next_token) {
-                stop_pos = slot.find_stopping_strings(str_test, token_str.size(), false);
-                send_text = stop_pos == std::string::npos;
             }
 
             // check if there is any token to predict
