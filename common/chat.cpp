@@ -574,7 +574,7 @@ common_chat_templates_ptr common_chat_templates_init(
     return tmpls;
 }
 
-std::string common_chat_format_name(common_chat_format format) {
+const char * common_chat_format_name(common_chat_format format) {
     switch (format) {
         case COMMON_CHAT_FORMAT_CONTENT_ONLY: return "Content-only";
         case COMMON_CHAT_FORMAT_GENERIC: return "Generic";
@@ -1853,7 +1853,7 @@ static void common_chat_parse_content_only(common_chat_msg_parser & builder) {
 }
 
 static void common_chat_parse(common_chat_msg_parser & builder, common_chat_format format) {
-    LOG_DBG("Parsing input with format %s: %s\n", common_chat_format_name(format).c_str(), builder.input().c_str());
+    LOG_DBG("Parsing input with format %s: %s\n", common_chat_format_name(format), builder.input().c_str());
 
     switch (format) {
         case COMMON_CHAT_FORMAT_CONTENT_ONLY:
@@ -1890,7 +1890,7 @@ static void common_chat_parse(common_chat_msg_parser & builder, common_chat_form
             common_chat_parse_command_r7b(builder);
             break;
         default:
-            throw std::runtime_error("Unsupported format: " + common_chat_format_name(format));
+            throw std::runtime_error(std::string("Unsupported format: ") + common_chat_format_name(format));
     }
     builder.finish();
 }
