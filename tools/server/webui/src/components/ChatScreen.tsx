@@ -278,8 +278,19 @@ export default function ChatScreen() {
 
 function ServerInfo() {
   const { serverProps } = useAppContext();
+  const modalities = [];
+  if (serverProps?.modalities?.audio) {
+    modalities.push('audio');
+  }
+  if (serverProps?.modalities?.vision) {
+    modalities.push('vision');
+  }
   return (
-    <div className="card card-sm shadow-sm border-1 border-base-content/20 text-base-content/70 mb-6">
+    <div
+      className="card card-sm shadow-sm border-1 border-base-content/20 text-base-content/70 mb-6"
+      tabIndex={0}
+      aria-description="Server information"
+    >
       <div className="card-body">
         <b>Server Info</b>
         <p>
@@ -287,6 +298,13 @@ function ServerInfo() {
           <br />
           <b>Build</b>: {serverProps?.build_info}
           <br />
+          {modalities.length > 0 ? (
+            <>
+              <b>Supported modalities:</b> {modalities.join(', ')}
+            </>
+          ) : (
+            ''
+          )}
         </p>
       </div>
     </div>
@@ -311,6 +329,8 @@ function ChatInput({
 
   return (
     <div
+      role="group"
+      aria-label="Chat input"
       className={classNames({
         'flex items-end pt-8 pb-6 sticky bottom-0 bg-base-100': true,
         'opacity-50': isDrag, // simply visual feedback to inform user that the file will be accepted
@@ -400,13 +420,15 @@ function ChatInput({
                     'btn w-8 h-8 p-0 rounded-full': true,
                     'btn-disabled': isGenerating,
                   })}
+                  aria-label="Upload file"
+                  tabIndex={0}
+                  role="button"
                 >
                   <PaperClipIcon className="h-5 w-5" />
                 </label>
                 <input
                   id="file-upload"
                   type="file"
-                  className="hidden"
                   disabled={isGenerating}
                   {...getInputProps()}
                   hidden
@@ -422,6 +444,7 @@ function ChatInput({
                   <button
                     className="btn btn-primary w-8 h-8 p-0 rounded-full"
                     onClick={onSend}
+                    aria-label="Send message"
                   >
                     <ArrowUpIcon className="h-5 w-5" />
                   </button>
