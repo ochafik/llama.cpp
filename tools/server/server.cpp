@@ -178,7 +178,7 @@ struct slot_params {
             {"grammar_triggers",          grammar_triggers},
             {"preserved_tokens",          sampling.preserved_tokens},
             {"chat_format",               common_chat_format_name(oaicompat_chat_syntax.format)},
-            {"reasoning_format",          (oaicompat_chat_syntax.reasoning_format == COMMON_REASONING_FORMAT_DEEPSEEK ? "deepseek" : "none")},
+            {"reasoning_format",          common_reasoning_format_name(oaicompat_chat_syntax.reasoning_format)},
             {"reasoning_in_content",      oaicompat_chat_syntax.reasoning_in_content},
             {"thinking_forced_open",      oaicompat_chat_syntax.thinking_forced_open},
             {"samplers",                  samplers},

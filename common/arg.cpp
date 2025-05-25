@@ -2854,6 +2854,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         [](common_params & params, const std::string & value) {
             /**/ if (value == "deepseek") { params.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK; }
             else if (value == "none") {     params.reasoning_format = COMMON_REASONING_FORMAT_NONE; }
+            else if (value == "disabled") { params.reasoning_format = COMMON_REASONING_FORMAT_DISABLED; }
             else { std::invalid_argument("invalid value"); }
         }
     ).set_examples({LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_MAIN}).set_env("LLAMA_ARG_THINK"));

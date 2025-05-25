@@ -84,7 +84,7 @@ class ServerProcess:
     draft_max: int | None = None
     no_webui: bool | None = None
     jinja: bool | None = None
-    reasoning_format: Literal['deepseek', 'none'] | None = None
+    reasoning_format: Literal['deepseek', 'none', 'disabled'] | None = None
     chat_template: str | None = None
     chat_template_file: str | None = None
     server_path: str | None = None

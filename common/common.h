@@ -216,6 +216,7 @@ struct common_params_vocoder {
 enum common_reasoning_format {
     COMMON_REASONING_FORMAT_NONE,
     COMMON_REASONING_FORMAT_DEEPSEEK, // Extract thinking tag contents and return as `message.reasoning_content`
+    COMMON_REASONING_FORMAT_DISABLED, // Disable thinking (causes any thinking tag to be closed, or empty thinking tags to be inserted, depending on the model)
 };
 
 struct common_params {

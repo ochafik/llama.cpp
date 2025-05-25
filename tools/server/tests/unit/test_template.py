@@ -25,6 +25,38 @@ def create_server():
     server.n_slots = 1
 
 
+@pytest.mark.parametrize("template_name,enable_thinking,expected_end", [
+    ("deepseek-ai-DeepSeek-R1-Distill-Qwen-32B", True,  "<think>\n"),
+    ("deepseek-ai-DeepSeek-R1-Distill-Qwen-32B", False, "<think>\n</think>"),
+
+    ("Qwen-Qwen3-0.6B", True,  "<|im_start|>assistant\n"),
+    ("Qwen-Qwen3-0.6B", False, "<|im_start|>assistant\n<think>\n\n</think>\n\n"),
+
+    ("Qwen-QwQ-32B", True,  "<|im_start|>assistant\n<think>\n"),
+    ("Qwen-QwQ-32B", False, "<|im_start|>assistant\n<think>\n</think>"),
+
+    ("CohereForAI-c4ai-command-r7b-12-2024-tool_use-think", True,  "<|START_THINKING|>"),
+    ("CohereForAI-c4ai-command-r7b-12-2024-tool_use-think", False, "<|START_THINKING|><|END_THINKING|>"),
+])
+def test_enable_thinking(template_name: str, enable_thinking: bool, expected_end: str):
+    global server
+    server.jinja = True
+    server.reasoning_format = 'deepseek' if enable_thinking else 'disabled'
+    server.chat_template_file = f'../../../models/templates/{template_name}.jinja'
+    server.start(timeout_seconds=TIMEOUT_SERVER_START)
+
+    res = server.make_request("POST", "/apply-template", data={
+        "messages": [
+            {"role": "user", "content": "What is today?"},
+        ],
+        "tools": [TEST_TOOL],
+    })
+    assert res.status_code == 200
+    prompt = res.body["prompt"]
+
+    assert prompt.endswith(expected_end), f"Expected prompt to end with '{expected_end}', got '{prompt}'"
+
+
 @pytest.mark.parametrize("tools", [None, [], [TEST_TOOL]])
 @pytest.mark.parametrize("template_name,format", [
     ("meta-llama-Llama-3.3-70B-Instruct",    "%d %b %Y"),
