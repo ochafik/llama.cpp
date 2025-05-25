@@ -1466,98 +1466,100 @@ static common_chat_params common_chat_params_init_hermes_2_pro(const common_chat
         data.thinking_forced_open = true;
     }
 
-    // (content)?(<tool_call>{"name": "foo", "arguments": {"a": 1}}</tool_call>)*
-    data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
-    data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-        std::vector<std::string> tool_rules;
-        std::vector<std::string> tool_call_alts;
-        std::vector<std::string> escaped_names;
-        foreach_function(inputs.tools, [&](const json & tool) {
-            const auto & function = tool.at("function");
-            std::string name = function.at("name");
-            auto parameters = function.at("parameters");
-            builder.resolve_refs(parameters);
-            tool_rules.push_back(builder.add_schema(name + "-call", {
-                {"type", "object"},
-                {"properties", json {
-                    {"name", json {{"const", name}}},
-                    {"arguments", parameters},
-                }},
-                {"required", json::array({"name", "arguments"})},
-            }));
-            tool_call_alts.push_back(builder.add_rule(
-                name + "-function-tag",
-                "\"<function\" ( \"=" + name + "\" | \" name=\\\"" + name + "\\\"\" ) \">\" space " +
-                builder.add_schema(name + "-args", parameters) + " "
-                "\"</function>\" space"));
+    if (!inputs.tools.is_null()) {
+        // (content)?(<tool_call>{"name": "foo", "arguments": {"a": 1}}</tool_call>)*
+        data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
+            std::vector<std::string> tool_rules;
+            std::vector<std::string> tool_call_alts;
+            std::vector<std::string> escaped_names;
+            foreach_function(inputs.tools, [&](const json & tool) {
+                const auto & function = tool.at("function");
+                std::string name = function.at("name");
+                auto parameters = function.at("parameters");
+                builder.resolve_refs(parameters);
+                tool_rules.push_back(builder.add_schema(name + "-call", {
+                    {"type", "object"},
+                    {"properties", json {
+                        {"name", json {{"const", name}}},
+                        {"arguments", parameters},
+                    }},
+                    {"required", json::array({"name", "arguments"})},
+                }));
+                tool_call_alts.push_back(builder.add_rule(
+                    name + "-function-tag",
+                    "\"<function\" ( \"=" + name + "\" | \" name=\\\"" + name + "\\\"\" ) \">\" space " +
+                    builder.add_schema(name + "-args", parameters) + " "
+                    "\"</function>\" space"));
 
-            data.grammar_triggers.push_back({
-                COMMON_GRAMMAR_TRIGGER_TYPE_WORD,
-                "<function=" + name + ">",
+                data.grammar_triggers.push_back({
+                    COMMON_GRAMMAR_TRIGGER_TYPE_WORD,
+                    "<function=" + name + ">",
+                });
+                auto escaped_name = regex_escape(name);
+                data.grammar_triggers.push_back({
+                    COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN,
+                    "<function\\s+name\\s*=\\s*\"" + escaped_name + "\"",
+                });
+                escaped_names.push_back(escaped_name);
             });
-            auto escaped_name = regex_escape(name);
+            auto any_tool_call = builder.add_rule("any_tool_call", "( " + string_join(tool_rules, " | ") + " ) space");
+            std::vector<std::string> alt_tags {
+                any_tool_call,
+                "\"<tool_call>\" space "     + any_tool_call + " \"</tool_call>\"",
+                // The rest is just to accommodate common "good bad" outputs.
+                "\"<function_call>\" space " + any_tool_call + " \"</function_call>\"",
+                "\"<response>\"  space "     + any_tool_call + " \"</response>\"",
+                "\"<tools>\"     space "     + any_tool_call + " \"</tools>\"",
+                "\"<json>\"      space "     + any_tool_call + " \"</json>\"",
+                "\"<xml>\"      space "     + any_tool_call + " \"</xml>\"",
+                "\"<JSON>\"      space "     + any_tool_call + " \"</JSON>\"",
+            };
+            auto wrappable_tool_call = builder.add_rule("wrappable_tool_call", "( " + string_join(alt_tags, " | ") + " ) space");
+            tool_call_alts.push_back(wrappable_tool_call);
+            tool_call_alts.push_back(
+                "( \"```\\n\" | \"```json\\n\" | \"```xml\\n\" ) space " + wrappable_tool_call + " space \"```\" space ");
+            auto tool_call = builder.add_rule("tool_call", string_join(tool_call_alts, " | "));
+            builder.add_rule("root",
+                std::string(data.thinking_forced_open ? "( \"</think>\" space )? " : "") +
+                (inputs.parallel_tool_calls ? "(" + tool_call + ")+" : tool_call));
+            // Trigger on some common known "good bad" outputs (only from the start and with a json that's about a specific argument name to avoid false positives)
             data.grammar_triggers.push_back({
-                COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN,
-                "<function\\s+name\\s*=\\s*\"" + escaped_name + "\"",
+                COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
+                // If thinking_forced_open, then we capture the </think> tag in the grammar,
+                // (important for required tool choice) and in the trigger's first capture (decides what is sent to the grammar)
+                std::string(data.thinking_forced_open ? "[\\s\\S]*?(</think>\\s*)" : "(?:<think>[\\s\\S]*?</think>\\s*)?") + (
+                    "(\\s*"
+                    "(?:<tool_call>"
+                    "|<function"
+                    "|(?:```(?:json|xml)?\n\\s*)?(?:<function_call>|<tools>|<xml><json>|<response>)?"
+                    "\\s*\\{\\s*\"name\"\\s*:\\s*\"(?:" + string_join(escaped_names, "|") + ")\""
+                    ")"
+                    ")[\\s\\S]*"
+                ),
             });
-            escaped_names.push_back(escaped_name);
+            data.preserved_tokens = {
+                "<think>",
+                "</think>",
+                "<tool_call>",
+                "</tool_call>",
+                "<function",
+                "<tools>",
+                "</tools>",
+                "<response>",
+                "</response>",
+                "<function_call>",
+                "</function_call>",
+                "<json>",
+                "</json>",
+                "<JSON>",
+                "</JSON>",
+                "```",
+                "```json",
+                "```xml",
+            };
         });
-        auto any_tool_call = builder.add_rule("any_tool_call", "( " + string_join(tool_rules, " | ") + " ) space");
-        std::vector<std::string> alt_tags {
-            any_tool_call,
-            "\"<tool_call>\" space "     + any_tool_call + " \"</tool_call>\"",
-            // The rest is just to accommodate common "good bad" outputs.
-            "\"<function_call>\" space " + any_tool_call + " \"</function_call>\"",
-            "\"<response>\"  space "     + any_tool_call + " \"</response>\"",
-            "\"<tools>\"     space "     + any_tool_call + " \"</tools>\"",
-            "\"<json>\"      space "     + any_tool_call + " \"</json>\"",
-            "\"<xml>\"      space "     + any_tool_call + " \"</xml>\"",
-            "\"<JSON>\"      space "     + any_tool_call + " \"</JSON>\"",
-        };
-        auto wrappable_tool_call = builder.add_rule("wrappable_tool_call", "( " + string_join(alt_tags, " | ") + " ) space");
-        tool_call_alts.push_back(wrappable_tool_call);
-        tool_call_alts.push_back(
-            "( \"```\\n\" | \"```json\\n\" | \"```xml\\n\" ) space " + wrappable_tool_call + " space \"```\" space ");
-        auto tool_call = builder.add_rule("tool_call", string_join(tool_call_alts, " | "));
-        builder.add_rule("root",
-            std::string(data.thinking_forced_open ? "( \"</think>\" space )? " : "") +
-            (inputs.parallel_tool_calls ? "(" + tool_call + ")+" : tool_call));
-        // Trigger on some common known "good bad" outputs (only from the start and with a json that's about a specific argument name to avoid false positives)
-        data.grammar_triggers.push_back({
-            COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
-            // If thinking_forced_open, then we capture the </think> tag in the grammar,
-            // (important for required tool choice) and in the trigger's first capture (decides what is sent to the grammar)
-            std::string(data.thinking_forced_open ? "[\\s\\S]*?(</think>\\s*)" : "(?:<think>[\\s\\S]*?</think>\\s*)?") + (
-                "(\\s*"
-                "(?:<tool_call>"
-                "|<function"
-                "|(?:```(?:json|xml)?\n\\s*)?(?:<function_call>|<tools>|<xml><json>|<response>)?"
-                 "\\s*\\{\\s*\"name\"\\s*:\\s*\"(?:" + string_join(escaped_names, "|") + ")\""
-                ")"
-                ")[\\s\\S]*"
-            ),
-        });
-        data.preserved_tokens = {
-            "<think>",
-            "</think>",
-            "<tool_call>",
-            "</tool_call>",
-            "<function",
-            "<tools>",
-            "</tools>",
-            "<response>",
-            "</response>",
-            "<function_call>",
-            "</function_call>",
-            "<json>",
-            "</json>",
-            "<JSON>",
-            "</JSON>",
-            "```",
-            "```json",
-            "```xml",
-        };
-    });
+    }
 
     return data;
 }
@@ -1702,7 +1704,7 @@ static common_chat_params common_chat_templates_apply_jinja(
     }
 
     // Hermes 2/3 Pro, Qwen 2.5 Instruct (w/ tools)
-    if (src.find("<tool_call>") != std::string::npos && params.json_schema.is_null() && params.tools.is_array() && params.json_schema.is_null()) {
+    if (src.find("<tool_call>") != std::string::npos && params.json_schema.is_null()) {
         return common_chat_params_init_hermes_2_pro(tmpl, params);
     }
 
