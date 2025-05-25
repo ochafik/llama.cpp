@@ -216,7 +216,7 @@ struct common_params_vocoder {
 enum common_reasoning_format {
     COMMON_REASONING_FORMAT_NONE,
     COMMON_REASONING_FORMAT_DEEPSEEK, // Extract thinking tag contents and return as `message.reasoning_content`
-    COMMON_REASONING_FORMAT_DISABLED, // Disable thinking (causes any thinking tag to be closed, or empty thinking tags to be inserted, depending on the model)
+    COMMON_REASONING_FORMAT_NOTHINK,  // Forcibly disables thinking (causes any thinking tag to be closed, empty thinking tags to be inserted, or template specific variables to be set, depending on the chat format)
 };
 
 struct common_params {
