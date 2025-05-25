@@ -30,6 +30,7 @@ class common_chat_msg_parser {
     const std::string & healing_marker() const { return healing_marker_; }
     const bool & is_partial() const { return is_partial_; }
     const common_chat_msg & result() const { return result_; }
+    const common_chat_syntax & syntax() const { return syntax_; }
 
     void move_to(size_t pos) {
         if (pos > input_.size()) {

@@ -820,6 +820,10 @@ static common_chat_params common_chat_params_init_generic(const common_chat_temp
     return data;
 }
 static void common_chat_parse_generic(common_chat_msg_parser & builder) {
+    if (!builder.syntax().parse_tool_calls) {
+        builder.add_content(builder.consume_rest());
+        return;
+    }
     static const std::vector<std::vector<std::string>> content_paths = {
         {"response"},
     };
@@ -892,6 +896,11 @@ static common_chat_params common_chat_params_init_mistral_nemo(const common_chat
     return data;
 }
 static void common_chat_parse_mistral_nemo(common_chat_msg_parser & builder) {
+    if (!builder.syntax().parse_tool_calls) {
+        builder.add_content(builder.consume_rest());
+        return;
+    }
+
     static const common_regex prefix(regex_escape("[TOOL_CALLS]"));
     parse_prefixed_json_tool_call_array(builder, prefix);
 }
@@ -1104,6 +1113,11 @@ static common_chat_params common_chat_params_init_llama_3_x(const common_chat_te
     return data;
 }
 static void common_chat_parse_llama_3_1(common_chat_msg_parser & builder, bool with_builtin_tools = false) {
+    if (!builder.syntax().parse_tool_calls) {
+        builder.add_content(builder.consume_rest());
+        return;
+    }
+
     static const common_regex function_regex(
         "\\s*\\{\\s*(?:\"type\"\\s*:\\s*\"function\"\\s*,\\s*)?\"name\"\\s*:\\s*\"([^\"]+)\"\\s*,\\s*\"parameters\"\\s*: ");
     static const common_regex close_regex("\\}\\s*");
@@ -1225,6 +1239,10 @@ static common_chat_params common_chat_params_init_deepseek_r1(const common_chat_
 }
 static void common_chat_parse_deepseek_r1(common_chat_msg_parser & builder) {
     builder.try_parse_reasoning("<think>", "</think>");
+    if (!builder.syntax().parse_tool_calls) {
+        builder.add_content(builder.consume_rest());
+        return;
+    }
 
     static const common_regex tool_calls_begin("(?:<｜tool▁calls▁begin｜>|<｜tool_calls_begin｜>|<｜tool calls begin｜>|<｜tool\\\\_calls\\\\_begin｜>|<｜tool▁calls｜>)");
     static const common_regex tool_calls_end("<｜tool▁calls▁end｜>");
@@ -1286,6 +1304,10 @@ static common_chat_params common_chat_params_init_firefunction_v2(const common_c
     return data;
 }
 static void common_chat_parse_firefunction_v2(common_chat_msg_parser & builder) {
+    if (!builder.syntax().parse_tool_calls) {
+        builder.add_content(builder.consume_rest());
+        return;
+    }
     static const common_regex prefix(regex_escape(" functools["));
     parse_prefixed_json_tool_call_array(builder, prefix, /* rstrip_prefix= */ 1);
 }
@@ -1427,6 +1449,10 @@ static common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1(con
     return data;
 }
 static void common_chat_parse_functionary_v3_1_llama_3_1(common_chat_msg_parser & builder) {
+    if (!builder.syntax().parse_tool_calls) {
+        builder.add_content(builder.consume_rest());
+        return;
+    }
     // This version of Functionary still supports the llama 3.1 tool call format for the python tool.
     static const common_regex python_tag_regex(regex_escape("<|python_tag|>"));
 
@@ -1554,6 +1580,10 @@ static common_chat_params common_chat_params_init_hermes_2_pro(const common_chat
 }
 static void common_chat_parse_hermes_2_pro(common_chat_msg_parser & builder) {
     builder.try_parse_reasoning("<think>", "</think>");
+    if (!builder.syntax().parse_tool_calls) {
+        builder.add_content(builder.consume_rest());
+        return;
+    }
 
     static const common_regex open_regex(
         "(?:"
@@ -1809,10 +1839,10 @@ static void common_chat_parse_content_only(common_chat_msg_parser & builder) {
     builder.add_content(builder.consume_rest());
 }
 
-static void common_chat_parse(common_chat_msg_parser & builder, common_chat_format format) {
-    LOG_DBG("Parsing input with format %s: %s\n", common_chat_format_name(format).c_str(), builder.input().c_str());
+static void common_chat_parse(common_chat_msg_parser & builder) {
+    LOG_DBG("Parsing input with format %s: %s\n", common_chat_format_name(builder.syntax().format).c_str(), builder.input().c_str());
 
-    switch (format) {
+    switch (builder.syntax().format) {
         case COMMON_CHAT_FORMAT_CONTENT_ONLY:
             common_chat_parse_content_only(builder);
             break;
@@ -1847,7 +1877,7 @@ static void common_chat_parse(common_chat_msg_parser & builder, common_chat_form
             common_chat_parse_command_r7b(builder);
             break;
         default:
-            throw std::runtime_error("Unsupported format: " + common_chat_format_name(format));
+            throw std::runtime_error(std::string("Unsupported format: ") + common_chat_format_name(builder.syntax().format));
     }
     builder.finish();
 }
@@ -1855,7 +1885,7 @@ static void common_chat_parse(common_chat_msg_parser & builder, common_chat_form
 common_chat_msg common_chat_parse(const std::string & input, bool is_partial, const common_chat_syntax & syntax) {
     common_chat_msg_parser builder(input, is_partial, syntax);
     try {
-        common_chat_parse(builder, syntax.format);
+        common_chat_parse(builder);
     } catch (const common_chat_msg_partial_exception & ex) {
         LOG_DBG("Partial parse: %s\n", ex.what());
         if (!is_partial) {
