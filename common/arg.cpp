@@ -2848,9 +2848,8 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
     ).set_examples({LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_MAIN}).set_env("LLAMA_ARG_JINJA"));
     add_opt(common_arg(
         {"--reasoning-format"}, "FORMAT",
-        "reasoning format (default: deepseek; allowed values: deepseek, none)\n"
-        "controls whether thought tags are extracted from the response, and in which format they're returned. 'none' leaves thoughts unparsed in `message.content`, 'deepseek' puts them in `message.reasoning_content` (for DeepSeek R1 & Command R7B only).\n"
-        "only supported for non-streamed responses",
+        "reasoning format (default: deepseek; allowed values: deepseek, none, disabled)\n"
+        "controls whether thought tags are allowed and/or extracted from the response, and in which format they're returned. 'none' leaves thoughts unparsed in `message.content`, 'deepseek' puts them in `message.reasoning_content` (for DeepSeek R1 & Command R7B only), 'disabled' prevents generation of thoughts (by closing any thoughts tag or setting template-specific variables such as `enable_thinking: false` for Qwen3).",
         [](common_params & params, const std::string & value) {
             /**/ if (value == "deepseek") { params.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK; }
             else if (value == "none") {     params.reasoning_format = COMMON_REASONING_FORMAT_NONE; }
