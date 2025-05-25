@@ -592,7 +592,7 @@ std::string common_chat_format_name(common_chat_format format) {
     }
 }
 
-std::string common_reasoning_format_name(common_reasoning_format format) {
+const char * common_reasoning_format_name(common_reasoning_format format) {
     switch (format) {
         case COMMON_REASONING_FORMAT_NONE:     return "none";
         case COMMON_REASONING_FORMAT_DEEPSEEK: return "deepseek";
