@@ -177,7 +177,7 @@ std::optional<common_chat_msg_parser::find_regex_result> common_chat_msg_parser:
     }
     auto prelude = input_.substr(pos_, m.groups[0].begin - pos_);
     pos_ = m.groups[0].end;
-    
+
     if (add_prelude_to_content) {
         add_content(prelude);
     }
