@@ -26,23 +26,24 @@ def create_server():
 
 
 @pytest.mark.parametrize("tools", [None, [], [TEST_TOOL]])
-@pytest.mark.parametrize("template_name,nothink,expected_end", [
-    ("deepseek-ai-DeepSeek-R1-Distill-Qwen-32B", False,  "<think>\n"),
-    ("deepseek-ai-DeepSeek-R1-Distill-Qwen-32B", True, "<think>\n</think>"),
+@pytest.mark.parametrize("template_name,reasoning_budget,expected_end", [
+    ("deepseek-ai-DeepSeek-R1-Distill-Qwen-32B", None, "<think>\n"),
+    ("deepseek-ai-DeepSeek-R1-Distill-Qwen-32B",   -1, "<think>\n"),
+    ("deepseek-ai-DeepSeek-R1-Distill-Qwen-32B",    0, "<think>\n</think>"),
 
-    ("Qwen-Qwen3-0.6B", False,  "<|im_start|>assistant\n"),
-    ("Qwen-Qwen3-0.6B", True, "<|im_start|>assistant\n<think>\n\n</think>\n\n"),
+    ("Qwen-Qwen3-0.6B", -1, "<|im_start|>assistant\n"),
+    ("Qwen-Qwen3-0.6B",  0, "<|im_start|>assistant\n<think>\n\n</think>\n\n"),
 
-    ("Qwen-QwQ-32B", False,  "<|im_start|>assistant\n<think>\n"),
-    ("Qwen-QwQ-32B", True, "<|im_start|>assistant\n<think>\n</think>"),
+    ("Qwen-QwQ-32B", -1, "<|im_start|>assistant\n<think>\n"),
+    ("Qwen-QwQ-32B",  0, "<|im_start|>assistant\n<think>\n</think>"),
 
-    ("CohereForAI-c4ai-command-r7b-12-2024-tool_use", False,  "<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>"),
-    ("CohereForAI-c4ai-command-r7b-12-2024-tool_use", True, "<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|><|START_THINKING|><|END_THINKING|>"),
+    ("CohereForAI-c4ai-command-r7b-12-2024-tool_use", -1, "<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>"),
+    ("CohereForAI-c4ai-command-r7b-12-2024-tool_use",  0, "<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|><|START_THINKING|><|END_THINKING|>"),
 ])
-def test_nothink(template_name: str, nothink: bool, expected_end: str, tools: list[dict]):
+def test_reasoning_budget(template_name: str, reasoning_budget: int | None, expected_end: str, tools: list[dict]):
     global server
     server.jinja = True
-    server.reasoning_format = 'nothink' if nothink else None
+    server.reasoning_budget = reasoning_budget
     server.chat_template_file = f'../../../models/templates/{template_name}.jinja'
     server.start(timeout_seconds=TIMEOUT_SERVER_START)
 

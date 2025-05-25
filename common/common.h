@@ -216,7 +216,6 @@ struct common_params_vocoder {
 enum common_reasoning_format {
     COMMON_REASONING_FORMAT_NONE,
     COMMON_REASONING_FORMAT_DEEPSEEK, // Extract thinking tag contents and return as `message.reasoning_content`
-    COMMON_REASONING_FORMAT_NOTHINK,  // Forcibly disables thinking (causes any thinking tag to be closed, empty thinking tags to be inserted, or template specific variables to be set, depending on the chat format)
 };
 
 struct common_params {
@@ -369,6 +368,7 @@ struct common_params {
     bool use_jinja = false;                                                                                 // NOLINT
     bool enable_chat_template = true;
     common_reasoning_format reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
+    int reasoning_budget = -1;
     bool prefill_assistant = true;                                                                          // if true, any trailing assistant message will be prefilled into the response
 
     std::vector<std::string> api_keys;

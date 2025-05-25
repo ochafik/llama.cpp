@@ -596,7 +596,6 @@ const char * common_reasoning_format_name(common_reasoning_format format) {
     switch (format) {
         case COMMON_REASONING_FORMAT_NONE:     return "none";
         case COMMON_REASONING_FORMAT_DEEPSEEK: return "deepseek";
-        case COMMON_REASONING_FORMAT_NOTHINK:  return "nothink";
         default:
             throw std::runtime_error("Unknown reasoning format");
     }
@@ -1700,7 +1699,7 @@ static common_chat_params common_chat_templates_apply_jinja(
     params.messages = common_chat_msgs_to_json_oaicompat<json>(inputs.messages, /* concat_text= */ !tmpl.original_caps().requires_typed_content);
     params.add_generation_prompt = inputs.add_generation_prompt;
     params.tool_choice = inputs.tool_choice;
-    params.enable_thinking = inputs.reasoning_format != COMMON_REASONING_FORMAT_NOTHINK;
+    params.enable_thinking = inputs.enable_thinking;
     params.grammar = inputs.grammar;
     params.now = inputs.now;
     if (!inputs.json_schema.empty()) {
