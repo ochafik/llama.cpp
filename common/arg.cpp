@@ -723,7 +723,7 @@ static bool common_download_file_multiple(const std::vector<std::pair<std::strin
 static bool common_download_model(
         const common_params_model &,
         const std::string &,
-        bool offline) {
+        bool) {
     LOG_ERR("error: built without CURL, cannot download model from the internet\n");
     return false;
 }
