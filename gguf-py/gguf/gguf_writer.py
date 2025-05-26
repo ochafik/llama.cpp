@@ -7,6 +7,7 @@ import struct
 import tempfile
 from dataclasses import dataclass
 from enum import Enum, auto
+from math import prod
 from pathlib import Path
 from io import BufferedWriter
 from typing import IO, Any, Sequence, Mapping
@@ -25,6 +26,7 @@ from .constants import (
     RopeScalingType,
     PoolingType,
     TokenType,
+    ExpertGatingFuncType,
 )
 
 from .quants import quant_shape_from_byte_shape
@@ -106,6 +108,53 @@ class GGUFWriter:
 
         self.add_architecture()
 
+    def get_total_parameter_count(self) -> tuple[int, int, int, int]:
+        total_params = 0
+        shared_params = 0
+        expert_params = 0
+
+        expert_sum = 0
+        n_expert_tensors = 0
+
+        last_lora_a: tuple[str, TensorInfo] | None = None
+
+        for tensors in self.tensors:
+            for name, info in tensors.items():
+
+                shape = info.shape
+
+                if name.endswith(".lora_a"):
+                    last_lora_a = (name, info)
+                    continue
+                elif name.endswith(".lora_b"):
+                    if last_lora_a is None or last_lora_a[0] != name[:-1] + "a":
+                        # Bail when the LoRA pair can't be found trivially
+                        logger.warning("can't measure LoRA size correctly, tensor order is unusual")
+                        return 0, 0, 0, 0
+                    else:
+                        shape = (*shape[:-1], last_lora_a[1].shape[-1])
+
+                size = prod(shape)
+
+                if "_exps." in name:
+                    expert_params += (size // shape[-3])
+                    expert_sum += shape[-3]
+                    n_expert_tensors += 1
+                else:
+                    shared_params += size
+
+                total_params += size
+
+        # Hopefully this should work even for variable-expert-count models
+        expert_count = (expert_sum // n_expert_tensors) if n_expert_tensors > 0 else 0
+
+        # Negate the total to signal it's likely not exact
+        if last_lora_a is not None:
+            total_params = -total_params
+
+        # NOTE: keep the output in the same order as accepted by 'size_label' in gguf-py/gguf/utility.py
+        return total_params, shared_params, expert_params, expert_count
+
     def format_shard_names(self, path: Path) -> list[Path]:
         if len(self.tensors) == 1:
             return [path]
@@ -115,6 +164,7 @@ class GGUFWriter:
         if self.state is WriterState.EMPTY and self.fout is not None and (path is None or path == self.path):
             # allow calling this multiple times as long as the path is the same
             return
+
         if self.state is not WriterState.NO_FILE:
             raise ValueError(f'Expected output file to be not yet opened, got {self.state}')
 
@@ -136,6 +186,8 @@ class GGUFWriter:
 
         if self.dry_run:
             logger.info("Dry run, not writing files")
+            for name in filenames:
+                print(name)  # noqa: NP100
             exit()
 
         return filenames
@@ -261,6 +313,8 @@ class GGUFWriter:
         self.add_key_value(key, val, GGUFValueType.STRING)
 
     def add_array(self, key: str, val: Sequence[Any]) -> None:
+        if len(val) == 0:
+            return
         self.add_key_value(key, val, GGUFValueType.ARRAY)
 
     @staticmethod
@@ -424,32 +478,18 @@ class GGUFWriter:
                 fout.close()
             self.fout = None
 
+    def add_type(self, type_name: str) -> None:
+        self.add_string(Keys.General.TYPE, type_name)
+
     def add_architecture(self) -> None:
         self.add_string(Keys.General.ARCHITECTURE, self.arch)
 
-    def add_author(self, author: str) -> None:
-        self.add_string(Keys.General.AUTHOR, author)
+    def add_quantization_version(self, quantization_version: int) -> None:
+        self.add_uint32(Keys.General.QUANTIZATION_VERSION, quantization_version)
 
-    def add_version(self, version: str) -> None:
-        self.add_string(Keys.General.VERSION, version)
-
-    def add_tensor_data_layout(self, layout: str) -> None:
-        self.add_string(Keys.LLM.TENSOR_DATA_LAYOUT.format(arch=self.arch), layout)
-
-    def add_url(self, url: str) -> None:
-        self.add_string(Keys.General.URL, url)
-
-    def add_description(self, description: str) -> None:
-        self.add_string(Keys.General.DESCRIPTION, description)
-
-    def add_licence(self, licence: str) -> None:
-        self.add_string(Keys.General.LICENSE, licence)
-
-    def add_source_url(self, url: str) -> None:
-        self.add_string(Keys.General.SOURCE_URL, url)
-
-    def add_source_hf_repo(self, repo: str) -> None:
-        self.add_string(Keys.General.SOURCE_HF_REPO, repo)
+    def add_custom_alignment(self, alignment: int) -> None:
+        self.data_alignment = alignment
+        self.add_uint32(Keys.General.ALIGNMENT, alignment)
 
     def add_file_type(self, ftype: int) -> None:
         self.add_uint32(Keys.General.FILE_TYPE, ftype)
@@ -457,13 +497,131 @@ class GGUFWriter:
     def add_name(self, name: str) -> None:
         self.add_string(Keys.General.NAME, name)
 
-    def add_quantization_version(self, quantization_version: int) -> None:
-        self.add_uint32(
-            Keys.General.QUANTIZATION_VERSION, quantization_version)
+    def add_author(self, author: str) -> None:
+        self.add_string(Keys.General.AUTHOR, author)
 
-    def add_custom_alignment(self, alignment: int) -> None:
-        self.data_alignment = alignment
-        self.add_uint32(Keys.General.ALIGNMENT, alignment)
+    def add_version(self, version: str) -> None:
+        self.add_string(Keys.General.VERSION, version)
+
+    def add_organization(self, organization: str) -> None:
+        self.add_string(Keys.General.ORGANIZATION, organization)
+
+    def add_finetune(self, finetune: str) -> None:
+        self.add_string(Keys.General.FINETUNE, finetune)
+
+    def add_basename(self, basename: str) -> None:
+        self.add_string(Keys.General.BASENAME, basename)
+
+    def add_description(self, description: str) -> None:
+        self.add_string(Keys.General.DESCRIPTION, description)
+
+    def add_quantized_by(self, quantized: str) -> None:
+        self.add_string(Keys.General.QUANTIZED_BY, quantized)
+
+    def add_size_label(self, size_label: str) -> None:
+        self.add_string(Keys.General.SIZE_LABEL, size_label)
+
+    def add_license(self, license: str) -> None:
+        self.add_string(Keys.General.LICENSE, license)
+
+    def add_license_name(self, license: str) -> None:
+        self.add_string(Keys.General.LICENSE_NAME, license)
+
+    def add_license_link(self, license: str) -> None:
+        self.add_string(Keys.General.LICENSE_LINK, license)
+
+    def add_url(self, url: str) -> None:
+        self.add_string(Keys.General.URL, url)
+
+    def add_doi(self, doi: str) -> None:
+        self.add_string(Keys.General.DOI, doi)
+
+    def add_uuid(self, uuid: str) -> None:
+        self.add_string(Keys.General.UUID, uuid)
+
+    def add_repo_url(self, repo_url: str) -> None:
+        self.add_string(Keys.General.REPO_URL, repo_url)
+
+    def add_source_url(self, url: str) -> None:
+        self.add_string(Keys.General.SOURCE_URL, url)
+
+    def add_source_doi(self, doi: str) -> None:
+        self.add_string(Keys.General.SOURCE_DOI, doi)
+
+    def add_source_uuid(self, uuid: str) -> None:
+        self.add_string(Keys.General.SOURCE_UUID, uuid)
+
+    def add_source_repo_url(self, repo_url: str) -> None:
+        self.add_string(Keys.General.SOURCE_REPO_URL, repo_url)
+
+    def add_base_model_count(self, source_count: int) -> None:
+        self.add_uint32(Keys.General.BASE_MODEL_COUNT, source_count)
+
+    def add_base_model_name(self, source_id: int, name: str) -> None:
+        self.add_string(Keys.General.BASE_MODEL_NAME.format(id=source_id), name)
+
+    def add_base_model_author(self, source_id: int, author: str) -> None:
+        self.add_string(Keys.General.BASE_MODEL_AUTHOR.format(id=source_id), author)
+
+    def add_base_model_version(self, source_id: int, version: str) -> None:
+        self.add_string(Keys.General.BASE_MODEL_VERSION.format(id=source_id), version)
+
+    def add_base_model_organization(self, source_id: int, organization: str) -> None:
+        self.add_string(Keys.General.BASE_MODEL_ORGANIZATION.format(id=source_id), organization)
+
+    def add_base_model_description(self, source_id: int, description: str) -> None:
+        self.add_string(Keys.General.BASE_MODEL_DESCRIPTION.format(id=source_id), description)
+
+    def add_base_model_url(self, source_id: int, url: str) -> None:
+        self.add_string(Keys.General.BASE_MODEL_URL.format(id=source_id), url)
+
+    def add_base_model_doi(self, source_id: int, doi: str) -> None:
+        self.add_string(Keys.General.BASE_MODEL_DOI.format(id=source_id), doi)
+
+    def add_base_model_uuid(self, source_id: int, uuid: str) -> None:
+        self.add_string(Keys.General.BASE_MODEL_UUID.format(id=source_id), uuid)
+
+    def add_base_model_repo_url(self, source_id: int, repo_url: str) -> None:
+        self.add_string(Keys.General.BASE_MODEL_REPO_URL.format(id=source_id), repo_url)
+
+    def add_dataset_count(self, source_count: int) -> None:
+        self.add_uint32(Keys.General.DATASET_COUNT, source_count)
+
+    def add_dataset_name(self, source_id: int, name: str) -> None:
+        self.add_string(Keys.General.DATASET_NAME.format(id=source_id), name)
+
+    def add_dataset_author(self, source_id: int, author: str) -> None:
+        self.add_string(Keys.General.DATASET_AUTHOR.format(id=source_id), author)
+
+    def add_dataset_version(self, source_id: int, version: str) -> None:
+        self.add_string(Keys.General.DATASET_VERSION.format(id=source_id), version)
+
+    def add_dataset_organization(self, source_id: int, organization: str) -> None:
+        self.add_string(Keys.General.DATASET_ORGANIZATION.format(id=source_id), organization)
+
+    def add_dataset_description(self, source_id: int, description: str) -> None:
+        self.add_string(Keys.General.DATASET_DESCRIPTION.format(id=source_id), description)
+
+    def add_dataset_url(self, source_id: int, url: str) -> None:
+        self.add_string(Keys.General.DATASET_URL.format(id=source_id), url)
+
+    def add_dataset_doi(self, source_id: int, doi: str) -> None:
+        self.add_string(Keys.General.DATASET_DOI.format(id=source_id), doi)
+
+    def add_dataset_uuid(self, source_id: int, uuid: str) -> None:
+        self.add_string(Keys.General.DATASET_UUID.format(id=source_id), uuid)
+
+    def add_dataset_repo_url(self, source_id: int, repo_url: str) -> None:
+        self.add_string(Keys.General.DATASET_REPO_URL.format(id=source_id), repo_url)
+
+    def add_tags(self, tags: Sequence[str]) -> None:
+        self.add_array(Keys.General.TAGS, tags)
+
+    def add_languages(self, languages: Sequence[str]) -> None:
+        self.add_array(Keys.General.LANGUAGES, languages)
+
+    def add_tensor_data_layout(self, layout: str) -> None:
+        self.add_string(Keys.LLM.TENSOR_DATA_LAYOUT.format(arch=self.arch), layout)
 
     def add_vocab_size(self, size: int) -> None:
         self.add_uint32(Keys.LLM.VOCAB_SIZE.format(arch=self.arch), size)
@@ -474,14 +632,32 @@ class GGUFWriter:
     def add_embedding_length(self, length: int) -> None:
         self.add_uint32(Keys.LLM.EMBEDDING_LENGTH.format(arch=self.arch), length)
 
+    def add_features_length(self, length: int) -> None:
+        self.add_uint32(Keys.LLM.FEATURES_LENGTH.format(arch=self.arch), length)
+
+    def add_posnet_embedding_length(self, length: int) -> None:
+        self.add_uint32(Keys.PosNet.EMBEDDING_LENGTH.format(arch=self.arch), length)
+
+    def add_posnet_block_count(self, length: int) -> None:
+        self.add_uint32(Keys.PosNet.BLOCK_COUNT.format(arch=self.arch), length)
+
+    def add_convnext_embedding_length(self, length: int) -> None:
+        self.add_uint32(Keys.ConvNext.EMBEDDING_LENGTH.format(arch=self.arch), length)
+
+    def add_convnext_block_count(self, length: int) -> None:
+        self.add_uint32(Keys.ConvNext.BLOCK_COUNT.format(arch=self.arch), length)
+
     def add_block_count(self, length: int) -> None:
         self.add_uint32(Keys.LLM.BLOCK_COUNT.format(arch=self.arch), length)
 
     def add_leading_dense_block_count(self, length: int) -> None:
         self.add_uint32(Keys.LLM.LEADING_DENSE_BLOCK_COUNT.format(arch=self.arch), length)
 
-    def add_feed_forward_length(self, length: int) -> None:
-        self.add_uint32(Keys.LLM.FEED_FORWARD_LENGTH.format(arch=self.arch), length)
+    def add_feed_forward_length(self, length: int | Sequence[int]) -> None:
+        if isinstance(length, int):
+            self.add_uint32(Keys.LLM.FEED_FORWARD_LENGTH.format(arch=self.arch), length)
+        else:
+            self.add_array(Keys.LLM.FEED_FORWARD_LENGTH.format(arch=self.arch), length)
 
     def add_expert_feed_forward_length(self, length: int) -> None:
         self.add_uint32(Keys.LLM.EXPERT_FEED_FORWARD_LENGTH.format(arch=self.arch), length)
@@ -495,17 +671,29 @@ class GGUFWriter:
     def add_decoder_start_token_id(self, id: int) -> None:
         self.add_uint32(Keys.LLM.DECODER_START_TOKEN_ID.format(arch=self.arch), id)
 
-    def add_head_count(self, count: int) -> None:
-        self.add_uint32(Keys.Attention.HEAD_COUNT.format(arch=self.arch), count)
+    def add_head_count(self, count: int | Sequence[int]) -> None:
+        if isinstance(count, int):
+            self.add_uint32(Keys.Attention.HEAD_COUNT.format(arch=self.arch), count)
+        else:
+            self.add_array(Keys.Attention.HEAD_COUNT.format(arch=self.arch), count)
 
-    def add_head_count_kv(self, count: int) -> None:
-        self.add_uint32(Keys.Attention.HEAD_COUNT_KV.format(arch=self.arch), count)
+    def add_head_count_kv(self, count: int | Sequence[int]) -> None:
+        if isinstance(count, int):
+            self.add_uint32(Keys.Attention.HEAD_COUNT_KV.format(arch=self.arch), count)
+        else:
+            self.add_array(Keys.Attention.HEAD_COUNT_KV.format(arch=self.arch), count)
 
     def add_key_length(self, length: int) -> None:
         self.add_uint32(Keys.Attention.KEY_LENGTH.format(arch=self.arch), length)
 
     def add_value_length(self, length: int) -> None:
         self.add_uint32(Keys.Attention.VALUE_LENGTH.format(arch=self.arch), length)
+
+    def add_key_length_mla(self, length: int) -> None:
+        self.add_uint32(Keys.Attention.KEY_LENGTH_MLA.format(arch=self.arch), length)
+
+    def add_value_length_mla(self, length: int) -> None:
+        self.add_uint32(Keys.Attention.VALUE_LENGTH_MLA.format(arch=self.arch), length)
 
     def add_max_alibi_bias(self, bias: float) -> None:
         self.add_float32(Keys.Attention.MAX_ALIBI_BIAS.format(arch=self.arch), bias)
@@ -515,6 +703,12 @@ class GGUFWriter:
 
     def add_logit_scale(self, value: float) -> None:
         self.add_float32(Keys.LLM.LOGIT_SCALE.format(arch=self.arch), value)
+
+    def add_attn_logit_softcapping(self, value: float) -> None:
+        self.add_float32(Keys.LLM.ATTN_LOGIT_SOFTCAPPING.format(arch=self.arch), value)
+
+    def add_final_logit_softcapping(self, value: float) -> None:
+        self.add_float32(Keys.LLM.FINAL_LOGIT_SOFTCAPPING.format(arch=self.arch), value)
 
     def add_expert_count(self, count: int) -> None:
         self.add_uint32(Keys.LLM.EXPERT_COUNT.format(arch=self.arch), count)
@@ -528,11 +722,53 @@ class GGUFWriter:
     def add_expert_weights_scale(self, value: float) -> None:
         self.add_float32(Keys.LLM.EXPERT_WEIGHTS_SCALE.format(arch=self.arch), value)
 
+    def add_expert_weights_norm(self, value: bool) -> None:
+        self.add_bool(Keys.LLM.EXPERT_WEIGHTS_NORM.format(arch=self.arch), value)
+
+    def add_expert_gating_func(self, value: ExpertGatingFuncType) -> None:
+        self.add_uint32(Keys.LLM.EXPERT_GATING_FUNC.format(arch=self.arch), value.value)
+
+    def add_moe_every_n_layers(self, value: int) -> None:
+        self.add_uint32(Keys.LLM.MOE_EVERY_N_LAYERS.format(arch=self.arch), value)
+
+    def add_swin_norm(self, value: bool) -> None:
+        self.add_bool(Keys.LLM.SWIN_NORM.format(arch=self.arch), value)
+
+    def add_rescale_every_n_layers(self, count: int) -> None:
+        self.add_uint32(Keys.LLM.RESCALE_EVERY_N_LAYERS.format(arch=self.arch), count)
+
+    def add_time_mix_extra_dim(self, dim: int) -> None:
+        self.add_uint32(Keys.LLM.TIME_MIX_EXTRA_DIM.format(arch=self.arch), dim)
+
+    def add_time_decay_extra_dim(self, dim: int) -> None:
+        self.add_uint32(Keys.LLM.TIME_DECAY_EXTRA_DIM.format(arch=self.arch), dim)
+
+    def add_residual_scale(self, value: float) -> None:
+        self.add_float32(Keys.LLM.RESIDUAL_SCALE.format(arch=self.arch), value)
+
+    def add_embedding_scale(self, value: float) -> None:
+        self.add_float32(Keys.LLM.EMBEDDING_SCALE.format(arch=self.arch), value)
+
+    def add_wkv_head_size(self, size: int) -> None:
+        self.add_uint32(Keys.WKV.HEAD_SIZE.format(arch=self.arch), size)
+
+    def add_token_shift_count(self, count: int) -> None:
+        self.add_uint32(Keys.LLM.TOKEN_SHIFT_COUNT.format(arch=self.arch), count)
+
+    def add_interleave_moe_layer_step(self, value: int) -> None:
+        self.add_uint32(Keys.LLM.INTERLEAVE_MOE_LAYER_STEP.format(arch=self.arch), value)
+
     def add_layer_norm_eps(self, value: float) -> None:
         self.add_float32(Keys.Attention.LAYERNORM_EPS.format(arch=self.arch), value)
 
     def add_layer_norm_rms_eps(self, value: float) -> None:
         self.add_float32(Keys.Attention.LAYERNORM_RMS_EPS.format(arch=self.arch), value)
+
+    def add_group_norm_eps(self, value: float) -> None:
+        self.add_float32(Keys.Attention.GROUPNORM_EPS.format(arch=self.arch), value)
+
+    def add_group_norm_groups(self, value: int) -> None:
+        self.add_uint32(Keys.Attention.GROUPNORM_GROUPS.format(arch=self.arch), value)
 
     def add_causal_attention(self, value: bool) -> None:
         self.add_bool(Keys.Attention.CAUSAL.format(arch=self.arch), value)
@@ -543,14 +779,35 @@ class GGUFWriter:
     def add_kv_lora_rank(self, length: int) -> None:
         self.add_uint32(Keys.Attention.KV_LORA_RANK.format(arch=self.arch), length)
 
+    def add_decay_lora_rank(self, length: int) -> None:
+        self.add_uint32(Keys.Attention.DECAY_LORA_RANK.format(arch=self.arch), length)
+
+    def add_iclr_lora_rank(self, length: int) -> None:
+        self.add_uint32(Keys.Attention.ICLR_LORA_RANK.format(arch=self.arch), length)
+
+    def add_value_residual_mix_lora_rank(self, length: int) -> None:
+        self.add_uint32(Keys.Attention.VALUE_RESIDUAL_MIX_LORA_RANK.format(arch=self.arch), length)
+
+    def add_gate_lora_rank(self, length: int) -> None:
+        self.add_uint32(Keys.Attention.GATE_LORA_RANK.format(arch=self.arch), length)
+
     def add_relative_attn_buckets_count(self, value: int) -> None:
         self.add_uint32(Keys.Attention.REL_BUCKETS_COUNT.format(arch=self.arch), value)
+
+    def add_sliding_window(self, value: int) -> None:
+        self.add_uint32(Keys.Attention.SLIDING_WINDOW.format(arch=self.arch), value)
+
+    def add_attention_scale(self, value: float) -> None:
+        self.add_float32(Keys.Attention.SCALE.format(arch=self.arch), value)
 
     def add_pooling_type(self, value: PoolingType) -> None:
         self.add_uint32(Keys.LLM.POOLING_TYPE.format(arch=self.arch), value.value)
 
     def add_rope_dimension_count(self, count: int) -> None:
         self.add_uint32(Keys.Rope.DIMENSION_COUNT.format(arch=self.arch), count)
+
+    def add_rope_dimension_sections(self, dims: Sequence[int]) -> None:
+        self.add_array(Keys.Rope.DIMENSION_SECTIONS.format(arch=self.arch), dims)
 
     def add_rope_freq_base(self, value: float) -> None:
         self.add_float32(Keys.Rope.FREQ_BASE.format(arch=self.arch), value)
@@ -584,6 +841,9 @@ class GGUFWriter:
 
     def add_ssm_time_step_rank(self, value: int) -> None:
         self.add_uint32(Keys.SSM.TIME_STEP_RANK.format(arch=self.arch), value)
+
+    def add_ssm_dt_b_c_rms(self, value: bool) -> None:
+        self.add_bool(Keys.SSM.DT_B_C_RMS.format(arch=self.arch), value)
 
     def add_tokenizer_model(self, model: str) -> None:
         self.add_string(Keys.Tokenizer.MODEL, model)
@@ -621,9 +881,6 @@ class GGUFWriter:
     def add_pad_token_id(self, id: int) -> None:
         self.add_uint32(Keys.Tokenizer.PAD_ID, id)
 
-    def add_cls_token_id(self, id: int) -> None:
-        self.add_uint32(Keys.Tokenizer.CLS_ID, id)
-
     def add_mask_token_id(self, id: int) -> None:
         self.add_uint32(Keys.Tokenizer.MASK_ID, id)
 
@@ -639,7 +896,7 @@ class GGUFWriter:
     def add_remove_extra_whitespaces(self, value: bool) -> None:
         self.add_bool(Keys.Tokenizer.REMOVE_EXTRA_WS, value)
 
-    def add_precompiled_charsmap(self, charsmap: Sequence[bytes]) -> None:
+    def add_precompiled_charsmap(self, charsmap: bytes) -> None:
         self.add_array(Keys.Tokenizer.PRECOMPILED_CHARSMAP, charsmap)
 
     def add_chat_template(self, value: str | Sequence[Mapping[str, str]]) -> None:
@@ -671,17 +928,93 @@ class GGUFWriter:
 
         self.add_string(Keys.Tokenizer.CHAT_TEMPLATE, value)
 
-    def add_prefix_token_id(self, id: int) -> None:
-        self.add_uint32(Keys.Tokenizer.PREFIX_ID, id)
-
-    def add_suffix_token_id(self, id: int) -> None:
-        self.add_uint32(Keys.Tokenizer.SUFFIX_ID, id)
-
-    def add_middle_token_id(self, id: int) -> None:
-        self.add_uint32(Keys.Tokenizer.MIDDLE_ID, id)
-
     def add_eot_token_id(self, id: int) -> None:
         self.add_uint32(Keys.Tokenizer.EOT_ID, id)
+
+    def add_eom_token_id(self, id: int) -> None:
+        self.add_uint32(Keys.Tokenizer.EOM_ID, id)
+
+    # for vision models
+
+    def add_clip_has_vision_encoder(self, value: bool) -> None:
+        self.add_bool(Keys.Clip.HAS_VISION_ENCODER, value)
+
+    def add_clip_has_audio_encoder(self, value: bool) -> None:
+        self.add_bool(Keys.Clip.HAS_AUDIO_ENCODER, value)
+
+    def add_clip_projector_type(self, value: str) -> None:
+        self.add_string(Keys.Clip.PROJECTOR_TYPE, value)
+
+    def add_vision_projection_dim(self, value: int) -> None:
+        self.add_uint32(Keys.ClipVision.PROJECTION_DIM, value)
+
+    def add_vision_patch_size(self, value: int) -> None:
+        self.add_uint32(Keys.ClipVision.PATCH_SIZE, value)
+
+    def add_vision_embedding_length(self, value: int) -> None:
+        self.add_uint32(Keys.ClipVision.EMBEDDING_LENGTH, value)
+
+    def add_vision_feed_forward_length(self, value: int) -> None:
+        self.add_uint32(Keys.ClipVision.FEED_FORWARD_LENGTH, value)
+
+    def add_vision_block_count(self, value: int) -> None:
+        self.add_uint32(Keys.ClipVision.BLOCK_COUNT, value)
+
+    def add_vision_head_count(self, value: int) -> None:
+        self.add_uint32(Keys.ClipVision.Attention.HEAD_COUNT, value)
+
+    def add_vision_attention_layernorm_eps(self, value: float) -> None:
+        self.add_float32(Keys.ClipVision.Attention.LAYERNORM_EPS, value)
+
+    def add_vision_image_size(self, value: int) -> None:
+        self.add_uint32(Keys.ClipVision.IMAGE_SIZE, value)
+
+    def add_vision_image_mean(self, values: Sequence[float]) -> None:
+        self.add_array(Keys.ClipVision.IMAGE_MEAN, values)
+
+    def add_vision_image_std(self, values: Sequence[float]) -> None:
+        self.add_array(Keys.ClipVision.IMAGE_STD, values)
+
+    def add_vision_spatial_merge_size(self, value: int) -> None:
+        self.add_uint32(Keys.ClipVision.SPATIAL_MERGE_SIZE, value)
+
+    def add_vision_use_gelu(self, value: bool) -> None:
+        self.add_bool(Keys.ClipVision.USE_GELU, value)
+
+    def add_vision_use_silu(self, value: bool) -> None:
+        self.add_bool(Keys.ClipVision.USE_SILU, value)
+
+    def add_vision_projector_scale_factor(self, value: int) -> None:
+        self.add_uint32(Keys.ClipVision.Projector.SCALE_FACTOR, value)
+
+    def add_vision_n_wa_pattern(self, value: int) -> None:
+        self.add_uint32(Keys.ClipVision.N_WA_PATTERN, value)
+
+    # audio models
+
+    def add_audio_projection_dim(self, value: int) -> None:
+        self.add_uint32(Keys.ClipAudio.PROJECTION_DIM, value)
+
+    def add_audio_embedding_length(self, value: int) -> None:
+        self.add_uint32(Keys.ClipAudio.EMBEDDING_LENGTH, value)
+
+    def add_audio_feed_forward_length(self, value: int) -> None:
+        self.add_uint32(Keys.ClipAudio.FEED_FORWARD_LENGTH, value)
+
+    def add_audio_block_count(self, value: int) -> None:
+        self.add_uint32(Keys.ClipAudio.BLOCK_COUNT, value)
+
+    def add_audio_head_count(self, value: int) -> None:
+        self.add_uint32(Keys.ClipAudio.Attention.HEAD_COUNT, value)
+
+    def add_audio_attention_layernorm_eps(self, value: float) -> None:
+        self.add_float32(Keys.ClipAudio.Attention.LAYERNORM_EPS, value)
+
+    def add_audio_num_mel_bins(self, value: int) -> None:
+        self.add_uint32(Keys.ClipAudio.NUM_MEL_BINS, value)
+
+    def add_audio_stack_factor(self, value: int) -> None:
+        self.add_uint32(Keys.ClipAudio.Projector.STACK_FACTOR, value)
 
     def _pack(self, fmt: str, value: Any, skip_pack_prefix: bool = False) -> bytes:
         pack_prefix = ''
@@ -702,7 +1035,14 @@ class GGUFWriter:
             encoded_val = val.encode("utf-8") if isinstance(val, str) else val
             kv_data += self._pack("Q", len(encoded_val))
             kv_data += encoded_val
-        elif vtype == GGUFValueType.ARRAY and isinstance(val, Sequence) and val:
+        elif vtype == GGUFValueType.ARRAY:
+
+            if not isinstance(val, Sequence):
+                raise ValueError("Invalid GGUF metadata array, expecting sequence")
+
+            if len(val) == 0:
+                raise ValueError("Invalid GGUF metadata array. Empty array")
+
             if isinstance(val, bytes):
                 ltype = GGUFValueType.UINT8
             else:

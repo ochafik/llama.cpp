@@ -3,6 +3,7 @@
 *.a
 *.bat
 *.bin
+*.d
 *.dll
 *.dot
 *.etag
@@ -17,6 +18,7 @@
 *.metallib
 *.o
 *.so
+*.swp
 *.tmp
 
 # IDE / OS
@@ -43,12 +45,16 @@ lcov-report/
 tags
 .build/
 build*
+release
+debug
 !build-info.cmake
 !build-info.cpp.in
 !build-info.sh
 !build.zig
+!docs/build.md
 /libllama.so
 /llama-*
+/vulkan-shaders-gen
 android-ndk-*
 arm_neon.h
 cmake-build-*
@@ -59,6 +65,12 @@ llama-batched-swift
 /rpc-server
 out/
 tmp/
+autogen-*.md
+
+# Deprecated
+
+/main
+/server
 
 # CI
 
@@ -72,7 +84,6 @@ models-mnt
 !models/ggml-vocab-*.gguf*
 
 # Zig
-
 zig-out/
 zig-cache/
 
@@ -85,10 +96,11 @@ perf-*.txt
 # Examples
 
 examples/jeopardy/results.txt
-examples/server/*.css.hpp
-examples/server/*.html.hpp
-examples/server/*.js.hpp
-examples/server/*.mjs.hpp
+tools/server/*.css.hpp
+tools/server/*.html.hpp
+tools/server/*.js.hpp
+tools/server/*.mjs.hpp
+tools/server/*.gz.hpp
 !build_64.sh
 !examples/*.bat
 !examples/*/*.kts
@@ -96,14 +108,19 @@ examples/server/*.mjs.hpp
 !examples/sycl/*.bat
 !examples/sycl/*.sh
 
+# Server Web UI temporary files
+node_modules
+tools/server/webui/dist
+
 # Python
 
-__pycache__
-.venv
-/Pipfile
-dist
-poetry.lock
+/.venv
+__pycache__/
+*/poetry.lock
 poetry.toml
+
+# Nix
+/result
 
 # Test binaries
 /tests/test-backend-ops
@@ -122,3 +139,10 @@ poetry.toml
 
 # Scripts
 !/scripts/install-oneapi.bat
+
+# Test models for lora adapters
+/lora-tests
+
+# Local scripts
+/run-vim.sh
+/run-chat.sh
