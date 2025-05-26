@@ -723,7 +723,7 @@ private:
                     break;
                 }
             }
-            auto alts = join(alternatives.begin(), alternatives.end(), " | ");
+            auto alts = string_join(alternatives, " | ");
             if (alternatives.size() > 1 || !has_required) {
                 rule += "( " + alts + (has_required ? " )" : " )?");
             } else {
