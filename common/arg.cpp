@@ -285,7 +285,7 @@ static bool common_download_file_single(const std::string & url, const std::stri
 
     common_load_model_from_url_headers headers;
     bool head_request_ok = false;
-    
+
     if (!file_exists || !offline)
     {
         bool should_download = !file_exists; // by default, we should download if the file does not exist
@@ -3017,7 +3017,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             params.offline = true;
         }
     ).set_env("LLAMA_OFFLINE"));
-    
+
     add_opt(common_arg(
         {"-lv", "--verbosity", "--log-verbosity"}, "N",
         "Set the verbosity threshold. Messages with a higher verbosity will be ignored.",
