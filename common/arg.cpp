@@ -710,12 +710,12 @@ bool common_has_curl() {
     return false;
 }
 
-static bool common_download_file_single(const std::string &, const std::string &, const std::string &) {
+static bool common_download_file_single(const std::string &, const std::string &, const std::string &, bool) {
     LOG_ERR("error: built without CURL, cannot download model from internet\n");
     return false;
 }
 
-static bool common_download_file_multiple(const std::vector<std::pair<std::string, std::string>> &, const std::string &) {
+static bool common_download_file_multiple(const std::vector<std::pair<std::string, std::string>> &, const std::string &, bool) {
     LOG_ERR("error: built without CURL, cannot download model from the internet\n");
     return false;
 }
@@ -728,7 +728,7 @@ static bool common_download_model(
     return false;
 }
 
-static struct common_hf_file_res common_get_hf_file(const std::string &, const std::string &) {
+static struct common_hf_file_res common_get_hf_file(const std::string &, const std::string &, bool) {
     LOG_ERR("error: built without CURL, cannot download model from the internet\n");
     return {};
 }
