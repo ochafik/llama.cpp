@@ -253,6 +253,10 @@ static bool common_download_file_single(const std::string & url, const std::stri
     std::string last_modified;
 
     if (file_exists) {
+        if (offline) {
+            LOG_INF("%s: using cached file (offline mode): %s\n", __func__, path.c_str());
+            return true; // skip verification/downloading
+        }
         // Try and read the JSON metadata file (note: stream autoclosed upon exiting this block).
         std::ifstream metadata_in(metadata_path);
         if (metadata_in.good()) {
@@ -271,10 +275,11 @@ static bool common_download_file_single(const std::string & url, const std::stri
         }
         // if we cannot open the metadata file, we assume that the downloaded file is not valid (etag and last-modified are left empty, so we will download it again)
     } else {
-        LOG_INF("%s: no previous model file found %s\n", __func__, path.c_str());
         if (offline) {
+            LOG_ERR("%s: required file is not available in cache (offline mode): %s\n", __func__, path.c_str());
             return false;
         }
+        LOG_INF("%s: no previous model file found %s\n", __func__, path.c_str());
     }
 
     // Send a HEAD request to retrieve the etag and last-modified headers
@@ -282,15 +287,6 @@ static bool common_download_file_single(const std::string & url, const std::stri
         std::string etag;
         std::string last_modified;
     };
-
-    if (offline) {
-        if (file_exists) {
-            LOG_INF("%s: using cached file (offline mode): %s\n", __func__, path.c_str());
-            return true; // skip verification/downloading
-        }
-        LOG_ERR("%s: required file is not available in cache (offline mode): %s\n", __func__, path.c_str());
-        return false;
-    }
 
     common_load_model_from_url_headers headers;
     bool head_request_ok = false;
