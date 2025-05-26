@@ -120,6 +120,8 @@ class ServerProcess:
             "--seed",
             self.seed,
         ]
+        if "OFFLINE" in os.environ:
+            server_args.append("--offline")
         if self.model_file:
             server_args.extend(["--model", self.model_file])
         if self.model_url:

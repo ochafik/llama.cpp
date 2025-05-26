@@ -242,33 +242,7 @@ static bool curl_perform_with_retry(const std::string & url, CURL * curl, int ma
 }
 
 // download one single file from remote URL to local path
-static bool common_download_file_single(const std::string & url, const std::string & path, const std::string & bearer_token) {
-    // Initialize libcurl
-    curl_ptr       curl(curl_easy_init(), &curl_easy_cleanup);
-    curl_slist_ptr http_headers;
-    if (!curl) {
-        LOG_ERR("%s: error initializing libcurl\n", __func__);
-        return false;
-    }
-
-    // Set the URL, allow to follow http redirection
-    curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl.get(), CURLOPT_FOLLOWLOCATION, 1L);
-
-    http_headers.ptr = curl_slist_append(http_headers.ptr, "User-Agent: llama-cpp");
-    // Check if hf-token or bearer-token was specified
-    if (!bearer_token.empty()) {
-        std::string auth_header = "Authorization: Bearer " + bearer_token;
-        http_headers.ptr = curl_slist_append(http_headers.ptr, auth_header.c_str());
-    }
-    curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER, http_headers.ptr);
-
-#if defined(_WIN32)
-    // CURLSSLOPT_NATIVE_CA tells libcurl to use standard certificate store of
-    //   operating system. Currently implemented under MS-Windows.
-    curl_easy_setopt(curl.get(), CURLOPT_SSL_OPTIONS, CURLSSLOPT_NATIVE_CA);
-#endif
-
+static bool common_download_file_single(const std::string & url, const std::string & path, const std::string & bearer_token, bool offline) {
     // Check if the file already exists locally
     auto file_exists = std::filesystem::exists(path);
 
@@ -298,6 +272,9 @@ static bool common_download_file_single(const std::string & url, const std::stri
         // if we cannot open the metadata file, we assume that the downloaded file is not valid (etag and last-modified are left empty, so we will download it again)
     } else {
         LOG_INF("%s: no previous model file found %s\n", __func__, path.c_str());
+        if (offline) {
+            return false;
+        }
     }
 
     // Send a HEAD request to retrieve the etag and last-modified headers
@@ -308,10 +285,37 @@ static bool common_download_file_single(const std::string & url, const std::stri
 
     common_load_model_from_url_headers headers;
     bool head_request_ok = false;
-    bool should_download = !file_exists; // by default, we should download if the file does not exist
-
-    // get ETag to see if the remote file has changed
+    
+    if (!file_exists || !offline)
     {
+        bool should_download = !file_exists; // by default, we should download if the file does not exist
+
+        // Initialize libcurl
+        curl_ptr       curl(curl_easy_init(), &curl_easy_cleanup);
+        curl_slist_ptr http_headers;
+        if (!curl) {
+            LOG_ERR("%s: error initializing libcurl\n", __func__);
+            return false;
+        }
+
+        // Set the URL, allow to follow http redirection
+        curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
+        curl_easy_setopt(curl.get(), CURLOPT_FOLLOWLOCATION, 1L);
+
+        http_headers.ptr = curl_slist_append(http_headers.ptr, "User-Agent: llama-cpp");
+        // Check if hf-token or bearer-token was specified
+        if (!bearer_token.empty()) {
+            std::string auth_header = "Authorization: Bearer " + bearer_token;
+            http_headers.ptr = curl_slist_append(http_headers.ptr, auth_header.c_str());
+        }
+        curl_easy_setopt(curl.get(), CURLOPT_HTTPHEADER, http_headers.ptr);
+
+#if defined(_WIN32)
+        // CURLSSLOPT_NATIVE_CA tells libcurl to use standard certificate store of
+        //   operating system. Currently implemented under MS-Windows.
+        curl_easy_setopt(curl.get(), CURLOPT_SSL_OPTIONS, CURLSSLOPT_NATIVE_CA);
+#endif
+
         typedef size_t(*CURLOPT_HEADERFUNCTION_PTR)(char *, size_t, size_t, void *);
         auto header_callback = [](char * buffer, size_t /*size*/, size_t n_items, void * userdata) -> size_t {
             common_load_model_from_url_headers * headers = (common_load_model_from_url_headers *) userdata;
@@ -354,105 +358,107 @@ static bool common_download_file_single(const std::string & url, const std::stri
             LOG_WRN("%s: HEAD invalid http status code received: %ld\n", __func__, http_code);
             head_request_ok = false;
         }
-    }
 
-    // if head_request_ok is false, we don't have the etag or last-modified headers
-    // we leave should_download as-is, which is true if the file does not exist
-    if (head_request_ok) {
-        // check if ETag or Last-Modified headers are different
-        // if it is, we need to download the file again
-        if (!etag.empty() && etag != headers.etag) {
-            LOG_WRN("%s: ETag header is different (%s != %s): triggering a new download\n", __func__, etag.c_str(), headers.etag.c_str());
-            should_download = true;
-        } else if (!last_modified.empty() && last_modified != headers.last_modified) {
-            LOG_WRN("%s: Last-Modified header is different (%s != %s): triggering a new download\n", __func__, last_modified.c_str(), headers.last_modified.c_str());
-            should_download = true;
+        // if head_request_ok is false, we don't have the etag or last-modified headers
+        // we leave should_download as-is, which is true if the file does not exist
+        if (head_request_ok) {
+            // check if ETag or Last-Modified headers are different
+            // if it is, we need to download the file again
+            if (!etag.empty() && etag != headers.etag) {
+                LOG_WRN("%s: ETag header is different (%s != %s): triggering a new download\n", __func__, etag.c_str(), headers.etag.c_str());
+                should_download = true;
+            } else if (!last_modified.empty() && last_modified != headers.last_modified) {
+                LOG_WRN("%s: Last-Modified header is different (%s != %s): triggering a new download\n", __func__, last_modified.c_str(), headers.last_modified.c_str());
+                should_download = true;
+            }
         }
-    }
 
-    if (should_download) {
-        std::string path_temporary = path + ".downloadInProgress";
-        if (file_exists) {
-            LOG_WRN("%s: deleting previous downloaded file: %s\n", __func__, path.c_str());
-            if (remove(path.c_str()) != 0) {
-                LOG_ERR("%s: unable to delete file: %s\n", __func__, path.c_str());
+        if (should_download) {
+            std::string path_temporary = path + ".downloadInProgress";
+            if (file_exists) {
+                LOG_WRN("%s: deleting previous downloaded file: %s\n", __func__, path.c_str());
+                if (remove(path.c_str()) != 0) {
+                    LOG_ERR("%s: unable to delete file: %s\n", __func__, path.c_str());
+                    return false;
+                }
+            }
+
+            // Set the output file
+
+            struct FILE_deleter {
+                void operator()(FILE * f) const {
+                    fclose(f);
+                }
+            };
+
+            std::unique_ptr<FILE, FILE_deleter> outfile(fopen(path_temporary.c_str(), "wb"));
+            if (!outfile) {
+                LOG_ERR("%s: error opening local file for writing: %s\n", __func__, path.c_str());
                 return false;
             }
-        }
 
-        // Set the output file
+            typedef size_t(*CURLOPT_WRITEFUNCTION_PTR)(void * data, size_t size, size_t nmemb, void * fd);
+            auto write_callback = [](void * data, size_t size, size_t nmemb, void * fd) -> size_t {
+                return fwrite(data, size, nmemb, (FILE *)fd);
+            };
+            curl_easy_setopt(curl.get(), CURLOPT_NOBODY, 0L);
+            curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, static_cast<CURLOPT_WRITEFUNCTION_PTR>(write_callback));
+            curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, outfile.get());
 
-        struct FILE_deleter {
-            void operator()(FILE * f) const {
-                fclose(f);
-            }
-        };
+            //  display download progress
+            curl_easy_setopt(curl.get(), CURLOPT_NOPROGRESS, 0L);
 
-        std::unique_ptr<FILE, FILE_deleter> outfile(fopen(path_temporary.c_str(), "wb"));
-        if (!outfile) {
-            LOG_ERR("%s: error opening local file for writing: %s\n", __func__, path.c_str());
-            return false;
-        }
+            // helper function to hide password in URL
+            auto llama_download_hide_password_in_url = [](const std::string & url) -> std::string {
+                std::size_t protocol_pos = url.find("://");
+                if (protocol_pos == std::string::npos) {
+                    return url;  // Malformed URL
+                }
 
-        typedef size_t(*CURLOPT_WRITEFUNCTION_PTR)(void * data, size_t size, size_t nmemb, void * fd);
-        auto write_callback = [](void * data, size_t size, size_t nmemb, void * fd) -> size_t {
-            return fwrite(data, size, nmemb, (FILE *)fd);
-        };
-        curl_easy_setopt(curl.get(), CURLOPT_NOBODY, 0L);
-        curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, static_cast<CURLOPT_WRITEFUNCTION_PTR>(write_callback));
-        curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, outfile.get());
+                std::size_t at_pos = url.find('@', protocol_pos + 3);
+                if (at_pos == std::string::npos) {
+                    return url;  // No password in URL
+                }
 
-        //  display download progress
-        curl_easy_setopt(curl.get(), CURLOPT_NOPROGRESS, 0L);
+                return url.substr(0, protocol_pos + 3) + "********" + url.substr(at_pos);
+            };
 
-        // helper function to hide password in URL
-        auto llama_download_hide_password_in_url = [](const std::string & url) -> std::string {
-            std::size_t protocol_pos = url.find("://");
-            if (protocol_pos == std::string::npos) {
-                return url;  // Malformed URL
-            }
-
-            std::size_t at_pos = url.find('@', protocol_pos + 3);
-            if (at_pos == std::string::npos) {
-                return url;  // No password in URL
+            // start the download
+            LOG_INF("%s: trying to download model from %s to %s (server_etag:%s, server_last_modified:%s)...\n", __func__,
+                llama_download_hide_password_in_url(url).c_str(), path.c_str(), headers.etag.c_str(), headers.last_modified.c_str());
+            bool was_perform_successful = curl_perform_with_retry(url, curl.get(), CURL_MAX_RETRY, CURL_RETRY_DELAY_SECONDS, "GET");
+            if (!was_perform_successful) {
+                return false;
             }
 
-            return url.substr(0, protocol_pos + 3) + "********" + url.substr(at_pos);
-        };
+            long http_code = 0;
+            curl_easy_getinfo (curl.get(), CURLINFO_RESPONSE_CODE, &http_code);
+            if (http_code < 200 || http_code >= 400) {
+                LOG_ERR("%s: invalid http status code received: %ld\n", __func__, http_code);
+                return false;
+            }
 
-        // start the download
-        LOG_INF("%s: trying to download model from %s to %s (server_etag:%s, server_last_modified:%s)...\n", __func__,
-            llama_download_hide_password_in_url(url).c_str(), path.c_str(), headers.etag.c_str(), headers.last_modified.c_str());
-        bool was_perform_successful = curl_perform_with_retry(url, curl.get(), CURL_MAX_RETRY, CURL_RETRY_DELAY_SECONDS, "GET");
-        if (!was_perform_successful) {
-            return false;
-        }
+            // Causes file to be closed explicitly here before we rename it.
+            outfile.reset();
 
-        long http_code = 0;
-        curl_easy_getinfo (curl.get(), CURLINFO_RESPONSE_CODE, &http_code);
-        if (http_code < 200 || http_code >= 400) {
-            LOG_ERR("%s: invalid http status code received: %ld\n", __func__, http_code);
-            return false;
-        }
+            // Write the updated JSON metadata file.
+            metadata.update({
+                {"url", url},
+                {"etag", headers.etag},
+                {"lastModified", headers.last_modified}
+            });
+            write_file(metadata_path, metadata.dump(4));
+            LOG_DBG("%s: file metadata saved: %s\n", __func__, metadata_path.c_str());
 
-        // Causes file to be closed explicitly here before we rename it.
-        outfile.reset();
-
-        // Write the updated JSON metadata file.
-        metadata.update({
-            {"url", url},
-            {"etag", headers.etag},
-            {"lastModified", headers.last_modified}
-        });
-        write_file(metadata_path, metadata.dump(4));
-        LOG_DBG("%s: file metadata saved: %s\n", __func__, metadata_path.c_str());
-
-        if (rename(path_temporary.c_str(), path.c_str()) != 0) {
-            LOG_ERR("%s: unable to rename file: %s to %s\n", __func__, path_temporary.c_str(), path.c_str());
-            return false;
+            if (rename(path_temporary.c_str(), path.c_str()) != 0) {
+                LOG_ERR("%s: unable to rename file: %s to %s\n", __func__, path_temporary.c_str(), path.c_str());
+                return false;
+            }
+        } else {
+            LOG_INF("%s: using cached file: %s\n", __func__, path.c_str());
         }
     } else {
-        LOG_INF("%s: using cached file: %s\n", __func__, path.c_str());
+        LOG_INF("%s: using cached file (offline mode): %s\n", __func__, path.c_str());
     }
 
     return true;
@@ -460,12 +466,12 @@ static bool common_download_file_single(const std::string & url, const std::stri
 
 // download multiple files from remote URLs to local paths
 // the input is a vector of pairs <url, path>
-static bool common_download_file_multiple(const std::vector<std::pair<std::string, std::string>> & urls, const std::string & bearer_token) {
+static bool common_download_file_multiple(const std::vector<std::pair<std::string, std::string>> & urls, const std::string & bearer_token, bool offline) {
     // Prepare download in parallel
     std::vector<std::future<bool>> futures_download;
     for (auto const & item : urls) {
-        futures_download.push_back(std::async(std::launch::async, [bearer_token](const std::pair<std::string, std::string> & it) -> bool {
-            return common_download_file_single(it.first, it.second, bearer_token);
+        futures_download.push_back(std::async(std::launch::async, [bearer_token, offline](const std::pair<std::string, std::string> & it) -> bool {
+            return common_download_file_single(it.first, it.second, bearer_token, offline);
         }, item));
     }
 
@@ -481,14 +487,15 @@ static bool common_download_file_multiple(const std::vector<std::pair<std::strin
 
 static bool common_download_model(
         const common_params_model & model,
-        const std::string & bearer_token) {
+        const std::string & bearer_token,
+        bool offline) {
     // Basic validation of the model.url
     if (model.url.empty()) {
         LOG_ERR("%s: invalid model url\n", __func__);
         return false;
     }
 
-    if (!common_download_file_single(model.url, model.path, bearer_token)) {
+    if (!common_download_file_single(model.url, model.path, bearer_token, offline)) {
         return false;
     }
 
@@ -547,7 +554,7 @@ static bool common_download_model(
         }
 
         // Download in parallel
-        common_download_file_multiple(urls, bearer_token);
+        common_download_file_multiple(urls, bearer_token, offline);
     }
 
     return true;
@@ -608,7 +615,7 @@ std::pair<long, std::vector<char>> common_remote_get_content(const std::string &
  *
  * Note: we use the Ollama-compatible HF API, but not using the blobId. Instead, we use the special "ggufFile" field which returns the value for "hf_file". This is done to be backward-compatible with existing cache files.
  */
-static struct common_hf_file_res common_get_hf_file(const std::string & hf_repo_with_tag, const std::string & bearer_token) {
+static struct common_hf_file_res common_get_hf_file(const std::string & hf_repo_with_tag, const std::string & bearer_token, bool offline) {
     auto parts = string_split<std::string>(hf_repo_with_tag, ':');
     std::string tag = parts.size() > 1 ? parts.back() : "latest";
     std::string hf_repo = parts[0];
@@ -638,20 +645,25 @@ static struct common_hf_file_res common_get_hf_file(const std::string & hf_repo_
     long res_code = 0;
     std::string res_str;
     bool use_cache = false;
-    try {
-        auto res = common_remote_get_content(url, params);
-        res_code = res.first;
-        res_str = std::string(res.second.data(), res.second.size());
-    } catch (const std::exception & e) {
-        LOG_WRN("error: failed to get manifest: %s\n", e.what());
-        LOG_WRN("try reading from cache\n");
-        // try to read from cache
+    if (!offline) {
         try {
+            auto res = common_remote_get_content(url, params);
+            res_code = res.first;
+            res_str = std::string(res.second.data(), res.second.size());
+        } catch (const std::exception & e) {
+            LOG_WRN("error: failed to get manifest at %s: %s\n", url.c_str(), e.what());
+        }
+    }
+    if (res_code == 0) {
+        if (std::filesystem::exists(cached_response_path)) {
+            LOG_WRN("trying to read manifest from cache: %s\n", cached_response_path.c_str());
             res_str = read_file(cached_response_path);
             res_code = 200;
             use_cache = true;
-        } catch (const std::exception & e) {
-            throw std::runtime_error("error: failed to get manifest (check your internet connection)");
+        } else {
+            throw std::runtime_error(
+                offline ? "error: failed to get manifest (offline mode)"
+                : "error: failed to get manifest (check your internet connection)");
         }
     }
     std::string ggufFile;
@@ -710,7 +722,8 @@ static bool common_download_file_multiple(const std::vector<std::pair<std::strin
 
 static bool common_download_model(
         const common_params_model &,
-        const std::string &) {
+        const std::string &,
+        bool offline) {
     LOG_ERR("error: built without CURL, cannot download model from the internet\n");
     return false;
 }
@@ -742,7 +755,8 @@ struct handle_model_result {
 static handle_model_result common_params_handle_model(
         struct common_params_model & model,
         const std::string & bearer_token,
-        const std::string & model_path_default) {
+        const std::string & model_path_default,
+        bool offline) {
     handle_model_result result;
     // handle pre-fill default model path and url based on hf_repo and hf_file
     {
@@ -750,7 +764,7 @@ static handle_model_result common_params_handle_model(
             // short-hand to avoid specifying --hf-file -> default it to --model
             if (model.hf_file.empty()) {
                 if (model.path.empty()) {
-                    auto auto_detected = common_get_hf_file(model.hf_repo, bearer_token);
+                    auto auto_detected = common_get_hf_file(model.hf_repo, bearer_token, offline);
                     if (auto_detected.repo.empty() || auto_detected.ggufFile.empty()) {
                         exit(1); // built without CURL, error message already printed
                     }
@@ -791,7 +805,7 @@ static handle_model_result common_params_handle_model(
 
     // then, download it if needed
     if (!model.url.empty()) {
-        bool ok = common_download_model(model, bearer_token);
+        bool ok = common_download_model(model, bearer_token, offline);
         if (!ok) {
             LOG_ERR("error: failed to download model from %s\n", model.url.c_str());
             exit(1);
@@ -934,7 +948,7 @@ static bool common_params_parse_ex(int argc, char ** argv, common_params_context
 
     // handle model and download
     {
-        auto res = common_params_handle_model(params.model, params.hf_token, DEFAULT_MODEL_PATH);
+        auto res = common_params_handle_model(params.model, params.hf_token, DEFAULT_MODEL_PATH, params.offline);
         if (params.no_mmproj) {
             params.mmproj = {};
         } else if (res.found_mmproj && params.mmproj.path.empty() && params.mmproj.url.empty()) {
@@ -944,12 +958,12 @@ static bool common_params_parse_ex(int argc, char ** argv, common_params_context
         // only download mmproj if the current example is using it
         for (auto & ex : mmproj_examples) {
             if (ctx_arg.ex == ex) {
-                common_params_handle_model(params.mmproj,    params.hf_token, "");
+                common_params_handle_model(params.mmproj,    params.hf_token, "", params.offline);
                 break;
             }
         }
-        common_params_handle_model(params.speculative.model, params.hf_token, "");
-        common_params_handle_model(params.vocoder.model,     params.hf_token, "");
+        common_params_handle_model(params.speculative.model, params.hf_token, "", params.offline);
+        common_params_handle_model(params.vocoder.model,     params.hf_token, "", params.offline);
     }
 
     if (params.escape) {
@@ -2987,6 +3001,14 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             common_log_set_verbosity_thold(INT_MAX);
         }
     ));
+    add_opt(common_arg(
+        {"--offline"},
+        "Offline mode: forces use of cache, prevents network access",
+        [](common_params & params) {
+            params.offline = true;
+        }
+    ));
+    
     add_opt(common_arg(
         {"-lv", "--verbosity", "--log-verbosity"}, "N",
         "Set the verbosity threshold. Messages with a higher verbosity will be ignored.",
