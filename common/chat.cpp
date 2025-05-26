@@ -1024,9 +1024,7 @@ static void common_chat_parse_command_r7b(common_chat_msg_parser & builder) {
         }
         builder.consume_regex(end_action_regex);
     } else if (auto res = builder.try_find_regex(start_response_regex)) {
-        if (auto res = builder.try_find_regex(end_response_regex)) {
-            // If we didn't extract thoughts, prelude includes them.
-        } else {
+        if (!builder.try_find_regex(end_response_regex)) {
             builder.add_content(builder.consume_rest());
             throw common_chat_msg_partial_exception(end_response_regex.str());
         }
