@@ -1101,6 +1101,13 @@ static void test_template_output_parsers() {
                     {COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1}));
         }
 
+        assert_equals(
+            message_assist_call,
+            common_chat_parse(
+                "<function=special_function>{\"arg1\": 1}<",
+                /* is_partial= */ true,
+                {COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1}));
+
         test_templates(tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
         test_templates(tmpls.get(), end_tokens, message_assist_call, tools,
                       "<function=special_function>{\"arg1\": 1}</function>");

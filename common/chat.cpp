@@ -1476,12 +1476,6 @@ static void common_chat_parse_functionary_v3_1_llama_3_1(common_chat_msg_parser 
     // This version of Functionary still supports the llama 3.1 tool call format for the python tool.
     static const common_regex python_tag_regex(regex_escape("<|python_tag|>"));
 
-    if (auto res = builder.try_find_regex(python_tag_regex)) {
-        auto arguments = wrap_code_as_arguments(builder, builder.consume_rest());
-        builder.add_tool_call("python", "", arguments);
-        return;
-    }
-
     static const common_regex function_regex(R"(<function=(\w+)>)");
     static const common_regex close_regex(R"(</function>)");
 
@@ -1492,6 +1486,12 @@ static void common_chat_parse_functionary_v3_1_llama_3_1(common_chat_msg_parser 
         function_regex,
         close_regex,
         std::nullopt);
+
+    if (auto res = builder.try_find_regex(python_tag_regex)) {
+        auto arguments = wrap_code_as_arguments(builder, builder.consume_rest());
+        builder.add_tool_call("python", "", arguments);
+        return;
+    }
 }
 
 static common_chat_params common_chat_params_init_hermes_2_pro(const common_chat_template & tmpl, const struct templates_params & inputs) {
