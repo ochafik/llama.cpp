@@ -341,7 +341,7 @@ class ServerProcess:
                         tool_call['id'] = tc['id']
                     fct = tc['function']
                     if fct.get('name') is not None:
-                        tool_call['function']['name'] = fct['name']
+                        tool_call['function']['name'] = tool_call['function'].get('name', '') + fct['name']
                     if fct.get('arguments') is not None:
                         assert len(fct['arguments']) > 0, f'Expected non empty arguments delta!'
                         tool_call['function']['arguments'] += fct['arguments']

@@ -101,9 +101,9 @@ std::vector<common_chat_msg_diff> common_chat_msg_diff::compute_diffs(const comm
         if (!args_diff.empty() || pref.id != newf.id) {
             auto & diff = diffs.emplace_back();
             diff.tool_call_index = idx;
-            diff.tool_call_delta.name = newf.name;
             if (pref.id != newf.id) {
                 diff.tool_call_delta.id = newf.id;
+                diff.tool_call_delta.name = newf.name;
             }
             diff.tool_call_delta.arguments = args_diff;
         }
