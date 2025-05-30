@@ -1096,6 +1096,7 @@ static common_chat_params common_chat_params_init_llama_3_x(const common_chat_te
                 tool_rules.push_back(
                     builder.add_rule(
                         name + "-call",
+                        "\"<|python_tag|>\"? space "
                         "\"{\" space "
                         "( \"\\\"type\\\"\"       space \":\" space \"\\\"function\\\"\"     space \",\" space )? "
                         "  \"\\\"name\\\"\"       space \":\" space \"\\\"" + name + "\\\"\" space \",\" space "
@@ -1105,12 +1106,12 @@ static common_chat_params common_chat_params_init_llama_3_x(const common_chat_te
             // Small models may hallucinate function names so we match anything (*at the start*) that looks like the JSON of a function call, regardless of the name.
             data.grammar_triggers.push_back({
                 COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
-                "(\\{\\s*(?:\"type\"\\s*:\\s*\"function\"\\s*,\\s*)?\"name\"\\s*:\\s*\")[\\s\\S]*", // + name + "\"[\\s\\S]*",
+                "((?:<\\|python_tag\\|>\\s*)?\\{\\s*(?:\"type\"\\s*:\\s*\"function\"\\s*,\\s*)?\"name\"\\s*:\\s*\")[\\s\\S]*", // + name + "\"[\\s\\S]*",
             });
             if (!builtin_tools.empty()) {
                 data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<|python_tag|>"});
-                data.preserved_tokens.push_back("<|python_tag|>");
             }
+            data.preserved_tokens.push_back("<|python_tag|>");
             // Allow a few empty lines on top of the usual constrained json schema space rule.
             builder.add_rule("root", string_join(tool_rules, " | "));
             data.additional_stops.push_back("<|eom_id|>");
@@ -1134,16 +1135,18 @@ static void common_chat_parse_llama_3_1(common_chat_msg_parser & builder, bool w
         return;
     }
 
-    static const common_regex function_regex(
-        "\\s*\\{\\s*(?:\"type\"\\s*:\\s*\"function\"\\s*,\\s*)?\"name\"\\s*:\\s*\"([^\"]+)\"\\s*,\\s*\"parameters\"\\s*: ");
-    static const common_regex close_regex("\\}\\s*");
+    static const common_regex python_tag_regex("\\s*<\\|python_tag\\|>");
 
-    static const common_regex function_name_regex("\\s*(\\w+)\\s*\\.\\s*call\\(");
-    static const common_regex arg_name_regex("\\s*(\\w+)\\s*=\\s*");
-
-    if (with_builtin_tools) {
-        static const common_regex builtin_call_regex("<\\|python_tag\\|>");
-        if (auto res = builder.try_find_regex(builtin_call_regex)) {
+    auto initial_pos = builder.pos();
+    if (auto res = builder.try_consume_regex(python_tag_regex)) {
+        if (auto tc = builder.try_consume_json_with_dumped_args({{"parameters"}})) {
+            if (!builder.add_tool_call(tc->value, "parameters")) {
+                throw common_chat_msg_partial_exception("Incomplete tool call");
+            }
+        } else if (with_builtin_tools) {
+            static const common_regex function_name_regex("\\s*(\\w+)\\s*\\.\\s*call\\(");
+            static const common_regex arg_name_regex("\\s*(\\w+)\\s*=\\s*");
+            
             auto fun_res = builder.consume_regex(function_name_regex);
             auto function_name = builder.str(fun_res.groups[1]);
 
@@ -1171,16 +1174,13 @@ static void common_chat_parse_llama_3_1(common_chat_msg_parser & builder, bool w
             if (!builder.add_tool_call(function_name, "", arguments)) {
                 throw common_chat_msg_partial_exception("Incomplete tool call");
             }
-            return;
+        }
+    } else if (auto tc = builder.try_consume_json_with_dumped_args({{"parameters"}})) {
+        if (!builder.add_tool_call(tc->value, "parameters")) {
+            builder.move_to(initial_pos);
         }
     }
-    parse_json_tool_calls(
-        builder,
-        /* block_open= */ std::nullopt,
-        /* function_regex_start_only= */ function_regex,
-        /* function_regex= */ std::nullopt,
-        close_regex,
-        std::nullopt);
+    builder.add_content(builder.consume_rest());
 
 }
 
@@ -1453,8 +1453,8 @@ static common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1(con
             if (has_raw_python) {
                 tool_rules.push_back(builder.add_rule("python-call", "\"<|python_tag|>\" .*"));
                 data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<|python_tag|>"});
-                data.preserved_tokens.push_back("<|python_tag|>");
             }
+            data.preserved_tokens.push_back("<|python_tag|>");
             auto tool_call = builder.add_rule("tool_call", string_join(tool_rules, " | ")) + " space";
             builder.add_rule("root", inputs.parallel_tool_calls ? "(" + tool_call + ")+" : tool_call);
             data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<function="});
