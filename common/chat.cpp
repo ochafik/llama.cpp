@@ -1146,7 +1146,7 @@ static void common_chat_parse_llama_3_1(common_chat_msg_parser & builder, bool w
         } else if (with_builtin_tools) {
             static const common_regex function_name_regex("\\s*(\\w+)\\s*\\.\\s*call\\(");
             static const common_regex arg_name_regex("\\s*(\\w+)\\s*=\\s*");
-            
+
             auto fun_res = builder.consume_regex(function_name_regex);
             auto function_name = builder.str(fun_res.groups[1]);
 
@@ -1181,7 +1181,6 @@ static void common_chat_parse_llama_3_1(common_chat_msg_parser & builder, bool w
         }
     }
     builder.add_content(builder.consume_rest());
-
 }
 
 static common_chat_params common_chat_params_init_deepseek_r1(const common_chat_template & tmpl, const struct templates_params & inputs) {
