@@ -1177,7 +1177,18 @@ static void common_chat_parse_llama_3_1(common_chat_msg_parser & builder, bool w
         }
     } else if (auto tc = builder.try_consume_json_with_dumped_args({{"parameters"}})) {
         if (!builder.add_tool_call(tc->value, "parameters")) {
-            builder.move_to(initial_pos);
+            auto has_unknown_keys = false;
+            for (const auto & [key, value] : tc->value.items()) {
+                if (key != "parameters" && key != "name" && key != "type") {
+                    has_unknown_keys = true;
+                    break;
+                }
+            }
+            if (has_unknown_keys) {
+                builder.move_to(initial_pos);
+            } else {
+                throw common_chat_msg_partial_exception("incomplete tool call");
+            }
         }
     }
     builder.add_content(builder.consume_rest());
