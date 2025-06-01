@@ -12,6 +12,12 @@ import {
 import ChatInputExtraContextItem from './ChatInputExtraContextItem';
 import { BtnWithTooltips } from '../utils/common';
 
+interface SplitMessage {
+  content: PendingMessage['content'];
+  thought?: string;
+  isThinking?: boolean;
+}
+
 export default function ChatMessage({
   msg,
   siblingLeafNodeIds,
@@ -48,6 +54,32 @@ export default function ChatMessage({
   );
   const nextSibling = siblingLeafNodeIds[siblingCurrIdx + 1];
   const prevSibling = siblingLeafNodeIds[siblingCurrIdx - 1];
+
+  // for reasoning model, we split the message into content and thought
+  // TODO: implement this as remark/rehype plugin in the future
+  const { content, thought, isThinking }: SplitMessage = useMemo(() => {
+    if (msg.content === null || msg.role !== 'assistant') {
+      return { content: msg.content };
+    }
+    let actualContent = '';
+    let thought = '';
+    let isThinking = false;
+    let thinkSplit = msg.content.split('<think>', 2);
+    actualContent += thinkSplit[0];
+    while (thinkSplit[1] !== undefined) {
+      // <think> tag found
+      thinkSplit = thinkSplit[1].split('</think>', 2);
+      thought += thinkSplit[0];
+      isThinking = true;
+      if (thinkSplit[1] !== undefined) {
+        // </think> closing tag found
+        isThinking = false;
+        thinkSplit = thinkSplit[1].split('<think>', 2);
+        actualContent += thinkSplit[0];
+      }
+    }
+    return { content: actualContent, thought, isThinking };
+  }, [msg]);
 
   if (!viewingChat) return null;
 
@@ -109,7 +141,7 @@ export default function ChatMessage({
           {/* not editing content, render message */}
           {editingContent === null && (
             <>
-              {msg.content === null ? (
+              {content === null ? (
                 <>
                   {/* show loading dots for pending message */}
                   <span className="loading loading-dots loading-md"></span>
@@ -118,16 +150,16 @@ export default function ChatMessage({
                 <>
                   {/* render message as markdown */}
                   <div dir="auto" tabIndex={0}>
-                    {msg.reasoningContent && (
+                    {thought && (
                       <ThoughtProcess
-                        isThinking={!!msg.reasoningContent && !!isPending}
-                        content={msg.reasoningContent}
+                        isThinking={!!isThinking && !!isPending}
+                        content={thought}
                         open={config.showThoughtInProgress}
                       />
                     )}
 
                     <MarkdownDisplay
-                      content={msg.content}
+                      content={content}
                       isGenerating={isPending}
                     />
                   </div>

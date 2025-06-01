@@ -41,7 +41,6 @@ export interface Message {
   timestamp: number; // timestamp from Date.now()
   role: 'user' | 'assistant' | 'system';
   content: string;
-  reasoningContent: string | null;
   timings?: TimingReport;
   extra?: MessageExtra[];
   // node based system for branching
@@ -113,7 +112,6 @@ export interface ViewingChat {
 
 export type PendingMessage = Omit<Message, 'content'> & {
   content: string | null;
-  reasoningContent: string | null;
 };
 
 export enum CanvasType {

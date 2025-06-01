@@ -111,7 +111,6 @@ const StorageUtils = {
       timestamp: now,
       role: 'system',
       content: '',
-      reasoningContent: null,
       parent: -1,
       children: [],
     });
@@ -230,7 +229,6 @@ interface LSMessage {
   id: number;
   role: 'user' | 'assistant' | 'system';
   content: string;
-  reasoningContent: string | null;
   timings?: TimingReport;
 }
 async function migrationLStoIDB() {
@@ -269,7 +267,6 @@ async function migrationLStoIDB() {
         timestamp: rootId,
         role: 'system',
         content: '',
-        reasoningContent: null,
         parent: -1,
         children: [firstMsg.id],
       });
