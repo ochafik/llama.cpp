@@ -589,6 +589,7 @@ const char * common_chat_format_name(common_chat_format format) {
         case COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1: return "Functionary v3.1 Llama 3.1";
         case COMMON_CHAT_FORMAT_HERMES_2_PRO: return "Hermes 2 Pro";
         case COMMON_CHAT_FORMAT_COMMAND_R7B: return "Command R7B";
+        case COMMON_CHAT_FORMAT_QWEN3: return "Qwen3";
         default:
             throw std::runtime_error("Unknown chat format");
     }
@@ -1030,6 +1031,47 @@ static void common_chat_parse_command_r7b(common_chat_msg_parser & builder) {
         builder.add_content(builder.consume_rest());
     }
 }
+
+/*
+<tool_call>
+<function=python>
+<parameter=code>
+print("Hello, World!")
+</parameter>
+</function>
+</tool_call>
+*/
+static void common_chat_parse_qwen3(common_chat_msg_parser & builder) {
+    if (!builder.syntax().parse_tool_calls) {
+        builder.add_content(builder.consume_rest());
+        return;
+    }
+
+    static const common_regex function_open("<tool_call>\n<function=([a-zA-Z0-9_]+)>");
+    static const common_regex function_close("</function>\n</tool_call>");
+    static const common_regex parameter_open("<parameter=([a-zA-Z0-9_]+)>");
+    static const common_regex parameter_close("</parameter>");
+
+    if (auto block_open_match = builder.try_consume_regex(function_open)) {
+        const auto function_name = builder.str(block_open_match->groups[1]);
+        json arguments = json::object();
+        while (true) {
+            builder.consume_spaces();
+            if (auto param_open_match = builder.try_consume_regex(parameter_open)) {
+                const auto parameter_name = builder.str(param_open_match->groups[1]);
+                if (auto param_match = builder.try_find_regex(parameter_close)) {
+                    const auto param = builder.str({param_open_match->groups[0].end, param_match->groups[0].begin});
+                    arguments[parameter_name] = param;
+                } else {}
+                    if (!builder.add_tool_call(function_name, "", json {{"type", "function"}, {"name", function_name}, {"parameters", json {{parameter_name, param}}}}})) {
+                        throw common_chat_msg_partial_exception("incomplete tool call");
+                    }
+                }
+            }
+        builder.add_content(builder.consume_rest());
+        return;
+    }
+}   
 
 static void expect_tool_parameters(const std::string & name, const json & parameters, const std::vector<std::string> & expected_properties) {
     if (!parameters.is_object() || !parameters.contains("type") || parameters.at("type") != "object" || !parameters.contains("properties") || !parameters.contains("required")) {
@@ -1907,6 +1949,9 @@ static void common_chat_parse(common_chat_msg_parser & builder) {
             break;
         case COMMON_CHAT_FORMAT_COMMAND_R7B:
             common_chat_parse_command_r7b(builder);
+            break;
+        case COMMON_CHAT_FORMAT_QWEN3:
+            common_chat_parse_qwen3(builder);
             break;
         default:
             throw std::runtime_error(std::string("Unsupported format: ") + common_chat_format_name(builder.syntax().format));
