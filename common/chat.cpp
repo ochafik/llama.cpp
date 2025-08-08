@@ -1070,13 +1070,13 @@ static common_chat_params common_chat_params_init_qwen3(const common_chat_templa
 
     data.prompt = apply(tmpl, inputs);
     data.format = COMMON_CHAT_FORMAT_QWEN3;
-    if (string_ends_with(data.prompt, "<think>\n")) {
-        if (!inputs.enable_thinking) {
-            data.prompt += "</think>";
-        } else {
-            data.thinking_forced_open = true;
-        }
-    }
+    // if (string_ends_with(data.prompt, "<think>\n")) {
+    //     if (!inputs.enable_thinking) {
+    //         data.prompt += "</think>";
+    //     } else {
+    //         data.thinking_forced_open = true;
+    //     }
+    // }
 
     if (!inputs.tools.is_null()) {
         // (content)?(<tool_call>{"name": "foo", "arguments": {"a": 1}}</tool_call>)*
@@ -1090,7 +1090,7 @@ static common_chat_params common_chat_params_init_qwen3(const common_chat_templa
                 builder.resolve_refs(parameters);
 
                 std::vector<std::string> fragments;
-                fragments.push_back("\"<tool_call>\\n<function=" + name + ">\\n\"");
+                fragments.push_back(" space \"<tool_call>\\n<function=" + name + ">\\n\"");
 
                 const auto & properties = parameters.at("properties");
                 std::vector<std::string> required;
@@ -1120,15 +1120,18 @@ static common_chat_params common_chat_params_init_qwen3(const common_chat_templa
             builder.add_rule("root",
                 std::string(data.thinking_forced_open ? "( \"</think>\" space )? " : "") +
                 (inputs.parallel_tool_calls ? "(" + tool_call + ")+" : tool_call));
-            // Trigger on some common known "good bad" outputs (only from the start and with a json that's about a specific argument name to avoid false positives)
             data.grammar_triggers.push_back({
-                COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
-                // If thinking_forced_open, then we capture the </think> tag in the grammar,
-                // (important for required tool choice) and in the trigger's first capture (decides what is sent to the grammar)
-                std::string(data.thinking_forced_open ? "[\\s\\S]*?(</think>\\s*)" : "(?:<think>[\\s\\S]*?</think>\\s*)?") + (
-                    "\\s*(<tool_call>\\n<function=)" // + string_join(tool_names, "|") + ")>\n)"
-                ),
+                COMMON_GRAMMAR_TRIGGER_TYPE_WORD,
+                "<tool_call>"
             });
+            // data.grammar_triggers.push_back({
+            //     COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
+            //     // If thinking_forced_open, then we capture the </think> tag in the grammar,
+            //     // (important for required tool choice) and in the trigger's first capture (decides what is sent to the grammar)
+            //     std::string(data.thinking_forced_open ? "[\\s\\S]*?(</think>\\s*)" : "(?:<think>[\\s\\S]*?</think>\\s*)?") + (
+            //         "\\s*(<tool_call>\\n<function=)" // + string_join(tool_names, "|") + ")>\n)"
+            //     ),
+            // });
             data.preserved_tokens = {
                 "<think>",
                 "</think>",
@@ -1148,12 +1151,11 @@ static void common_chat_parse_qwen3(common_chat_msg_parser & builder) {
         return;
     }
 
-    static const common_regex function_open("<tool_call>\n<function=([a-zA-Z0-9_]+)>\n");
+    static const common_regex function_open("\\s*<tool_call>\n<function=([a-zA-Z0-9_]+)>\n");
     static const common_regex function_close("</function>\n</tool_call>");
     static const common_regex parameter_open("<parameter=([a-zA-Z0-9_]+)>\n");
     static const common_regex parameter_close("</parameter>\n");
 
-    const auto start_pos = builder.pos();
     while (auto block_open_match = builder.try_find_regex(function_open)) {
         const auto function_name = builder.str(block_open_match->groups[1]);
         json arguments = json::object();
