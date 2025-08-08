@@ -1090,7 +1090,7 @@ static common_chat_params common_chat_params_init_qwen3(const common_chat_templa
                 builder.resolve_refs(parameters);
 
                 std::vector<std::string> fragments;
-                fragments.push_back("\"<function\" ( \"=" + name + "\" | \" name=\\\"" + name + "\\\"\" ) \">\\n\"");
+                fragments.push_back("\"<tool_call>\\n<function=" + name + ">\\n\"");
 
                 const auto & properties = parameters.at("properties");
                 std::vector<std::string> required;
@@ -1110,18 +1110,13 @@ static common_chat_params common_chat_params_init_qwen3(const common_chat_templa
                         fragments.push_back(")? ");
                     }
                 }
-                fragments.push_back("\"</function>\\n\"");
+                fragments.push_back("\"</function>\\n</tool_call>\"");
 
                 tool_rules.push_back(builder.add_rule(
                     name + "-function-tag",
                     string_join(fragments, " ")));
-
-                data.grammar_triggers.push_back({
-                    COMMON_GRAMMAR_TRIGGER_TYPE_WORD,
-                    "<function=" + name + ">",
-                });
             });
-            auto tool_call = builder.add_rule("tool_call", "( " + string_join(tool_rules, " | ") + " ) space");
+            auto tool_call = tool_rules.size() == 1 ? tool_rules[0] : builder.add_rule("tool_call", string_join(tool_rules, " | "));
             builder.add_rule("root",
                 std::string(data.thinking_forced_open ? "( \"</think>\" space )? " : "") +
                 (inputs.parallel_tool_calls ? "(" + tool_call + ")+" : tool_call));
@@ -1131,7 +1126,7 @@ static common_chat_params common_chat_params_init_qwen3(const common_chat_templa
                 // If thinking_forced_open, then we capture the </think> tag in the grammar,
                 // (important for required tool choice) and in the trigger's first capture (decides what is sent to the grammar)
                 std::string(data.thinking_forced_open ? "[\\s\\S]*?(</think>\\s*)" : "(?:<think>[\\s\\S]*?</think>\\s*)?") + (
-                    "(\\s*<tool_call>\\n<function=)"
+                    "(\\s*<tool_call>\n<function=)" // + string_join(tool_names, "|") + ")>\n)"
                 ),
             });
             data.preserved_tokens = {
