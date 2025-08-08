@@ -1068,7 +1068,7 @@ static common_chat_params common_chat_params_init_qwen3(const common_chat_templa
         {"enable_thinking", inputs.enable_thinking},
     };
 
-    data.prompt = apply(tmpl, inputs.messages, inputs.tools.empty() ? json() : inputs.tools, inputs.add_generation_prompt, additional_context);
+    data.prompt = apply(tmpl, inputs);
     data.format = COMMON_CHAT_FORMAT_QWEN3;
     if (string_ends_with(data.prompt, "<think>\n")) {
         if (!inputs.enable_thinking) {
