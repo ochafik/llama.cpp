@@ -187,7 +187,7 @@ struct clip_hparams {
     float eps = 1e-6;
     float rope_theta = 0.0;
 
-    std::vector<int32_t> image_grid_pinpoints;
+    std::vector<clip_image_size> image_res_candidates; // for llava-uhd style models
     int32_t image_crop_resolution;
     std::unordered_set<int32_t> vision_feature_layer;
     int32_t attn_window_size = 0;
@@ -354,6 +354,16 @@ struct clip_model {
     ggml_tensor * conv1d_2_b = nullptr;
     ggml_tensor * mm_norm_pre_w = nullptr;
     ggml_tensor * mm_norm_mid_w = nullptr;
+
+    bool audio_has_avgpool() const {
+        return proj_type == PROJECTOR_TYPE_QWEN2A
+            || proj_type == PROJECTOR_TYPE_VOXTRAL;
+    }
+
+    bool audio_has_stack_frames() const {
+        return proj_type == PROJECTOR_TYPE_ULTRAVOX
+            || proj_type == PROJECTOR_TYPE_VOXTRAL;
+    }
 };
 
 struct clip_ctx {
@@ -367,8 +377,8 @@ struct clip_ctx {
     std::vector<ggml_backend_t> backend_ptrs;
     std::vector<ggml_backend_buffer_type_t> backend_buft;
 
-    ggml_backend_t backend;
-    ggml_backend_t backend_cpu;
+    ggml_backend_t backend = nullptr;
+    ggml_backend_t backend_cpu = nullptr;
     ggml_backend_buffer_ptr buf;
 
     int max_nodes = 8192;
@@ -384,9 +394,18 @@ struct clip_ctx {
         if (!backend_cpu) {
             throw std::runtime_error("failed to initialize CPU backend");
         }
-        backend = ctx_params.use_gpu
-                    ? ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_GPU, nullptr)
-                    : nullptr;
+        if (ctx_params.use_gpu) {
+            auto backend_name = std::getenv("MTMD_BACKEND_DEVICE");
+            if (backend_name != nullptr) {
+                backend = ggml_backend_init_by_name(backend_name, nullptr);
+                if (!backend) {
+                    LOG_WRN("%s: Warning: Failed to initialize \"%s\" backend, falling back to default GPU backend\n", __func__, backend_name);
+                }
+            }
+            if (!backend) {
+                backend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_GPU, nullptr);
+            }
+        }
 
         if (backend) {
             LOG_INF("%s: CLIP using %s backend\n", __func__, ggml_backend_name(backend));
@@ -849,10 +868,16 @@ struct clip_graph {
             int n_head = n_embd/d_head;
             int num_query = 96;
             if (ctx->model.hparams.minicpmv_version == 2) {
+                // MiniCPM-V 2.5
                 num_query = 96;
             } else if (ctx->model.hparams.minicpmv_version == 3) {
+                // MiniCPM-V 2.6
                 num_query = 64;
             } else if (ctx->model.hparams.minicpmv_version == 4) {
+                // MiniCPM-o 2.6
+                num_query = 64;
+            } else if (ctx->model.hparams.minicpmv_version == 5) {
+                // MiniCPM-V 4.0
                 num_query = 64;
             }
 
@@ -1405,8 +1430,7 @@ struct clip_graph {
                 ggml_tensor * x = embeddings;
                 embeddings = ggml_mul_mat(ctx0, model.mm_model_mlp_2_w, embeddings);
                 x = ggml_mul_mat(ctx0, model.mm_model_mlp_1_w,x);
-                embeddings = ggml_silu_inplace(ctx0, embeddings);
-                embeddings = ggml_mul(ctx0, embeddings,x);
+                embeddings = ggml_swiglu_split(ctx0, embeddings, x);
                 embeddings = ggml_mul_mat(ctx0, model.mm_model_mlp_3_w, embeddings);
             }
             // arrangement of BOI/EOI token embeddings
@@ -1475,55 +1499,51 @@ struct clip_graph {
 
         cb(cur, "after_transformer", -1);
 
-        if (ctx->proj_type() == PROJECTOR_TYPE_ULTRAVOX) {
+        if (model.audio_has_stack_frames()) {
             // StackAudioFrames
             // https://huggingface.co/fixie-ai/ultravox-v0_5-llama-3_2-1b/blob/main/ultravox_model.py
-            {
-                int64_t stride = n_embd * hparams.proj_stack_factor;
-                int64_t padded_len = GGML_PAD(ggml_nelements(cur), stride);
-                int64_t pad = padded_len - ggml_nelements(cur);
-                if (pad > 0) {
-                    cur = ggml_view_1d(ctx0, cur, ggml_nelements(cur), 0);
-                    cur = ggml_pad(ctx0, cur, pad, 0, 0, 0);
-                }
-                cur = ggml_view_2d(ctx0, cur, stride, padded_len / stride,
-                                    ggml_row_size(cur->type, stride), 0);
+            int64_t stride = n_embd * hparams.proj_stack_factor;
+            int64_t padded_len = GGML_PAD(ggml_nelements(cur), stride);
+            int64_t pad = padded_len - ggml_nelements(cur);
+            if (pad > 0) {
+                cur = ggml_view_1d(ctx0, cur, ggml_nelements(cur), 0);
+                cur = ggml_pad(ctx0, cur, pad, 0, 0, 0);
             }
-
+            cur = ggml_view_2d(ctx0, cur, stride, padded_len / stride,
+                                ggml_row_size(cur->type, stride), 0);
             cb(cur, "after_stacked", -1);
+        }
 
+        if (ctx->proj_type() == PROJECTOR_TYPE_ULTRAVOX) {
             // UltravoxProjector
-            {
-                // pre-norm
-                cur = ggml_rms_norm(ctx0, cur, 1e-6);
-                cur = ggml_mul(ctx0, cur, model.mm_norm_pre_w);
+            // pre-norm
+            cur = ggml_rms_norm(ctx0, cur, 1e-6);
+            cur = ggml_mul(ctx0, cur, model.mm_norm_pre_w);
 
-                // ffn in
-                cur = ggml_mul_mat(ctx0, model.mm_1_w, cur);
+            // ffn in
+            cur = ggml_mul_mat(ctx0, model.mm_1_w, cur);
 
-                // swiglu
-                {
-                    int64_t split_point = cur->ne[0] / 2;
-                    ggml_tensor * x0 = ggml_cont(ctx0, ggml_view_2d(ctx0, cur, split_point, cur->ne[1], cur->nb[1], 0));
-                    ggml_tensor * x1 = ggml_cont(ctx0, ggml_view_2d(ctx0, cur, split_point, cur->ne[1], cur->nb[1], split_point * ggml_element_size(cur)));
+            // swiglu
+            // see SwiGLU in ultravox_model.py, the second half passed through is silu, not the first half
+            cur = ggml_swiglu_swapped(ctx0, cur);
 
-                    // see SwiGLU in ultravox_model.py, the second half passed through is silu, not the first half
-                    x1 = ggml_silu(ctx0, x1);
-                    cur = ggml_mul(ctx0, x0, x1);
-                }
+            // mid-norm
+            cur = ggml_rms_norm(ctx0, cur, 1e-6);
+            cur = ggml_mul(ctx0, cur, model.mm_norm_mid_w);
 
-                // mid-norm
-                cur = ggml_rms_norm(ctx0, cur, 1e-6);
-                cur = ggml_mul(ctx0, cur, model.mm_norm_mid_w);
-
-                // ffn out
-                cur = ggml_mul_mat(ctx0, model.mm_2_w, cur);
-            }
+            // ffn out
+            cur = ggml_mul_mat(ctx0, model.mm_2_w, cur);
 
         } else if (ctx->proj_type() == PROJECTOR_TYPE_QWEN2A) {
             // projector
             cur = ggml_mul_mat(ctx0, model.mm_fc_w, cur);
             cur = ggml_add(ctx0, cur, model.mm_fc_b);
+
+        } else if (ctx->proj_type() == PROJECTOR_TYPE_VOXTRAL) {
+            // projector
+            cur = ggml_mul_mat(ctx0, model.mm_1_w, cur);
+            cur = ggml_gelu_erf(ctx0, cur);
+            cur = ggml_mul_mat(ctx0, model.mm_2_w, cur);
 
         } else {
             GGML_ABORT("%s: unknown projector type", __func__);
@@ -1669,8 +1689,7 @@ private:
             inpL = cur;
         }
 
-        // TODO @ngxson : find a way to move this outside
-        if (ctx->proj_type() == PROJECTOR_TYPE_QWEN2A) {
+        if (ctx->model.audio_has_avgpool()) {
             ggml_tensor * cur = inpL;
             cur = ggml_transpose(ctx0, cur);
             cur = ggml_cont(ctx0, cur);
@@ -1769,33 +1788,40 @@ private:
             cur = tmp;
         }
 
+        // we only support parallel ffn for now
         switch (type_op) {
             case FFN_SILU:
-                {
+                if (gate) {
+                    cur = ggml_swiglu_split(ctx0, cur, tmp);
+                    cb(cur, "ffn_swiglu", il);
+                } else {
                     cur = ggml_silu(ctx0, cur);
                     cb(cur, "ffn_silu", il);
                 } break;
             case FFN_GELU:
-                {
+                if (gate) {
+                    cur = ggml_geglu_split(ctx0, cur, tmp);
+                    cb(cur, "ffn_geglu", il);
+                } else {
                     cur = ggml_gelu(ctx0, cur);
                     cb(cur, "ffn_gelu", il);
                 } break;
             case FFN_GELU_ERF:
-                {
+                if (gate) {
+                    cur = ggml_geglu_erf_split(ctx0, cur, tmp);
+                    cb(cur, "ffn_geglu_erf", il);
+                } else {
                     cur = ggml_gelu_erf(ctx0, cur);
-                    cb(cur, "ggml_gelu_erf", il);
+                    cb(cur, "ffn_gelu_erf", il);
                 } break;
             case FFN_GELU_QUICK:
-                {
+                if (gate) {
+                    cur = ggml_geglu_quick_split(ctx0, cur, tmp);
+                    cb(cur, "ffn_geglu_quick", il);
+                } else {
                     cur = ggml_gelu_quick(ctx0, cur);
-                    cb(cur, "ffn_relu", il);
+                    cb(cur, "ffn_gelu_quick", il);
                 } break;
-        }
-
-        // we only support parallel ffn for now
-        if (gate) {
-            cur = ggml_mul(ctx0, cur, tmp);
-            cb(cur, "ffn_gate_par", il);
         }
 
         if (down) {
@@ -1977,6 +2003,7 @@ static ggml_cgraph * clip_image_build_graph(clip_ctx * ctx, const clip_image_f32
                 res = graph.build_llama4();
             } break;
         case PROJECTOR_TYPE_ULTRAVOX:
+        case PROJECTOR_TYPE_VOXTRAL:
         case PROJECTOR_TYPE_QWEN2A:
             {
                 res = graph.build_whisper_enc();
@@ -2109,8 +2136,7 @@ struct clip_model_loader {
             if (is_vision) {
                 get_u32(KEY_IMAGE_SIZE, hparams.image_size);
                 get_u32(KEY_PATCH_SIZE, hparams.patch_size);
-                get_u32(KEY_IMAGE_CROP_RESOLUTION,    hparams.image_crop_resolution, false);
-                get_arr_int(KEY_IMAGE_GRID_PINPOINTS, hparams.image_grid_pinpoints, false);
+                get_u32(KEY_IMAGE_CROP_RESOLUTION, hparams.image_crop_resolution, false);
                 get_i32(KEY_MINICPMV_VERSION, hparams.minicpmv_version, false); // legacy
 
             } else if (is_audio) {
@@ -2118,6 +2144,20 @@ struct clip_model_loader {
 
             } else {
                 GGML_ASSERT(false && "unknown modality");
+            }
+
+            // for pinpoints, we need to convert it into a list of resolution candidates
+            {
+                std::vector<int> pinpoints;
+                get_arr_int(KEY_IMAGE_GRID_PINPOINTS, pinpoints, false);
+                if (!pinpoints.empty()) {
+                    for (size_t i = 0; i < pinpoints.size(); i += 2) {
+                        hparams.image_res_candidates.push_back({
+                            pinpoints[i],
+                            pinpoints[i+1],
+                        });
+                    }
+                }
             }
 
             // default warmup value
@@ -2198,6 +2238,9 @@ struct clip_model_loader {
                     {
                         hparams.rope_theta = 10000.0f;
                         hparams.warmup_image_size = hparams.patch_size * 8;
+                        // Mistral Small 2506 needs 1024x1024 image size cap to prevent OOM
+                        // ref: https://github.com/ggml-org/llama.cpp/issues/14310
+                        hparams.image_size = 1024;
                         get_u32(KEY_SPATIAL_MERGE_SIZE, hparams.spatial_merge_size, false);
                     } break;
                 case PROJECTOR_TYPE_GEMMA3:
@@ -2231,21 +2274,14 @@ struct clip_model_loader {
                     {
                         hparams.rope_theta = 10000.0f;
                         get_u32(KEY_PROJ_SCALE_FACTOR, hparams.proj_scale_factor);
-
-                        // borrowed from llava-1.6
-                        const int isize = hparams.image_size;
-                        hparams.image_grid_pinpoints = {
-                            isize,   isize*2, // 336, 672
-                            isize*2, isize,   // 672, 336
-                            isize*2, isize*2, // 672, 672
-                            isize*3, isize,   // 1008, 336
-                            isize,   isize*3, // 336, 1008
-                        };
+                        set_llava_uhd_res_candidates(model, 3);
                     } break;
                 case PROJECTOR_TYPE_ULTRAVOX:
                 case PROJECTOR_TYPE_QWEN2A:
+                case PROJECTOR_TYPE_VOXTRAL:
                     {
-                        bool require_stack = model.proj_type == PROJECTOR_TYPE_ULTRAVOX;
+                        bool require_stack = model.proj_type == PROJECTOR_TYPE_ULTRAVOX ||
+                                             model.proj_type == PROJECTOR_TYPE_VOXTRAL;
                         get_u32(KEY_A_PROJ_STACK_FACTOR, hparams.proj_stack_factor, require_stack);
                         if (hparams.n_mel_bins != 128) {
                             throw std::runtime_error(string_format("%s: only 128 mel bins are supported for ultravox\n", __func__));
@@ -2300,7 +2336,7 @@ struct clip_model_loader {
 
         // create data context
         struct ggml_init_params params = {
-            /*.mem_size =*/ (gguf_get_n_tensors(ctx_gguf.get()) + 1) * ggml_tensor_overhead(),
+            /*.mem_size =*/ static_cast<size_t>(gguf_get_n_tensors(ctx_gguf.get()) + 1) * ggml_tensor_overhead(),
             /*.mem_buffer =*/ NULL,
             /*.no_alloc =*/ true,
         };
@@ -2529,6 +2565,15 @@ struct clip_model_loader {
                     model.mm_fc_w = get_tensor(string_format(TN_MM_AUDIO_FC, "weight"));
                     model.mm_fc_b = get_tensor(string_format(TN_MM_AUDIO_FC, "bias"));
                 } break;
+            case PROJECTOR_TYPE_VOXTRAL:
+                {
+                    model.conv1d_1_w = get_tensor(string_format(TN_CONV1D, 1, "weight"));
+                    model.conv1d_1_b = get_tensor(string_format(TN_CONV1D, 1, "bias"));
+                    model.conv1d_2_w = get_tensor(string_format(TN_CONV1D, 2, "weight"));
+                    model.conv1d_2_b = get_tensor(string_format(TN_CONV1D, 2, "bias"));
+                    model.mm_1_w = get_tensor(string_format(TN_MM_AUDIO_MLP, 1, "weight"));
+                    model.mm_2_w = get_tensor(string_format(TN_MM_AUDIO_MLP, 2, "weight"));
+                } break;
             case PROJECTOR_TYPE_INTERNVL:
                 {
                     model.mm_0_w = get_tensor(string_format(TN_MVLM_PROJ_MLP, 0, "weight"));
@@ -2672,6 +2717,21 @@ struct clip_model_loader {
         const int32_t * values = (const int32_t *)gguf_get_arr_data(ctx_gguf.get(), i);
         for (int i = 0; i < n; ++i) {
             output[i] = values[i];
+        }
+    }
+
+    void set_llava_uhd_res_candidates(clip_model & model, const int max_patches_per_side) {
+        auto & hparams = model.hparams;
+        for (int x = 1; x <= max_patches_per_side; x++) {
+            for (int y = 1; y <= max_patches_per_side; y++) {
+                if (x == 1 && y == 1) {
+                    continue; // skip the first point
+                }
+                hparams.image_res_candidates.push_back(clip_image_size{
+                    x*hparams.image_size,
+                    y*hparams.image_size,
+                });
+            }
         }
     }
 };
@@ -3028,35 +3088,40 @@ struct llava_uhd {
         bool padding_refined = false;  // if true, refine image will be padded to the grid size (e.g. llava-1.6)
     };
 
-    static int get_max_slices(struct clip_ctx * ctx) {
-        if (clip_is_minicpmv(ctx)) {
-            return 9;
-        }
-        return 0;
-    }
-
     static slice_instructions get_slice_instructions(struct clip_ctx * ctx, const clip_image_size & original_size) {
         slice_instructions res;
         const int patch_size      = clip_get_patch_size(ctx);
         const int slice_size      = clip_get_image_size(ctx);
-        const int max_slice_nums  = get_max_slices(ctx);
         const int original_width  = original_size.width;
         const int original_height = original_size.height;
-        const float log_ratio = log((float)original_width / original_height);
-        const float ratio = (float)original_width * original_height / (slice_size * slice_size);
-        const int multiple = fmin(ceil(ratio), max_slice_nums);
-        const bool has_slices = (multiple > 1);
-        const bool has_pinpoints = !ctx->model.hparams.image_grid_pinpoints.empty();
+
+        const bool has_slices    = original_size.width > slice_size || original_size.height > slice_size;
+        const bool has_pinpoints = !ctx->model.hparams.image_res_candidates.empty();
+
+        if (!has_slices) {
+            // skip slicing logic
+            res.overview_size = clip_image_size{slice_size, slice_size};
+            res.refined_size  = clip_image_size{0, 0};
+            res.grid_size     = clip_image_size{0, 0};
+
+            return res;
+        }
 
         if (has_pinpoints) {
             // has pinpoints, use them to calculate the grid size (e.g. llava-1.6)
             auto refine_size = llava_uhd::select_best_resolution(
-                ctx->model.hparams.image_grid_pinpoints,
-                original_size);
+                original_size,
+                ctx->model.hparams.image_res_candidates);
             res.overview_size   = clip_image_size{slice_size, slice_size};
             res.refined_size    = refine_size;
             res.grid_size       = clip_image_size{0, 0};
             res.padding_refined = true;
+
+            LOG_DBG("%s: using pinpoints for slicing\n", __func__);
+            LOG_DBG("%s: original size: %d x %d, overview size: %d x %d, refined size: %d x %d\n",
+                    __func__, original_width, original_height,
+                    res.overview_size.width, res.overview_size.height,
+                    res.refined_size.width,  res.refined_size.height);
 
             for (int y = 0; y < refine_size.height; y += slice_size) {
                 for (int x = 0; x < refine_size.width; x += slice_size) {
@@ -3066,12 +3131,15 @@ struct llava_uhd {
                     slice.size.width  = std::min(slice_size, refine_size.width  - x);
                     slice.size.height = std::min(slice_size, refine_size.height - y);
                     res.slices.push_back(slice);
-                    if (x == 0) {
-                        res.grid_size.width++;
-                    }
+                    LOG_DBG("%s: slice %d: x=%d, y=%d, size=%dx%d\n",
+                            __func__, (int)res.slices.size() - 1,
+                            slice.x, slice.y, slice.size.width, slice.size.height);
                 }
-                res.grid_size.height++;
             }
+
+            res.grid_size.height = refine_size.height / slice_size;
+            res.grid_size.width  = refine_size.width  / slice_size;
+            LOG_DBG("%s: grid size: %d x %d\n", __func__, res.grid_size.width, res.grid_size.height);
 
             return res;
         }
@@ -3081,16 +3149,22 @@ struct llava_uhd {
         auto best_size    = get_best_resize(original_size, slice_size, patch_size, !has_slices);
         res.overview_size = best_size;
 
-        if (!has_slices) {
-            // skip slicing logic
-            res.refined_size = clip_image_size{0, 0};
-            res.grid_size    = clip_image_size{0, 0};
+        {
+            const int max_slice_nums = 9; // TODO: this is only used by minicpmv, maybe remove it
+            const float log_ratio = log((float)original_width / original_height);
+            const float ratio = (float)original_width * original_height / (slice_size * slice_size);
+            const int multiple = fmin(ceil(ratio), max_slice_nums);
 
-        } else {
             auto best_grid   = get_best_grid(max_slice_nums, multiple, log_ratio);
             auto refine_size = get_refine_size(original_size, best_grid, slice_size, patch_size, true);
             res.grid_size    = best_grid;
             res.refined_size = refine_size;
+
+            LOG_DBG("%s: original size: %d x %d, overview size: %d x %d, refined size: %d x %d, grid size: %d x %d\n",
+                    __func__, original_width, original_height,
+                    res.overview_size.width, res.overview_size.height,
+                    res.refined_size.width, res.refined_size.height,
+                    res.grid_size.width, res.grid_size.height);
 
             int width  = refine_size.width;
             int height = refine_size.height;
@@ -3108,7 +3182,9 @@ struct llava_uhd {
                     slice.size.width  = grid_x;
                     slice.size.height = grid_y;
                     res.slices.push_back(slice);
-                    // LOG_INF("slice %d: %d %d %d %d\n", ic, patches_i, patches_j, grid_x, grid_y);
+                    LOG_DBG("%s: slice %d: x=%d, y=%d, size=%dx%d\n",
+                            __func__, (int)res.slices.size() - 1,
+                            slice.x, slice.y, slice.size.width, slice.size.height);
                 }
             }
         }
@@ -3166,46 +3242,53 @@ private:
         return res;
     }
 
+    static clip_image_size resize_maintain_aspect_ratio(const clip_image_size & orig, const clip_image_size & target_max) {
+        float scale_width  = static_cast<float>(target_max.width)  / orig.width;
+        float scale_height = static_cast<float>(target_max.height) / orig.height;
+        float scale = std::min(scale_width, scale_height);
+        return clip_image_size{
+            static_cast<int>(orig.width  * scale),
+            static_cast<int>(orig.height * scale),
+        };
+    }
+
     /**
      * Selects the best resolution from a list of possible resolutions based on the original size.
+     *
+     * For example, when given a list of resolutions:
+     *  - 100x100
+     *  - 200x100
+     *  - 100x200
+     *  - 200x200
+     *
+     * And an input image of size 111x200, then 100x200 is the best fit (least wasted resolution).
      *
      * @param original_size The original size of the image
      * @param possible_resolutions A list of possible resolutions
      * @return The best fit resolution
      */
     static clip_image_size select_best_resolution(const clip_image_size & original_size, const std::vector<clip_image_size> & possible_resolutions) {
-        int original_width = original_size.width;
-        int original_height = original_size.height;
         clip_image_size best_fit;
+        int min_wasted_area = std::numeric_limits<int>::max();
         int max_effective_resolution = 0;
-        int min_wasted_resolution = std::numeric_limits<int>::max();
 
-        for (const auto & resolution : possible_resolutions) {
-            int width  = resolution.width;
-            int height = resolution.height;
-            float scale = std::min(static_cast<float>(width) / original_width, static_cast<float>(height) / original_height);
-            int downscaled_width  = static_cast<int>(original_width * scale);
-            int downscaled_height = static_cast<int>(original_height * scale);
-            int effective_resolution = std::min(downscaled_width * downscaled_height, original_width * original_height);
-            int wasted_resolution = (width * height) - effective_resolution;
-            // LOG_INF("resolution: %d %d, scale: %f, downscaled: %d %d, effective: %d, wasted: %d\n", width, height, scale, downscaled_width, downscaled_height, effective_resolution, wasted_resolution);
-            if (effective_resolution > max_effective_resolution || (effective_resolution == max_effective_resolution && wasted_resolution < min_wasted_resolution)) {
+        for (const clip_image_size & candidate : possible_resolutions) {
+            auto target_size = resize_maintain_aspect_ratio(original_size, candidate);
+            int effective_resolution = std::min(
+                target_size.width * target_size.height,
+                original_size.width * original_size.height);
+            int wasted_area = (candidate.width * candidate.height) - effective_resolution;
+
+            if (effective_resolution > max_effective_resolution || (effective_resolution == max_effective_resolution && wasted_area < min_wasted_area)) {
                 max_effective_resolution = effective_resolution;
-                min_wasted_resolution = wasted_resolution;
-                best_fit = resolution;
+                min_wasted_area = wasted_area;
+                best_fit = candidate;
             }
+
+            LOG_DBG("%s: candidate: %d x %d, target: %d x %d, wasted: %d, effective: %d\n", __func__, candidate.width, candidate.height, target_size.width, target_size.height, wasted_area, effective_resolution);
         }
 
         return best_fit;
-    }
-
-    // used by llava 1.6 with custom list of pinpoints
-    static clip_image_size select_best_resolution(const std::vector<int32_t> & pinpoints, const clip_image_size & original_size) {
-        std::vector<clip_image_size> possible_resolutions; // TODO @ngxson : construct this inside hparams, not here
-        for (size_t i = 0; i < pinpoints.size(); i += 2) {
-            possible_resolutions.push_back(clip_image_size{pinpoints[i], pinpoints[i+1]});
-        }
-        return select_best_resolution(original_size, possible_resolutions);
     }
 
     static int ensure_divide(int length, int patch_size) {
@@ -3331,7 +3414,7 @@ bool clip_image_preprocess(struct clip_ctx * ctx, const clip_image_u8 * img, str
         return true;
 
     } else if (ctx->proj_type() == PROJECTOR_TYPE_LLAMA4) {
-        GGML_ASSERT(!params.image_grid_pinpoints.empty());
+        GGML_ASSERT(!params.image_res_candidates.empty());
         auto const inst = llava_uhd::get_slice_instructions(ctx, original_size);
         std::vector<clip_image_u8_ptr> imgs = llava_uhd::slice_image(img, inst);
 
@@ -3371,7 +3454,7 @@ bool clip_image_preprocess(struct clip_ctx * ctx, const clip_image_u8 * img, str
         res_imgs->entries.push_back(std::move(res));
         return true;
 
-    } else if (!params.image_grid_pinpoints.empty()) {
+    } else if (!params.image_res_candidates.empty()) {
         // "spatial_unpad" with "anyres" processing for llava-1.6
         auto const inst = llava_uhd::get_slice_instructions(ctx, original_size);
         std::vector<clip_image_u8_ptr> imgs = llava_uhd::slice_image(img, inst);
@@ -3431,17 +3514,6 @@ const char * clip_patch_merge_type(const struct clip_ctx * ctx) {
     return ctx->model.hparams.mm_patch_merge_type == PATCH_MERGE_SPATIAL_UNPAD ? "spatial_unpad" : "flat";
 }
 
-const int32_t * clip_image_grid(const struct clip_ctx * ctx) {
-    if (ctx->model.hparams.image_grid_pinpoints.size()) {
-        return &ctx->model.hparams.image_grid_pinpoints.front();
-    }
-    return nullptr;
-}
-
-size_t get_clip_image_grid_size(const struct clip_ctx * ctx) {
-    return ctx->model.hparams.image_grid_pinpoints.size();
-}
-
 int clip_n_output_tokens_x(const struct clip_ctx * ctx, struct clip_image_f32 * img) {
     const auto & params = ctx->model.hparams;
     const int n_total = clip_n_output_tokens(ctx, img);
@@ -3485,10 +3557,16 @@ int clip_n_output_tokens(const struct clip_ctx * ctx, struct clip_image_f32 * im
         case PROJECTOR_TYPE_MINICPMV:
             {
                 if (params.minicpmv_version == 2) {
+                    // MiniCPM-V 2.5
                     n_patches_sq = 96;
                 } else if (params.minicpmv_version == 3) {
+                    // MiniCPM-V 2.6
                     n_patches_sq = 64;
                 } else if (params.minicpmv_version == 4) {
+                    // MiniCPM-o 2.6
+                    n_patches_sq = 64;
+                } else if (params.minicpmv_version == 5) {
+                    // MiniCPM-V 4.0
                     n_patches_sq = 64;
                 } else {
                     GGML_ABORT("Unknown minicpmv version");
@@ -3528,17 +3606,26 @@ int clip_n_output_tokens(const struct clip_ctx * ctx, struct clip_image_f32 * im
                 int scale_factor = ctx->model.hparams.proj_scale_factor;
                 n_patches_sq /= (scale_factor * scale_factor);
             } break;
+        case PROJECTOR_TYPE_VOXTRAL:
         case PROJECTOR_TYPE_ULTRAVOX:
-            {
-                const int proj_stack_factor = ctx->model.hparams.proj_stack_factor;
-                const int n_len = CLIP_ALIGN(img->nx, proj_stack_factor);
-                n_patches_sq = n_len / proj_stack_factor / 2;
-            } break;
         case PROJECTOR_TYPE_QWEN2A:
             {
-                // divide by 2 because of whisper
-                // another divide by 2 because of nn.AvgPool1d(2, stride=2)
-                n_patches_sq = img->nx / 4;
+                n_patches_sq = img->nx;
+
+                const int proj_stack_factor = ctx->model.hparams.proj_stack_factor;
+                if (ctx->model.audio_has_stack_frames()) {
+                    GGML_ASSERT(proj_stack_factor > 0);
+                    const int n_len = CLIP_ALIGN(n_patches_sq, proj_stack_factor);
+                    n_patches_sq = n_len / proj_stack_factor;
+                }
+
+                // whisper downscales input token by half after conv1d
+                n_patches_sq /= 2;
+
+                if (ctx->model.audio_has_avgpool()) {
+                    // divide by 2 because of nn.AvgPool1d(2, stride=2)
+                    n_patches_sq /= 2;
+                }
             } break;
         default:
             GGML_ABORT("unsupported projector type");
@@ -3944,6 +4031,7 @@ bool clip_image_batch_encode(clip_ctx * ctx, const int n_threads, const clip_ima
         case PROJECTOR_TYPE_INTERNVL:
         case PROJECTOR_TYPE_QWEN2A:
         case PROJECTOR_TYPE_ULTRAVOX:
+        case PROJECTOR_TYPE_VOXTRAL:
             {
                 // do nothing
             } break;
@@ -4027,11 +4115,17 @@ int clip_n_mmproj_embd(const struct clip_ctx * ctx) {
             return ctx->model.mm_3_b->ne[0];
         case PROJECTOR_TYPE_MINICPMV:
             if (hparams.minicpmv_version == 2) {
+                // MiniCPM-V 2.5
                 return 4096;
             } else if (hparams.minicpmv_version == 3) {
+                // MiniCPM-V 2.6
                 return 3584;
             } else if (hparams.minicpmv_version == 4) {
+                // MiniCPM-o 2.6
                 return 3584;
+            } else if (hparams.minicpmv_version == 5) {
+                // MiniCPM-V 4.0
+                return 2560;
             }
             GGML_ABORT("Unknown minicpmv version");
         case PROJECTOR_TYPE_GLM_EDGE:
@@ -4044,6 +4138,7 @@ int clip_n_mmproj_embd(const struct clip_ctx * ctx) {
         case PROJECTOR_TYPE_IDEFICS3:
             return ctx->model.projection->ne[1];
         case PROJECTOR_TYPE_ULTRAVOX:
+        case PROJECTOR_TYPE_VOXTRAL:
             return ctx->model.mm_2_w->ne[1];
         case PROJECTOR_TYPE_INTERNVL:
             return ctx->model.mm_3_w->ne[1];
@@ -4090,7 +4185,8 @@ bool clip_has_audio_encoder(const struct clip_ctx * ctx) {
 
 bool clip_has_whisper_encoder(const struct clip_ctx * ctx) {
     return ctx->proj_type() == PROJECTOR_TYPE_ULTRAVOX
-        || ctx->proj_type() == PROJECTOR_TYPE_QWEN2A;
+        || ctx->proj_type() == PROJECTOR_TYPE_QWEN2A
+        || ctx->proj_type() == PROJECTOR_TYPE_VOXTRAL;
 }
 
 bool clip_encode_float_image (struct clip_ctx * ctx, int n_threads, float * img, int h, int w, float * vec) {

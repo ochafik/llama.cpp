@@ -7,6 +7,7 @@
 #include <chrono>
 #include <string>
 #include <vector>
+#include <map>
 
 struct common_chat_templates;
 
@@ -109,6 +110,8 @@ enum common_chat_format {
     COMMON_CHAT_FORMAT_HERMES_2_PRO,
     COMMON_CHAT_FORMAT_COMMAND_R7B,
     COMMON_CHAT_FORMAT_QWEN3,
+    COMMON_CHAT_FORMAT_GRANITE,
+    COMMON_CHAT_FORMAT_GPT_OSS,
 
     COMMON_CHAT_FORMAT_COUNT, // Not a format, just the # formats
 };
@@ -126,6 +129,9 @@ struct common_chat_templates_inputs {
     common_reasoning_format reasoning_format = COMMON_REASONING_FORMAT_NONE;
     bool enable_thinking = true;
     std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
+    std::map<std::string, std::string> chat_template_kwargs;
+    bool add_bos = false;
+    bool add_eos = false;
 };
 
 struct common_chat_params {

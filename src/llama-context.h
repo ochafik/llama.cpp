@@ -18,7 +18,7 @@ class llama_io_read_i;
 class llama_io_write_i;
 
 struct llama_memory_i;
-struct llama_memory_state_i;
+struct llama_memory_context_i;
 
 struct llama_context {
     // init scheduler and compute buffers, reserve worst-case graphs
@@ -34,8 +34,6 @@ struct llama_context {
     const llama_cparams & get_cparams() const;
 
     ggml_backend_sched_t get_sched() const;
-
-    ggml_context * get_ctx_compute() const;
 
     uint32_t n_ctx()         const;
     uint32_t n_ctx_per_seq() const;
@@ -93,14 +91,14 @@ struct llama_context {
                 int32_t   il_end);
 
     // process a single ubatch with a specific graph type
-    // if memory_state is provided, it will be applied first to the context's memory
+    // if memory_context is provided, it will be applied first to the context's memory
     // ret contains the status of the graph computation
     // returns nullptr only if ret != GGML_STATUS_SUCCESS
-    llm_graph_result_ptr process_ubatch(
-              const llama_ubatch & ubatch,
-                  llm_graph_type   gtype,
-            llama_memory_state_i * mstate,
-                     ggml_status & ret);
+    llm_graph_result * process_ubatch(
+                const llama_ubatch & ubatch,
+                    llm_graph_type   gtype,
+            llama_memory_context_i * mctx,
+                       ggml_status & ret);
 
     int encode(const llama_batch & batch_inp);
     int decode(const llama_batch & batch_inp);
@@ -183,29 +181,30 @@ private:
     // Returns max number of outputs for which space was reserved.
     uint32_t output_reserve(int32_t n_outputs);
 
+    void output_reorder();
+
     //
     // graph
     //
 
 public:
-    int32_t graph_max_nodes() const;
+    uint32_t graph_max_nodes() const;
 
-    // zero-out inputs and create the ctx_compute for the compute graph
-    ggml_cgraph * graph_init();
+    // can reuse the llm_graph_result instance of the context (for example to update a memory module)
+    llm_graph_result * get_gf_res_reserve() const;
 
     // returns the result of ggml_backend_sched_graph_compute_async execution
     ggml_status graph_compute(ggml_cgraph * gf, bool batched);
 
     // reserve a graph with a dummy ubatch of the specified size
-    ggml_cgraph * graph_reserve(uint32_t n_tokens, uint32_t n_seqs, uint32_t n_outputs, const llama_memory_state_i * mstate);
+    ggml_cgraph * graph_reserve(uint32_t n_tokens, uint32_t n_seqs, uint32_t n_outputs, const llama_memory_context_i * mctx);
 
 private:
-    llm_graph_result_ptr graph_build(
-                    ggml_context * ctx,
-                     ggml_cgraph * gf,
-              const llama_ubatch & ubatch,
-                  llm_graph_type   gtype,
-      const llama_memory_state_i * mstate);
+    llm_graph_params graph_params(
+                        llm_graph_result * res,
+                      const llama_ubatch & ubatch,
+            const llama_memory_context_i * mctx,
+                          llm_graph_type   gtype) const;
 
     llm_graph_cb graph_get_cb() const;
 
@@ -247,18 +246,23 @@ private:
     std::map<llama_seq_id, std::vector<float>> embd_seq;
 
     // reuse the batch_allocr to avoid unnecessary memory allocations
-    std::unique_ptr<llama_batch_allocr> batch_allocr;
+    std::unique_ptr<llama_batch_allocr> balloc;
 
     uint32_t n_outputs = 0; // number of actually-used outputs in the current ubatch or last logical batch
 
     std::vector<int32_t> output_ids; // map batch token positions to ids of the logits and embd buffers
 
+    struct swap_info {
+        uint32_t i0;
+        uint32_t i1;
+    };
+
+    std::vector<swap_info> output_swaps;
+
     ggml_backend_sched_ptr sched;
 
     ggml_backend_t backend_cpu = nullptr;
     std::vector<ggml_backend_ptr> backends;
-
-    ggml_context_ptr ctx_compute;
 
     // training
     ggml_opt_context_t opt_ctx = nullptr;
@@ -275,13 +279,20 @@ private:
     std::vector<ggml_backend_t>             backend_ptrs;
     std::vector<ggml_backend_buffer_type_t> backend_buft;
 
-    // memory buffers used to evaluate the model
-    std::vector<uint8_t> buf_compute_meta;
+    llm_graph_result_ptr gf_res_prev;
+    llm_graph_result_ptr gf_res_reserve;
 
     // host buffer for the model output (logits and embeddings)
     ggml_backend_buffer_ptr buf_output;
 
     bool has_evaluated_once = false;
+
+    // env: LLAMA_SET_ROWS (temporary)
+    // ref: https://github.com/ggml-org/llama.cpp/pull/14285
+    bool supports_set_rows = true;
+
+    // env: LLAMA_GRAPH_REUSE_DISABLE
+    bool graph_reuse_disable = false;
 
     // perf
     mutable int64_t t_start_us  = 0;
@@ -294,4 +305,6 @@ private:
 
     mutable int32_t n_p_eval = 0; // number of tokens in eval calls for the prompt (with batch size > 1)
     mutable int32_t n_eval   = 0; // number of eval calls
+
+    mutable int32_t n_reused = 0; // number of times the previous graph was reused
 };

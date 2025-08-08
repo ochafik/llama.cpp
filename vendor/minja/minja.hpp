@@ -1246,7 +1246,7 @@ public:
             }
             return result;
 
-          } else if (target_value.is_array()) {            
+          } else if (target_value.is_array()) {
             auto result = Value::array();
             for (int64_t i = start; step > 0 ? i < end : i > end; i += step) {
               result.push_back(target_value.at(i));
@@ -1295,7 +1295,7 @@ static bool in(const Value & value, const Value & container) {
   return (((container.is_array() || container.is_object()) && container.contains(value)) ||
       (value.is_string() && container.is_string() &&
         container.to_str().find(value.to_str()) != std::string::npos));
-};                                    
+}
 
 class BinaryOpExpr : public Expression {
 public:
