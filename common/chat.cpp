@@ -1105,7 +1105,7 @@ static common_chat_params common_chat_params_init_qwen3(const common_chat_templa
                     }
                     fragments.push_back("\"<parameter=" + param_name + ">\\n\" ");
                     fragments.push_back(builder.add_schema(name + "-parameter-" + param_name, param_value));
-                    fragments.push_back("\"</parameter>\\n\"");
+                    fragments.push_back("\"\\n</parameter>\\n\"");
                     if (optional) {
                         fragments.push_back(")? ");
                     }
@@ -1126,7 +1126,7 @@ static common_chat_params common_chat_params_init_qwen3(const common_chat_templa
                 // If thinking_forced_open, then we capture the </think> tag in the grammar,
                 // (important for required tool choice) and in the trigger's first capture (decides what is sent to the grammar)
                 std::string(data.thinking_forced_open ? "[\\s\\S]*?(</think>\\s*)" : "(?:<think>[\\s\\S]*?</think>\\s*)?") + (
-                    "(\\s*<tool_call>\n<function=)" // + string_join(tool_names, "|") + ")>\n)"
+                    "\\s*(<tool_call>\\n<function=)" // + string_join(tool_names, "|") + ")>\n)"
                 ),
             });
             data.preserved_tokens = {
