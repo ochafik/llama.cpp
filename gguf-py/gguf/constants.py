@@ -2590,6 +2590,7 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
         MODEL_TENSOR.ATTN_K,
         MODEL_TENSOR.ATTN_V,
         MODEL_TENSOR.ATTN_OUT,
+        MODEL_TENSOR.OUTPUT,
     ],
     MODEL_ARCH.SMALLTHINKER: [
         MODEL_TENSOR.TOKEN_EMBD,
@@ -2832,6 +2833,7 @@ class VisionProjectorType:
     QWEN2A = "qwen2a" # audio
     QWEN25O = "qwen2.5o" # omni
     VOXTRAL = "voxtral"
+    LFM2 = "lfm2"
 
 
 # Items here are (block size, type size)
