@@ -142,6 +142,37 @@ function _generateMinMaxInt(minValue, maxValue, out, decimalsLeft = 16, topLevel
       const minDigits = minS.length;
       const maxDigits = maxS.length;
 
+      // Check if we can use the compact [0-9]{0,N} or [1-9] [0-9]{0,N} form
+      // Only applies when max is a power of 10 (10, 100, 1000, etc.)
+      if (maxDigits > 1 && maxS === "1" + "0".repeat(maxDigits - 1)) {
+          // Range ends at exactly 10^N
+          if (minValue === 0) {
+              // 0 to 10^N
+              if (maxDigits === 2) {
+                  // 0 to 10: [0-9] | "10"
+                  out.push(`[0-9] | "${maxS}"`);
+              } else {
+                  // 0 to 10^N: [0] | [1-9] [0-9]{0,N-1} | "10^N"
+                  out.push("[0] | [1-9] ");
+                  moreDigits(0, maxDigits - 2);
+                  out.push(` | "${maxS}"`);
+              }
+              return;
+          } else if (minValue === 1) {
+              // 1 to 10^N
+              if (maxDigits === 2) {
+                  // 1 to 10: [1-9] | "10"
+                  out.push(`[1-9] | "${maxS}"`);
+              } else {
+                  // 1 to 10^N: [1-9] [0-9]{0,N-1} | "10^N"
+                  out.push("[1-9] ");
+                  moreDigits(0, maxDigits - 2);
+                  out.push(` | "${maxS}"`);
+              }
+              return;
+          }
+      }
+
       for (let digits = minDigits; digits < maxDigits; digits++) {
           uniformRange(minS, "9".repeat(digits));
           minS = "1" + "0".repeat(digits);

@@ -235,7 +235,7 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
             "maximum": 100
         })""",
         R"""(
-            root ::= ("-" [1-9] [0-9]{0,15} | [0-9] | ([1-8] [0-9] | [9] [0-9]) | "100") space
+            root ::= ("-" [1-9] [0-9]{0,15} | [0] | [1-9] [0-9]{0,1} | "100") space
             space ::= | " " | "\n"{1,2} [ \t]{0,20}
         )"""
     });
@@ -264,6 +264,20 @@ static void test_all(const std::string & lang, std::function<void(const TestCase
         })""",
         R"""(
             root ::= (([1] ([5-9]) | [2-9] [0-9]) | ([1-2] [0-9]{2} | [3] "00")) space
+            space ::= | " " | "\n"{1,2} [ \t]{0,20}
+        )"""
+    });
+
+    test({
+        SUCCESS,
+        "min 0 max 1000000000",
+        R"""({
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1000000000
+        })""",
+        R"""(
+            root ::= ([0] | [1-9] [0-9]{0,8} | "1000000000") space
             space ::= | " " | "\n"{1,2} [ \t]{0,20}
         )"""
     });

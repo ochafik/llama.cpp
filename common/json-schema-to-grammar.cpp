@@ -145,6 +145,38 @@ static void _build_min_max_int(int min_value, int max_value, std::stringstream &
         auto min_digits = min_s.length();
         auto max_digits = max_s.length();
 
+        // Check if we can use the compact [0-9]{0,N} or [1-9] [0-9]{0,N} form
+        // Only applies when max is a power of 10 (10, 100, 1000, etc.)
+        if (max_digits > 1 && max_s == "1" + string_repeat("0", max_digits - 1)) {
+            // Range ends at exactly 10^N
+            if (min_value == 0) {
+                // 0 to 10^N
+                if (max_digits == 2) {
+                    // 0 to 10: [0-9] | "10"
+                    out << "[0-9] | \"" << max_s << "\"";
+                } else {
+                    // 0 to 10^N: [0] | [1-9] [0-9]{0,N-1} | "10^N"
+                    out << "[0] | [1-9] ";
+                    more_digits(0, max_digits - 2);
+                    out << " | " << "\"" << max_s << "\"";
+                }
+                return;
+            }
+            if (min_value == 1) {
+                // 1 to 10^N
+                if (max_digits == 2) {
+                    // 1 to 10: [1-9] | "10"
+                    out << "[1-9] | \"" << max_s << "\"";
+                } else {
+                    // 1 to 10^N: [1-9] [0-9]{0,N-1} | "10^N"
+                    out << "[1-9] ";
+                    more_digits(0, max_digits - 2);
+                    out << " | " << "\"" << max_s << "\"";
+                }
+                return;
+            }
+        }
+
         for (auto digits = min_digits; digits < max_digits; digits++) {
             uniform_range(min_s, string_repeat("9", digits));
             min_s = "1" + string_repeat("0", digits);

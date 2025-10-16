@@ -124,6 +124,34 @@ def _generate_min_max_int(min_value: Optional[int], max_value: Optional[int], ou
         min_digits = len(min_s)
         max_digits = len(max_s)
 
+        # Check if we can use the compact [0-9]{0,N} or [1-9] [0-9]{0,N} form
+        # Only applies when max is a power of 10 (10, 100, 1000, etc.)
+        if max_digits > 1 and max_s == "1" + "0" * (max_digits - 1):
+            # Range ends at exactly 10^N
+            if min_value == 0:
+                # 0 to 10^N
+                if max_digits == 2:
+                    # 0 to 10: [0-9] | "10"
+                    out.append(f'[0-9] | "{max_s}"')
+                else:
+                    # 0 to 10^N: [0] | [1-9] [0-9]{0,N-1} | "10^N"
+                    out.append("[0] | [1-9] ")
+                    more_digits(0, max_digits - 2)
+                    out.append(f' | "{max_s}"')
+                return
+            
+            if min_value == 1:
+                # 1 to 10^N
+                if max_digits == 2:
+                    # 1 to 10: [1-9] | "10"
+                    out.append(f'[1-9] | "{max_s}"')
+                else:
+                    # 1 to 10^N: [1-9] [0-9]{0,N-1} | "10^N"
+                    out.append("[1-9] ")
+                    more_digits(0, max_digits - 2)
+                    out.append(f' | "{max_s}"')
+                return
+
         for digits in range(min_digits, max_digits):
             uniform_range(min_s, "9" * digits)
             min_s = "1" + "0" * digits
