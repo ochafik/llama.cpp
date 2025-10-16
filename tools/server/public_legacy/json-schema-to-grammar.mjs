@@ -143,8 +143,13 @@ function _generateMinMaxInt(minValue, maxValue, out, decimalsLeft = 16, topLevel
       const maxDigits = maxS.length;
 
       // Check if we can use the compact [0-9]{0,N} or [1-9] [0-9]{0,N} form
-      // Only applies when max is a power of 10 (10, 100, 1000, etc.)
-      if (maxDigits > 1 && maxS === "1" + "0".repeat(maxDigits - 1)) {
+      // This applies when:
+      // 1. Max is a power of 10 (10, 100, 1000, etc.) - full optimization
+      // 2. Min is 0 or 1 and there are multiple digit lengths - partial optimization
+
+      const maxIsPowerOf10 = (maxDigits > 1 && maxS === "1" + "0".repeat(maxDigits - 1));
+
+      if (maxIsPowerOf10) {
           // Range ends at exactly 10^N
           if (minValue === 0) {
               // 0 to 10^N
@@ -158,7 +163,8 @@ function _generateMinMaxInt(minValue, maxValue, out, decimalsLeft = 16, topLevel
                   out.push(` | "${maxS}"`);
               }
               return;
-          } else if (minValue === 1) {
+          }
+          if (minValue === 1) {
               // 1 to 10^N
               if (maxDigits === 2) {
                   // 1 to 10: [1-9] | "10"
@@ -169,6 +175,27 @@ function _generateMinMaxInt(minValue, maxValue, out, decimalsLeft = 16, topLevel
                   moreDigits(0, maxDigits - 2);
                   out.push(` | "${maxS}"`);
               }
+              return;
+          }
+      }
+
+      // Optimization: combine multiple full digit-length ranges using [1-9] [0-9]{min,max}
+      // This applies when min is 1 or 0 and we span multiple digit lengths
+      if (!maxIsPowerOf10 && maxDigits > minDigits + 1) {
+          if (minValue === 1) {
+              // 1 to large number: [1-9] [0-9]{0,N-2} | (final range)
+              out.push("[1-9] ");
+              moreDigits(0, maxDigits - 2);
+              out.push(" | ");
+              uniformRange("1" + "0".repeat(maxDigits - 1), maxS);
+              return;
+          }
+          if (minValue === 0) {
+              // 0 to large number: [0] | [1-9] [0-9]{0,N-2} | (final range)
+              out.push("[0] | [1-9] ");
+              moreDigits(0, maxDigits - 2);
+              out.push(" | ");
+              uniformRange("1" + "0".repeat(maxDigits - 1), maxS);
               return;
           }
       }

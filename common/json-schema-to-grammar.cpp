@@ -146,8 +146,13 @@ static void _build_min_max_int(int min_value, int max_value, std::stringstream &
         auto max_digits = max_s.length();
 
         // Check if we can use the compact [0-9]{0,N} or [1-9] [0-9]{0,N} form
-        // Only applies when max is a power of 10 (10, 100, 1000, etc.)
-        if (max_digits > 1 && max_s == "1" + string_repeat("0", max_digits - 1)) {
+        // This applies when:
+        // 1. Max is a power of 10 (10, 100, 1000, etc.) - full optimization
+        // 2. Min is 0 or 1 and there are multiple digit lengths - partial optimization
+
+        bool max_is_power_of_10 = (max_digits > 1 && max_s == "1" + string_repeat("0", max_digits - 1));
+
+        if (max_is_power_of_10) {
             // Range ends at exactly 10^N
             if (min_value == 0) {
                 // 0 to 10^N
@@ -173,6 +178,27 @@ static void _build_min_max_int(int min_value, int max_value, std::stringstream &
                     more_digits(0, max_digits - 2);
                     out << " | " << "\"" << max_s << "\"";
                 }
+                return;
+            }
+        }
+
+        // Optimization: combine multiple full digit-length ranges using [1-9] [0-9]{min,max}
+        // This applies when min is 1 or 0 and we span multiple digit lengths
+        if (!max_is_power_of_10 && max_digits > min_digits + 1) {
+            if (min_value == 1) {
+                // 1 to large number: [1-9] [0-9]{0,N-2} | (final range)
+                out << "[1-9] ";
+                more_digits(0, max_digits - 2);
+                out << " | ";
+                uniform_range("1" + string_repeat("0", max_digits - 1), max_s);
+                return;
+            }
+            if (min_value == 0) {
+                // 0 to large number: [0] | [1-9] [0-9]{0,N-2} | (final range)
+                out << "[0] | [1-9] ";
+                more_digits(0, max_digits - 2);
+                out << " | ";
+                uniform_range("1" + string_repeat("0", max_digits - 1), max_s);
                 return;
             }
         }
