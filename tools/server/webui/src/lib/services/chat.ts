@@ -1,35 +1,42 @@
-import { config } from '$lib/stores/settings.svelte';
-import { slotsService } from './slots';
+import { getJsonHeaders } from '$lib/utils';
+import { AttachmentType } from '$lib/enums';
+
 /**
- * ChatService - Low-level API communication layer for llama.cpp server interactions
+ * ChatService - Low-level API communication layer for Chat Completions
  *
- * This service handles direct communication with the llama.cpp server's chat completion API.
+ * **Terminology - Chat vs Conversation:**
+ * - **Chat**: The active interaction space with the Chat Completions API. This service
+ *   handles the real-time communication with the AI backend - sending messages, receiving
+ *   streaming responses, and managing request lifecycles. "Chat" is ephemeral and runtime-focused.
+ * - **Conversation**: The persistent database entity storing all messages and metadata.
+ *   Managed by ConversationsService/Store, conversations persist across sessions.
+ *
+ * This service handles direct communication with the llama-server's Chat Completions API.
  * It provides the network layer abstraction for AI model interactions while remaining
  * stateless and focused purely on API communication.
  *
- * **Architecture & Relationship with ChatStore:**
+ * **Architecture & Relationships:**
  * - **ChatService** (this class): Stateless API communication layer
- *   - Handles HTTP requests/responses with llama.cpp server
+ *   - Handles HTTP requests/responses with the llama-server
  *   - Manages streaming and non-streaming response parsing
- *   - Provides request abortion capabilities
+ *   - Provides per-conversation request abortion capabilities
  *   - Converts database messages to API format
  *   - Handles error translation for server responses
  *
- * - **ChatStore**: Stateful orchestration and UI state management
- *   - Uses ChatService for all AI model communication
- *   - Manages conversation state, message history, and UI reactivity
- *   - Coordinates with DatabaseStore for persistence
- *   - Handles complex workflows like branching and regeneration
+ * - **chatStore**: Uses ChatService for all AI model communication
+ * - **conversationsStore**: Provides message context for API requests
  *
  * **Key Responsibilities:**
  * - Message format conversion (DatabaseMessage → API format)
  * - Streaming response handling with real-time callbacks
  * - Reasoning content extraction and processing
  * - File attachment processing (images, PDFs, audio, text)
- * - Request lifecycle management (abort, cleanup)
+ * - Request lifecycle management (abort via AbortSignal)
  */
 export class ChatService {
-	private abortController: AbortController | null = null;
+	// ─────────────────────────────────────────────────────────────────────────────
+	// Messaging
+	// ─────────────────────────────────────────────────────────────────────────────
 
 	/**
 	 * Sends a chat completion request to the llama.cpp server.
@@ -41,15 +48,21 @@ export class ChatService {
 	 * @returns {Promise<string | void>} that resolves to the complete response string (non-streaming) or void (streaming)
 	 * @throws {Error} if the request fails or is aborted
 	 */
-	async sendMessage(
+	static async sendMessage(
 		messages: ApiChatMessageData[] | (DatabaseMessage & { extra?: DatabaseMessageExtra[] })[],
-		options: SettingsChatServiceOptions = {}
+		options: SettingsChatServiceOptions = {},
+		conversationId?: string,
+		signal?: AbortSignal
 	): Promise<string | void> {
 		const {
 			stream,
 			onChunk,
 			onComplete,
 			onError,
+			onReasoningChunk,
+			onToolCallChunk,
+			onModel,
+			onTimings,
 			// Generation parameters
 			temperature,
 			max_tokens,
@@ -74,30 +87,22 @@ export class ChatService {
 			// Other parameters
 			samplers,
 			custom,
-			timings_per_token
+			timings_per_token,
+			// Config options
+			systemMessage,
+			disableReasoningFormat
 		} = options;
 
-		const currentConfig = config();
-
-		// Cancel any ongoing request and create a new abort controller
-		this.abort();
-		this.abortController = new AbortController();
-
-		// Convert database messages with attachments to API format if needed
 		const normalizedMessages: ApiChatMessageData[] = messages
 			.map((msg) => {
-				// Check if this is a DatabaseMessage by checking for DatabaseMessage-specific fields
 				if ('id' in msg && 'convId' in msg && 'timestamp' in msg) {
-					// This is a DatabaseMessage, convert it
 					const dbMsg = msg as DatabaseMessage & { extra?: DatabaseMessageExtra[] };
-					return ChatService.convertMessageToChatServiceData(dbMsg);
+					return ChatService.convertDbMessageToApiChatMessageData(dbMsg);
 				} else {
-					// This is already an ApiChatMessageData object
 					return msg as ApiChatMessageData;
 				}
 			})
 			.filter((msg) => {
-				// Filter out empty system messages
 				if (msg.role === 'system') {
 					const content = typeof msg.content === 'string' ? msg.content : '';
 
@@ -107,8 +112,7 @@ export class ChatService {
 				return true;
 			});
 
-		// Build base request body with system message injection
-		const processedMessages = this.injectSystemMessage(normalizedMessages);
+		const processedMessages = ChatService.injectSystemMessage(normalizedMessages, systemMessage);
 
 		const requestBody: ApiChatCompletionRequest = {
 			messages: processedMessages.map((msg: ApiChatMessageData) => ({
@@ -118,7 +122,12 @@ export class ChatService {
 			stream
 		};
 
-		requestBody.reasoning_format = currentConfig.disableReasoningFormat ? 'none' : 'auto';
+		// Include model in request if provided (required in ROUTER mode)
+		if (options.model) {
+			requestBody.model = options.model;
+		}
+
+		requestBody.reasoning_format = disableReasoningFormat ? 'none' : 'auto';
 
 		if (temperature !== undefined) requestBody.temperature = temperature;
 		if (max_tokens !== undefined) {
@@ -163,21 +172,15 @@ export class ChatService {
 		}
 
 		try {
-			const apiKey = currentConfig.apiKey?.toString().trim();
-
 			const response = await fetch(`./v1/chat/completions`, {
 				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
-				},
+				headers: getJsonHeaders(),
 				body: JSON.stringify(requestBody),
-				signal: this.abortController.signal
+				signal
 			});
 
 			if (!response.ok) {
-				// Use the new parseErrorResponse method to handle structured errors
-				const error = await this.parseErrorResponse(response);
+				const error = await ChatService.parseErrorResponse(response);
 				if (onError) {
 					onError(error);
 				}
@@ -185,15 +188,27 @@ export class ChatService {
 			}
 
 			if (stream) {
-				return this.handleStreamResponse(
+				await ChatService.handleStreamResponse(
 					response,
 					onChunk,
 					onComplete,
 					onError,
-					options.onReasoningChunk
+					onReasoningChunk,
+					onToolCallChunk,
+					onModel,
+					onTimings,
+					conversationId,
+					signal
 				);
+				return;
 			} else {
-				return this.handleNonStreamResponse(response, onComplete, onError);
+				return ChatService.handleNonStreamResponse(
+					response,
+					onComplete,
+					onError,
+					onToolCallChunk,
+					onModel
+				);
 			}
 		} catch (error) {
 			if (error instanceof Error && error.name === 'AbortError') {
@@ -230,28 +245,37 @@ export class ChatService {
 		}
 	}
 
+	// ─────────────────────────────────────────────────────────────────────────────
+	// Streaming
+	// ─────────────────────────────────────────────────────────────────────────────
+
 	/**
-	 * Handles streaming response from the chat completion API.
-	 * Processes server-sent events and extracts content chunks from the stream.
-	 *
-	 * @param response - The fetch Response object containing the streaming data
+	 * Handles streaming response from the chat completion API
+	 * @param response - The Response object from the fetch request
 	 * @param onChunk - Optional callback invoked for each content chunk received
 	 * @param onComplete - Optional callback invoked when the stream is complete with full response
 	 * @param onError - Optional callback invoked if an error occurs during streaming
 	 * @param onReasoningChunk - Optional callback invoked for each reasoning content chunk
+	 * @param conversationId - Optional conversation ID for per-conversation state tracking
 	 * @returns {Promise<void>} Promise that resolves when streaming is complete
 	 * @throws {Error} if the stream cannot be read or parsed
 	 */
-	private async handleStreamResponse(
+	private static async handleStreamResponse(
 		response: Response,
 		onChunk?: (chunk: string) => void,
 		onComplete?: (
 			response: string,
 			reasoningContent?: string,
-			timings?: ChatMessageTimings
+			timings?: ChatMessageTimings,
+			toolCalls?: string
 		) => void,
 		onError?: (error: Error) => void,
-		onReasoningChunk?: (chunk: string) => void
+		onReasoningChunk?: (chunk: string) => void,
+		onToolCallChunk?: (chunk: string) => void,
+		onModel?: (model: string) => void,
+		onTimings?: (timings: ChatMessageTimings, promptProgress?: ChatMessagePromptProgress) => void,
+		conversationId?: string,
+		abortSignal?: AbortSignal
 	): Promise<void> {
 		const reader = response.body?.getReader();
 
@@ -262,21 +286,67 @@ export class ChatService {
 		const decoder = new TextDecoder();
 		let aggregatedContent = '';
 		let fullReasoningContent = '';
-		let hasReceivedData = false;
+		let aggregatedToolCalls: ApiChatCompletionToolCall[] = [];
 		let lastTimings: ChatMessageTimings | undefined;
 		let streamFinished = false;
+		let modelEmitted = false;
+		let toolCallIndexOffset = 0;
+		let hasOpenToolCallBatch = false;
+
+		const finalizeOpenToolCallBatch = () => {
+			if (!hasOpenToolCallBatch) {
+				return;
+			}
+
+			toolCallIndexOffset = aggregatedToolCalls.length;
+			hasOpenToolCallBatch = false;
+		};
+
+		const processToolCallDelta = (toolCalls?: ApiChatCompletionToolCallDelta[]) => {
+			if (!toolCalls || toolCalls.length === 0) {
+				return;
+			}
+
+			aggregatedToolCalls = ChatService.mergeToolCallDeltas(
+				aggregatedToolCalls,
+				toolCalls,
+				toolCallIndexOffset
+			);
+
+			if (aggregatedToolCalls.length === 0) {
+				return;
+			}
+
+			hasOpenToolCallBatch = true;
+
+			const serializedToolCalls = JSON.stringify(aggregatedToolCalls);
+
+			if (!serializedToolCalls) {
+				return;
+			}
+
+			if (!abortSignal?.aborted) {
+				onToolCallChunk?.(serializedToolCalls);
+			}
+		};
 
 		try {
 			let chunk = '';
 			while (true) {
+				if (abortSignal?.aborted) break;
+
 				const { done, value } = await reader.read();
 				if (done) break;
 
+				if (abortSignal?.aborted) break;
+
 				chunk += decoder.decode(value, { stream: true });
 				const lines = chunk.split('\n');
-				chunk = lines.pop() || ''; // Save incomplete line for next read
+				chunk = lines.pop() || '';
 
 				for (const line of lines) {
+					if (abortSignal?.aborted) break;
+
 					if (line.startsWith('data: ')) {
 						const data = line.slice(6);
 						if (data === '[DONE]') {
@@ -286,46 +356,65 @@ export class ChatService {
 
 						try {
 							const parsed: ApiChatCompletionStreamChunk = JSON.parse(data);
-
 							const content = parsed.choices[0]?.delta?.content;
 							const reasoningContent = parsed.choices[0]?.delta?.reasoning_content;
+							const toolCalls = parsed.choices[0]?.delta?.tool_calls;
 							const timings = parsed.timings;
 							const promptProgress = parsed.prompt_progress;
 
-							if (timings || promptProgress) {
-								this.updateProcessingState(timings, promptProgress);
+							const chunkModel = ChatService.extractModelName(parsed);
+							if (chunkModel && !modelEmitted) {
+								modelEmitted = true;
+								onModel?.(chunkModel);
+							}
 
-								// Store the latest timing data
+							if (timings || promptProgress) {
+								ChatService.notifyTimings(timings, promptProgress, onTimings);
 								if (timings) {
 									lastTimings = timings;
 								}
 							}
 
 							if (content) {
-								hasReceivedData = true;
+								finalizeOpenToolCallBatch();
 								aggregatedContent += content;
-								onChunk?.(content);
+								if (!abortSignal?.aborted) {
+									onChunk?.(content);
+								}
 							}
 
 							if (reasoningContent) {
-								hasReceivedData = true;
+								finalizeOpenToolCallBatch();
 								fullReasoningContent += reasoningContent;
-								onReasoningChunk?.(reasoningContent);
+								if (!abortSignal?.aborted) {
+									onReasoningChunk?.(reasoningContent);
+								}
 							}
+
+							processToolCallDelta(toolCalls);
 						} catch (e) {
 							console.error('Error parsing JSON chunk:', e);
 						}
 					}
 				}
+
+				if (abortSignal?.aborted) break;
 			}
 
-			if (streamFinished) {
-				if (!hasReceivedData && aggregatedContent.length === 0) {
-					const noResponseError = new Error('No response received from server. Please try again.');
-					throw noResponseError;
-				}
+			if (abortSignal?.aborted) return;
 
-				onComplete?.(aggregatedContent, fullReasoningContent || undefined, lastTimings);
+			if (streamFinished) {
+				finalizeOpenToolCallBatch();
+
+				const finalToolCalls =
+					aggregatedToolCalls.length > 0 ? JSON.stringify(aggregatedToolCalls) : undefined;
+
+				onComplete?.(
+					aggregatedContent,
+					fullReasoningContent || undefined,
+					lastTimings,
+					finalToolCalls
+				);
 			}
 		} catch (error) {
 			const err = error instanceof Error ? error : new Error('Stream error');
@@ -348,14 +437,17 @@ export class ChatService {
 	 * @returns {Promise<string>} Promise that resolves to the generated content string
 	 * @throws {Error} if the response cannot be parsed or is malformed
 	 */
-	private async handleNonStreamResponse(
+	private static async handleNonStreamResponse(
 		response: Response,
 		onComplete?: (
 			response: string,
 			reasoningContent?: string,
-			timings?: ChatMessageTimings
+			timings?: ChatMessageTimings,
+			toolCalls?: string
 		) => void,
-		onError?: (error: Error) => void
+		onError?: (error: Error) => void,
+		onToolCallChunk?: (chunk: string) => void,
+		onModel?: (model: string) => void
 	): Promise<string> {
 		try {
 			const responseText = await response.text();
@@ -366,19 +458,39 @@ export class ChatService {
 			}
 
 			const data: ApiChatCompletionResponse = JSON.parse(responseText);
+
+			const responseModel = ChatService.extractModelName(data);
+			if (responseModel) {
+				onModel?.(responseModel);
+			}
+
 			const content = data.choices[0]?.message?.content || '';
 			const reasoningContent = data.choices[0]?.message?.reasoning_content;
+			const toolCalls = data.choices[0]?.message?.tool_calls;
 
 			if (reasoningContent) {
 				console.log('Full reasoning content:', reasoningContent);
 			}
 
-			if (!content.trim()) {
+			let serializedToolCalls: string | undefined;
+
+			if (toolCalls && toolCalls.length > 0) {
+				const mergedToolCalls = ChatService.mergeToolCallDeltas([], toolCalls);
+
+				if (mergedToolCalls.length > 0) {
+					serializedToolCalls = JSON.stringify(mergedToolCalls);
+					if (serializedToolCalls) {
+						onToolCallChunk?.(serializedToolCalls);
+					}
+				}
+			}
+
+			if (!content.trim() && !serializedToolCalls) {
 				const noResponseError = new Error('No response received from server. Please try again.');
 				throw noResponseError;
 			}
 
-			onComplete?.(content, reasoningContent);
+			onComplete?.(content, reasoningContent, undefined, serializedToolCalls);
 
 			return content;
 		} catch (error) {
@@ -389,6 +501,67 @@ export class ChatService {
 			throw err;
 		}
 	}
+
+	/**
+	 * Merges tool call deltas into an existing array of tool calls.
+	 * Handles both existing and new tool calls, updating existing ones and adding new ones.
+	 *
+	 * @param existing - The existing array of tool calls to merge into
+	 * @param deltas - The array of tool call deltas to merge
+	 * @param indexOffset - Optional offset to apply to the index of new tool calls
+	 * @returns {ApiChatCompletionToolCall[]} The merged array of tool calls
+	 */
+	private static mergeToolCallDeltas(
+		existing: ApiChatCompletionToolCall[],
+		deltas: ApiChatCompletionToolCallDelta[],
+		indexOffset = 0
+	): ApiChatCompletionToolCall[] {
+		const result = existing.map((call) => ({
+			...call,
+			function: call.function ? { ...call.function } : undefined
+		}));
+
+		for (const delta of deltas) {
+			const index =
+				typeof delta.index === 'number' && delta.index >= 0
+					? delta.index + indexOffset
+					: result.length;
+
+			while (result.length <= index) {
+				result.push({ function: undefined });
+			}
+
+			const target = result[index]!;
+
+			if (delta.id) {
+				target.id = delta.id;
+			}
+
+			if (delta.type) {
+				target.type = delta.type;
+			}
+
+			if (delta.function) {
+				const fn = target.function ? { ...target.function } : {};
+
+				if (delta.function.name) {
+					fn.name = delta.function.name;
+				}
+
+				if (delta.function.arguments) {
+					fn.arguments = (fn.arguments ?? '') + delta.function.arguments;
+				}
+
+				target.function = fn;
+			}
+		}
+
+		return result;
+	}
+
+	// ─────────────────────────────────────────────────────────────────────────────
+	// Conversion
+	// ─────────────────────────────────────────────────────────────────────────────
 
 	/**
 	 * Converts a database message with attachments to API chat message format.
@@ -402,7 +575,7 @@ export class ChatService {
 	 * @returns {ApiChatMessageData} object formatted for the chat completion API
 	 * @static
 	 */
-	static convertMessageToChatServiceData(
+	static convertDbMessageToApiChatMessageData(
 		message: DatabaseMessage & { extra?: DatabaseMessageExtra[] }
 	): ApiChatMessageData {
 		if (!message.extra || message.extra.length === 0) {
@@ -423,7 +596,7 @@ export class ChatService {
 
 		const imageFiles = message.extra.filter(
 			(extra: DatabaseMessageExtra): extra is DatabaseMessageExtraImageFile =>
-				extra.type === 'imageFile'
+				extra.type === AttachmentType.IMAGE
 		);
 
 		for (const image of imageFiles) {
@@ -435,7 +608,7 @@ export class ChatService {
 
 		const textFiles = message.extra.filter(
 			(extra: DatabaseMessageExtra): extra is DatabaseMessageExtraTextFile =>
-				extra.type === 'textFile'
+				extra.type === AttachmentType.TEXT
 		);
 
 		for (const textFile of textFiles) {
@@ -445,9 +618,22 @@ export class ChatService {
 			});
 		}
 
+		// Handle legacy 'context' type from old webui (pasted content)
+		const legacyContextFiles = message.extra.filter(
+			(extra: DatabaseMessageExtra): extra is DatabaseMessageExtraLegacyContext =>
+				extra.type === AttachmentType.LEGACY_CONTEXT
+		);
+
+		for (const legacyContextFile of legacyContextFiles) {
+			contentParts.push({
+				type: 'text',
+				text: `\n\n--- File: ${legacyContextFile.name} ---\n${legacyContextFile.content}`
+			});
+		}
+
 		const audioFiles = message.extra.filter(
 			(extra: DatabaseMessageExtra): extra is DatabaseMessageExtraAudioFile =>
-				extra.type === 'audioFile'
+				extra.type === AttachmentType.AUDIO
 		);
 
 		for (const audio of audioFiles) {
@@ -462,7 +648,7 @@ export class ChatService {
 
 		const pdfFiles = message.extra.filter(
 			(extra: DatabaseMessageExtra): extra is DatabaseMessageExtraPdfFile =>
-				extra.type === 'pdfFile'
+				extra.type === AttachmentType.PDF
 		);
 
 		for (const pdfFile of pdfFiles) {
@@ -487,69 +673,35 @@ export class ChatService {
 		};
 	}
 
-	/**
-	 * Get server properties - static method for API compatibility
-	 */
-	static async getServerProps(): Promise<ApiLlamaCppServerProps> {
-		try {
-			const currentConfig = config();
-			const apiKey = currentConfig.apiKey?.toString().trim();
-
-			const response = await fetch(`./props`, {
-				headers: {
-					'Content-Type': 'application/json',
-					...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {})
-				}
-			});
-
-			if (!response.ok) {
-				throw new Error(`Failed to fetch server props: ${response.status}`);
-			}
-
-			const data = await response.json();
-			return data;
-		} catch (error) {
-			console.error('Error fetching server props:', error);
-			throw error;
-		}
-	}
+	// ─────────────────────────────────────────────────────────────────────────────
+	// Utilities
+	// ─────────────────────────────────────────────────────────────────────────────
 
 	/**
-	 * Aborts any ongoing chat completion request.
-	 * Cancels the current request and cleans up the abort controller.
-	 *
-	 * @public
-	 */
-	public abort(): void {
-		if (this.abortController) {
-			this.abortController.abort();
-			this.abortController = null;
-		}
-	}
-
-	/**
-	 * Injects a system message at the beginning of the conversation if configured in settings.
-	 * Checks for existing system messages to avoid duplication and retrieves the system message
-	 * from the current configuration settings.
+	 * Injects a system message at the beginning of the conversation if provided.
+	 * Checks for existing system messages to avoid duplication.
 	 *
 	 * @param messages - Array of chat messages to process
-	 * @returns Array of messages with system message injected at the beginning if configured
+	 * @param systemMessage - Optional system message to inject
+	 * @returns Array of messages with system message injected at the beginning if provided
 	 * @private
 	 */
-	private injectSystemMessage(messages: ApiChatMessageData[]): ApiChatMessageData[] {
-		const currentConfig = config();
-		const systemMessage = currentConfig.systemMessage?.toString().trim();
+	private static injectSystemMessage(
+		messages: ApiChatMessageData[],
+		systemMessage?: string
+	): ApiChatMessageData[] {
+		const trimmedSystemMessage = systemMessage?.trim();
 
-		if (!systemMessage) {
+		if (!trimmedSystemMessage) {
 			return messages;
 		}
 
 		if (messages.length > 0 && messages[0].role === 'system') {
-			if (messages[0].content !== systemMessage) {
+			if (messages[0].content !== trimmedSystemMessage) {
 				const updatedMessages = [...messages];
 				updatedMessages[0] = {
 					role: 'system',
-					content: systemMessage
+					content: trimmedSystemMessage
 				};
 				return updatedMessages;
 			}
@@ -559,7 +711,7 @@ export class ChatService {
 
 		const systemMsg: ApiChatMessageData = {
 			role: 'system',
-			content: systemMessage
+			content: trimmedSystemMessage
 		};
 
 		return [systemMsg, ...messages];
@@ -570,47 +722,98 @@ export class ChatService {
 	 * @param response - HTTP response object
 	 * @returns Promise<Error> - Parsed error with context info if available
 	 */
-	private async parseErrorResponse(response: Response): Promise<Error> {
+	private static async parseErrorResponse(
+		response: Response
+	): Promise<Error & { contextInfo?: { n_prompt_tokens: number; n_ctx: number } }> {
 		try {
 			const errorText = await response.text();
 			const errorData: ApiErrorResponse = JSON.parse(errorText);
 
 			const message = errorData.error?.message || 'Unknown server error';
-			const error = new Error(message);
+			const error = new Error(message) as Error & {
+				contextInfo?: { n_prompt_tokens: number; n_ctx: number };
+			};
 			error.name = response.status === 400 ? 'ServerError' : 'HttpError';
+
+			if (errorData.error && 'n_prompt_tokens' in errorData.error && 'n_ctx' in errorData.error) {
+				error.contextInfo = {
+					n_prompt_tokens: errorData.error.n_prompt_tokens,
+					n_ctx: errorData.error.n_ctx
+				};
+			}
 
 			return error;
 		} catch {
-			// If we can't parse the error response, return a generic error
-			const fallback = new Error(`Server error (${response.status}): ${response.statusText}`);
+			const fallback = new Error(
+				`Server error (${response.status}): ${response.statusText}`
+			) as Error & {
+				contextInfo?: { n_prompt_tokens: number; n_ctx: number };
+			};
 			fallback.name = 'HttpError';
 			return fallback;
 		}
 	}
 
-	private updateProcessingState(
-		timings?: ChatMessageTimings,
-		promptProgress?: ChatMessagePromptProgress
-	): void {
-		// Calculate tokens per second from timing data
-		const tokensPerSecond =
-			timings?.predicted_ms && timings?.predicted_n
-				? (timings.predicted_n / timings.predicted_ms) * 1000
-				: 0;
+	/**
+	 * Extracts model name from Chat Completions API response data.
+	 * Handles various response formats including streaming chunks and final responses.
+	 *
+	 * WORKAROUND: In single model mode, llama-server returns a default/incorrect model name
+	 * in the response. We override it with the actual model name from serverStore.
+	 *
+	 * @param data - Raw response data from the Chat Completions API
+	 * @returns Model name string if found, undefined otherwise
+	 * @private
+	 */
+	private static extractModelName(data: unknown): string | undefined {
+		const asRecord = (value: unknown): Record<string, unknown> | undefined => {
+			return typeof value === 'object' && value !== null
+				? (value as Record<string, unknown>)
+				: undefined;
+		};
 
-		// Update slots service with timing data (async but don't wait)
-		slotsService
-			.updateFromTimingData({
-				prompt_n: timings?.prompt_n || 0,
-				predicted_n: timings?.predicted_n || 0,
-				predicted_per_second: tokensPerSecond,
-				cache_n: timings?.cache_n || 0,
-				prompt_progress: promptProgress
-			})
-			.catch((error) => {
-				console.warn('Failed to update processing state:', error);
-			});
+		const getTrimmedString = (value: unknown): string | undefined => {
+			return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+		};
+
+		const root = asRecord(data);
+		if (!root) return undefined;
+
+		// 1) root (some implementations provide `model` at the top level)
+		const rootModel = getTrimmedString(root.model);
+		if (rootModel) return rootModel;
+
+		// 2) streaming choice (delta) or final response (message)
+		const firstChoice = Array.isArray(root.choices) ? asRecord(root.choices[0]) : undefined;
+		if (!firstChoice) return undefined;
+
+		// priority: delta.model (first chunk) else message.model (final response)
+		const deltaModel = getTrimmedString(asRecord(firstChoice.delta)?.model);
+		if (deltaModel) return deltaModel;
+
+		const messageModel = getTrimmedString(asRecord(firstChoice.message)?.model);
+		if (messageModel) return messageModel;
+
+		// avoid guessing from non-standard locations (metadata, etc.)
+		return undefined;
+	}
+
+	/**
+	 * Calls the onTimings callback with timing data from streaming response.
+	 *
+	 * @param timings - Timing information from the Chat Completions API response
+	 * @param promptProgress - Prompt processing progress data
+	 * @param onTimingsCallback - Callback function to invoke with timing data
+	 * @private
+	 */
+	private static notifyTimings(
+		timings: ChatMessageTimings | undefined,
+		promptProgress: ChatMessagePromptProgress | undefined,
+		onTimingsCallback:
+			| ((timings: ChatMessageTimings, promptProgress?: ChatMessagePromptProgress) => void)
+			| undefined
+	): void {
+		if (!timings || !onTimingsCallback) return;
+		onTimingsCallback(timings, promptProgress);
 	}
 }
-
-export const chatService = new ChatService();
