@@ -7,9 +7,10 @@
 	import remarkRehype from 'remark-rehype';
 	import rehypeKatex from 'rehype-katex';
 	import rehypeStringify from 'rehype-stringify';
-	import { copyCodeToClipboard } from '$lib/utils/copy';
+	import { copyCodeToClipboard, preprocessLaTeX } from '$lib/utils';
+	import { rehypeRestoreTableHtml } from '$lib/markdown/table-html-restorer';
 	import { browser } from '$app/environment';
-	import 'katex/dist/katex.min.css';
+	import '$styles/katex-custom.scss';
 
 	import githubDarkCss from 'highlight.js/styles/github-dark.css?inline';
 	import githubLightCss from 'highlight.js/styles/github.css?inline';
@@ -59,6 +60,7 @@
 			.use(remarkRehype) // Convert Markdown AST to rehype
 			.use(rehypeKatex) // Render math using KaTeX
 			.use(rehypeHighlight) // Add syntax highlighting
+			.use(rehypeRestoreTableHtml) // Restore limited HTML (e.g., <br>, <ul>) inside Markdown tables
 			.use(rehypeStringify); // Convert to HTML string
 	});
 
@@ -176,19 +178,9 @@
 		return mutated ? tempDiv.innerHTML : html;
 	}
 
-	function normalizeMathDelimiters(text: string): string {
-		return text
-			.replace(/(^|[^\\])\\\[((?:\\.|[\s\S])*?)\\\]/g, (_, prefix: string, content: string) => {
-				return `${prefix}$$${content}$$`;
-			})
-			.replace(/(^|[^\\])\\\(((?:\\.|[\s\S])*?)\\\)/g, (_, prefix: string, content: string) => {
-				return `${prefix}$${content}$`;
-			});
-	}
-
 	async function processMarkdown(text: string): Promise<string> {
 		try {
-			const normalized = normalizeMathDelimiters(text);
+			let normalized = preprocessLaTeX(text);
 			const result = await processor().process(normalized);
 			const html = String(result);
 			const enhancedLinks = enhanceLinks(html);
