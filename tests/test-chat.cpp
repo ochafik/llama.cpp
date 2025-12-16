@@ -985,6 +985,37 @@ static void test_template_output_parsers() {
                     /* .format = */ COMMON_CHAT_FORMAT_HERMES_2_PRO,
                     /* .reasoning_format = */ COMMON_REASONING_FORMAT_DEEPSEEK,
                 }));
+        // Test partial parsing of incomplete <function=name tag (no closing >)
+        // This simulates streaming where the tag is cut off mid-generation.
+        // The incomplete tag should NOT be included in content - parser should hold off.
+        assert_msg_equals(
+            simple_assist_msg("Let's call something\n"),
+            common_chat_parse(
+                "Let's call something\n"
+                "<function=special_function",  // No closing > yet
+                /* is_partial= */ true,
+                {COMMON_CHAT_FORMAT_HERMES_2_PRO}));
+        // Test with <tool_call> followed by incomplete <function= tag
+        // Note: The partial matching algorithm looks at what the input ENDS with.
+        // `<function=get_weather` at the end triggers a partial match, but
+        // `<tool_call>\n` in the middle is already "past" and gets included in content.
+        // In practice, with grammar-constrained output, this mixed format wouldn't occur.
+        assert_msg_equals(
+            simple_assist_msg("Hello, world!\n<tool_call>\n"),
+            common_chat_parse(
+                "Hello, world!\n"
+                "<tool_call>\n"
+                "<function=get_weather",  // No closing > yet
+                /* is_partial= */ true,
+                {COMMON_CHAT_FORMAT_HERMES_2_PRO}));
+        // Test with just the start of <function= (very early in streaming)
+        assert_msg_equals(
+            simple_assist_msg("Content here\n"),
+            common_chat_parse(
+                "Content here\n"
+                "<function=",
+                /* is_partial= */ true,
+                {COMMON_CHAT_FORMAT_HERMES_2_PRO}));
         assert_msg_equals(message_assist_call_thoughts,
             common_chat_parse(
                 // QwQ-32B's template adds a trailing <think> if add_generation_prompt

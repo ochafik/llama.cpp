@@ -43,6 +43,9 @@ class common_regex {
     std::string pattern;
     std::regex rx;
     std::regex rx_reversed_partial;
+    // Store reversed partial for each top-level alternative to handle cases where
+    // one alternative can match empty and steals the match from other alternatives.
+    std::vector<std::regex> rx_reversed_partial_alts;
 
   public:
     explicit common_regex(const std::string & pattern);
@@ -54,3 +57,6 @@ class common_regex {
 
 // For testing only (pretty print of failures).
 std::string regex_to_reversed_partial_regex(const std::string & pattern);
+
+// Split pattern by top-level alternation for separate partial matching.
+std::vector<std::string> split_top_level_alternations(const std::string & pattern);

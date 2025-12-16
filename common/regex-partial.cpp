@@ -3,10 +3,65 @@
 #include <functional>
 #include <optional>
 
+// Split a pattern by top-level alternation (|) for separate partial matching.
+// This handles nested groups correctly - only splits at the top level.
+std::vector<std::string> split_top_level_alternations(const std::string & pattern) {
+    std::vector<std::string> alternatives;
+    std::string current;
+    int depth = 0;  // Track nesting depth of groups () and []
+
+    for (size_t i = 0; i < pattern.size(); ++i) {
+        char c = pattern[i];
+        if (c == '\\' && i + 1 < pattern.size()) {
+            // Escape sequence - add both characters
+            current += c;
+            current += pattern[++i];
+        } else if (c == '[') {
+            // Character class - skip until ]
+            current += c;
+            ++i;
+            while (i < pattern.size() && pattern[i] != ']') {
+                if (pattern[i] == '\\' && i + 1 < pattern.size()) {
+                    current += pattern[i++];
+                }
+                current += pattern[i++];
+            }
+            if (i < pattern.size()) {
+                current += pattern[i];  // Add closing ]
+            }
+        } else if (c == '(') {
+            depth++;
+            current += c;
+        } else if (c == ')') {
+            depth--;
+            current += c;
+        } else if (c == '|' && depth == 0) {
+            // Top-level alternation
+            alternatives.push_back(current);
+            current.clear();
+        } else {
+            current += c;
+        }
+    }
+    if (!current.empty()) {
+        alternatives.push_back(current);
+    }
+    return alternatives;
+}
+
 common_regex::common_regex(const std::string & pattern) :
     pattern(pattern),
     rx(pattern),
-    rx_reversed_partial(regex_to_reversed_partial_regex(pattern)) {}
+    rx_reversed_partial(regex_to_reversed_partial_regex(pattern)) {
+    // If pattern has multiple top-level alternatives, store each one's reversed partial
+    // separately to handle cases where one alternative can match empty.
+    auto alts = split_top_level_alternations(pattern);
+    if (alts.size() > 1) {
+        for (const auto & alt : alts) {
+            rx_reversed_partial_alts.emplace_back(regex_to_reversed_partial_regex(alt));
+        }
+    }
+}
 
 common_regex_match common_regex::search(const std::string & input, size_t pos, bool as_match) const {
     std::smatch match;
@@ -26,25 +81,47 @@ common_regex_match common_regex::search(const std::string & input, size_t pos, b
         }
         return res;
     }
-    std::match_results<std::string::const_reverse_iterator> srmatch;
-    if (std::regex_match(input.rbegin(), input.rend() - pos, srmatch, rx_reversed_partial)) {
-        auto group = srmatch[1].str();
-        if (group.length() != 0) {
-            auto it = srmatch[1].second.base();
-            // auto position = static_cast<size_t>(std::distance(input.begin(), it));
-            if ((!as_match) || it == input.begin()) {
-                common_regex_match res;
-                res.type = COMMON_REGEX_MATCH_TYPE_PARTIAL;
-                const size_t begin = std::distance(input.begin(), it);
-                const size_t end = input.size();
-                if (begin == std::string::npos || end == std::string::npos || begin > end) {
-                    throw std::runtime_error("Invalid range");
+
+    // Helper lambda to check for partial match with a reversed partial regex
+    auto try_partial_match = [&](const std::regex & rx_partial) -> common_regex_match {
+        std::match_results<std::string::const_reverse_iterator> srmatch;
+        if (std::regex_match(input.rbegin(), input.rend() - pos, srmatch, rx_partial)) {
+            auto group = srmatch[1].str();
+            if (group.length() != 0) {
+                auto it = srmatch[1].second.base();
+                if ((!as_match) || it == input.begin()) {
+                    common_regex_match res;
+                    res.type = COMMON_REGEX_MATCH_TYPE_PARTIAL;
+                    const size_t begin = std::distance(input.begin(), it);
+                    const size_t end = input.size();
+                    if (begin == std::string::npos || end == std::string::npos || begin > end) {
+                        throw std::runtime_error("Invalid range");
+                    }
+                    res.groups.push_back({begin, end});
+                    return res;
                 }
-                res.groups.push_back({begin, end});
-                return res;
             }
         }
+        return {};
+    };
+
+    // First try the combined pattern
+    auto result = try_partial_match(rx_reversed_partial);
+    if (result.type != COMMON_REGEX_MATCH_TYPE_NONE) {
+        return result;
     }
+
+    // If combined pattern didn't find a non-empty partial match but we have
+    // multiple top-level alternatives, try each one separately.
+    // This handles cases where one alternative can match empty and "steals"
+    // the match from other alternatives that would match non-empty.
+    for (const auto & alt_rx : rx_reversed_partial_alts) {
+        result = try_partial_match(alt_rx);
+        if (result.type != COMMON_REGEX_MATCH_TYPE_NONE) {
+            return result;
+        }
+    }
+
     return {};
 }
 

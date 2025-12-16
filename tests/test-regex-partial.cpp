@@ -47,17 +47,16 @@ static void test_regex() {
             std::cout << "  Input: " << input_output.input << '\n';
             auto m = cr.search(input_output.input, 0);
             if (m != input_output.output) {
-                auto match_to_str = [&](const std::optional<common_regex_match> & m) {
+                auto match_to_str = [&](const common_regex_match & m) {
                     std::ostringstream ss;
-                    if (m->type == COMMON_REGEX_MATCH_TYPE_NONE) {
+                    if (m.type == COMMON_REGEX_MATCH_TYPE_NONE) {
                         ss << "<no match>";
                     } else {
-                        GGML_ASSERT(!input_output.output.groups.empty());
                         std::vector<std::string> parts;
-                        for (const auto & g : m->groups) {
+                        for (const auto & g : m.groups) {
                             parts.push_back("{" + std::to_string(g.begin) + ", " + std::to_string(g.end) + "}");
                         }
-                        ss << "{" << common_regex_match_type_name(m->type) << ", {" << string_join(parts, ", ") << "}}";
+                        ss << "{" << common_regex_match_type_name(m.type) << ", {" << string_join(parts, ", ") << "}}";
                     }
                     return ss.str();
                 };
@@ -194,6 +193,30 @@ static void test_regex() {
         }
     });
 
+    // Test simpler <function=...> pattern in isolation
+    test({
+        "<function=([^>]+)>",
+        {
+            {"<function=all>", {COMMON_REGEX_MATCH_TYPE_FULL, {{0, 14}, {10, 13}}}},
+            {"<function=all", {COMMON_REGEX_MATCH_TYPE_PARTIAL, {{0, 13}}}},
+            {"<function=", {COMMON_REGEX_MATCH_TYPE_PARTIAL, {{0, 10}}}},
+            {"<function", {COMMON_REGEX_MATCH_TYPE_PARTIAL, {{0, 9}}}},
+            {"<fun", {COMMON_REGEX_MATCH_TYPE_PARTIAL, {{0, 4}}}},
+        }
+    });
+
+    // Test alternation with simple patterns
+    test({
+        "abc|<function=([^>]+)>",
+        {
+            {"abc", {COMMON_REGEX_MATCH_TYPE_FULL, {{0, 3}, {3, 3}}}},
+            {"ab", {COMMON_REGEX_MATCH_TYPE_PARTIAL, {{0, 2}}}},
+            {"<function=all>", {COMMON_REGEX_MATCH_TYPE_FULL, {{0, 14}, {10, 13}}}},
+            {"<function=all", {COMMON_REGEX_MATCH_TYPE_PARTIAL, {{0, 13}}}},
+            {"<fun", {COMMON_REGEX_MATCH_TYPE_PARTIAL, {{0, 4}}}},
+        }
+    });
+
     test({
         "(?:"
             "(```(?:xml|json)?\\n\\s*)?" // match 1 (block_start)
@@ -215,6 +238,11 @@ static void test_regex() {
             {"{\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}", {COMMON_REGEX_MATCH_TYPE_FULL, {{0, 8}, {54, 54}, {54, 54}, {0, 8}, {54, 54}, {54, 54}}}},
             {"<tool_call> {\"name", {COMMON_REGEX_MATCH_TYPE_PARTIAL, {{0, 18}}}},
             {"<tool_call>{\"name", {COMMON_REGEX_MATCH_TYPE_PARTIAL, {{0, 17}}}},
+            // <tool_call> alone DOES trigger partial now! The fix tries each alternative separately,
+            // and the first alternative's partial match recognizes <tool_call> as a prefix
+            {"<tool_call>", {COMMON_REGEX_MATCH_TYPE_PARTIAL, {{0, 11}}}},
+            {"<tool_call>\n", {COMMON_REGEX_MATCH_TYPE_PARTIAL, {{0, 12}}}},
+            {"<tool_call>{", {COMMON_REGEX_MATCH_TYPE_PARTIAL, {{0, 12}}}},
             {"Let's call something\n<tool_call>{\"name", {COMMON_REGEX_MATCH_TYPE_PARTIAL, {{21, 38}}}},
             {"Ok then<tool_call>{\"name", {COMMON_REGEX_MATCH_TYPE_PARTIAL, {{7, 24}}}},
             {"{\"name", {COMMON_REGEX_MATCH_TYPE_PARTIAL, {{0, 6}}}},
@@ -223,9 +251,48 @@ static void test_regex() {
             {"<function_call> {\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}", {COMMON_REGEX_MATCH_TYPE_FULL, {{0, 24}, {70, 70}, {0, 15}, {15, 24}, {70, 70}, {70, 70}}}},
             {"<function name=\"special_function\"> {\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}", {COMMON_REGEX_MATCH_TYPE_FULL, {{0, 34}, {89, 89}, {89, 89}, {89, 89}, {89, 89}, {16, 32}}}},
             {"<function=all>", {COMMON_REGEX_MATCH_TYPE_FULL, {{0, 14}, {14, 14}, {14, 14}, {14, 14}, {10, 13}, {14, 14}}}},
-
+            // Test partial matches for <function= pattern (missing closing >)
+            // These now work because we try each top-level alternative separately when the combined pattern matches empty.
+            {"<function=all", {COMMON_REGEX_MATCH_TYPE_PARTIAL, {{0, 13}}}},
+            {"<function=", {COMMON_REGEX_MATCH_TYPE_PARTIAL, {{0, 10}}}},
+            {"<function", {COMMON_REGEX_MATCH_TYPE_PARTIAL, {{0, 9}}}},
+            {"<fun", {COMMON_REGEX_MATCH_TYPE_PARTIAL, {{0, 4}}}},
+            {"Let's call something\n<function=special_function", {COMMON_REGEX_MATCH_TYPE_PARTIAL, {{21, 47}}}},
         }
     });
+}
+
+// Test that top-level alternations are handled correctly for partial matching
+static void test_alternation_partial() {
+    printf("[%s]\n", __func__);
+
+    // Test that split_top_level_alternations works correctly
+    auto alts = split_top_level_alternations("a|b|c");
+    GGML_ASSERT(alts.size() == 3);
+    GGML_ASSERT(alts[0] == "a");
+    GGML_ASSERT(alts[1] == "b");
+    GGML_ASSERT(alts[2] == "c");
+
+    // Nested alternations should NOT be split
+    alts = split_top_level_alternations("(a|b)|c");
+    GGML_ASSERT(alts.size() == 2);
+    GGML_ASSERT(alts[0] == "(a|b)");
+    GGML_ASSERT(alts[1] == "c");
+
+    // Complex pattern with nested groups
+    alts = split_top_level_alternations("(?:abc|def)|<function=([^>]+)>");
+    GGML_ASSERT(alts.size() == 2);
+    GGML_ASSERT(alts[0] == "(?:abc|def)");
+    GGML_ASSERT(alts[1] == "<function=([^>]+)>");
+
+    // Test that partial matching works for patterns with alternations where
+    // one alternative can match empty
+    common_regex cr("(?:(abc)?def)|<function=([^>]+)>");
+    auto m = cr.search("<function=test", 0);
+    GGML_ASSERT(m.type == COMMON_REGEX_MATCH_TYPE_PARTIAL);
+    GGML_ASSERT(m.groups.size() == 1);
+    GGML_ASSERT(m.groups[0].begin == 0);
+    GGML_ASSERT(m.groups[0].end == 14);
 }
 
 static void test_regex_to_reversed_partial_regex() {
@@ -283,6 +350,7 @@ static void test_regex_to_reversed_partial_regex() {
 
 int main() {
     test_regex_to_reversed_partial_regex();
+    test_alternation_partial();
     test_regex();
     std::cout << "All tests passed.\n";
 }
