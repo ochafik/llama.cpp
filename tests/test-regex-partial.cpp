@@ -285,6 +285,49 @@ static void test_alternation_partial() {
     GGML_ASSERT(alts[0] == "(?:abc|def)");
     GGML_ASSERT(alts[1] == "<function=([^>]+)>");
 
+    // === Edge cases for split_top_level_alternations ===
+
+    // Single pattern (no alternation)
+    alts = split_top_level_alternations("abc");
+    GGML_ASSERT(alts.size() == 1);
+    GGML_ASSERT(alts[0] == "abc");
+
+    // Escaped pipe should NOT split
+    alts = split_top_level_alternations("a\\|b|c");
+    GGML_ASSERT(alts.size() == 2);
+    GGML_ASSERT(alts[0] == "a\\|b");
+    GGML_ASSERT(alts[1] == "c");
+
+    // Pipe in character class should NOT split
+    alts = split_top_level_alternations("a[|]b|c");
+    GGML_ASSERT(alts.size() == 2);
+    GGML_ASSERT(alts[0] == "a[|]b");
+    GGML_ASSERT(alts[1] == "c");
+
+    // Pipe in character class with escape inside
+    alts = split_top_level_alternations("a[\\]|]b|c");
+    GGML_ASSERT(alts.size() == 2);
+    GGML_ASSERT(alts[0] == "a[\\]|]b");
+    GGML_ASSERT(alts[1] == "c");
+
+    // Multiple nested groups
+    alts = split_top_level_alternations("((a|b)|(c|d))|e");
+    GGML_ASSERT(alts.size() == 2);
+    GGML_ASSERT(alts[0] == "((a|b)|(c|d))");
+    GGML_ASSERT(alts[1] == "e");
+
+    // Empty pattern
+    alts = split_top_level_alternations("");
+    GGML_ASSERT(alts.size() == 0);
+
+    // Pattern ending with pipe (trailing empty alternative - currently dropped)
+    alts = split_top_level_alternations("a|b|");
+    // Note: Empty alternatives are currently dropped by the implementation
+    // This is acceptable since empty alternatives in regexes are unusual
+    GGML_ASSERT(alts.size() == 2);
+    GGML_ASSERT(alts[0] == "a");
+    GGML_ASSERT(alts[1] == "b");
+
     // Test that partial matching works for patterns with alternations where
     // one alternative can match empty
     common_regex cr("(?:(abc)?def)|<function=([^>]+)>");
