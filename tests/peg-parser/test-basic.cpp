@@ -451,4 +451,125 @@ void test_basic(testing & t) {
             t.assert_equal("result_is_fail", true, result.fail());
         });
     });
+
+    t.test("preserved parser", [](testing & t) {
+        // Test text fallback (no token info in context)
+        t.test("text_fallback_success", [](testing &t) {
+            auto parser = build_peg_parser([](common_peg_parser_builder & p) {
+                // Token ID 12345 won't matter - no token info
+                return p.preserved("<tool_call>", 12345);
+            });
+
+            common_peg_parse_context ctx("<tool_call>", false);
+            auto result = parser.parse(ctx);
+            t.assert_equal("text_fallback_success", true, result.success());
+            t.assert_equal("text_fallback_end", 11u, result.end);
+        });
+
+        t.test("text_fallback_fail", [](testing &t) {
+            auto parser = build_peg_parser([](common_peg_parser_builder & p) {
+                return p.preserved("<tool_call>", 12345);
+            });
+
+            common_peg_parse_context ctx("<other>", false);
+            auto result = parser.parse(ctx);
+            t.assert_equal("text_fallback_fail", true, result.fail());
+        });
+
+        t.test("text_fallback_partial", [](testing &t) {
+            auto parser = build_peg_parser([](common_peg_parser_builder & p) {
+                return p.preserved("<tool_call>", 12345);
+            });
+
+            common_peg_parse_context ctx("<tool_", true);
+            auto result = parser.parse(ctx);
+            t.assert_equal("text_fallback_partial", true, result.need_more_input());
+        });
+
+        // Test with token info - token matches
+        t.test("token_match_success", [](testing &t) {
+            auto parser = build_peg_parser([](common_peg_parser_builder & p) {
+                return p.preserved("<tool_call>", 303320);
+            });
+
+            // Create context with token info
+            std::vector<common_peg_token_span> tokens = {
+                {303320, 0, 11}  // <tool_call> token at position 0
+            };
+            common_peg_parse_context ctx("<tool_call>", false, tokens);
+            auto result = parser.parse(ctx);
+            t.assert_equal("token_match_success", true, result.success());
+            t.assert_equal("token_match_end", 11u, result.end);
+        });
+
+        // Test with token info - wrong token at position
+        t.test("token_mismatch_fail", [](testing &t) {
+            auto parser = build_peg_parser([](common_peg_parser_builder & p) {
+                return p.preserved("<tool_call>", 303320);
+            });
+
+            // Wrong token at position 0
+            std::vector<common_peg_token_span> tokens = {
+                {999999, 0, 11}  // Different token
+            };
+            common_peg_parse_context ctx("<tool_call>", false, tokens);
+            auto result = parser.parse(ctx);
+            t.assert_equal("token_mismatch_fail", true, result.fail());
+        });
+
+        // Test sequence with preserved tokens
+        t.test("sequence_with_preserved", [](testing &t) {
+            auto parser = build_peg_parser([](common_peg_parser_builder & p) {
+                return p.preserved("<tool_call>", 303320) +
+                       p.chars("[a-z]", 1, -1) +
+                       p.preserved("</tool_call>", 303322);
+            });
+
+            std::vector<common_peg_token_span> tokens = {
+                {303320, 0, 11},  // <tool_call>
+                {303322, 15, 27}  // </tool_call>
+            };
+            common_peg_parse_context ctx("<tool_call>test</tool_call>", false, tokens);
+            auto result = parser.parse(ctx);
+            t.assert_equal("sequence_with_preserved", true, result.success());
+        });
+
+        // Qwen3-Coder-like parser demo (simplified)
+        // Format: <tool_call>content</tool_call>
+        // <tool_call> and </tool_call> are single tokens (303320 and 303322)
+        t.test("qwen3_coder_like", [](testing &t) {
+            auto parser = build_peg_parser([](common_peg_parser_builder & p) {
+                // Simple: <tool_call> + content + </tool_call>
+                // Use until() to match content until the closing tag
+                return p.preserved("<tool_call>", 303320) +
+                       p.until("</tool_call>") +
+                       p.preserved("</tool_call>", 303322);
+            });
+
+            // Test with token info (simulating actual model output)
+            std::string input = "<tool_call><function=get_weather><parameter=city>Paris</parameter></function></tool_call>";
+            std::vector<common_peg_token_span> tokens = {
+                {303320, 0, 11},   // <tool_call> at positions 0-11
+                {303322, 77, 89}   // </tool_call> at positions 77-89
+            };
+            common_peg_parse_context ctx(input, false, tokens);
+            auto result = parser.parse(ctx);
+            t.assert_equal("qwen3_coder_like", true, result.success());
+        });
+
+        // Same parser but without token info (text fallback)
+        t.test("qwen3_coder_like_text_fallback", [](testing &t) {
+            auto parser = build_peg_parser([](common_peg_parser_builder & p) {
+                return p.preserved("<tool_call>", 303320) +
+                       p.until("</tool_call>") +
+                       p.preserved("</tool_call>", 303322);
+            });
+
+            // No token info - falls back to text matching
+            std::string input = "<tool_call><function=get_weather><parameter=city>Paris</parameter></function></tool_call>";
+            common_peg_parse_context ctx(input, false);
+            auto result = parser.parse(ctx);
+            t.assert_equal("qwen3_coder_like_text_fallback", true, result.success());
+        });
+    });
 }
