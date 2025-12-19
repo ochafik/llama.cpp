@@ -1395,6 +1395,118 @@ static void common_chat_parse_seed_oss(common_chat_msg_parser & builder) {
     builder.consume_reasoning_with_xml_tool_calls(form, "<seed:think>", "</seed:think>");
 }
 
+// FunctionGemma format: <start_function_call>call:name{key:<escape>value<escape>,key2:123}<end_function_call>
+static void common_chat_parse_function_gemma(common_chat_msg_parser & builder) {
+    if (!builder.syntax().parse_tool_calls) {
+        builder.add_content(builder.consume_rest());
+        return;
+    }
+
+    // Match pattern: <start_function_call>call:name{...}<end_function_call>
+    static const common_regex tool_call_regex(
+        "<start_function_call>call:([a-zA-Z_][a-zA-Z0-9_]*)\\{([^}]*)\\}<end_function_call>");
+
+    while (true) {
+        auto res = builder.try_find_regex(tool_call_regex);
+        if (!res) {
+            // No more tool calls found, consume rest as content
+            auto remaining = builder.consume_rest();
+            if (!remaining.empty()) {
+                builder.add_content(remaining);
+            }
+            break;
+        }
+
+        // Extract function name and arguments string
+        std::string function_name = builder.str(res->groups[1]);
+        std::string args_str = builder.str(res->groups[2]);
+
+        // Parse the arguments: key:<escape>value<escape> or key:value
+        json arguments = json::object();
+
+        // Split by comma and parse each key:value pair
+        size_t pos = 0;
+        while (pos < args_str.size()) {
+            // Skip leading whitespace
+            while (pos < args_str.size() && std::isspace(args_str[pos])) {
+                ++pos;
+            }
+            if (pos >= args_str.size()) break;
+
+            // Find the key (ends at ':')
+            size_t key_end = args_str.find(':', pos);
+            if (key_end == std::string::npos) break;
+
+            std::string key = args_str.substr(pos, key_end - pos);
+            // Trim key
+            while (!key.empty() && std::isspace(key.front())) key.erase(0, 1);
+            while (!key.empty() && std::isspace(key.back())) key.pop_back();
+
+            pos = key_end + 1;
+
+            // Check if value is escaped (string) or raw
+            std::string value;
+            bool is_string = false;
+
+            // Skip whitespace after colon
+            while (pos < args_str.size() && std::isspace(args_str[pos])) {
+                ++pos;
+            }
+
+            if (pos < args_str.size() && args_str.substr(pos, 8) == "<escape>") {
+                // String value wrapped in <escape>...</escape>
+                is_string = true;
+                pos += 8; // Skip "<escape>"
+                size_t val_end = args_str.find("<escape>", pos);
+                if (val_end == std::string::npos) {
+                    // Partial value - take rest
+                    value = args_str.substr(pos);
+                    pos = args_str.size();
+                } else {
+                    value = args_str.substr(pos, val_end - pos);
+                    pos = val_end + 8; // Skip closing "<escape>"
+                }
+            } else {
+                // Raw value (number, boolean, etc.) - ends at comma or end
+                size_t val_end = args_str.find(',', pos);
+                if (val_end == std::string::npos) {
+                    value = args_str.substr(pos);
+                    pos = args_str.size();
+                } else {
+                    value = args_str.substr(pos, val_end - pos);
+                    pos = val_end;
+                }
+                // Trim value
+                while (!value.empty() && std::isspace(value.back())) value.pop_back();
+            }
+
+            // Add to arguments JSON
+            if (!key.empty()) {
+                if (is_string) {
+                    arguments[key] = value;
+                } else {
+                    // Try to parse as JSON value (number, boolean, null)
+                    try {
+                        arguments[key] = json::parse(value);
+                    } catch (...) {
+                        // If parsing fails, treat as string
+                        arguments[key] = value;
+                    }
+                }
+            }
+
+            // Skip comma if present
+            if (pos < args_str.size() && args_str[pos] == ',') {
+                ++pos;
+            }
+        }
+
+        if (!builder.add_tool_call(function_name, "", arguments.dump())) {
+            throw common_chat_msg_partial_exception("Incomplete FunctionGemma tool call");
+        }
+    }
+}
+
 static void common_chat_parse_content_only(common_chat_msg_parser & builder) {
     builder.try_parse_reasoning("<think>", "</think>");
     builder.add_content(builder.consume_rest());
@@ -1478,6 +1590,9 @@ static void common_chat_parse(common_chat_msg_parser & builder) {
             break;
         case COMMON_CHAT_FORMAT_XIAOMI_MIMO:
             common_chat_parse_xiaomi_mimo(builder);
+            break;
+        case COMMON_CHAT_FORMAT_FUNCTION_GEMMA:
+            common_chat_parse_function_gemma(builder);
             break;
         default:
             throw std::runtime_error(std::string("Unsupported format: ") + common_chat_format_name(builder.syntax().format));

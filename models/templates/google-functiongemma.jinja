@@ -1,0 +1,8 @@
+{{ bos_token }}{% for message in messages %}{% if message['role'] == 'system' or message['role'] == 'developer' %}{% set role = 'developer' %}{% elif message['role'] == 'assistant' %}{% set role = 'model' %}{% elif message['role'] == 'tool' %}{% set role = 'model' %}{% else %}{% set role = message['role'] %}{% endif %}<start_of_turn>{{ role }}
+{% if message['role'] == 'system' or message['role'] == 'developer' %}You are a model that can do function calling with the following functions
+{% if tools is defined and tools | length > 0 %}{% for tool in tools %}{% if tool.function is defined %}{% set fn = tool.function %}{% else %}{% set fn = tool %}{% endif %}<start_function_declaration>declaration:{{ fn.name }}<escape>{{ fn.description }}<escape>,parameters:{{ fn.parameters | tojson }}<end_function_declaration>
+{% endfor %}{% endif %}{% elif message['role'] == 'tool' %}<start_function_response>response:{{ message.name }}<escape>{{ message.content }}<escape><end_function_response>
+{% elif message.tool_calls is defined and message.tool_calls | length > 0 %}{% for tc in message.tool_calls %}{% if tc.function is defined %}{% set fn = tc.function %}{% else %}{% set fn = tc %}{% endif %}<start_function_call>call:{{ fn.name }}{% if fn.arguments is string %}{{ fn.arguments }}{% else %}{{ fn.arguments | tojson }}{% endif %}<end_function_call>{% endfor %}
+{% if message.content is defined and message.content %}{{ message.content | trim }}{% endif %}{% else %}{{ message.content | trim }}{% endif %}<end_of_turn>
+{% endfor %}{% if add_generation_prompt %}<start_of_turn>model
+{% endif %}
