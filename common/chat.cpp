@@ -673,6 +673,7 @@ const char * common_chat_format_name(common_chat_format format) {
         case COMMON_CHAT_FORMAT_PEG_SIMPLE: return "peg-simple";
         case COMMON_CHAT_FORMAT_PEG_NATIVE: return "peg-native";
         case COMMON_CHAT_FORMAT_PEG_CONSTRUCTED: return "peg-constructed";
+        case COMMON_CHAT_FORMAT_PEG_FUNCTION_GEMMA: return "peg-function-gemma";
         default:
             throw std::runtime_error("Unknown chat format");
     }
@@ -1946,7 +1947,7 @@ static common_chat_params common_chat_params_init_function_gemma(const common_ch
     data.grammar_lazy = params.tools.is_array() && !params.tools.empty() && params.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
 
     data.prompt = apply(tmpl, params);
-    data.format = COMMON_CHAT_FORMAT_FUNCTION_GEMMA;
+    data.format = COMMON_CHAT_FORMAT_PEG_FUNCTION_GEMMA;
 
     data.preserved_tokens = {
         "<start_function_call>",
@@ -1958,7 +1959,58 @@ static common_chat_params common_chat_params_init_function_gemma(const common_ch
 
     data.additional_stops.push_back("<end_function_call>");
 
-    if (params.tools.is_array() && !params.tools.empty()) {
+    bool has_tools = params.tools.is_array() && !params.tools.empty();
+
+    // Build the PEG parser for FunctionGemma format
+    // Format: <start_function_call>call:name{key:<escape>value<escape>,key2:123}<end_function_call>
+    auto parser = build_chat_peg_function_gemma_parser([&](common_chat_peg_function_gemma_builder & p) {
+        // Identifier pattern: [a-zA-Z_][a-zA-Z0-9_]*
+        auto identifier = p.chars("a-zA-Z_", 1, 1) + p.chars("a-zA-Z0-9_", 0, -1);
+
+        // Argument name: alphanumeric identifier before ':'
+        auto arg_name = p.tool_arg_name(identifier);
+
+        // String value: <escape>...<escape> with content captured
+        // Note: using text-based matching for <escape> inside content; token-awareness
+        // applies at token boundaries which works for the delimiters themselves
+        auto string_value = p.escape() + p.tool_arg_string_value(p.until("<escape>")) + p.escape();
+
+        // JSON value: raw number, boolean, null, array, or object (without escape delimiters)
+        auto json_value = p.tool_arg_json_value(p.json());
+
+        // An argument is: name:(string_value | json_value)
+        auto arg = p.tool_arg(arg_name + ":" + (string_value | json_value));
+
+        // Arguments list: {arg1,arg2,...} or {}
+        auto args = "{" + p.optional(arg + p.zero_or_more("," + arg)) + "}";
+
+        // Tool name: alphanumeric identifier after "call:"
+        auto tool_name = p.tool_name(identifier);
+
+        // Tool call: <start_function_call>call:name{...}<end_function_call>
+        auto tool_call = p.tool(
+            p.tool_open(p.start_function_call() + "call:")
+            + tool_name
+            + args
+            + p.tool_close(p.end_function_call())
+        );
+
+        // Content before tool calls
+        auto content = p.content(p.until("<start_function_call>"));
+
+        if (has_tools && params.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+            int min_calls = params.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
+            int max_calls = params.parallel_tool_calls ? -1 : 1;
+            return content + p.repeat(tool_call, min_calls, max_calls);
+        }
+
+        // Content only
+        return p.content(p.rest());
+    });
+
+    data.parser = parser.save();
+
+    if (has_tools) {
         data.grammar = build_grammar([&](const common_grammar_builder & builder) {
             std::vector<std::string> tool_rules;
 

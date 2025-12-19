@@ -122,3 +122,47 @@ void common_chat_peg_constructed_mapper::map(const common_peg_ast_node & node) {
         current_tool->arguments += "}";
     }
 }
+
+void common_chat_peg_function_gemma_mapper::map(const common_peg_ast_node & node) {
+    common_chat_peg_mapper::map(node);
+
+    bool is_tool_open = node.tag == common_chat_peg_function_gemma_builder::TOOL_OPEN;
+    bool is_tool_name = node.tag == common_chat_peg_function_gemma_builder::TOOL_NAME;
+    bool is_tool_close = node.tag == common_chat_peg_function_gemma_builder::TOOL_CLOSE;
+    bool is_arg_name = node.tag == common_chat_peg_function_gemma_builder::TOOL_ARG_NAME;
+    bool is_arg_string = node.tag == common_chat_peg_function_gemma_builder::TOOL_ARG_STRING_VALUE;
+    bool is_arg_json = node.tag == common_chat_peg_function_gemma_builder::TOOL_ARG_JSON_VALUE;
+
+    if (is_tool_open) {
+        result.tool_calls.emplace_back();
+        current_tool = &result.tool_calls.back();
+        arg_count = 0;
+    }
+
+    if (is_tool_name && current_tool) {
+        current_tool->name = std::string(trim_trailing_space(node.text));
+        current_tool->arguments = "{";
+    }
+
+    if (is_arg_name && current_tool) {
+        if (arg_count > 0) {
+            current_tool->arguments += ",";
+        }
+        current_tool->arguments += json(trim_trailing_space(node.text)).dump() + ":";
+        ++arg_count;
+    }
+
+    if (is_arg_string && current_tool) {
+        // String value - serialize to JSON string
+        current_tool->arguments += json(std::string(trim_trailing_space(node.text))).dump();
+    }
+
+    if (is_arg_json && current_tool) {
+        // Raw JSON value (number, boolean, null, etc.)
+        current_tool->arguments += std::string(trim_trailing_space(node.text));
+    }
+
+    if (is_tool_close && current_tool) {
+        current_tool->arguments += "}";
+    }
+}

@@ -914,7 +914,13 @@ static void test_template_output_parsers() {
         auto tmpls = read_templates("models/templates/google-functiongemma.jinja");
         std::vector<std::string> end_tokens{ "<end_of_turn>" };
 
-        assert_equals(COMMON_CHAT_FORMAT_FUNCTION_GEMMA, common_chat_templates_apply(tmpls.get(), inputs_tools).format);
+        auto params = common_chat_templates_apply(tmpls.get(), inputs_tools);
+        assert_equals(COMMON_CHAT_FORMAT_PEG_FUNCTION_GEMMA, params.format);
+
+        // Get the syntax with PEG parser for parsing tests
+        common_chat_syntax syntax;
+        syntax.format = params.format;
+        syntax.parser.load(params.parser);
 
         // Test parsing FunctionGemma tool call format
         common_chat_msg expected_call;
@@ -925,7 +931,7 @@ static void test_template_output_parsers() {
             common_chat_parse(
                 "<start_function_call>call:get_weather{location:<escape>Tokyo<escape>}<end_function_call>",
                 /* is_partial= */ false,
-                {COMMON_CHAT_FORMAT_FUNCTION_GEMMA}));
+                syntax));
 
         // Test parsing with numeric argument
         common_chat_msg expected_call_numeric;
@@ -936,7 +942,7 @@ static void test_template_output_parsers() {
             common_chat_parse(
                 "<start_function_call>call:set_temperature{value:25}<end_function_call>",
                 /* is_partial= */ false,
-                {COMMON_CHAT_FORMAT_FUNCTION_GEMMA}));
+                syntax));
 
         // Test parsing with content before tool call
         common_chat_msg expected_with_content;
@@ -948,7 +954,7 @@ static void test_template_output_parsers() {
             common_chat_parse(
                 "Let me check that for you.<start_function_call>call:get_weather{location:<escape>London<escape>}<end_function_call>",
                 /* is_partial= */ false,
-                {COMMON_CHAT_FORMAT_FUNCTION_GEMMA}));
+                syntax));
     }
     {
         auto tmpls = read_templates("models/templates/mistralai-Mistral-Nemo-Instruct-2407.jinja");

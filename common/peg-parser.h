@@ -20,6 +20,9 @@ constexpr common_peg_parser_id COMMON_PEG_INVALID_PARSER_ID = static_cast<common
 using common_peg_ast_id = size_t;
 constexpr common_peg_ast_id COMMON_PEG_INVALID_AST_ID = static_cast<common_peg_ast_id>(-1);
 
+// Sentinel value for token ID (no token match)
+constexpr int32_t COMMON_PEG_TOKEN_NULL = -1;
+
 // Lightweight wrapper around common_peg_parser_id for convenience
 class common_peg_parser {
     common_peg_parser_id id_;
@@ -153,6 +156,9 @@ struct common_peg_parse_context {
     // Optional token information for token-aware parsing
     std::vector<common_peg_token_span> tokens;
 
+    // Token ID resolution map: literal text -> token ID (resolved from vocabulary at runtime)
+    std::unordered_map<std::string, int32_t> token_ids;
+
     common_peg_parse_context()
         : is_partial(false), parse_depth(0) {}
 
@@ -165,7 +171,16 @@ struct common_peg_parse_context {
     common_peg_parse_context(const std::string & input, bool is_partial, std::vector<common_peg_token_span> tokens)
         : input(input), is_partial(is_partial), parse_depth(0), tokens(std::move(tokens)) {}
 
+    common_peg_parse_context(const std::string & input, bool is_partial, std::vector<common_peg_token_span> tokens, std::unordered_map<std::string, int32_t> token_ids)
+        : input(input), is_partial(is_partial), parse_depth(0), tokens(std::move(tokens)), token_ids(std::move(token_ids)) {}
+
     bool has_token_info() const { return !tokens.empty(); }
+
+    // Resolve token ID for a literal (returns COMMON_PEG_TOKEN_NULL if not found)
+    int32_t resolve_token_id(const std::string & literal) const {
+        auto it = token_ids.find(literal);
+        return it != token_ids.end() ? it->second : COMMON_PEG_TOKEN_NULL;
+    }
 
     // Check if a specific token is at position
     bool is_token_at(size_t pos, int32_t token_id) const {
@@ -201,13 +216,11 @@ struct common_peg_literal_parser {
     std::string literal;
 };
 
-// Token-aware literal: matches as token if available, falls back to text
+// Token-aware literal: matches as token if available, falls back to text.
+// Token ID is resolved at parse time from the context's token_ids map.
 // Use this for special delimiters like <tool_call>, <escape>, etc.
-constexpr int32_t COMMON_PEG_TOKEN_NULL = -1;
-
-struct common_peg_preserved_parser {
-    std::string literal;                        // Text representation
-    int32_t token_id = COMMON_PEG_TOKEN_NULL;   // Token ID if resolved, else COMMON_PEG_TOKEN_NULL
+struct common_peg_token_parser {
+    std::string literal;  // Text representation (token ID resolved at parse time)
 };
 
 struct common_peg_sequence_parser {
@@ -290,7 +303,7 @@ using common_peg_parser_variant = std::variant<
     common_peg_start_parser,
     common_peg_end_parser,
     common_peg_literal_parser,
-    common_peg_preserved_parser,
+    common_peg_token_parser,
     common_peg_sequence_parser,
     common_peg_choice_parser,
     common_peg_repetition_parser,
@@ -375,12 +388,12 @@ class common_peg_parser_builder {
     //   S -> "hello"
     common_peg_parser literal(const std::string & literal) { return add(common_peg_literal_parser{literal}); }
 
-    // Matches a preserved token (token-aware literal).
-    // When token_id is set and parse context has token info, matches by token ID.
-    // Otherwise falls back to text matching.
+    // Matches a token by text, with token-aware matching when available.
+    // Token ID is resolved at parse time from context's token_ids map (populated from vocabulary).
+    // Falls back to text matching if token info not available.
     // Use for special delimiters like <tool_call>, <escape>, etc.
-    common_peg_parser preserved(const std::string & literal, int32_t token_id = COMMON_PEG_TOKEN_NULL) {
-        return add(common_peg_preserved_parser{literal, token_id});
+    common_peg_parser token(const std::string & literal) {
+        return add(common_peg_token_parser{literal});
     }
 
     // Matches a sequence of parsers in order, all must succeed.
