@@ -1396,18 +1396,35 @@ static void common_chat_parse_seed_oss(common_chat_msg_parser & builder) {
 }
 
 // FunctionGemma format: <start_function_call>call:name{key:<escape>value<escape>,key2:123}<end_function_call>
+// Helper to find the closing brace of a FunctionGemma call, accounting for <escape> delimiters
+static size_t find_function_gemma_args_end(const std::string & input, size_t start) {
+    bool in_escape = false;
+    for (size_t i = start; i < input.size(); ++i) {
+        if (!in_escape && input.substr(i, 8) == "<escape>") {
+            in_escape = true;
+            i += 7; // Skip to end of "<escape>" (loop will add 1)
+        } else if (in_escape && input.substr(i, 8) == "<escape>") {
+            in_escape = false;
+            i += 7; // Skip to end of "</escape>"
+        } else if (!in_escape && input[i] == '}') {
+            return i;
+        }
+    }
+    return std::string::npos;
+}
+
 static void common_chat_parse_function_gemma(common_chat_msg_parser & builder) {
     if (!builder.syntax().parse_tool_calls) {
         builder.add_content(builder.consume_rest());
         return;
     }
 
-    // Match pattern: <start_function_call>call:name{...}<end_function_call>
-    static const common_regex tool_call_regex(
-        "<start_function_call>call:([a-zA-Z_][a-zA-Z0-9_]*)\\{([^}]*)\\}<end_function_call>");
+    // Match the start of a function call: <start_function_call>call:name{
+    static const common_regex tool_call_start_regex(
+        "<start_function_call>call:([a-zA-Z_][a-zA-Z0-9_]*)\\{");
 
     while (true) {
-        auto res = builder.try_find_regex(tool_call_regex);
+        auto res = builder.try_find_regex(tool_call_start_regex);
         if (!res) {
             // No more tool calls found, consume rest as content
             auto remaining = builder.consume_rest();
@@ -1417,18 +1434,35 @@ static void common_chat_parse_function_gemma(common_chat_msg_parser & builder) {
             break;
         }
 
-        // Extract function name and arguments string
+        // Extract function name
         std::string function_name = builder.str(res->groups[1]);
-        std::string args_str = builder.str(res->groups[2]);
+
+        // Find the closing brace, accounting for <escape> delimiters
+        const std::string & input = builder.input();
+        size_t args_start = builder.pos();
+        size_t args_end = find_function_gemma_args_end(input, args_start);
+
+        if (args_end == std::string::npos) {
+            // Incomplete - no closing brace found
+            throw common_chat_msg_partial_exception("Incomplete FunctionGemma tool call - no closing brace");
+        }
+
+        std::string args_str = input.substr(args_start, args_end - args_start);
+        builder.move_to(args_end + 1); // Move past the closing brace
+
+        // Consume the end tag
+        static const std::string end_tag = "<end_function_call>";
+        if (input.substr(builder.pos(), end_tag.size()) == end_tag) {
+            builder.move_to(builder.pos() + end_tag.size());
+        }
 
         // Parse the arguments: key:<escape>value<escape> or key:value
         json arguments = json::object();
 
-        // Split by comma and parse each key:value pair
         size_t pos = 0;
         while (pos < args_str.size()) {
-            // Skip leading whitespace
-            while (pos < args_str.size() && std::isspace(args_str[pos])) {
+            // Skip leading whitespace and commas
+            while (pos < args_str.size() && (std::isspace(args_str[pos]) || args_str[pos] == ',')) {
                 ++pos;
             }
             if (pos >= args_str.size()) break;
@@ -1493,11 +1527,6 @@ static void common_chat_parse_function_gemma(common_chat_msg_parser & builder) {
                         arguments[key] = value;
                     }
                 }
-            }
-
-            // Skip comma if present
-            if (pos < args_str.size() && args_str[pos] == ',') {
-                ++pos;
             }
         }
 
