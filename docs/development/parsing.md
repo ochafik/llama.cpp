@@ -198,16 +198,13 @@ build_chat_peg_parser([&](common_chat_peg_parser & p) {
 });
 ```
 
-Use `common_chat_peg_mapper` to extract the content. Note that this is already
-done for you in `common_chat_peg_parser` when
-`chat_format == COMMON_CHAT_FORMAT_PEG_SIMPLE`.
+Use `apply_chat_peg_mapper` with `common_chat_peg_base_mapper()` to extract the content. Note that this is already done for you in `common_chat_peg_parser` when `chat_format == COMMON_CHAT_FORMAT_PEG_SIMPLE`.
 
 ```cpp
 auto result = parser.parse(ctx);
 
 common_chat_msg msg;
-auto mapper = common_chat_peg_mapper(msg);
-mapper.from_ast(ctx.ast, result);
+apply_chat_peg_mapper(common_chat_peg_base_mapper(), ctx.ast, result, msg);
 ```
 
 ### Native

@@ -1526,15 +1526,12 @@ common_chat_msg common_chat_peg_parse(const common_peg_arena & parser, const std
     msg.role = "assistant";
 
     if (syntax.format == COMMON_CHAT_FORMAT_PEG_NATIVE) {
-        auto mapper = common_chat_peg_native_mapper(msg);
-        mapper.from_ast(ctx.ast, result);
+        apply_chat_peg_mapper(common_chat_peg_native_mapper(), ctx.ast, result, msg);
     } else if (syntax.format == COMMON_CHAT_FORMAT_PEG_CONSTRUCTED) {
-        auto mapper = common_chat_peg_constructed_mapper(msg);
-        mapper.from_ast(ctx.ast, result);
+        apply_chat_peg_mapper(common_chat_peg_constructed_mapper(), ctx.ast, result, msg);
     } else {
         // Generic mapper
-        auto mapper = common_chat_peg_mapper(msg);
-        mapper.from_ast(ctx.ast, result);
+        apply_chat_peg_mapper(common_chat_peg_base_mapper(), ctx.ast, result, msg);
     }
     if (!is_partial) {
         LOG_DBG("Parsed message: %s\n", common_chat_msgs_to_json_oaicompat<json>({msg}).at(0).dump().c_str());

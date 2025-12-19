@@ -3,6 +3,22 @@
 #include "chat.h"
 #include "peg-parser.h"
 
+// Mapper types: curried functions for AST-to-message conversion
+// The outer function captures the result, the inner processes each node
+typedef std::function<void(const common_peg_ast_node & node)> common_chat_peg_map_func;
+typedef std::function<common_chat_peg_map_func(common_chat_msg & result)> common_chat_peg_mapper;
+
+// Helper to apply a mapper to parse results
+inline void apply_chat_peg_mapper(
+    const common_chat_peg_mapper & mapper,
+    const common_peg_ast_arena & arena,
+    const common_peg_parse_result & parse_result,
+    common_chat_msg & msg
+) {
+    auto map_func = mapper(msg);
+    arena.visit(parse_result, map_func);
+}
+
 class common_chat_peg_builder : public common_peg_parser_builder {
   public:
     static constexpr const char * REASONING_BLOCK = "reasoning-block";
@@ -20,15 +36,8 @@ inline common_peg_arena build_chat_peg_parser(const std::function<common_peg_par
     return builder.build();
 }
 
-class common_chat_peg_mapper {
-  public:
-    common_chat_msg & result;
-
-    common_chat_peg_mapper(common_chat_msg & msg) : result(msg) {}
-
-    virtual void from_ast(const common_peg_ast_arena & arena, const common_peg_parse_result & result);
-    virtual void map(const common_peg_ast_node & node);
-};
+// Base mapper: handles reasoning and content tags
+common_chat_peg_mapper common_chat_peg_base_mapper();
 
 class common_chat_peg_native_builder : public common_chat_peg_builder {
   public:
@@ -47,14 +56,8 @@ class common_chat_peg_native_builder : public common_chat_peg_builder {
     common_peg_parser tool_args(const common_peg_parser & p) { return tag(TOOL_ARGS, p); }
 };
 
-class common_chat_peg_native_mapper : public common_chat_peg_mapper {
-    common_chat_tool_call * current_tool;
-
-  public:
-    common_chat_peg_native_mapper(common_chat_msg & msg) : common_chat_peg_mapper(msg) {}
-
-    void map(const common_peg_ast_node & node) override;
-};
+// Native mapper: handles tool calls with pre-parsed JSON args
+common_chat_peg_mapper common_chat_peg_native_mapper();
 
 inline common_peg_arena build_chat_peg_native_parser(const std::function<common_peg_parser(common_chat_peg_native_builder & builder)> & fn) {
     common_chat_peg_native_builder builder;
@@ -87,16 +90,8 @@ class common_chat_peg_constructed_builder : public common_chat_peg_builder {
     common_peg_parser tool_arg_json_value(const common_peg_parser & p) { return tag(TOOL_ARG_JSON_VALUE, p); }
 };
 
-class common_chat_peg_constructed_mapper : public common_chat_peg_mapper {
-    common_chat_tool_call * current_tool;
-    int arg_count = 0;
-    bool needs_closing_quote = false;
-
-  public:
-    common_chat_peg_constructed_mapper(common_chat_msg & msg) : common_chat_peg_mapper(msg) {}
-
-    void map(const common_peg_ast_node & node) override;
-};
+// Constructed mapper: builds JSON args from individual parsed pieces
+common_chat_peg_mapper common_chat_peg_constructed_mapper();
 
 inline common_peg_arena build_chat_peg_constructed_parser(const std::function<common_peg_parser(common_chat_peg_constructed_builder & builder)> & fn) {
     common_chat_peg_constructed_builder builder;
