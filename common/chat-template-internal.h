@@ -137,3 +137,6 @@ typedef common_chat_params (*common_chat_format_init_fn_llama3x)(
     const struct templates_params & params,
     bool allow_python_tag_builtin_tools
 );
+
+// Forward declarations for modular parser implementations in chat-syntax/
+common_chat_params common_chat_params_init_mistral_nemo(const common_chat_template & tmpl, const struct templates_params & inputs);

@@ -406,6 +406,13 @@ class common_peg_parser_builder {
         return add(common_peg_token_parser{literal});
     }
 
+    // Matches a token by text with a semantic tag.
+    // Combines atomic(), tag(), and token() - tokens are inherently atomic.
+    template<typename E, typename = std::enable_if_t<std::is_enum_v<E>>>
+    common_peg_parser token(const std::string & s, E tag_id) {
+        return atomic(tag(tag_id, token(s)));
+    }
+
     // Matches a sequence of parsers in order, all must succeed.
     //   S -> A B C
     common_peg_parser sequence() { return add(common_peg_sequence_parser{}); }

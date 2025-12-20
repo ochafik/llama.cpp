@@ -1,6 +1,7 @@
 #include "chat.h"
 #include "chat-parser.h"
 #include "chat-peg-parser.h"
+#include "chat-template-internal.h"
 #include "common.h"
 #include "json-partial.h"
 #include "json-schema-to-grammar.h"
@@ -22,15 +23,6 @@
 #include <vector>
 
 using json = nlohmann::ordered_json;
-
-static std::string format_time(const std::chrono::system_clock::time_point & now, const std::string & format) {
-    auto time = std::chrono::system_clock::to_time_t(now);
-    auto local_time = *std::localtime(&time);
-    std::ostringstream ss;
-    ss << std::put_time(&local_time, format.c_str());
-    auto res = ss.str();
-    return res;
-}
 
 static std::string string_diff(const std::string & last, const std::string & current) {
     if (last.empty()) {
@@ -143,24 +135,6 @@ struct common_chat_templates {
     bool has_explicit_template; // Model had builtin template or template overridde was specified.
     std::unique_ptr<common_chat_template> template_default; // always set (defaults to chatml)
     std::unique_ptr<common_chat_template> template_tool_use;
-};
-
-struct templates_params {
-    json messages;
-    json tools;
-    common_chat_tool_choice tool_choice;
-    json json_schema;
-    bool parallel_tool_calls;
-    common_reasoning_format reasoning_format;
-    bool stream;
-    std::string grammar;
-    bool add_generation_prompt = true;
-    bool enable_thinking = true;
-    std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
-    json extra_context;
-    bool add_bos;
-    bool add_eos;
-    bool is_inference = true;
 };
 
 common_chat_tool_choice common_chat_tool_choice_parse_oaicompat(const std::string & tool_choice) {
@@ -703,71 +677,6 @@ common_reasoning_format common_reasoning_format_from_name(const std::string & fo
     throw std::runtime_error("Unknown reasoning format: " + format);
 }
 
-static void foreach_function(const json & tools, const std::function<void(const json &)> & fn) {
-    for (const auto & tool : tools) {
-        if (!tool.contains("type") || tool.at("type") != "function" || !tool.contains("function")) {
-            LOG_INF("Skipping tool without function: %s", tool.dump(2).c_str());
-            continue;
-        }
-        fn(tool);
-    }
-}
-
-static void foreach_parameter(const json & function, const std::function<void(const std::string &, const json &, bool)> & fn) {
-    if (!function.contains("parameters") || !function.at("parameters").is_object()) {
-        return;
-    }
-    const auto & params = function.at("parameters");
-    if (!params.contains("properties") || !params.at("properties").is_object()) {
-        return;
-    }
-    const auto & props = params.at("properties");
-    std::set<std::string> required;
-    if (params.contains("required") && params.at("required").is_array()) {
-        params.at("required").get_to(required);
-    }
-    for (const auto & [name, prop] : props.items()) {
-        bool is_required = (required.find(name) != required.end());
-        fn(name, prop, is_required);
-    }
-}
-
-static std::string apply(
-    const common_chat_template & tmpl,
-    const struct templates_params & inputs,
-    const std::optional<json> & messages_override = std::nullopt,
-    const std::optional<json> & tools_override = std::nullopt,
-    const std::optional<json> & additional_context = std::nullopt)
-{
-    minja::chat_template_inputs tmpl_inputs;
-    tmpl_inputs.messages = messages_override ? *messages_override : inputs.messages;
-    if (tools_override) {
-        tmpl_inputs.tools = *tools_override;
-    } else {
-        tmpl_inputs.tools = inputs.tools.empty() ? json() : inputs.tools;
-    }
-    tmpl_inputs.add_generation_prompt = inputs.add_generation_prompt;
-    tmpl_inputs.extra_context = inputs.extra_context;
-    tmpl_inputs.extra_context["enable_thinking"] = inputs.enable_thinking;
-    if (additional_context) {
-        tmpl_inputs.extra_context.merge_patch(*additional_context);
-    }
-    // TODO: add flag to control date/time, if only for testing purposes.
-    // tmpl_inputs.now = std::chrono::system_clock::now();
-
-    minja::chat_template_options tmpl_opts;
-    // To avoid double BOS / EOS tokens, we're manually removing begining / trailing tokens
-    // instead of using `chat_template_options.use_bos_token = false`, since these tokens
-    // may be needed inside the template / between messages too.
-    auto result = tmpl.apply(tmpl_inputs, tmpl_opts);
-    if (inputs.add_bos && string_starts_with(result, tmpl.bos_token())) {
-        result = result.substr(tmpl.bos_token().size());
-    }
-    if (inputs.add_eos && string_ends_with(result, tmpl.eos_token())) {
-        result = result.substr(0, result.size() - tmpl.eos_token().size());
-    }
-    return result;
-}
 
 static common_chat_params common_chat_params_init_generic(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
@@ -854,52 +763,6 @@ static common_chat_params common_chat_params_init_generic(const common_chat_temp
     data.format = COMMON_CHAT_FORMAT_GENERIC;
     return data;
 }
-
-static common_chat_params common_chat_params_init_mistral_nemo(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    common_chat_params data;
-    data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
-    data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-        auto schemas = json::array();
-        foreach_function(inputs.tools, [&](const json & tool) {
-            const auto & function = tool.at("function");
-            schemas.push_back({
-                {"type", "object"},
-                {"properties", {
-                    // Important note: the model is probably trained to take a JSON stringified arguments value.
-                    // It's hard to constrain that for now (while reusing the JSON schema conversion), so we're just expecting a plain object.
-                    {"name", {
-                        {"type", "string"},
-                        {"const", function.at("name")},
-                    }},
-                    {"arguments", function.at("parameters")},
-                    {"id", {
-                        {"type", "string"},
-                        // Nemo's template expects a 9-character alphanumeric ID.
-                        {"pattern", "^[a-zA-Z0-9]{9}$"},
-                    }},
-                }},
-                {"required", json::array({"name", "arguments", "id"})},
-            });
-        });
-        auto schema = json {
-            {"type", "array"},
-            {"items", schemas.size() == 1 ? schemas[0] : json {{"anyOf", schemas}}},
-            {"minItems", 1},
-        };
-        if (!inputs.parallel_tool_calls) {
-            schema["maxItems"] = 1;
-        }
-        builder.add_rule("root", "\"[TOOL_CALLS]\" " + builder.add_schema("tool_calls", schema));
-    });
-    data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "[TOOL_CALLS]"});
-    data.preserved_tokens = {
-        "[TOOL_CALLS]",
-    };
-    data.prompt = apply(tmpl, inputs);
-    data.format = COMMON_CHAT_FORMAT_MISTRAL_NEMO;
-    return data;
-}
-
 
 // Case-insensitive find
 static size_t ifind_string(const std::string & haystack, const std::string & needle, size_t pos = 0) {
