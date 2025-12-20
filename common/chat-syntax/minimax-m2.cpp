@@ -60,30 +60,30 @@ common_chat_params common_chat_params_init_minimax_m2(const common_chat_template
                 auto schema_info = common_schema_info();
                 schema_info.resolve_refs(parameters);
 
-                // Format: <invoke name="function_name"><parameter name="key">value</parameter></invoke>
+                // Format: <invoke name="function_name">\n<parameter name="key">value</parameter>\n</invoke>\n
                 auto tool_open = "<invoke name=\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\">\n";
                 auto tool_close = p.literal("</invoke>\n");
                 auto args = p.sequence();
                 auto arg_string = p.rule("xml-arg-string", p.until_one_of({
-                    "\n</parameter>",
-                    "\n<parameter name=",
-                    "\n</invoke>"
+                    "</parameter>",
+                    "<parameter name=",
+                    "</invoke>"
                 }));
 
                 foreach_parameter(function, [&](const auto & param_name, const json & param_schema, bool is_required) {
                     auto rule_name = "tool-" + name + "-arg-" + param_name;
 
-                    auto arg_open = "<parameter name=\"" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + "\">\n";
+                    auto arg_open = "<parameter name=\"" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + "\">";
                     auto arg_close = p.literal("</parameter>\n");
                     auto arg_value = p.eps();
 
                     if (schema_info.resolves_to_string(param_schema)) {
-                        arg_value = p.tag(Tag::TOOL_ARG_STRING_VALUE, arg_string) + "\n";
+                        arg_value = p.tag(Tag::TOOL_ARG_STRING_VALUE, arg_string);
                     } else {
                         arg_value = p.tag(Tag::TOOL_ARG_JSON_VALUE, p.schema(p.json(), rule_name + "-schema", param_schema));
                     }
 
-                    auto arg_rule = p.rule(rule_name, p.atomic_tag(Tag::TOOL_ARG_OPEN, arg_open) + arg_value + p.optional(p.atomic_tag(Tag::TOOL_ARG_CLOSE, arg_close)));
+                    auto arg_rule = p.rule(rule_name, p.atomic_tag(Tag::TOOL_ARG_OPEN, arg_open) + arg_value + p.atomic_tag(Tag::TOOL_ARG_CLOSE, arg_close));
                     args += p.repeat(arg_rule, /* min = */ is_required ? 1 : 0, /* max = */ 1);
                 });
 
@@ -108,20 +108,16 @@ common_chat_params common_chat_params_init_minimax_m2(const common_chat_template
     if (include_grammar) {
         data.grammar_lazy = has_tools && inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
 
-        // Build grammar using XML tool call helper
-        // Note: We can't use parser.build_grammar() because the PEG parser uses optional()
-        // for closing tags to handle streaming, but grammar needs required closing tags.
-        static const xml_tool_call_format form {
-            /* form.scope_start = */ "<minimax:tool_call>\n",
-            /* form.tool_start  = */ "<invoke name=\"",
-            /* form.tool_sep    = */ "\">\n",
-            /* form.key_start   = */ "<parameter name=\"",
-            /* form.key_val_sep = */ "\">",
-            /* form.val_end     = */ "</parameter>\n",
-            /* form.tool_end    = */ "</invoke>\n",
-            /* form.scope_end   = */ "</minimax:tool_call>",
-        };
-        build_grammar_xml_tool_call(data, inputs.tools, form);
+        // Build grammar from PEG parser
+        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
+            foreach_function(inputs.tools, [&](const json & tool) {
+                auto schema = tool.at("function").at("parameters");
+                builder.resolve_refs(schema);
+            });
+            parser.build_grammar(builder, data.grammar_lazy);
+        });
+
+        data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<minimax:tool_call>"});
     }
 
     return data;
