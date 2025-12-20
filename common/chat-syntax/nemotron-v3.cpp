@@ -56,7 +56,7 @@ common_chat_params common_chat_params_init_nemotron_v3(const common_chat_templat
                 auto schema_info = common_schema_info();
                 schema_info.resolve_refs(parameters);
 
-                auto tool_open = "<function=" + p.atomic_tag(Tag::TOOL_NAME, p.literal(name)) + ">\n";
+                auto tool_open = "<function=" + p.literal_tag(Tag::TOOL_NAME, name) + ">\n";
                 auto tool_close = p.literal("</function>\n");
                 auto args = p.sequence();
                 auto arg_string = p.rule("xml-arg-string", p.until_one_of({
@@ -68,7 +68,7 @@ common_chat_params common_chat_params_init_nemotron_v3(const common_chat_templat
                 foreach_parameter(function, [&](const auto & param_name, const json & param_schema, bool is_required) {
                     auto rule_name = "tool-" + name + "-arg-" + param_name;
 
-                    auto arg_open = "<parameter=" + p.atomic_tag(Tag::TOOL_ARG_NAME, p.literal(param_name)) + ">\n";
+                    auto arg_open = "<parameter=" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + ">\n";
                     auto arg_close = p.literal("</parameter>\n");
                     auto arg_value = p.eps();
 

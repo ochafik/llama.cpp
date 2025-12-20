@@ -47,11 +47,9 @@ struct templates_params {
 };
 
 // Helper to iterate over function tools
-// Note: The version in chat.cpp has LOG_INF but that's debug-only, so we skip it here
 inline void foreach_function(const json & tools, const std::function<void(const json &)> & fn) {
     for (const auto & tool : tools) {
         if (!tool.contains("type") || tool.at("type") != "function" || !tool.contains("function")) {
-            // Debug-only: LOG_INF("Skipping tool without function: %s", tool.dump(2).c_str());
             continue;
         }
         fn(tool);
@@ -139,16 +137,3 @@ typedef common_chat_params (*common_chat_format_init_fn_llama3x)(
     const struct templates_params & params,
     bool allow_python_tag_builtin_tools
 );
-
-// Forward declarations for format init functions (defined in chat-syntax/*.cpp)
-common_chat_params common_chat_params_init_function_gemma(
-    const common_chat_template & tmpl,
-    const struct templates_params & params);
-
-common_chat_params common_chat_params_init_ministral_3(
-    const common_chat_template & tmpl,
-    const struct templates_params & params);
-
-common_chat_params common_chat_params_init_nemotron_v3(
-    const common_chat_template & tmpl,
-    const struct templates_params & params);

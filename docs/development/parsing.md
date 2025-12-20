@@ -246,12 +246,12 @@ build_chat_peg_native_parser([&](auto & p) {
 });
 ```
 
-### Constructed
+### Nemotron V3 (Constructed Arguments)
 
-The `constructed` parser is for models that emit tool arguments as separate entities (e.g., XML tags).
+The Nemotron V3 parser is for models that emit tool arguments as separate entities (e.g., XML tags like `<function=name><parameter=key>value</parameter></function>`).
 
 ```cpp
-build_chat_peg_constructed_parser([&](auto & p) {
+build_chat_peg_nemotron_v3_parser([&](auto & p) {
     using Tag = common_chat_peg_tag;
     auto location_arg = p.tag(Tag::TOOL_ARG, p.sequence({
         p.atomic_tag(Tag::TOOL_ARG_OPEN, "<parameter name=\"" + p.atomic_tag(Tag::TOOL_ARG_NAME, p.literal("location")) + "\">"),

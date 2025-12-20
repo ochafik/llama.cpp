@@ -545,6 +545,15 @@ class common_peg_parser_builder {
     template<typename E, typename = std::enable_if_t<std::is_enum_v<E>>>
     common_peg_parser atomic_tag(E tag_id, const common_peg_parser & p) { return atomic(tag(tag_id, p)); }
 
+    // Literal tag: combines atomic(), tag(), and literal() - for tagging string literals
+    template<typename E, typename = std::enable_if_t<std::is_enum_v<E>>>
+    common_peg_parser literal_tag(E tag_id, const std::string & s) { return atomic(tag(tag_id, literal(s))); }
+
+    // Token tag: combines atomic(), tag(), and token() - for tagging token literals
+    // Tokens are inherently atomic (single token match or atomic text fallback)
+    template<typename E, typename = std::enable_if_t<std::is_enum_v<E>>>
+    common_peg_parser token_tag(E tag_id, const std::string & s) { return atomic(tag(tag_id, token(s))); }
+
     void set_root(const common_peg_parser & p);
 
     common_peg_arena build();

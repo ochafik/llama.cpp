@@ -78,7 +78,7 @@ common_chat_params common_chat_params_init_ministral_3(const common_chat_templat
                 const auto & schema = function.at("parameters");
 
                 tool_choice |= p.rule("tool-" + name,
-                    p.atomic_tag(Tag::TOOL_OPEN, p.atomic_tag(Tag::TOOL_NAME, p.literal(name)) + "[ARGS]")
+                    p.atomic_tag(Tag::TOOL_OPEN, p.literal_tag(Tag::TOOL_NAME, name) + p.token("[ARGS]"))
                     + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-schema", schema))
                 );
             });
