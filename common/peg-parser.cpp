@@ -692,6 +692,87 @@ struct parser_executor {
         return common_peg_parse_result(COMMON_PEG_PARSE_RESULT_SUCCESS, start_pos, last_valid_pos);
     }
 
+    common_peg_parse_result operator()(const common_peg_until_token_parser & p) const {
+        // Resolve token IDs for all delimiters
+        std::vector<int32_t> delimiter_ids;
+        for (const auto & delim : p.delimiters) {
+            int32_t token_id = ctx.resolve_token_id(delim);
+            if (token_id != COMMON_PEG_TOKEN_NULL) {
+                delimiter_ids.push_back(token_id);
+            }
+        }
+
+        // If we have token info and all delimiters resolved, use token-aware matching
+        if (ctx.has_token_info() && delimiter_ids.size() == p.delimiters.size()) {
+            // Scan token boundaries looking for delimiter tokens
+            size_t pos = start_pos;
+
+            while (pos < ctx.input.size()) {
+                // Check if any delimiter token starts at this position
+                for (int32_t delim_id : delimiter_ids) {
+                    if (ctx.is_token_at(pos, delim_id)) {
+                        // Found a delimiter token, return everything before it
+                        return common_peg_parse_result(COMMON_PEG_PARSE_RESULT_SUCCESS, start_pos, pos);
+                    }
+                }
+
+                // Move to next token boundary
+                size_t next_pos = ctx.token_end_at(pos);
+                if (next_pos == pos) {
+                    // No token at this position, move by one character
+                    ++pos;
+                } else {
+                    pos = next_pos;
+                }
+            }
+
+            if (ctx.is_partial) {
+                // Reached end of partial input, need more
+                return common_peg_parse_result(COMMON_PEG_PARSE_RESULT_NEED_MORE_INPUT, start_pos, pos);
+            }
+            return common_peg_parse_result(COMMON_PEG_PARSE_RESULT_SUCCESS, start_pos, pos);
+        }
+
+        // Fall back to text-based matching (same as until_parser)
+        trie matcher(p.delimiters);
+
+        size_t pos = start_pos;
+        size_t last_valid_pos = start_pos;
+
+        while (pos < ctx.input.size()) {
+            auto utf8_result = parse_utf8_codepoint(ctx.input, pos);
+
+            if (utf8_result.status == utf8_parse_result::INCOMPLETE) {
+                if (!ctx.is_partial) {
+                    return common_peg_parse_result(COMMON_PEG_PARSE_RESULT_FAIL, start_pos);
+                }
+                return common_peg_parse_result(COMMON_PEG_PARSE_RESULT_NEED_MORE_INPUT, start_pos, last_valid_pos);
+            }
+
+            if (utf8_result.status == utf8_parse_result::INVALID) {
+                return common_peg_parse_result(COMMON_PEG_PARSE_RESULT_FAIL, start_pos);
+            }
+
+            auto match = matcher.check_at(ctx.input, pos);
+
+            if (match == trie::COMPLETE_MATCH) {
+                return common_peg_parse_result(COMMON_PEG_PARSE_RESULT_SUCCESS, start_pos, pos);
+            }
+
+            if (match == trie::PARTIAL_MATCH) {
+                return common_peg_parse_result(COMMON_PEG_PARSE_RESULT_SUCCESS, start_pos, pos);
+            }
+
+            pos += utf8_result.bytes_consumed;
+            last_valid_pos = pos;
+        }
+
+        if (last_valid_pos == ctx.input.size() && ctx.is_partial) {
+            return common_peg_parse_result(COMMON_PEG_PARSE_RESULT_NEED_MORE_INPUT, start_pos, last_valid_pos);
+        }
+        return common_peg_parse_result(COMMON_PEG_PARSE_RESULT_SUCCESS, start_pos, last_valid_pos);
+    }
+
     common_peg_parse_result operator()(const common_peg_schema_parser & p) {
         return arena.parse(p.child, ctx, start_pos);
     }
@@ -814,6 +895,7 @@ void common_peg_arena::resolve_refs() {
                                  std::is_same_v<T, common_peg_end_parser> ||
                                  std::is_same_v<T, common_peg_ref_parser> ||
                                  std::is_same_v<T, common_peg_until_parser> ||
+                                 std::is_same_v<T, common_peg_until_token_parser> ||
                                  std::is_same_v<T, common_peg_literal_parser> ||
                                  std::is_same_v<T, common_peg_token_parser> ||
                                  std::is_same_v<T, common_peg_json_string_parser> ||
@@ -883,6 +965,8 @@ std::string common_peg_arena::dump(common_peg_parser_id id) const {
             return "JsonString()";
         } else if constexpr (std::is_same_v<T, common_peg_until_parser>) {
             return "Until(" + string_join(p.delimiters, " | ") + ")";
+        } else if constexpr (std::is_same_v<T, common_peg_until_token_parser>) {
+            return "UntilToken(" + string_join(p.delimiters, " | ") + ")";
         } else if constexpr (std::is_same_v<T, common_peg_schema_parser>) {
             return "Schema(" + dump(p.child) + ", " + (p.schema ? p.schema->dump() : "null") + ")";
         } else if constexpr (std::is_same_v<T, common_peg_rule_parser>) {
@@ -1237,6 +1321,7 @@ static std::unordered_set<std::string> collect_reachable_rules(
                           std::is_same_v<T, common_peg_start_parser> ||
                           std::is_same_v<T, common_peg_end_parser> ||
                           std::is_same_v<T, common_peg_until_parser> ||
+                          std::is_same_v<T, common_peg_until_token_parser> ||
                           std::is_same_v<T, common_peg_literal_parser> ||
                           std::is_same_v<T, common_peg_token_parser> ||
                           std::is_same_v<T, common_peg_chars_parser> ||
@@ -1295,9 +1380,8 @@ void common_peg_arena::build_grammar(const common_grammar_builder & builder, boo
             } else if constexpr (std::is_same_v<T, common_peg_literal_parser>) {
                 return gbnf_format_literal(p.literal);
             } else if constexpr (std::is_same_v<T, common_peg_token_parser>) {
-                // For grammar generation, token parsers are emitted as literals
-                // The token-aware matching happens at parse time, not grammar time
-                return gbnf_format_literal(p.literal);
+                // Emit as @"..." token-aware literal for GBNF
+                return "@" + gbnf_format_literal(p.literal);
             } else if constexpr (std::is_same_v<T, common_peg_sequence_parser>) {
                 std::string s;
                 for (const auto & child : p.children) {
@@ -1385,6 +1469,12 @@ void common_peg_arena::build_grammar(const common_grammar_builder & builder, boo
             } else if constexpr (std::is_same_v<T, common_peg_json_string_parser>) {
                 return R"(( [^"\\] | "\\" ( ["\\/ bfnrt] | "u" [0-9a-fA-F]{4} ) )*)";
             } else if constexpr (std::is_same_v<T, common_peg_until_parser>) {
+                if (p.delimiters.empty()) {
+                    return ".*";
+                }
+                return gbnf_excluding_pattern(p.delimiters);
+            } else if constexpr (std::is_same_v<T, common_peg_until_token_parser>) {
+                // GBNF doesn't have token-awareness, so same as text-based until
                 if (p.delimiters.empty()) {
                     return ".*";
                 }
@@ -1519,6 +1609,8 @@ static nlohmann::json serialize_parser_variant(const common_peg_parser_variant &
             return json{{"type", "json_string"}};
         } else if constexpr (std::is_same_v<T, common_peg_until_parser>) {
             return json{{"type", "until"}, {"delimiters", p.delimiters}};
+        } else if constexpr (std::is_same_v<T, common_peg_until_token_parser>) {
+            return json{{"type", "until_token"}, {"delimiters", p.delimiters}};
         } else if constexpr (std::is_same_v<T, common_peg_schema_parser>) {
             return json{
                 {"type", "schema"},
@@ -1657,6 +1749,12 @@ static common_peg_parser_variant deserialize_parser_variant(const nlohmann::json
             throw std::runtime_error("until parser missing or invalid 'delimiters' field");
         }
         return common_peg_until_parser{j["delimiters"].get<std::vector<std::string>>()};
+    }
+    if (type == "until_token") {
+        if (!j.contains("delimiters") || !j["delimiters"].is_array()) {
+            throw std::runtime_error("until_token parser missing or invalid 'delimiters' field");
+        }
+        return common_peg_until_token_parser{j["delimiters"].get<std::vector<std::string>>()};
     }
     if (type == "schema") {
         if (!j.contains("child") || !j.contains("name") || !j.contains("schema") || !j.contains("raw")) {

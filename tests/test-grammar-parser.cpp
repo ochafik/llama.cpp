@@ -529,5 +529,26 @@ int main()
         {LLAMA_GRETYPE_END, 0},
     });
 
+    // @"..." token literal syntax (without vocab, falls back to CHAR elements)
+    verify_parsing(R"""(
+        root  ::= @"hello" " " @"world"
+    )""", {
+        {"root", 0}
+    }, {
+        // root (index 0) - @"hello" expands to CHAR elements without vocab
+        {LLAMA_GRETYPE_CHAR, 'h'},
+        {LLAMA_GRETYPE_CHAR, 'e'},
+        {LLAMA_GRETYPE_CHAR, 'l'},
+        {LLAMA_GRETYPE_CHAR, 'l'},
+        {LLAMA_GRETYPE_CHAR, 'o'},
+        {LLAMA_GRETYPE_CHAR, ' '},
+        {LLAMA_GRETYPE_CHAR, 'w'},
+        {LLAMA_GRETYPE_CHAR, 'o'},
+        {LLAMA_GRETYPE_CHAR, 'r'},
+        {LLAMA_GRETYPE_CHAR, 'l'},
+        {LLAMA_GRETYPE_CHAR, 'd'},
+        {LLAMA_GRETYPE_END, 0},
+    });
+
     return 0;
 }

@@ -1971,9 +1971,8 @@ static common_chat_params common_chat_params_init_function_gemma(const common_ch
         auto arg_name = p.tool_arg_name(identifier);
 
         // String value: <escape>...<escape> with content captured
-        // Note: using text-based matching for <escape> inside content; token-awareness
-        // applies at token boundaries which works for the delimiters themselves
-        auto string_value = p.escape() + p.tool_arg_string_value(p.until("<escape>")) + p.escape();
+        // Token-aware matching ensures we don't match partial token sequences
+        auto string_value = p.escape() + p.tool_arg_string_value(p.until_token("<escape>")) + p.escape();
 
         // JSON value: raw number, boolean, null, array, or object (without escape delimiters)
         auto json_value = p.tool_arg_json_value(p.json());
@@ -1995,8 +1994,8 @@ static common_chat_params common_chat_params_init_function_gemma(const common_ch
             + p.tool_close(p.end_function_call())
         );
 
-        // Content before tool calls
-        auto content = p.content(p.until("<start_function_call>"));
+        // Content before tool calls (token-aware matching)
+        auto content = p.content(p.until_token("<start_function_call>"));
 
         if (has_tools && params.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
             int min_calls = params.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;

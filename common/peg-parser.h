@@ -269,6 +269,13 @@ struct common_peg_until_parser {
     std::vector<std::string> delimiters;
 };
 
+// Token-aware until: matches until a token delimiter is found.
+// Token IDs are resolved at parse time from context's token_ids map.
+// Falls back to text matching if token info not available.
+struct common_peg_until_token_parser {
+    std::vector<std::string> delimiters;  // Text form of tokens to match
+};
+
 struct common_peg_schema_parser {
     common_peg_parser_id child;
     std::string name;
@@ -314,6 +321,7 @@ using common_peg_parser_variant = std::variant<
     common_peg_chars_parser,
     common_peg_json_string_parser,
     common_peg_until_parser,
+    common_peg_until_token_parser,
     common_peg_schema_parser,
     common_peg_rule_parser,
     common_peg_ref_parser,
@@ -456,6 +464,16 @@ class common_peg_parser_builder {
     // Matches all characters until one of the delimiters in the list is found (delimiter not consumed).
     //   S -> (!delim .)*
     common_peg_parser until_one_of(const std::vector<std::string> & delimiters) { return add(common_peg_until_parser{delimiters}); }
+
+    // Token-aware until: matches until a token delimiter is found.
+    // Token ID is resolved at parse time from context's token_ids map.
+    // Falls back to text matching if token info not available.
+    //   S -> (!delim .)*
+    common_peg_parser until_token(const std::string & delimiter) { return add(common_peg_until_token_parser{{delimiter}}); }
+
+    // Token-aware until: matches until one of the token delimiters is found.
+    //   S -> (!delim .)*
+    common_peg_parser until_token_one_of(const std::vector<std::string> & delimiters) { return add(common_peg_until_token_parser{delimiters}); }
 
     // Matches everything
     //   S -> .*
