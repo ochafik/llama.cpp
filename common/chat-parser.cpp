@@ -1668,7 +1668,8 @@ common_chat_msg common_chat_peg_parse(const common_peg_arena & parser, const std
     common_chat_msg msg;
     msg.role = "assistant";
 
-    if (syntax.format == COMMON_CHAT_FORMAT_NEMOTRON_V3) {
+    if (syntax.format == COMMON_CHAT_FORMAT_NEMOTRON_V3 ||
+        syntax.format == COMMON_CHAT_FORMAT_SEED_OSS) {
         apply_chat_peg_mapper(common_chat_peg_constructed_mapper(), ctx.ast, result, msg);
     } else if (syntax.format == COMMON_CHAT_FORMAT_FUNCTION_GEMMA) {
         apply_chat_peg_mapper(common_chat_peg_function_gemma_mapper(), ctx.ast, result, msg);
