@@ -772,38 +772,6 @@ static size_t ifind_string(const std::string & haystack, const std::string & nee
     return (it == haystack.end()) ? std::string::npos : std::distance(haystack.begin(), it);
 }
 
-static common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_template & tmpl, const struct templates_params & params) {
-    common_chat_params data;
-    data.grammar_lazy = params.tools.is_array() && !params.tools.empty() && params.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
-
-    data.prompt = apply(tmpl, params);
-    data.format = COMMON_CHAT_FORMAT_QWEN3_CODER_XML;
-
-    data.preserved_tokens = {
-        "<tool_call>",
-        "</tool_call>",
-        "<function=",
-        "</function>",
-        "<parameter=",
-        "</parameter>",
-    };
-
-    // build grammar for tool call
-    static const xml_tool_call_format form {
-        /* form.scope_start = */ "<tool_call>\n",
-        /* form.tool_start  = */ "<function=",
-        /* form.tool_sep    = */ ">\n",
-        /* form.key_start   = */ "<parameter=",
-        /* form.key_val_sep = */ ">\n",
-        /* form.val_end     = */ "\n</parameter>\n",
-        /* form.tool_end    = */ "</function>\n",
-        /* form.scope_end   = */ "</tool_call>",
-    };
-    build_grammar_xml_tool_call(data, params.tools, form);
-
-    return data;
-}
-
 static common_chat_params common_chat_params_init_kimi_k2(const common_chat_template & tmpl, const struct templates_params & params) {
     common_chat_params data;
     data.grammar_lazy = params.tools.is_array() && !params.tools.empty() && params.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
