@@ -88,6 +88,9 @@ common_chat_peg_mapper common_chat_peg_constructed_mapper();
 // FunctionGemma mapper: similar to constructed but uses <escape> delimited strings
 common_chat_peg_mapper common_chat_peg_function_gemma_mapper();
 
+// Short form mapper: handles {"function_name": {"arg1": value1}} format (used by Apertus)
+common_chat_peg_mapper common_chat_peg_short_form_mapper();
+
 // Convenience aliases for building parsers
 inline common_peg_arena build_chat_peg_native_parser(const std::function<common_peg_parser(common_peg_parser_builder & builder)> & fn) {
     return build_chat_peg_parser(fn);

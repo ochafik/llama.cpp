@@ -153,3 +153,4 @@ common_chat_params common_chat_params_init_nemotron_v3(const common_chat_templat
 common_chat_params common_chat_params_init_seed_oss(const common_chat_template & tmpl, const struct templates_params & inputs);
 common_chat_params common_chat_params_init_nemotron_v2(const common_chat_template & tmpl, const struct templates_params & inputs);
 common_chat_params common_chat_params_init_lfm2(const common_chat_template & tmpl, const struct templates_params & inputs);
+common_chat_params common_chat_params_init_apertus(const common_chat_template & tmpl, const struct templates_params & inputs);

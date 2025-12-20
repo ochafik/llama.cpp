@@ -193,3 +193,54 @@ common_chat_peg_mapper common_chat_peg_function_gemma_mapper() {
         };
     };
 }
+
+// Short form mapper: handles {"function_name": {"arg1": value1}} format (used by Apertus)
+// The entire JSON array is captured in TOOL_ARGS, and we parse it to extract individual tool calls
+common_chat_peg_mapper common_chat_peg_short_form_mapper() {
+    return [](common_chat_msg & result) -> common_chat_peg_map_func {
+        auto base = common_chat_peg_base_mapper()(result);
+
+        return [&result, base](const common_peg_ast_node & node) mutable {
+            base(node);
+
+            switch (static_cast<Tag>(node.tag_id)) {
+                case Tag::TOOL_ARGS: {
+                    // Parse the JSON array - format is [{"func_name": {...}}, ...]
+                    try {
+                        auto arr = json::parse(node.text);
+                        if (!arr.is_array()) {
+                            break;
+                        }
+                        for (const auto & item : arr) {
+                            if (!item.is_object() || item.size() != 1) {
+                                continue;
+                            }
+                            // The key is the function name, the value is the arguments
+                            auto it = item.begin();
+                            std::string name = it.key();
+                            const json & args = it.value();
+
+                            result.tool_calls.emplace_back();
+                            auto & tool = result.tool_calls.back();
+                            tool.name = name;
+                            if (args.is_object()) {
+                                tool.arguments = args.dump();
+                            } else if (args.is_string()) {
+                                tool.arguments = args.get<std::string>();
+                            } else if (!args.is_null()) {
+                                tool.arguments = args.dump();
+                            } else {
+                                tool.arguments = "{}";
+                            }
+                        }
+                    } catch (...) {
+                        // JSON parse error - ignore
+                    }
+                    break;
+                }
+                default:
+                    break;
+            }
+        };
+    };
+}

@@ -1673,6 +1673,8 @@ common_chat_msg common_chat_peg_parse(const common_peg_arena & parser, const std
         apply_chat_peg_mapper(common_chat_peg_constructed_mapper(), ctx.ast, result, msg);
     } else if (syntax.format == COMMON_CHAT_FORMAT_FUNCTION_GEMMA) {
         apply_chat_peg_mapper(common_chat_peg_function_gemma_mapper(), ctx.ast, result, msg);
+    } else if (syntax.format == COMMON_CHAT_FORMAT_APERTUS) {
+        apply_chat_peg_mapper(common_chat_peg_short_form_mapper(), ctx.ast, result, msg);
     } else {
         // Default to native mapper for all PEG-based formats
         apply_chat_peg_mapper(common_chat_peg_native_mapper(), ctx.ast, result, msg);
