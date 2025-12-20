@@ -47,11 +47,9 @@ common_chat_params common_chat_params_init_llama_3_x(const common_chat_template 
                 auto parameters = function.at("parameters");
 
                 // Check if this is a builtin tool
-                bool is_builtin = false;
                 if (allow_python_tag_builtin_tools) {
                     if (name == "wolfram_alpha" || name == "web_search" || name == "brave_search" ||
                         name == "python" || name == "code_interpreter") {
-                        is_builtin = true;
                         builtin_tool_names.push_back(name);
                         builtin_tools.push_back(name);
 
