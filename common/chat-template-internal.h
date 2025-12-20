@@ -160,3 +160,4 @@ common_chat_params common_chat_params_init_kimi_k2(const common_chat_template & 
 common_chat_params common_chat_params_init_apriel_1_5(const common_chat_template & tmpl, const struct templates_params & inputs);
 common_chat_params common_chat_params_init_xiaomi_mimo(const common_chat_template & tmpl, const struct templates_params & inputs);
 common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & tmpl, const struct templates_params & inputs);
+common_chat_params common_chat_params_init_granite(const common_chat_template & tmpl, const struct templates_params & inputs);
