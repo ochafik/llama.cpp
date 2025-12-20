@@ -1054,13 +1054,14 @@ static common_chat_params common_chat_params_init_ministral_3(const common_chat_
         "[ARGS]",
     };
 
-    auto parser = build_chat_peg_native_parser([&](common_chat_peg_native_builder & p) {
-        auto reasoning = extract_reasoning ? p.optional("[THINK]" + p.reasoning(p.until("[/THINK]")) + "[/THINK]") : p.eps();
+    auto parser = build_chat_peg_native_parser([&](auto & p) {
+        using Tag = common_chat_peg_tag;
+        auto reasoning = extract_reasoning ? p.optional("[THINK]" + p.tag(Tag::REASONING, p.until("[/THINK]")) + "[/THINK]") : p.eps();
 
         // Response format parser
         if (inputs.json_schema.is_object() && !inputs.json_schema.empty()) {
             // Ministral wants to emit json surrounded by code fences
-            return reasoning << "```json" << p.content(p.schema(p.json(), "response-format", inputs.json_schema)) << "```";
+            return reasoning << "```json" << p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema)) << "```";
         }
 
         // Tool call parser
@@ -1072,8 +1073,8 @@ static common_chat_params common_chat_params_init_ministral_3(const common_chat_
                 const auto & schema = function.at("parameters");
 
                 tool_choice |= p.rule("tool-" + name,
-                    p.tool_open(p.tool_name(p.literal(name)) + "[ARGS]")
-                    + p.tool_args(p.schema(p.json(), "tool-" + name + "-schema", schema))
+                    p.atomic_tag(Tag::TOOL_OPEN, p.atomic_tag(Tag::TOOL_NAME, p.literal(name)) + "[ARGS]")
+                    + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-schema", schema))
                 );
             });
 
@@ -1081,12 +1082,12 @@ static common_chat_params common_chat_params_init_ministral_3(const common_chat_
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
             auto tool_calls = p.trigger_rule("tool-call", p.repeat("[TOOL_CALLS]" + tool_choice, min_calls, max_calls));
 
-            return reasoning << p.content(p.until("[TOOL_CALLS]")) << tool_calls;
+            return reasoning << p.tag(Tag::CONTENT, p.until("[TOOL_CALLS]")) << tool_calls;
         }
 
         // Content only parser
         include_grammar = false;
-        return reasoning << p.content(p.rest());
+        return reasoning << p.tag(Tag::CONTENT, p.rest());
     });
 
     data.parser = parser.save();

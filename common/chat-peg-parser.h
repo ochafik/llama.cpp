@@ -3,8 +3,53 @@
 #include "chat.h"
 #include "peg-parser.h"
 
+// Chat PEG tag enum - all tags used in chat parsing
+enum class common_chat_peg_tag : int {
+    NONE = 0,
+    // Base tags
+    REASONING_BLOCK,
+    REASONING,
+    CONTENT,
+    // Native tool call tags
+    TOOL,
+    TOOL_OPEN,
+    TOOL_CLOSE,
+    TOOL_ID,
+    TOOL_NAME,
+    TOOL_ARGS,
+    // Constructed tool call tags
+    TOOL_ARG,
+    TOOL_ARG_OPEN,
+    TOOL_ARG_CLOSE,
+    TOOL_ARG_NAME,
+    TOOL_ARG_STRING_VALUE,
+    TOOL_ARG_JSON_VALUE,
+};
+
+// Tag to string for debugging/serialization (exhaustive switch)
+inline const char * common_chat_peg_tag_to_string(common_chat_peg_tag tag) {
+    switch (tag) {
+        case common_chat_peg_tag::NONE:                 return "";
+        case common_chat_peg_tag::REASONING_BLOCK:      return "reasoning-block";
+        case common_chat_peg_tag::REASONING:            return "reasoning";
+        case common_chat_peg_tag::CONTENT:              return "content";
+        case common_chat_peg_tag::TOOL:                 return "tool";
+        case common_chat_peg_tag::TOOL_OPEN:            return "tool-open";
+        case common_chat_peg_tag::TOOL_CLOSE:           return "tool-close";
+        case common_chat_peg_tag::TOOL_ID:              return "tool-id";
+        case common_chat_peg_tag::TOOL_NAME:            return "tool-name";
+        case common_chat_peg_tag::TOOL_ARGS:            return "tool-args";
+        case common_chat_peg_tag::TOOL_ARG:             return "tool-arg";
+        case common_chat_peg_tag::TOOL_ARG_OPEN:        return "tool-arg-open";
+        case common_chat_peg_tag::TOOL_ARG_CLOSE:       return "tool-arg-close";
+        case common_chat_peg_tag::TOOL_ARG_NAME:        return "tool-arg-name";
+        case common_chat_peg_tag::TOOL_ARG_STRING_VALUE: return "tool-arg-string-value";
+        case common_chat_peg_tag::TOOL_ARG_JSON_VALUE:  return "tool-arg-json-value";
+    }
+    return "unknown";
+}
+
 // Mapper types: curried functions for AST-to-message conversion
-// The outer function captures the result, the inner processes each node
 typedef std::function<void(const common_peg_ast_node & node)> common_chat_peg_map_func;
 typedef std::function<common_chat_peg_map_func(common_chat_msg & result)> common_chat_peg_mapper;
 
@@ -19,16 +64,11 @@ inline void apply_chat_peg_mapper(
     arena.visit(parse_result, map_func);
 }
 
-class common_chat_peg_builder : public common_peg_parser_builder {
-  public:
-    static constexpr const char * REASONING_BLOCK = "reasoning-block";
-    static constexpr const char * REASONING = "reasoning";
-    static constexpr const char * CONTENT = "content";
+// Alias for the tag enum
+using Tag = common_chat_peg_tag;
 
-    common_peg_parser reasoning_block(const common_peg_parser & p) { return tag(REASONING_BLOCK, p); }
-    common_peg_parser reasoning(const common_peg_parser & p) { return tag(REASONING, p); }
-    common_peg_parser content(const common_peg_parser & p) { return tag(CONTENT, p); }
-};
+// The builder now just inherits from the base - use p.tag(Tag::XXX, parser) directly
+using common_chat_peg_builder = common_peg_parser_builder;
 
 inline common_peg_arena build_chat_peg_parser(const std::function<common_peg_parser(common_chat_peg_builder & builder)> & fn) {
     common_chat_peg_builder builder;
@@ -39,62 +79,17 @@ inline common_peg_arena build_chat_peg_parser(const std::function<common_peg_par
 // Base mapper: handles reasoning and content tags
 common_chat_peg_mapper common_chat_peg_base_mapper();
 
-class common_chat_peg_native_builder : public common_chat_peg_builder {
-  public:
-    static constexpr const char * TOOL = "tool";
-    static constexpr const char * TOOL_OPEN = "tool-open";
-    static constexpr const char * TOOL_CLOSE = "tool-close";
-    static constexpr const char * TOOL_ID = "tool-id";
-    static constexpr const char * TOOL_NAME = "tool-name";
-    static constexpr const char * TOOL_ARGS = "tool-args";
-
-    common_peg_parser tool(const common_peg_parser & p) { return tag(TOOL, p); }
-    common_peg_parser tool_open(const common_peg_parser & p) { return atomic(tag(TOOL_OPEN, p)); }
-    common_peg_parser tool_close(const common_peg_parser & p) { return atomic(tag(TOOL_CLOSE, p)); }
-    common_peg_parser tool_id(const common_peg_parser & p) { return atomic(tag(TOOL_ID, p)); }
-    common_peg_parser tool_name(const common_peg_parser & p) { return atomic(tag(TOOL_NAME, p)); }
-    common_peg_parser tool_args(const common_peg_parser & p) { return tag(TOOL_ARGS, p); }
-};
-
 // Native mapper: handles tool calls with pre-parsed JSON args
 common_chat_peg_mapper common_chat_peg_native_mapper();
-
-inline common_peg_arena build_chat_peg_native_parser(const std::function<common_peg_parser(common_chat_peg_native_builder & builder)> & fn) {
-    common_chat_peg_native_builder builder;
-    builder.set_root(fn(builder));
-    return builder.build();
-}
-
-class common_chat_peg_constructed_builder : public common_chat_peg_builder {
-  public:
-    static constexpr const char * TOOL = "tool";
-    static constexpr const char * TOOL_OPEN = "tool-open";
-    static constexpr const char * TOOL_CLOSE = "tool-close";
-    static constexpr const char * TOOL_NAME = "tool-name";
-    static constexpr const char * TOOL_ARG = "tool-arg";
-    static constexpr const char * TOOL_ARG_OPEN = "tool-arg-open";
-    static constexpr const char * TOOL_ARG_CLOSE = "tool-arg-close";
-    static constexpr const char * TOOL_ARG_NAME = "tool-arg-name";
-    static constexpr const char * TOOL_ARG_STRING_VALUE = "tool-arg-string-value";
-    static constexpr const char * TOOL_ARG_JSON_VALUE = "tool-arg-json-value";
-
-    common_peg_parser tool(const common_peg_parser & p) { return tag(TOOL, p); }
-    common_peg_parser tool_open(const common_peg_parser & p) { return atomic(tag(TOOL_OPEN, p)); }
-    common_peg_parser tool_close(const common_peg_parser & p) { return atomic(tag(TOOL_CLOSE, p)); }
-    common_peg_parser tool_name(const common_peg_parser & p) { return atomic(tag(TOOL_NAME, p)); }
-    common_peg_parser tool_arg(const common_peg_parser & p) { return tag(TOOL_ARG, p); }
-    common_peg_parser tool_arg_open(const common_peg_parser & p) { return atomic(tag(TOOL_ARG_OPEN, p)); }
-    common_peg_parser tool_arg_close(const common_peg_parser & p) { return atomic(tag(TOOL_ARG_CLOSE, p)); }
-    common_peg_parser tool_arg_name(const common_peg_parser & p) { return atomic(tag(TOOL_ARG_NAME, p)); }
-    common_peg_parser tool_arg_string_value(const common_peg_parser & p) { return tag(TOOL_ARG_STRING_VALUE, p); }
-    common_peg_parser tool_arg_json_value(const common_peg_parser & p) { return tag(TOOL_ARG_JSON_VALUE, p); }
-};
 
 // Constructed mapper: builds JSON args from individual parsed pieces
 common_chat_peg_mapper common_chat_peg_constructed_mapper();
 
-inline common_peg_arena build_chat_peg_constructed_parser(const std::function<common_peg_parser(common_chat_peg_constructed_builder & builder)> & fn) {
-    common_chat_peg_constructed_builder builder;
-    builder.set_root(fn(builder));
-    return builder.build();
+// Convenience aliases for building parsers
+inline common_peg_arena build_chat_peg_native_parser(const std::function<common_peg_parser(common_peg_parser_builder & builder)> & fn) {
+    return build_chat_peg_parser(fn);
+}
+
+inline common_peg_arena build_chat_peg_constructed_parser(const std::function<common_peg_parser(common_peg_parser_builder & builder)> & fn) {
+    return build_chat_peg_parser(fn);
 }
