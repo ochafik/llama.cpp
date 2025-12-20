@@ -18,7 +18,7 @@ common_chat_params common_chat_params_init_magistral(const common_chat_template 
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
 
     // Build the PEG parser
-    auto parser = build_chat_peg_native_parser([&](auto & p) {
+    auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
 
         // Optional reasoning block

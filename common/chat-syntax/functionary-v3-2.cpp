@@ -16,7 +16,7 @@ common_chat_params common_chat_params_init_functionary_v3_2(const common_chat_te
         data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
 
         // Build PEG parser for >>>function_name\n{...} format
-        auto parser = build_chat_peg_native_parser([&](auto & p) {
+        auto parser = build_chat_peg_parser([&](auto & p) {
             using Tag = common_chat_peg_tag;
 
             // Response format parser

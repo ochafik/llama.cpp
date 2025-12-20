@@ -52,7 +52,7 @@ common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1(const comm
         }
 
         // Build PEG parser for <function=name>{...}</function> format
-        auto parser = build_chat_peg_native_parser([&](auto & p) {
+        auto parser = build_chat_peg_parser([&](auto & p) {
             using Tag = common_chat_peg_tag;
 
             // Response format parser

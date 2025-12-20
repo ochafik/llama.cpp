@@ -24,7 +24,7 @@ common_chat_params common_chat_params_init_firefunction_v2(const common_chat_tem
         };
 
         // Build the PEG parser
-        auto parser = build_chat_peg_native_parser([&](auto & p) {
+        auto parser = build_chat_peg_parser([&](auto & p) {
             using Tag = common_chat_peg_tag;
 
             if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {

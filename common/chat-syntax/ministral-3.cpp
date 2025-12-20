@@ -59,7 +59,7 @@ common_chat_params common_chat_params_init_ministral_3(const common_chat_templat
         "[ARGS]",
     };
 
-    auto parser = build_chat_peg_native_parser([&](auto & p) {
+    auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
         auto reasoning = extract_reasoning ? p.optional("[THINK]" + p.tag(Tag::REASONING, p.until("[/THINK]")) + "[/THINK]") : p.eps();
 

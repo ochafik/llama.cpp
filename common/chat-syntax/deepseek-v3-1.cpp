@@ -43,7 +43,7 @@ common_chat_params common_chat_params_init_deepseek_v3_1(const common_chat_templ
     };
 
     // Build PEG parser
-    auto parser = build_chat_peg_native_parser([&](auto & p) {
+    auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
 
         // Optional thinking block

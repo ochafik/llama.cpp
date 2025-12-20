@@ -71,7 +71,7 @@ common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & 
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
     auto include_grammar = true;
 
-    auto parser = build_chat_peg_constructed_parser([&](auto & p) {
+    auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
         auto reasoning = p.eps();
         if (inputs.enable_thinking && extract_reasoning) {

@@ -17,7 +17,7 @@ common_chat_params common_chat_params_init_xiaomi_mimo(const common_chat_templat
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
     auto include_grammar = true;
 
-    auto parser = build_chat_peg_native_parser([&](auto & p) {
+    auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
 
         // Response format parser

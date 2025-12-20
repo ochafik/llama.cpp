@@ -34,7 +34,7 @@ common_chat_params common_chat_params_init_minimax_m2(const common_chat_template
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
     auto include_grammar = true;
 
-    auto parser = build_chat_peg_constructed_parser([&](auto & p) {
+    auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
         auto reasoning = p.eps();
         if (inputs.enable_thinking && extract_reasoning) {
@@ -109,6 +109,8 @@ common_chat_params common_chat_params_init_minimax_m2(const common_chat_template
         data.grammar_lazy = has_tools && inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
 
         // Build grammar using XML tool call helper
+        // Note: We can't use parser.build_grammar() because the PEG parser uses optional()
+        // for closing tags to handle streaming, but grammar needs required closing tags.
         static const xml_tool_call_format form {
             /* form.scope_start = */ "<minimax:tool_call>\n",
             /* form.tool_start  = */ "<invoke name=\"",

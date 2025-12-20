@@ -59,7 +59,7 @@ common_chat_params common_chat_params_init_lfm2(const common_chat_template & tmp
         data.preserved_tokens = {"<|tool_call_start|>", "<|tool_call_end|>"};
 
         // Build PEG parser
-        auto parser = build_chat_peg_native_parser([&](auto & p) {
+        auto parser = build_chat_peg_parser([&](auto & p) {
             using Tag = common_chat_peg_tag;
 
             // Tool call: <|tool_call_start|> + JSON array + <|tool_call_end|>

@@ -32,7 +32,7 @@ common_chat_params common_chat_params_init_llama_3_x(const common_chat_template 
         }
 
         // Build PEG parser
-        auto parser = build_chat_peg_native_parser([&](auto & p) {
+        auto parser = build_chat_peg_parser([&](auto & p) {
             using Tag = common_chat_peg_tag;
 
             // Build tool call alternatives

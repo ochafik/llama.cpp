@@ -17,7 +17,7 @@ common_chat_params common_chat_params_init_mistral_nemo(const common_chat_templa
     bool has_tools = inputs.tools.is_array() && !inputs.tools.empty();
 
     // Build the PEG parser
-    auto parser = build_chat_peg_native_parser([&](auto & p) {
+    auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
 
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
