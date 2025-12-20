@@ -1486,8 +1486,16 @@ static void common_chat_parse(common_chat_msg_parser & builder) {
         case COMMON_CHAT_FORMAT_FUNCTION_GEMMA:
             common_chat_parse_function_gemma(builder);
             break;
-        // Formats SEED_OSS, MINIMAX_M2, GLM_4_5, KIMI_K2, APRIEL_1_5, QWEN3_CODER_XML, XIAOMI_MIMO
-        // are handled by on-demand PEG parsers above - should not reach here
+        // Formats with on-demand PEG parsers: when called without parser, fall back to content-only
+        case COMMON_CHAT_FORMAT_SEED_OSS:
+        case COMMON_CHAT_FORMAT_MINIMAX_M2:
+        case COMMON_CHAT_FORMAT_GLM_4_5:
+        case COMMON_CHAT_FORMAT_KIMI_K2:
+        case COMMON_CHAT_FORMAT_APRIEL_1_5:
+        case COMMON_CHAT_FORMAT_QWEN3_CODER_XML:
+        case COMMON_CHAT_FORMAT_XIAOMI_MIMO:
+            common_chat_parse_content_only(builder);
+            break;
         default:
             throw std::runtime_error(std::string("Unsupported format: ") + common_chat_format_name(builder.syntax().format));
     }
@@ -1495,11 +1503,12 @@ static void common_chat_parse(common_chat_msg_parser & builder) {
 }
 
 common_chat_msg common_chat_parse(const std::string & input, bool is_partial, const common_chat_syntax & syntax) {
-    // If a PEG parser is available, use it
+    // If a PEG parser is available, use it (this is the preferred path - always provide a parser)
     if (!syntax.parser.empty()) {
         return common_chat_peg_parse(syntax.parser, input, is_partial, syntax);
     }
 
+    // Legacy non-PEG parsing path for older formats (deprecated - prefer using PEG parser)
     common_chat_msg_parser builder(input, is_partial, syntax);
     try {
         common_chat_parse(builder);
@@ -1557,7 +1566,8 @@ common_chat_msg common_chat_peg_parse(const common_peg_arena & parser, const std
         apply_chat_peg_mapper(common_chat_peg_generic_mapper(), ctx.ast, result, msg);
     } else if (syntax.format == COMMON_CHAT_FORMAT_MISTRAL_NEMO ||
                syntax.format == COMMON_CHAT_FORMAT_MAGISTRAL ||
-               syntax.format == COMMON_CHAT_FORMAT_FIREFUNCTION_V2) {
+               syntax.format == COMMON_CHAT_FORMAT_FIREFUNCTION_V2 ||
+               syntax.format == COMMON_CHAT_FORMAT_NEMOTRON_V2) {
         apply_chat_peg_mapper(common_chat_peg_oai_array_mapper(), ctx.ast, result, msg);
     } else {
         // Default to native mapper for JSON-based formats (including KIMI_K2, XIAOMI_MIMO)

@@ -17,30 +17,71 @@ static std::string_view trim_trailing_space(std::string_view sv, int max = -1) {
     return sv;
 }
 
+// Helper: Convert JSON value to arguments string (handles object, string, null cases)
+static std::string json_to_arguments(const json & j) {
+    if (j.is_object()) {
+        return j.dump();
+    }
+    if (j.is_string()) {
+        return j.get<std::string>();
+    }
+    if (!j.is_null()) {
+        return j.dump();
+    }
+    return "{}";
+}
+
+// Helper: Populate tool call from JSON object with configurable field names
+static void populate_tool_from_json(
+    common_chat_tool_call & tool,
+    const json & item,
+    const char * name_key,
+    const char * id_key,
+    const char * args_key
+) {
+    if (item.contains(name_key)) {
+        tool.name = item.at(name_key).get<std::string>();
+    }
+    if (id_key && item.contains(id_key)) {
+        const auto & id = item.at(id_key);
+        tool.id = id.is_string() ? id.get<std::string>() : std::to_string(id.get<int>());
+    }
+    if (item.contains(args_key)) {
+        tool.arguments = json_to_arguments(item.at(args_key));
+    } else {
+        tool.arguments = "{}";
+    }
+}
+
+// Helper: Handle base content tags (REASONING, CONTENT)
+static void handle_base_tags(common_chat_msg & result, const common_peg_ast_node & node) {
+    switch (static_cast<Tag>(node.tag_id)) {
+        case Tag::REASONING:
+            result.reasoning_content += std::string(trim_trailing_space(node.text));
+            break;
+        case Tag::CONTENT:
+            // Don't trim content - preserve trailing whitespace for interleaved content
+            result.content += std::string(node.text);
+            break;
+        default:
+            break;
+    }
+}
+
 common_chat_peg_mapper common_chat_peg_base_mapper() {
     return [](common_chat_msg & result) -> common_chat_peg_map_func {
         return [&result](const common_peg_ast_node & node) {
-            switch (static_cast<Tag>(node.tag_id)) {
-                case Tag::REASONING:
-                    result.reasoning_content += std::string(trim_trailing_space(node.text));
-                    break;
-                case Tag::CONTENT:
-                    result.content += std::string(trim_trailing_space(node.text));
-                    break;
-                default:
-                    break;
-            }
+            handle_base_tags(result, node);
         };
     };
 }
 
 common_chat_peg_mapper common_chat_peg_native_mapper() {
     return [](common_chat_msg & result) -> common_chat_peg_map_func {
-        auto base = common_chat_peg_base_mapper()(result);
         common_chat_tool_call * current_tool = nullptr;
 
-        return [&result, base, current_tool](const common_peg_ast_node & node) mutable {
-            base(node);
+        return [&result, current_tool](const common_peg_ast_node & node) mutable {
+            handle_base_tags(result, node);
 
             switch (static_cast<Tag>(node.tag_id)) {
                 case Tag::TOOL_OPEN:
@@ -71,14 +112,13 @@ common_chat_peg_mapper common_chat_peg_native_mapper() {
 
 common_chat_peg_mapper common_chat_peg_constructed_mapper() {
     return [](common_chat_msg & result) -> common_chat_peg_map_func {
-        auto base = common_chat_peg_base_mapper()(result);
         common_chat_tool_call * current_tool = nullptr;
         int arg_count = 0;
         bool needs_closing_quote = false;
         bool args_complete = false;  // True if TOOL_ARGS set complete arguments
 
-        return [&result, base, current_tool, arg_count, needs_closing_quote, args_complete](const common_peg_ast_node & node) mutable {
-            base(node);
+        return [&result, current_tool, arg_count, needs_closing_quote, args_complete](const common_peg_ast_node & node) mutable {
+            handle_base_tags(result, node);
 
             switch (static_cast<Tag>(node.tag_id)) {
                 case Tag::TOOL_OPEN:
@@ -107,8 +147,9 @@ common_chat_peg_mapper common_chat_peg_constructed_mapper() {
                     break;
                 case Tag::TOOL_ARG_STRING_VALUE:
                     if (current_tool) {
-                        // Serialize to JSON, but exclude the end quote
-                        std::string dumped = json(node.text).dump();
+                        // Trim trailing whitespace and serialize to JSON, but exclude the end quote
+                        std::string trimmed = string_strip(std::string(node.text));
+                        std::string dumped = json(trimmed).dump();
                         current_tool->arguments += dumped.substr(0, dumped.size() - 1);
                         needs_closing_quote = true;
                     }
@@ -152,12 +193,11 @@ common_chat_peg_mapper common_chat_peg_constructed_mapper() {
 // Format: <start_function_call>call:name{key:<escape>value<escape>,key2:123}<end_function_call>
 common_chat_peg_mapper common_chat_peg_function_gemma_mapper() {
     return [](common_chat_msg & result) -> common_chat_peg_map_func {
-        auto base = common_chat_peg_base_mapper()(result);
         common_chat_tool_call * current_tool = nullptr;
         int arg_count = 0;
 
-        return [&result, base, current_tool, arg_count](const common_peg_ast_node & node) mutable {
-            base(node);
+        return [&result, current_tool, arg_count](const common_peg_ast_node & node) mutable {
+            handle_base_tags(result, node);
 
             switch (static_cast<Tag>(node.tag_id)) {
                 case Tag::TOOL_OPEN:
@@ -209,10 +249,8 @@ common_chat_peg_mapper common_chat_peg_function_gemma_mapper() {
 // The entire JSON array is captured in TOOL_ARGS, and we parse it to extract individual tool calls
 common_chat_peg_mapper common_chat_peg_short_form_mapper() {
     return [](common_chat_msg & result) -> common_chat_peg_map_func {
-        auto base = common_chat_peg_base_mapper()(result);
-
-        return [&result, base](const common_peg_ast_node & node) mutable {
-            base(node);
+        return [&result](const common_peg_ast_node & node) mutable {
+            handle_base_tags(result, node);
 
             switch (static_cast<Tag>(node.tag_id)) {
                 case Tag::TOOL_ARGS: {
@@ -228,21 +266,10 @@ common_chat_peg_mapper common_chat_peg_short_form_mapper() {
                             }
                             // The key is the function name, the value is the arguments
                             auto it = item.begin();
-                            std::string name = it.key();
-                            const json & args = it.value();
-
                             result.tool_calls.emplace_back();
                             auto & tool = result.tool_calls.back();
-                            tool.name = name;
-                            if (args.is_object()) {
-                                tool.arguments = args.dump();
-                            } else if (args.is_string()) {
-                                tool.arguments = args.get<std::string>();
-                            } else if (!args.is_null()) {
-                                tool.arguments = args.dump();
-                            } else {
-                                tool.arguments = "{}";
-                            }
+                            tool.name = it.key();
+                            tool.arguments = json_to_arguments(it.value());
                         }
                     } catch (...) {
                         // JSON parse error - ignore
@@ -268,36 +295,11 @@ common_chat_peg_mapper common_chat_peg_generic_mapper() {
                         if (data.contains("tool_calls") && data.at("tool_calls").is_array()) {
                             for (const auto & tc : data.at("tool_calls")) {
                                 result.tool_calls.emplace_back();
-                                auto & tool = result.tool_calls.back();
-                                if (tc.contains("name")) {
-                                    tool.name = tc.at("name").get<std::string>();
-                                }
-                                if (tc.contains("id")) {
-                                    tool.id = tc.at("id").get<std::string>();
-                                }
-                                if (tc.contains("arguments")) {
-                                    const auto & args = tc.at("arguments");
-                                    tool.arguments = args.is_string() ? args.get<std::string>() : args.dump();
-                                } else {
-                                    tool.arguments = "{}";
-                                }
+                                populate_tool_from_json(result.tool_calls.back(), tc, "name", "id", "arguments");
                             }
                         } else if (data.contains("tool_call") && data.at("tool_call").is_object()) {
-                            const auto & tc = data.at("tool_call");
                             result.tool_calls.emplace_back();
-                            auto & tool = result.tool_calls.back();
-                            if (tc.contains("name")) {
-                                tool.name = tc.at("name").get<std::string>();
-                            }
-                            if (tc.contains("id")) {
-                                tool.id = tc.at("id").get<std::string>();
-                            }
-                            if (tc.contains("arguments")) {
-                                const auto & args = tc.at("arguments");
-                                tool.arguments = args.is_string() ? args.get<std::string>() : args.dump();
-                            } else {
-                                tool.arguments = "{}";
-                            }
+                            populate_tool_from_json(result.tool_calls.back(), data.at("tool_call"), "name", "id", "arguments");
                         } else if (data.contains("response")) {
                             const auto & resp = data.at("response");
                             result.content = resp.is_string() ? resp.get<std::string>() : resp.dump();
@@ -327,13 +329,11 @@ common_chat_peg_mapper common_chat_peg_generic_mapper() {
 }
 
 // OpenAI-style array mapper: handles [{"name": "func", "arguments": {...}, "id": "..."}] format
-// Used by Mistral Nemo, Magistral, and similar formats
+// Used by Mistral Nemo, Magistral, FireFunction, and similar formats
 common_chat_peg_mapper common_chat_peg_oai_array_mapper() {
     return [](common_chat_msg & result) -> common_chat_peg_map_func {
-        auto base = common_chat_peg_base_mapper()(result);
-
-        return [&result, base](const common_peg_ast_node & node) mutable {
-            base(node);
+        return [&result](const common_peg_ast_node & node) mutable {
+            handle_base_tags(result, node);
 
             switch (static_cast<Tag>(node.tag_id)) {
                 case Tag::TOOL_ARGS: {
@@ -346,31 +346,8 @@ common_chat_peg_mapper common_chat_peg_oai_array_mapper() {
                             if (!item.is_object()) {
                                 continue;
                             }
-
                             result.tool_calls.emplace_back();
-                            auto & tool = result.tool_calls.back();
-
-                            if (item.contains("name")) {
-                                tool.name = item.at("name").get<std::string>();
-                            }
-                            if (item.contains("id")) {
-                                const auto & id = item.at("id");
-                                tool.id = id.is_string() ? id.get<std::string>() : std::to_string(id.get<int>());
-                            }
-                            if (item.contains("arguments")) {
-                                const auto & args = item.at("arguments");
-                                if (args.is_object()) {
-                                    tool.arguments = args.dump();
-                                } else if (args.is_string()) {
-                                    tool.arguments = args.get<std::string>();
-                                } else if (!args.is_null()) {
-                                    tool.arguments = args.dump();
-                                } else {
-                                    tool.arguments = "{}";
-                                }
-                            } else {
-                                tool.arguments = "{}";
-                            }
+                            populate_tool_from_json(result.tool_calls.back(), item, "name", "id", "arguments");
                         }
                     } catch (...) {
                         // JSON parse error - ignore
@@ -388,14 +365,11 @@ common_chat_peg_mapper common_chat_peg_oai_array_mapper() {
 // The entire JSON array is captured in TOOL_ARGS, and we parse it to extract individual tool calls
 common_chat_peg_mapper common_chat_peg_command_r7b_mapper() {
     return [](common_chat_msg & result) -> common_chat_peg_map_func {
-        auto base = common_chat_peg_base_mapper()(result);
-
-        return [&result, base](const common_peg_ast_node & node) mutable {
-            base(node);
+        return [&result](const common_peg_ast_node & node) mutable {
+            handle_base_tags(result, node);
 
             switch (static_cast<Tag>(node.tag_id)) {
                 case Tag::TOOL_ARGS: {
-                    // Parse the JSON array - format is [{"tool_call_id": "0", "tool_name": "func", "parameters": {...}}, ...]
                     try {
                         auto arr = json::parse(node.text);
                         if (!arr.is_array()) {
@@ -405,32 +379,8 @@ common_chat_peg_mapper common_chat_peg_command_r7b_mapper() {
                             if (!item.is_object()) {
                                 continue;
                             }
-
                             result.tool_calls.emplace_back();
-                            auto & tool = result.tool_calls.back();
-
-                            if (item.contains("tool_name")) {
-                                tool.name = item.at("tool_name").get<std::string>();
-                            }
-                            if (item.contains("tool_call_id")) {
-                                const auto & id = item.at("tool_call_id");
-                                // Can be string or number
-                                tool.id = id.is_string() ? id.get<std::string>() : std::to_string(id.get<int>());
-                            }
-                            if (item.contains("parameters")) {
-                                const auto & params = item.at("parameters");
-                                if (params.is_object()) {
-                                    tool.arguments = params.dump();
-                                } else if (params.is_string()) {
-                                    tool.arguments = params.get<std::string>();
-                                } else if (!params.is_null()) {
-                                    tool.arguments = params.dump();
-                                } else {
-                                    tool.arguments = "{}";
-                                }
-                            } else {
-                                tool.arguments = "{}";
-                            }
+                            populate_tool_from_json(result.tool_calls.back(), item, "tool_name", "tool_call_id", "parameters");
                         }
                     } catch (...) {
                         // JSON parse error - ignore

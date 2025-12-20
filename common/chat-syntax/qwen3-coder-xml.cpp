@@ -41,20 +41,22 @@ common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_tem
                 schema_info.resolve_refs(parameters);
 
                 // Format: <function=name><parameter=key>value</parameter></function>
-                auto tool_open = "<function=" + p.literal_tag(Tag::TOOL_NAME, name) + ">\n";
-                auto tool_close = p.literal("</function>\n");
+                // Allow optional whitespace/indentation for flexibility
+                auto ws = p.space();  // matches any whitespace including newlines
+                auto tool_open = ws + "<function=" + p.literal_tag(Tag::TOOL_NAME, name) + ">" + ws;
+                auto tool_close = ws + "</function>" + ws;
                 auto args = p.sequence();
                 auto arg_string = p.rule("xml-arg-string", p.until_one_of({
-                    "\n</parameter>",
-                    "\n<parameter=",
-                    "\n</function>"
+                    "</parameter>",
+                    "<parameter=",
+                    "</function>"
                 }));
 
                 foreach_parameter(function, [&](const auto & param_name, const json & param_schema, bool is_required) {
                     auto rule_name = "tool-" + name + "-arg-" + param_name;
 
-                    auto arg_open = "<parameter=" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + ">\n";
-                    auto arg_close = p.literal("\n</parameter>\n");
+                    auto arg_open = ws + "<parameter=" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + ">" + ws;
+                    auto arg_close = ws + "</parameter>" + ws;
                     auto arg_value = p.eps();
 
                     if (schema_info.resolves_to_string(param_schema)) {
@@ -72,7 +74,7 @@ common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_tem
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            auto tool_call = p.rule("tool-call", "<tool_call>\n" + tool_choice + "</tool_call>" + p.space());
+            auto tool_call = p.rule("tool-call", "<tool_call>" + p.space() + tool_choice + "</tool_call>" + p.space());
             auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, /* min = */ min_calls, /* max = */ max_calls));
 
             return p.tag(Tag::CONTENT, p.until("<tool_call>")) << tool_calls;

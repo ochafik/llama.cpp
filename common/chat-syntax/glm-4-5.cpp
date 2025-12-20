@@ -73,17 +73,19 @@ common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & 
 
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
-        auto reasoning = p.eps();
-        if (inputs.enable_thinking && extract_reasoning) {
-            auto reasoning_content = p.tag(Tag::REASONING, p.until("</think>")) + ("</think>" | p.end());
-            if (data.thinking_forced_open) {
-                reasoning = reasoning_content;
-            }
-        }
+
+        // Thinking block parser - extracts content from <think>...</think> into REASONING
+        auto thinking_block = p.space() + "<think>" + p.tag(Tag::REASONING, p.until("</think>")) + "</think>";
+
+        // When thinking_forced_open is true, we expect reasoning content without the opening <think>
+        auto forced_thinking = p.tag(Tag::REASONING, p.until("</think>")) + ("</think>" | p.end());
 
         // Response format parser
         if (inputs.json_schema.is_object() && !inputs.json_schema.empty()) {
-            return reasoning << p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema));
+            if (data.thinking_forced_open) {
+                return forced_thinking + p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema));
+            }
+            return p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema));
         }
 
         // Tool call parser
@@ -98,8 +100,10 @@ common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & 
                 schema_info.resolve_refs(parameters);
 
                 // Format: <tool_call>name<arg_key>key</arg_key><arg_value>value</arg_value></tool_call>
-                auto tool_open = "\n<tool_call>" + p.literal_tag(Tag::TOOL_NAME, name) + "\n";
-                auto tool_close = p.literal("</tool_call>\n");
+                // Optional leading newline to handle both start-of-output and mid-content cases
+                auto tool_open = p.optional(p.literal("\n")) + "<tool_call>" + p.literal_tag(Tag::TOOL_NAME, name) + "\n";
+                // Tool close: just </tool_call>, optional newline consumed by content_after
+                auto tool_close = p.literal("</tool_call>");
                 auto args = p.sequence();
                 auto arg_string = p.rule("xml-arg-string", p.until_one_of({
                     "</arg_value>",
@@ -131,12 +135,36 @@ common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & 
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
             auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_choice, /* min = */ min_calls, /* max = */ max_calls));
 
-            return reasoning << p.tag(Tag::CONTENT, p.until("\n<tool_call>")) << tool_calls;
+            // Content chunks are text until thinking or tool call markers
+            auto content_chunk = p.tag(Tag::CONTENT, p.until_one_of({"<think>", "\n<tool_call>", "<tool_call>"}));
+
+            if (extract_reasoning) {
+                // Mixed content with interleaved thinking: (thinking | content)* tool_calls (thinking | content)*
+                auto mixed = p.zero_or_more(thinking_block | content_chunk);
+                if (data.thinking_forced_open) {
+                    return forced_thinking + mixed + tool_calls + mixed;
+                }
+                return mixed + tool_calls + mixed;
+            }
+
+            // No reasoning extraction - simpler parser
+            auto content_before = p.tag(Tag::CONTENT, p.until_one_of({"\n<tool_call>", "<tool_call>"}));
+            auto content_after = p.tag(Tag::CONTENT, p.rest());
+            return content_before + tool_calls + content_after;
         }
 
         // Content only parser
         include_grammar = false;
-        return reasoning << p.tag(Tag::CONTENT, p.rest());
+        if (extract_reasoning) {
+            // Mixed content with interleaved thinking
+            auto content_chunk = p.tag(Tag::CONTENT, p.until("<think>"));
+            auto mixed = p.zero_or_more(thinking_block | content_chunk);
+            if (data.thinking_forced_open) {
+                return forced_thinking + mixed;
+            }
+            return mixed;
+        }
+        return p.tag(Tag::CONTENT, p.rest());
     });
 
     data.parser = parser.save();

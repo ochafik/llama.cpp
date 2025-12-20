@@ -46,26 +46,41 @@ common_chat_params common_chat_params_init_kimi_k2(const common_chat_template & 
         }
 
         // Tool call parser
-        // Format: <|tool_call_begin|>NAME<|tool_call_argument_begin|>{...}<|tool_call_end|>
+        // Format: <|tool_call_begin|>functions.{name}:{counter}<|tool_call_argument_begin|>{...}<|tool_call_end|>
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
-            // Individual tool call
-            auto tool_call = p.tag(Tag::TOOL,
-                p.token_tag(Tag::TOOL_OPEN, "<|tool_call_begin|>")
-                + p.tag(Tag::TOOL_NAME, p.until("<|tool_call_argument_begin|>"))
-                + "<|tool_call_argument_begin|>"
-                + p.tag(Tag::TOOL_ARGS, p.json())
-                + p.token_tag(Tag::TOOL_CLOSE, "<|tool_call_end|>")
-            );
+            auto tool_choice = p.choice();
+
+            foreach_function(inputs.tools, [&](const json & tool) {
+                const auto & function = tool.at("function");
+                std::string name = function.at("name");
+                auto parameters = function.at("parameters");
+
+                // Match: functions.{name}:{counter}
+                // Use atomic_tag to ensure tool calls are only created when fully matched
+                auto tool_open = p.token("<|tool_call_begin|>")
+                    + "functions." + p.literal_tag(Tag::TOOL_NAME, name) + ":" + p.until("<|tool_call_argument_begin|>")
+                    + "<|tool_call_argument_begin|>";
+                auto tool_close = p.token("<|tool_call_end|>");
+                auto tool_args = p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters));
+
+                tool_choice |= p.rule("tool-" + name,
+                    p.atomic_tag(Tag::TOOL_OPEN, tool_open)
+                    + tool_args
+                    + p.atomic_tag(Tag::TOOL_CLOSE, tool_close));
+            });
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
             auto tool_calls = p.trigger_rule("tool-call",
                 "<|tool_calls_section_begin|>"
-                + p.repeat(tool_call, min_calls, max_calls)
+                + p.repeat(tool_choice, min_calls, max_calls)
                 + "<|tool_calls_section_end|>"
             );
 
-            return reasoning << p.tag(Tag::CONTENT, p.until("<|tool_calls_section_begin|>")) << tool_calls;
+            // Content before + tool calls + content after
+            auto content_before = p.tag(Tag::CONTENT, p.until("<|tool_calls_section_begin|>"));
+            auto content_after = p.tag(Tag::CONTENT, p.rest());
+            return reasoning << content_before << tool_calls << content_after;
         }
 
         // Content only parser
