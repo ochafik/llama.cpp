@@ -789,7 +789,7 @@ struct parser_executor {
 
             auto node_id = ctx.ast.add_node(
                 p.name,
-                "",
+                0,  // rules don't have tag_id
                 result.start,
                 result.end,
                 text,
@@ -815,7 +815,7 @@ struct parser_executor {
 
             auto node_id = ctx.ast.add_node(
                 "",
-                p.tag,
+                p.tag_id,
                 result.start,
                 result.end,
                 text,
@@ -1634,7 +1634,7 @@ static nlohmann::json serialize_parser_variant(const common_peg_parser_variant &
             return json{
                 {"type", "tag"},
                 {"child", p.child},
-                {"tag", p.tag}
+                {"tag_id", p.tag_id}
             };
         }
     }, variant);
@@ -1794,12 +1794,12 @@ static common_peg_parser_variant deserialize_parser_variant(const nlohmann::json
         };
     }
     if (type == "tag") {
-        if (!j.contains("child") || !j.contains("tag")) {
+        if (!j.contains("child") || !j.contains("tag_id")) {
             throw std::runtime_error("tag parser missing required fields");
         }
         return common_peg_tag_parser{
             j["child"].get<common_peg_parser_id>(),
-            j["tag"].get<std::string>(),
+            j["tag_id"].get<int>(),
         };
     }
 

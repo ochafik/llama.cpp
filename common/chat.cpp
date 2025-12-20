@@ -1075,13 +1075,14 @@ static common_chat_params common_chat_params_init_ministral_3(const common_chat_
         "[ARGS]",
     };
 
-    auto parser = build_chat_peg_native_parser([&](common_chat_peg_native_builder & p) {
-        auto reasoning = extract_reasoning ? p.optional("[THINK]" + p.reasoning(p.until("[/THINK]")) + "[/THINK]") : p.eps();
+    auto parser = build_chat_peg_native_parser([&](auto & p) {
+        using Tag = common_chat_peg_tag;
+        auto reasoning = extract_reasoning ? p.optional("[THINK]" + p.tag(Tag::REASONING, p.until("[/THINK]")) + "[/THINK]") : p.eps();
 
         // Response format parser
         if (inputs.json_schema.is_object() && !inputs.json_schema.empty()) {
             // Ministral wants to emit json surrounded by code fences
-            return reasoning << "```json" << p.content(p.schema(p.json(), "response-format", inputs.json_schema)) << "```";
+            return reasoning << "```json" << p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema)) << "```";
         }
 
         // Tool call parser
@@ -1093,8 +1094,8 @@ static common_chat_params common_chat_params_init_ministral_3(const common_chat_
                 const auto & schema = function.at("parameters");
 
                 tool_choice |= p.rule("tool-" + name,
-                    p.tool_open(p.tool_name(p.literal(name)) + "[ARGS]")
-                    + p.tool_args(p.schema(p.json(), "tool-" + name + "-schema", schema))
+                    p.atomic_tag(Tag::TOOL_OPEN, p.atomic_tag(Tag::TOOL_NAME, p.literal(name)) + "[ARGS]")
+                    + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-schema", schema))
                 );
             });
 
@@ -1102,12 +1103,12 @@ static common_chat_params common_chat_params_init_ministral_3(const common_chat_
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
             auto tool_calls = p.trigger_rule("tool-call", p.repeat("[TOOL_CALLS]" + tool_choice, min_calls, max_calls));
 
-            return reasoning << p.content(p.until("[TOOL_CALLS]")) << tool_calls;
+            return reasoning << p.tag(Tag::CONTENT, p.until("[TOOL_CALLS]")) << tool_calls;
         }
 
         // Content only parser
         include_grammar = false;
-        return reasoning << p.content(p.rest());
+        return reasoning << p.tag(Tag::CONTENT, p.rest());
     });
 
     data.parser = parser.save();
@@ -1457,9 +1458,10 @@ static common_chat_params common_chat_params_init_nemotron_v3(const common_chat_
     auto include_grammar = true;
 
     auto parser = build_chat_peg_constructed_parser([&](auto & p) {
+        using Tag = common_chat_peg_tag;
         auto reasoning = p.eps();
         if (inputs.enable_thinking && extract_reasoning) {
-            auto reasoning_content = p.reasoning(p.until("</think>")) + ("</think>" | p.end());
+            auto reasoning_content = p.tag(Tag::REASONING, p.until("</think>")) + ("</think>" | p.end());
             if (data.thinking_forced_open) {
                 reasoning = reasoning_content;
             }
@@ -1467,7 +1469,7 @@ static common_chat_params common_chat_params_init_nemotron_v3(const common_chat_
 
         // Response format parser
         if (inputs.json_schema.is_object() && !inputs.json_schema.empty()) {
-            return reasoning << p.content(p.schema(p.json(), "response-format", inputs.json_schema));
+            return reasoning << p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema));
         }
 
         // Tool call parser
@@ -1481,7 +1483,7 @@ static common_chat_params common_chat_params_init_nemotron_v3(const common_chat_
                 auto schema_info = common_schema_info();
                 schema_info.resolve_refs(parameters);
 
-                auto tool_open = "<function=" + p.tool_name(p.literal(name)) + ">\n";
+                auto tool_open = "<function=" + p.atomic_tag(Tag::TOOL_NAME, p.literal(name)) + ">\n";
                 auto tool_close = p.literal("</function>\n");
                 auto args = p.sequence();
                 auto arg_string = p.rule("xml-arg-string", p.until_one_of({
@@ -1493,22 +1495,22 @@ static common_chat_params common_chat_params_init_nemotron_v3(const common_chat_
                 foreach_parameter(function, [&](const auto & param_name, const json & param_schema, bool is_required) {
                     auto rule_name = "tool-" + name + "-arg-" + param_name;
 
-                    auto arg_open = "<parameter=" + p.tool_arg_name(p.literal(param_name)) + ">\n";
+                    auto arg_open = "<parameter=" + p.atomic_tag(Tag::TOOL_ARG_NAME, p.literal(param_name)) + ">\n";
                     auto arg_close = p.literal("</parameter>\n");
                     auto arg_value = p.eps();
 
                     if (schema_info.resolves_to_string(param_schema)) {
-                        arg_value = p.tool_arg_string_value(arg_string) + "\n";
+                        arg_value = p.tag(Tag::TOOL_ARG_STRING_VALUE, arg_string) + "\n";
                     } else {
-                        arg_value = p.tool_arg_json_value(p.schema(p.json(), rule_name + "-schema", param_schema));
+                        arg_value = p.tag(Tag::TOOL_ARG_JSON_VALUE, p.schema(p.json(), rule_name + "-schema", param_schema));
                     }
 
                     // Model may or my not close with </parameter>
-                    auto arg_rule = p.rule(rule_name, p.tool_arg_open(arg_open) + arg_value + p.optional(p.tool_arg_close(arg_close)));
+                    auto arg_rule = p.rule(rule_name, p.atomic_tag(Tag::TOOL_ARG_OPEN, arg_open) + arg_value + p.optional(p.atomic_tag(Tag::TOOL_ARG_CLOSE, arg_close)));
                     args += p.repeat(arg_rule, /* min = */ is_required ? 1 : 0, /* max = */ 1);
                 });
 
-                tool_choice |= p.rule("tool-" + name, p.tool_open(tool_open) + args + p.tool_close(tool_close));
+                tool_choice |= p.rule("tool-" + name, p.atomic_tag(Tag::TOOL_OPEN, tool_open) + args + p.atomic_tag(Tag::TOOL_CLOSE, tool_close));
             });
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
@@ -1516,12 +1518,12 @@ static common_chat_params common_chat_params_init_nemotron_v3(const common_chat_
             auto tool_call = p.rule("tool-call", "<tool_call>\n" + tool_choice + "</tool_call>" + p.space());
             auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, /* min = */ min_calls, /* max = */ max_calls));
 
-            return reasoning << p.content(p.until("<tool_call>")) << tool_calls;
+            return reasoning << p.tag(Tag::CONTENT, p.until("<tool_call>")) << tool_calls;
         }
 
         // Content only parser
         include_grammar = false;
-        return reasoning << p.content(p.rest());
+        return reasoning << p.tag(Tag::CONTENT, p.rest());
     });
 
     data.parser = parser.save();
@@ -1963,39 +1965,46 @@ static common_chat_params common_chat_params_init_function_gemma(const common_ch
 
     // Build the PEG parser for FunctionGemma format
     // Format: <start_function_call>call:name{key:<escape>value<escape>,key2:123}<end_function_call>
-    auto parser = build_chat_peg_function_gemma_parser([&](common_chat_peg_function_gemma_builder & p) {
+    auto parser = build_chat_peg_parser([&](auto & p) {
+        using Tag = common_chat_peg_tag;
+
+        // Token-aware parsers for FunctionGemma special tokens
+        auto escape = p.token("<escape>");
+        auto start_function_call = p.token("<start_function_call>");
+        auto end_function_call = p.token("<end_function_call>");
+
         // Identifier pattern: [a-zA-Z_][a-zA-Z0-9_]*
         auto identifier = p.chars("a-zA-Z_", 1, 1) + p.chars("a-zA-Z0-9_", 0, -1);
 
         // Argument name: alphanumeric identifier before ':'
-        auto arg_name = p.tool_arg_name(identifier);
+        auto arg_name = p.atomic_tag(Tag::TOOL_ARG_NAME, identifier);
 
         // String value: <escape>...<escape> with content captured
         // Token-aware matching ensures we don't match partial token sequences
-        auto string_value = p.escape() + p.tool_arg_string_value(p.until_token("<escape>")) + p.escape();
+        auto string_value = escape + p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until_token("<escape>")) + escape;
 
         // JSON value: raw number, boolean, null, array, or object (without escape delimiters)
-        auto json_value = p.tool_arg_json_value(p.json());
+        auto json_value = p.tag(Tag::TOOL_ARG_JSON_VALUE, p.json());
 
         // An argument is: name:(string_value | json_value)
-        auto arg = p.tool_arg(arg_name + ":" + (string_value | json_value));
+        auto arg = p.tag(Tag::TOOL_ARG, arg_name + ":" + (string_value | json_value));
 
         // Arguments list: {arg1,arg2,...} or {}
         auto args = "{" + p.optional(arg + p.zero_or_more("," + arg)) + "}";
 
         // Tool name: alphanumeric identifier after "call:"
-        auto tool_name = p.tool_name(identifier);
+        auto tool_name = p.atomic_tag(Tag::TOOL_NAME, identifier);
 
         // Tool call: <start_function_call>call:name{...}<end_function_call>
-        auto tool_call = p.tool(
-            p.tool_open(p.start_function_call() + "call:")
+        auto tool_call = p.tag(Tag::TOOL,
+            p.atomic_tag(Tag::TOOL_OPEN, start_function_call + "call:")
             + tool_name
             + args
-            + p.tool_close(p.end_function_call())
+            + p.atomic_tag(Tag::TOOL_CLOSE, end_function_call)
         );
 
         // Content before tool calls (token-aware matching)
-        auto content = p.content(p.until_token("<start_function_call>"));
+        auto content = p.tag(Tag::CONTENT, p.until_token("<start_function_call>"));
 
         if (has_tools && params.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
             int min_calls = params.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
@@ -2004,7 +2013,7 @@ static common_chat_params common_chat_params_init_function_gemma(const common_ch
         }
 
         // Content only
-        return p.content(p.rest());
+        return p.tag(Tag::CONTENT, p.rest());
     });
 
     data.parser = parser.save();
