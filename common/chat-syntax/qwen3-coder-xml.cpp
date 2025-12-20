@@ -63,7 +63,7 @@ common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_tem
                         arg_value = p.tag(Tag::TOOL_ARG_JSON_VALUE, p.schema(p.json(), rule_name + "-schema", param_schema));
                     }
 
-                    auto arg_rule = p.rule(rule_name, p.atomic_tag(Tag::TOOL_ARG_OPEN, arg_open) + arg_value + p.optional(p.atomic_tag(Tag::TOOL_ARG_CLOSE, arg_close)));
+                    auto arg_rule = p.rule(rule_name, p.atomic_tag(Tag::TOOL_ARG_OPEN, arg_open) + arg_value + p.atomic_tag(Tag::TOOL_ARG_CLOSE, arg_close));
                     args += p.repeat(arg_rule, /* min = */ is_required ? 1 : 0, /* max = */ 1);
                 });
 
@@ -88,18 +88,16 @@ common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_tem
     if (include_grammar) {
         data.grammar_lazy = has_tools && inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
 
-        // Build grammar using XML tool call helper
-        static const xml_tool_call_format form {
-            /* form.scope_start = */ "<tool_call>\n",
-            /* form.tool_start  = */ "<function=",
-            /* form.tool_sep    = */ ">\n",
-            /* form.key_start   = */ "<parameter=",
-            /* form.key_val_sep = */ ">\n",
-            /* form.val_end     = */ "\n</parameter>\n",
-            /* form.tool_end    = */ "</function>\n",
-            /* form.scope_end   = */ "</tool_call>",
-        };
-        build_grammar_xml_tool_call(data, inputs.tools, form);
+        // Build grammar from PEG parser
+        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
+            foreach_function(inputs.tools, [&](const json & tool) {
+                auto schema = tool.at("function").at("parameters");
+                builder.resolve_refs(schema);
+            });
+            parser.build_grammar(builder, data.grammar_lazy);
+        });
+
+        data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_call>"});
     }
 
     return data;

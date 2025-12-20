@@ -51,22 +51,16 @@ common_chat_params common_chat_params_init_xiaomi_mimo(const common_chat_templat
     if (include_grammar) {
         data.grammar_lazy = has_tools && inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
 
-        // Build grammar using XML tool call helper
-        static const xml_tool_call_format form = ([]() {
-            xml_tool_call_format form {};
-            form.scope_start = "\n";
-            form.tool_start  = "<tool_call>\n{\"name\": \"";
-            form.tool_sep    = "\", \"arguments\": {";
-            form.key_start   = "\"";
-            form.key_val_sep = "\": ";
-            form.val_end     = ", ";
-            form.tool_end    = "}\n</tool_call>";
-            form.scope_end   = "";
-            form.raw_argval  = false;
-            form.last_val_end = "";
-            return form;
-        })();
-        build_grammar_xml_tool_call(data, inputs.tools, form);
+        // Build grammar from PEG parser
+        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
+            foreach_function(inputs.tools, [&](const json & tool) {
+                auto schema = tool.at("function").at("parameters");
+                builder.resolve_refs(schema);
+            });
+            parser.build_grammar(builder, data.grammar_lazy);
+        });
+
+        data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_call>"});
     }
 
     return data;

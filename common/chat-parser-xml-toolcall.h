@@ -34,12 +34,3 @@ struct xml_tool_call_format {
     bool allow_toolcall_in_think = false;
 };
 
-// make a GBNF that accept any strings except those containing any of the forbidden strings.
-std::string make_gbnf_excluding(std::vector<std::string> forbids);
-
-/**
- * Build grammar for xml-style tool call
- * form.scope_start and form.scope_end can be empty.
- * Requires data.format for model-specific hacks.
- */
-void build_grammar_xml_tool_call(common_chat_params & data, const nlohmann::ordered_json & tools, const struct xml_tool_call_format & form);
