@@ -308,6 +308,19 @@ common_chat_tool complex_function_in_think_tool {
         "required": ["name", "age", "active", "score"]
     })",
 };
+// Tool for testing multiple string parameters
+common_chat_tool process_data_tool {
+    /* .name = */ "process_data",
+    /* .description = */ "Process data with specified format",
+    /* .parameters = */ R"({
+        "type": "object",
+        "properties": {
+            "input": { "type": "string", "description": "The input data" },
+            "format": { "type": "string", "description": "The output format" }
+        },
+        "required": ["input", "format"]
+    })",
+};
 
 std::vector<common_chat_tool> tools           { special_function_tool, special_function_tool_with_optional_param, python_tool };
 std::vector<common_chat_tool> llama_3_1_tools { special_function_tool, code_interpreter_tool };
@@ -2047,10 +2060,10 @@ static void test_template_output_parsers() {
 
         test_templates(tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
 
-        // Create inputs with reasoning enabled
+        // Create inputs with reasoning enabled (includes process_data for multi-param tests)
         common_chat_templates_inputs inputs_tools_reasoning;
         inputs_tools_reasoning.messages = {message_user};
-        inputs_tools_reasoning.tools = {special_function_tool};
+        inputs_tools_reasoning.tools = {special_function_tool, process_data_tool};
         inputs_tools_reasoning.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
 
         // Get syntax with parser for tool call tests (with reasoning)
@@ -2102,6 +2115,22 @@ static void test_template_output_parsers() {
                 /* is_partial= */ false,
                 syntax));
 
+        // Test multiple parameters in tool call
+        common_chat_msg msg_multi_param;
+        msg_multi_param.role = "assistant";
+        msg_multi_param.tool_calls.push_back({"process_data", "{\"input\":\"test\",\"format\":\"json\"}", ""});
+        assert_msg_equals(
+            msg_multi_param,
+            common_chat_parse(
+                "<seed:tool_call>\n"
+                "<function=process_data>\n"
+                "<parameter=input>\ntest\n</parameter>\n"
+                "<parameter=format>\njson\n</parameter>\n"
+                "</function>\n"
+                "</seed:tool_call>",
+                /* is_partial= */ false,
+                syntax));
+
         // Test reasoning + tool call combination
         common_chat_msg msg_reasoning_tool;
         msg_reasoning_tool.role = "assistant";
@@ -2134,6 +2163,16 @@ static void test_template_output_parsers() {
             }
             previousToolCalls = partial_res.tool_calls.size();
         }
+
+        // Test partial parsing for incomplete string parameter - captures partial value
+        assert_msg_equals(
+            simple_assist_msg("", "", "process_data", "{\"input\":\"test"),
+            common_chat_parse(
+                "<seed:tool_call>\n"
+                "<function=process_data>\n"
+                "<parameter=input>\ntest",
+                /* is_partial= */ true,
+                syntax));
 
         // Test incomplete reasoning tag
         assert_msg_equals(
@@ -2662,6 +2701,13 @@ Hey there!<|im_end|>
         test_parser_with_streaming(message_assist_call_withopt,
             "<minimax:tool_call>\n<invoke name=\"special_function_with_opt\">\n<parameter name=\"arg1\">1</parameter>\n<parameter name=\"arg2\">2</parameter>\n</invoke>\n</minimax:tool_call>",
             [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, syntax); });
+
+        // Test compact format (no extra whitespace) - verifies whitespace flexibility
+        assert_msg_equals(message_assist_call,
+            common_chat_parse(
+                "<minimax:tool_call><invoke name=\"special_function\"><parameter name=\"arg1\">1</parameter></invoke></minimax:tool_call>",
+                /* is_partial= */ false,
+                syntax));
 
         // Test template generation for regular content
         test_templates(tmpls.get(), end_tokens, message_assist, tools,
