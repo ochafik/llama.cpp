@@ -772,48 +772,6 @@ static size_t ifind_string(const std::string & haystack, const std::string & nee
     return (it == haystack.end()) ? std::string::npos : std::distance(haystack.begin(), it);
 }
 
-static common_chat_params common_chat_params_init_minimax_m2(const common_chat_template & tmpl, const struct templates_params & params) {
-    common_chat_params data;
-    data.grammar_lazy = params.tools.is_array() && !params.tools.empty() && params.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
-
-    data.prompt = apply(tmpl, params);
-    data.format = COMMON_CHAT_FORMAT_MINIMAX_M2;
-
-    // Handle thinking tags based on prompt ending
-    if (string_ends_with(data.prompt, "<think>\n")) {
-        if (!params.enable_thinking) {
-            // Close the thinking tag immediately if thinking is disabled
-            data.prompt += "</think>\n\n";
-        } else {
-            // Mark thinking as forced open (template started with <think>)
-            data.thinking_forced_open = true;
-        }
-    }
-
-    // Preserve MiniMax-M2 special tokens
-    data.preserved_tokens = {
-        "<think>",
-        "</think>",
-        "<minimax:tool_call>",
-        "</minimax:tool_call>",
-    };
-
-    // build grammar for tool call
-    static const xml_tool_call_format form {
-        /* form.scope_start = */ "<minimax:tool_call>\n",
-        /* form.tool_start  = */ "<invoke name=\"",
-        /* form.tool_sep    = */ "\">\n",
-        /* form.key_start   = */ "<parameter name=\"",
-        /* form.key_val_sep = */ "\">",
-        /* form.val_end     = */ "</parameter>\n",
-        /* form.tool_end    = */ "</invoke>\n",
-        /* form.scope_end   = */ "</minimax:tool_call>",
-    };
-    build_grammar_xml_tool_call(data, params.tools, form);
-
-    return data;
-}
-
 static common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_template & tmpl, const struct templates_params & params) {
     common_chat_params data;
     data.grammar_lazy = params.tools.is_array() && !params.tools.empty() && params.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
