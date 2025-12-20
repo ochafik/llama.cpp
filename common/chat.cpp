@@ -881,67 +881,6 @@ static common_chat_params common_chat_params_init_lfm2(const common_chat_templat
     return data;
 }
 
-static common_chat_params common_chat_params_init_nemotron_v2(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    common_chat_params data;
-
-    // Generate the prompt using the apply() function with the template
-    data.prompt = apply(tmpl, inputs);
-    data.format = COMMON_CHAT_FORMAT_NEMOTRON_V2;
-
-    // Handle thinking tags appropriately based on inputs.enable_thinking
-    if (string_ends_with(data.prompt, "<think>\n")) {
-        if (!inputs.enable_thinking) {
-            data.prompt += "</think>";
-        } else {
-            data.thinking_forced_open = true;
-        }
-    }
-
-    // When tools are present, build grammar for the <TOOLCALL> format, similar to CommandR, but without tool call ID
-    if (!inputs.tools.is_null() && inputs.tools.is_array() && !inputs.tools.empty()) {
-        data.grammar_lazy = true;
-        data.grammar      = build_grammar([&](const common_grammar_builder & builder) {
-            auto schemas = json::array();
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                schemas.push_back({
-                    { "type",       "object"                                                   },
-                    { "properties",
-                        {
-                            { "name",
-                            {
-                                { "type", "string" },
-                                { "const", function.at("name") },
-                            } },
-                            { "arguments", function.at("parameters") },
-                        }                                                                        },
-                    { "required",   json::array({ "name", "arguments" }) },
-                });
-            });
-            auto schema = json{
-                        { "type",     "array"                                                         },
-                        { "items",    schemas.size() == 1 ? schemas[0] : json{ { "anyOf", schemas } } },
-                        { "minItems", 1                                                               },
-            };
-            if (!inputs.parallel_tool_calls) {
-                schema["maxItems"] = 1;
-            }
-            builder.add_rule("root",
-                                std::string(data.thinking_forced_open ? "( \"</think>\" space )? " : "") +
-                                    "\"<TOOLCALL>\" " + builder.add_schema("tool_calls", schema) +
-                                    " \"</TOOLCALL>\"");
-        });
-        data.grammar_triggers.push_back({ COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
-            // If thinking_forced_open, then we capture the </think> tag in the grammar,
-            // (important for required tool choice) and in the trigger's first capture (decides what is sent to the grammar)
-            std::string(data.thinking_forced_open ?
-                            "[\\s\\S]*?(</think>\\s*)" :
-                            "(?:<think>[\\s\\S]*?</think>\\s*)?") +
-                "(<TOOLCALL>)[\\s\\S]*" });
-    }
-    return data;
-}
-
 static common_chat_params common_chat_params_init_apertus(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
 
