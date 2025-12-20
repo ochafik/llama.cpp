@@ -51,7 +51,7 @@ common_chat_params common_chat_params_init_ministral_3(const common_chat_templat
     auto include_grammar = true;
 
     data.prompt = apply(tmpl, inputs, /* messages_override = */ adjusted_messages);
-    data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
+    data.format = COMMON_CHAT_FORMAT_MINISTRAL_3;
     data.preserved_tokens = {
         "[THINK]",
         "[/THINK]",
@@ -70,6 +70,8 @@ common_chat_params common_chat_params_init_ministral_3(const common_chat_templat
         }
 
         // Tool call parser
+        // Format: [TOOL_CALLS]func1[ARGS]{...}[TOOL_CALLS]func2[ARGS]{...}
+        // Note: [TOOL_CALLS] prefix appears before EACH tool call
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
             auto tool_choice = p.choice();
             foreach_function(inputs.tools, [&](const json & tool) {
@@ -77,15 +79,17 @@ common_chat_params common_chat_params_init_ministral_3(const common_chat_templat
                 std::string name = function.at("name");
                 const auto & schema = function.at("parameters");
 
-                tool_choice |= p.rule("tool-" + name,
-                    p.atomic_tag(Tag::TOOL_OPEN, p.literal_tag(Tag::TOOL_NAME, name) + p.token("[ARGS]"))
+                // Each tool call starts with [TOOL_CALLS] prefix
+                tool_choice |= p.rule("tool-" + name, p.tag(Tag::TOOL,
+                    p.token("[TOOL_CALLS]")
+                    + p.atomic_tag(Tag::TOOL_OPEN, p.literal_tag(Tag::TOOL_NAME, name) + p.token("[ARGS]"))
                     + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-schema", schema))
-                );
+                ));
             });
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            auto tool_calls = p.trigger_rule("tool-call", p.repeat("[TOOL_CALLS]" + tool_choice, min_calls, max_calls));
+            auto tool_calls = p.trigger_rule("tool-call", p.repeat(tool_choice, min_calls, max_calls));
 
             return reasoning << p.tag(Tag::CONTENT, p.until("[TOOL_CALLS]")) << tool_calls;
         }

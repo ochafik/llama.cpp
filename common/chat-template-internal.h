@@ -141,3 +141,12 @@ typedef common_chat_params (*common_chat_format_init_fn_llama3x)(
 // Forward declarations for modular parser implementations in chat-syntax/
 common_chat_params common_chat_params_init_mistral_nemo(const common_chat_template & tmpl, const struct templates_params & inputs);
 common_chat_params common_chat_params_init_magistral(const common_chat_template & tmpl, const struct templates_params & inputs);
+common_chat_params common_chat_params_init_command_r7b(const common_chat_template & tmpl, const struct templates_params & inputs);
+common_chat_params common_chat_params_init_deepseek_r1(const common_chat_template & tmpl, const struct templates_params & inputs);
+common_chat_params common_chat_params_init_deepseek_v3_1(const common_chat_template & tmpl, const struct templates_params & inputs);
+common_chat_params common_chat_params_init_firefunction_v2(const common_chat_template & tmpl, const struct templates_params & inputs);
+common_chat_params common_chat_params_init_function_gemma(const common_chat_template & tmpl, const struct templates_params & inputs);
+common_chat_params common_chat_params_init_hermes_2_pro(const common_chat_template & tmpl, const struct templates_params & inputs);
+common_chat_params common_chat_params_init_llama_3_x(const common_chat_template & tmpl, const struct templates_params & inputs, bool allow_python_tag_builtin_tools);
+common_chat_params common_chat_params_init_ministral_3(const common_chat_template & tmpl, const struct templates_params & inputs);
+common_chat_params common_chat_params_init_nemotron_v3(const common_chat_template & tmpl, const struct templates_params & inputs);

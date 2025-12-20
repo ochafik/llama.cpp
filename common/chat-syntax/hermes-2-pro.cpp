@@ -28,7 +28,7 @@ common_chat_params common_chat_params_init_hermes_2_pro(const common_chat_templa
     bool has_tools = inputs.tools.is_array() && !inputs.tools.empty();
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
 
-    data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
+    data.format = COMMON_CHAT_FORMAT_HERMES_2_PRO;
     data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
 
     data.preserved_tokens = {
@@ -127,31 +127,62 @@ common_chat_params common_chat_params_init_hermes_2_pro(const common_chat_templa
     data.parser = parser.save();
 
     if (has_tools) {
+        // Build grammar manually for backward compatibility with streaming tests
+        // (using regular string literals instead of token syntax)
         data.grammar = build_grammar([&](const common_grammar_builder & builder) {
+            std::vector<std::string> tool_rules;
+            std::vector<std::string> tool_call_alts;
             std::vector<std::string> escaped_names;
             foreach_function(inputs.tools, [&](const json & tool) {
                 const auto & function = tool.at("function");
-                auto schema = function.at("parameters");
-                builder.resolve_refs(schema);
-                escaped_names.push_back(regex_escape(function.at("name").get<std::string>()));
-            });
-            parser.build_grammar(builder, data.grammar_lazy);
-
-            // Add triggers
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
                 std::string name = function.at("name");
+                auto parameters = function.at("parameters");
+                builder.resolve_refs(parameters);
+                tool_rules.push_back(builder.add_schema(name + "-call", {
+                    {"type", "object"},
+                    {"properties", json {
+                        {"name", json {{"const", name}}},
+                        {"arguments", parameters},
+                    }},
+                    {"required", json::array({"name", "arguments"})},
+                }));
+                tool_call_alts.push_back(builder.add_rule(
+                    name + "-function-tag",
+                    "\"<function\" ( \"=" + name + "\" | \" name=\\\"" + name + "\\\"\" ) \">\" space " +
+                    builder.add_schema(name + "-args", parameters) + " "
+                    "\"</function>\" space"));
 
                 data.grammar_triggers.push_back({
                     COMMON_GRAMMAR_TRIGGER_TYPE_WORD,
                     "<function=" + name + ">",
                 });
+                escaped_names.push_back(regex_escape(name));
                 data.grammar_triggers.push_back({
                     COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN,
                     "<function\\s+name\\s*=\\s*\"" + regex_escape(name) + "\"",
                 });
             });
-
+            auto any_tool_call = builder.add_rule("any_tool_call", "( " + string_join(tool_rules, " | ") + " ) space");
+            std::vector<std::string> alt_tags {
+                any_tool_call,
+                "\"<tool_call>\" space "     + any_tool_call + " \"</tool_call>\"",
+                // The rest is just to accommodate common "good bad" outputs.
+                "\"<function_call>\" space " + any_tool_call + " \"</function_call>\"",
+                "\"<response>\"  space "     + any_tool_call + " \"</response>\"",
+                "\"<tools>\"     space "     + any_tool_call + " \"</tools>\"",
+                "\"<json>\"      space "     + any_tool_call + " \"</json>\"",
+                "\"<xml>\"      space "     + any_tool_call + " \"</xml>\"",
+                "\"<JSON>\"      space "     + any_tool_call + " \"</JSON>\"",
+            };
+            auto wrappable_tool_call = builder.add_rule("wrappable_tool_call", "( " + string_join(alt_tags, " | ") + " ) space");
+            tool_call_alts.push_back(wrappable_tool_call);
+            tool_call_alts.push_back(
+                "( \"```\\n\" | \"```json\\n\" | \"```xml\\n\" ) space " + wrappable_tool_call + " space \"```\" space ");
+            auto tool_call = builder.add_rule("tool_call", string_join(tool_call_alts, " | "));
+            builder.add_rule("root",
+                std::string(data.thinking_forced_open ? "( \"</think>\" space )? " : "") +
+                (inputs.parallel_tool_calls ? "(" + tool_call + ")+" : tool_call));
+            // Trigger on some common known "good bad" outputs
             data.grammar_triggers.push_back({
                 COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
                 std::string(data.thinking_forced_open ? "[\\s\\S]*?(</think>\\s*)" : "(?:<think>[\\s\\S]*?</think>\\s*)?") + (

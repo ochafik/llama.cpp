@@ -24,7 +24,7 @@ common_chat_params common_chat_params_init_llama_3_x(const common_chat_template 
 
     if (has_tools) {
         data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
-        data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
+        data.format = COMMON_CHAT_FORMAT_LLAMA_3_X;
 
         data.preserved_tokens = {};
         if (allow_python_tag_builtin_tools) {
@@ -125,7 +125,7 @@ common_chat_params common_chat_params_init_llama_3_x(const common_chat_template 
         });
         if (!builtin_tools.empty()) {
             data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<|python_tag|>"});
-            data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;  // Keep as PEG_NATIVE for builtin tools
+            data.format = COMMON_CHAT_FORMAT_LLAMA_3_X_WITH_BUILTIN_TOOLS;
         }
 
         data.additional_stops.push_back("<|eom_id|>");

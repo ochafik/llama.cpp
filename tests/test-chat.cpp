@@ -915,7 +915,7 @@ static void test_template_output_parsers() {
         std::vector<std::string> end_tokens{ "<end_of_turn>" };
 
         auto params = common_chat_templates_apply(tmpls.get(), inputs_tools);
-        assert_equals(COMMON_CHAT_FORMAT_PEG_FUNCTION_GEMMA, params.format);
+        assert_equals(COMMON_CHAT_FORMAT_FUNCTION_GEMMA, params.format);
 
         // Get the syntax with PEG parser for parsing tests
         common_chat_syntax syntax;

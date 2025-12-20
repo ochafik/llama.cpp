@@ -18,7 +18,7 @@ common_chat_params common_chat_params_init_firefunction_v2(const common_chat_tem
     bool has_tools = inputs.tools.is_array() && !inputs.tools.empty();
 
     if (has_tools) {
-        data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
+        data.format = COMMON_CHAT_FORMAT_FIREFUNCTION_V2;
         data.preserved_tokens = {
             " functools[",
         };

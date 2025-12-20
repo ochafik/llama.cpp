@@ -9,7 +9,7 @@ common_chat_params common_chat_params_init_function_gemma(const common_chat_temp
     data.grammar_lazy = params.tools.is_array() && !params.tools.empty() && params.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
 
     data.prompt = apply(tmpl, params);
-    data.format = COMMON_CHAT_FORMAT_PEG_FUNCTION_GEMMA;
+    data.format = COMMON_CHAT_FORMAT_FUNCTION_GEMMA;
 
     data.preserved_tokens = {
         "<start_function_call>",

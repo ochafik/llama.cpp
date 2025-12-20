@@ -34,7 +34,7 @@ common_chat_params common_chat_params_init_command_r7b(const common_chat_templat
     bool has_tools = inputs.tools.is_array() && !inputs.tools.empty();
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
 
-    data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
+    data.format = COMMON_CHAT_FORMAT_COMMAND_R7B;
     data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
 
     data.preserved_tokens = {

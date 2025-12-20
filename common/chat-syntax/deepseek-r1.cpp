@@ -41,7 +41,7 @@ common_chat_params common_chat_params_init_deepseek_r1(const common_chat_templat
     bool has_tools = inputs.tools.is_array() && !inputs.tools.empty();
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
 
-    data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
+    data.format = COMMON_CHAT_FORMAT_DEEPSEEK_R1;
     data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED && inputs.json_schema.is_null();
 
     data.preserved_tokens = {
@@ -118,13 +118,27 @@ common_chat_params common_chat_params_init_deepseek_r1(const common_chat_templat
     data.parser = parser.save();
 
     if (has_tools) {
+        // Build grammar manually for backward compatibility
         data.grammar = build_grammar([&](const common_grammar_builder & builder) {
+            std::vector<std::string> tool_rules;
             foreach_function(inputs.tools, [&](const json & tool) {
                 const auto & function = tool.at("function");
-                auto schema = function.at("parameters");
-                builder.resolve_refs(schema);
+                std::string name = function.at("name");
+                auto parameters = function.at("parameters");
+                builder.resolve_refs(parameters);
+                tool_rules.push_back(builder.add_rule(name + "-call",
+                    "( \"<｜tool▁call▁begin｜>\" )? \"function<｜tool▁sep｜>" + name + "\\n"
+                    "```json\\n\" " + builder.add_schema(name + "-args", parameters) + " "
+                    "\"\\n```<｜tool▁call▁end｜>\""));
             });
-            parser.build_grammar(builder, data.grammar_lazy);
+            // Distill Qwen 7B & 32B models seem confused re/ syntax of their tool call opening tag,
+            // so we accept common variants (then it's all constrained)
+            builder.add_rule("root",
+                std::string(data.thinking_forced_open ? "( \"</think>\" space )? " : "") +
+                "( \"<｜tool▁calls▁begin｜>\" | \"<｜tool_calls_begin｜>\" | \"<｜tool calls begin｜>\" | \"<｜tool\\\\_calls\\\\_begin｜>\" | \"<｜tool▁calls｜>\" ) "
+                "(" + string_join(tool_rules, " | ") + ")" + (inputs.parallel_tool_calls ? "*" : "") + " "
+                "\"<｜tool▁calls▁end｜>\""
+                " space");
         });
 
         data.grammar_triggers.push_back({
