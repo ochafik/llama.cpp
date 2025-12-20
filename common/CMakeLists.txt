@@ -45,7 +45,7 @@ endif()
 set(TARGET common)
 
 # Glob chat syntax files from the chat-syntax directory
-file(GLOB CHAT_SYNTAX_SOURCES "chat-syntax/*.cpp")
+file(GLOB CHAT_SYNTAX_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/chat-syntax/*.cpp")
 
 add_library(${TARGET} STATIC
     arg.cpp
