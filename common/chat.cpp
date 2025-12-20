@@ -772,50 +772,6 @@ static size_t ifind_string(const std::string & haystack, const std::string & nee
     return (it == haystack.end()) ? std::string::npos : std::distance(haystack.begin(), it);
 }
 
-static common_chat_params common_chat_params_init_kimi_k2(const common_chat_template & tmpl, const struct templates_params & params) {
-    common_chat_params data;
-    data.grammar_lazy = params.tools.is_array() && !params.tools.empty() && params.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
-
-    data.prompt = apply(tmpl, params);
-    data.format = COMMON_CHAT_FORMAT_KIMI_K2;
-
-    data.preserved_tokens = {
-        "<think>",
-        "</think>",
-        "<|tool_calls_section_begin|>",
-        "<|tool_call_begin|>",
-        "<|tool_call_argument_begin|>",
-        "<|tool_call_end|>",
-        "<|tool_calls_section_end|>",
-        "<|im_end|>",
-        "<|im_system|>",
-        "<|im_middle|>",
-    };
-
-    data.additional_stops.insert(data.additional_stops.end(), {
-        "<|im_end|>",
-        "<|im_middle|>"
-    });
-    // build grammar for tool call
-    static const xml_tool_call_format form = ([]() {
-        xml_tool_call_format form {};
-        form.scope_start = "<|tool_calls_section_begin|>";
-        form.tool_start  = "<|tool_call_begin|>";
-        form.tool_sep    = "<|tool_call_argument_begin|>{";
-        form.key_start   = "\"";
-        form.key_val_sep = "\": ";
-        form.val_end     = ", ";
-        form.tool_end    = "}<|tool_call_end|>";
-        form.scope_end   = "<|tool_calls_section_end|>";
-        form.raw_argval  = false;
-        form.last_val_end = "";
-        return form;
-    })();
-    build_grammar_xml_tool_call(data, params.tools, form);
-
-    return data;
-}
-
 static common_chat_params common_chat_params_init_apriel_1_5(const common_chat_template & tmpl, const struct templates_params & params) {
     common_chat_params data;
     data.grammar_lazy = params.tools.is_array() && !params.tools.empty() && params.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
