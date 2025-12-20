@@ -40,7 +40,11 @@ common_chat_params common_chat_params_init_minimax_m2(const common_chat_template
         if (inputs.enable_thinking && extract_reasoning) {
             auto reasoning_content = p.tag(Tag::REASONING, p.until("</think>")) + ("</think>" | p.end());
             if (data.thinking_forced_open) {
+                // Thinking was forced open in prompt - model output starts with reasoning content directly
                 reasoning = reasoning_content;
+            } else {
+                // Handle optional <think>...</think> at start of output
+                reasoning = p.optional("<think>" + reasoning_content);
             }
         }
 
@@ -60,9 +64,9 @@ common_chat_params common_chat_params_init_minimax_m2(const common_chat_template
                 auto schema_info = common_schema_info();
                 schema_info.resolve_refs(parameters);
 
-                // Format: <invoke name="function_name">\n<parameter name="key">value</parameter>\n</invoke>\n
-                auto tool_open = "<invoke name=\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\">\n";
-                auto tool_close = p.literal("</invoke>\n");
+                // Format: <invoke name="function_name"><parameter name="key">value</parameter></invoke>
+                auto tool_open = "<invoke name=\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\">" + p.space();
+                auto tool_close = p.space() + p.literal("</invoke>") + p.space();
                 auto args = p.sequence();
                 auto arg_string = p.rule("xml-arg-string", p.until_one_of({
                     "</parameter>",
@@ -74,7 +78,7 @@ common_chat_params common_chat_params_init_minimax_m2(const common_chat_template
                     auto rule_name = "tool-" + name + "-arg-" + param_name;
 
                     auto arg_open = "<parameter name=\"" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + "\">";
-                    auto arg_close = p.literal("</parameter>\n");
+                    auto arg_close = p.literal("</parameter>") + p.space();
                     auto arg_value = p.eps();
 
                     if (schema_info.resolves_to_string(param_schema)) {
@@ -92,10 +96,10 @@ common_chat_params common_chat_params_init_minimax_m2(const common_chat_template
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            auto tool_call = p.rule("tool-call", "<minimax:tool_call>\n" + tool_choice + "</minimax:tool_call>" + p.space());
+            auto tool_call = p.rule("tool-call", "<minimax:tool_call>" + p.space() + tool_choice + "</minimax:tool_call>" + p.space());
             auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, /* min = */ min_calls, /* max = */ max_calls));
 
-            return reasoning << p.tag(Tag::CONTENT, p.until("<minimax:tool_call>")) << tool_calls;
+            return reasoning << p.tag(Tag::CONTENT, p.until("<minimax:tool_call>")) << tool_calls << p.tag(Tag::CONTENT, p.rest());
         }
 
         // Content only parser

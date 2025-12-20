@@ -41,6 +41,9 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
             auto reasoning_content = p.tag(Tag::REASONING, p.until("</seed:think>")) + ("</seed:think>" | p.end());
             if (data.thinking_forced_open) {
                 reasoning = reasoning_content;
+            } else {
+                // Handle optional <seed:think>...</seed:think> at start of output
+                reasoning = p.optional("<seed:think>" + reasoning_content);
             }
         }
 

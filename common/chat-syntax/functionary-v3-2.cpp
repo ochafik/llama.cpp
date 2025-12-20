@@ -37,14 +37,14 @@ common_chat_params common_chat_params_init_functionary_v3_2(const common_chat_te
                     if (name == "python") {
                         // Python can have raw code or JSON
                         first_tool_choice |= p.rule("first-tool-" + name, p.tag(Tag::TOOL,
-                            p.literal_tag(Tag::TOOL_NAME, name) + "\n"
+                            p.tag(Tag::TOOL_OPEN, p.eps()) + p.literal_tag(Tag::TOOL_NAME, name) + "\n"
                             + (p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-params", parameters))
                                | p.tag(Tag::TOOL_ARGS, p.until(">>>")))
                         ));
                     } else {
                         // Regular JSON tool
                         first_tool_choice |= p.rule("first-tool-" + name, p.tag(Tag::TOOL,
-                            p.literal_tag(Tag::TOOL_NAME, name) + "\n"
+                            p.tag(Tag::TOOL_OPEN, p.eps()) + p.literal_tag(Tag::TOOL_NAME, name) + "\n"
                             + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-params", parameters))
                         ));
                     }
@@ -72,18 +72,23 @@ common_chat_params common_chat_params_init_functionary_v3_2(const common_chat_te
                     }
                 });
 
-                // Build pattern: optional content, then first tool, then subsequent tools
+                // Build pattern: first call or content, then subsequent tool calls
+                // Format: name\n{...}  or  all\n<content>  or  all\n<content>>>>name\n{...}
                 auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
 
+                // Content marker: "all\n" followed by text until >>> or end
+                auto content_marker = "all\n" + p.tag(Tag::CONTENT, p.until(">>>"));
+
+                // First element is either content or tool call
+                auto first_element = content_marker | p.repeat(first_tool_choice, min_calls, 1);
+
                 if (inputs.parallel_tool_calls) {
-                    // First tool + any number of subsequent tools
-                    auto first_call = p.trigger_rule("first-tool", p.repeat(first_tool_choice, min_calls, 1));
+                    // Subsequent tool calls with >>> prefix
                     auto subsequent_calls = p.repeat(subsequent_tool_choice, 0, -1);
-                    return p.tag(Tag::CONTENT, p.until_one_of({">>>", "\n"})) << first_call << subsequent_calls;
+                    return p.trigger_rule("first-element", first_element) << subsequent_calls << p.tag(Tag::CONTENT, p.rest());
                 } else {
-                    // Just one tool call
-                    auto tool_call = p.trigger_rule("tool-call", p.repeat(first_tool_choice, min_calls, 1));
-                    return p.tag(Tag::CONTENT, p.until_one_of({">>>", "\n"})) << tool_call;
+                    // Just the first element
+                    return p.trigger_rule("first-element", first_element) << p.tag(Tag::CONTENT, p.rest());
                 }
             }
 

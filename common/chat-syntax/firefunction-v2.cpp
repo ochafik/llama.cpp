@@ -38,7 +38,7 @@ common_chat_params common_chat_params_init_firefunction_v2(const common_chat_tem
                 auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
                 auto tool_calls = p.trigger_rule("tool-call", p.repeat(tool_call, min_calls, max_calls));
 
-                return p.tag(Tag::CONTENT, p.until(" functools")) << tool_calls;
+                return p.tag(Tag::CONTENT, p.until(" functools")) + tool_calls;
             }
 
             // Content only parser

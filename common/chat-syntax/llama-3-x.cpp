@@ -61,7 +61,8 @@ common_chat_params common_chat_params_init_llama_3_x(const common_chat_template 
                                 if (!first) {
                                     args = args + ", ";
                                 }
-                                args = args + it.key() + "=" + p.tag(Tag::TOOL_ARGS, p.json_string());
+                                // Use constructed mapper tags: TOOL_ARG_NAME and TOOL_ARG_JSON_VALUE
+                                args = args + p.literal_tag(Tag::TOOL_ARG_NAME, it.key()) + "=" + p.tag(Tag::TOOL_ARG_JSON_VALUE, p.json_string());
                                 first = false;
                             }
                         }
@@ -79,7 +80,7 @@ common_chat_params common_chat_params_init_llama_3_x(const common_chat_template 
                     p.literal_tag(Tag::TOOL_OPEN, "{")
                     + p.optional("\"type\"" + p.space() + ":" + p.space() + "\"function\"" + p.space() + "," + p.space())
                     + "\"name\"" + p.space() + ":" + p.space()
-                    + p.literal_tag(Tag::TOOL_NAME, "\"" + name + "\"") + p.space() + "," + p.space()
+                    + "\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"" + p.space() + "," + p.space()
                     + "\"parameters\"" + p.space() + ":" + p.space()
                     + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-params", parameters))
                     + p.atomic_tag(Tag::TOOL_CLOSE, p.space() + "}")

@@ -91,3 +91,12 @@ common_chat_peg_mapper common_chat_peg_function_gemma_mapper();
 // Short form mapper: handles {"function_name": {"arg1": value1}} format (used by Apertus)
 common_chat_peg_mapper common_chat_peg_short_form_mapper();
 
+// Generic mapper: handles {"tool_call": {...}}, {"tool_calls": [...]}, or {"response": "..."} format
+common_chat_peg_mapper common_chat_peg_generic_mapper();
+
+// OpenAI-style array mapper: handles [{"name": "func", "arguments": {...}, "id": "..."}] format
+common_chat_peg_mapper common_chat_peg_oai_array_mapper();
+
+// Command R7B mapper: handles [{"tool_call_id": "0", "tool_name": "func", "parameters": {...}}] format
+common_chat_peg_mapper common_chat_peg_command_r7b_mapper();
+

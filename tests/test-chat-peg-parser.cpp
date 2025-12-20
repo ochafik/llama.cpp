@@ -161,7 +161,7 @@ static void test_example_native(testing & t) {
     };
 
     auto build_parser = [](const test_case & tc) {
-        return build_chat_peg_native_parser([&](auto & p) {
+        return build_chat_peg_parser([&](auto & p) {
             using Tag = common_chat_peg_tag;
             auto reasoning_in_content = (tc.reasoning_format == COMMON_REASONING_FORMAT_NONE);
             auto reasoning = p.eps();
@@ -432,7 +432,7 @@ static void test_example_native(testing & t) {
 
 static void test_example_qwen3_coder(testing & t) {
     auto tools = create_tools();
-    auto parser = build_chat_peg_constructed_parser([&](auto & p) {
+    auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
         auto content = p.rule("content", p.tag(Tag::CONTENT, p.until("<tool_call>")));
 
@@ -565,7 +565,7 @@ static void test_example_qwen3_coder(testing & t) {
 }
 
 void test_command7_parser_compare(testing & t) {
-    auto parser = build_chat_peg_native_parser([](auto & p) {
+    auto parser = build_chat_peg_parser([](auto & p) {
         using Tag = common_chat_peg_tag;
         auto thinking = p.tag(Tag::REASONING_BLOCK,
             "<|START_THINKING|>" << p.tag(Tag::REASONING, p.until("<|END_THINKING|>")) << "<|END_THINKING|>");

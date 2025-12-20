@@ -32,7 +32,6 @@ common_chat_params common_chat_params_init_command_r7b(const common_chat_templat
     }
 
     bool has_tools = inputs.tools.is_array() && !inputs.tools.empty();
-    auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
 
     data.format = COMMON_CHAT_FORMAT_COMMAND_R7B;
     data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
@@ -46,18 +45,26 @@ common_chat_params common_chat_params_init_command_r7b(const common_chat_templat
         "<|END_THINKING|>",
     };
 
+    auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
+
     // Build PEG parser
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
 
-        // Optional thinking block
+        // Always handle thinking block (consume tags even if not extracting reasoning)
         auto reasoning = p.eps();
-        if (extract_reasoning) {
-            if (data.thinking_forced_open) {
-                // Thinking was already started by template
+        if (data.thinking_forced_open) {
+            // Thinking was already started by template
+            if (extract_reasoning) {
                 reasoning = p.tag(Tag::REASONING, p.until("<|END_THINKING|>")) + "<|END_THINKING|>";
             } else {
+                reasoning = p.until("<|END_THINKING|>") + "<|END_THINKING|>";
+            }
+        } else {
+            if (extract_reasoning) {
                 reasoning = p.optional("<|START_THINKING|>" + p.tag(Tag::REASONING, p.until("<|END_THINKING|>")) + "<|END_THINKING|>");
+            } else {
+                reasoning = p.optional("<|START_THINKING|>" + p.until("<|END_THINKING|>") + "<|END_THINKING|>");
             }
         }
 
@@ -76,7 +83,7 @@ common_chat_params common_chat_params_init_command_r7b(const common_chat_templat
             // Content until we see the action marker
             auto content = p.tag(Tag::CONTENT, p.until("<|START_ACTION|>"));
 
-            return reasoning << content << tool_calls;
+            return reasoning << content << tool_calls << p.tag(Tag::CONTENT, p.rest());
         }
 
         // Content only parser

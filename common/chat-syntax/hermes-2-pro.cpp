@@ -80,13 +80,13 @@ common_chat_params common_chat_params_init_hermes_2_pro(const common_chat_templa
                     + p.space()
                     + "{" + p.space()
                     + "\"name\"" + p.space() + ":" + p.space()
-                    + p.literal_tag(Tag::TOOL_NAME, "\"" + name + "\"") + p.space() + "," + p.space()
+                    + "\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"" + p.space() + "," + p.space()
                     + "\"arguments\"" + p.space() + ":" + p.space()
                     + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters))
                     + p.space() + "}"
                     + p.space()
                     + p.token_tag(Tag::TOOL_CLOSE, "</tool_call>")
-                ));
+                ) + p.space());
 
                 // <function=name>{...}</function>
                 tool_choice |= p.rule("func-eq-" + name, p.tag(Tag::TOOL,
@@ -95,16 +95,16 @@ common_chat_params common_chat_params_init_hermes_2_pro(const common_chat_templa
                     + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "func-" + name + "-args", parameters))
                     + p.space()
                     + p.token_tag(Tag::TOOL_CLOSE, "</function>")
-                ));
+                ) + p.space());
 
                 // <function name="name">{...}</function>
                 tool_choice |= p.rule("func-name-" + name, p.tag(Tag::TOOL,
-                    p.atomic_tag(Tag::TOOL_OPEN, "<function" + p.space() + "name=" + p.literal_tag(Tag::TOOL_NAME, "\"" + name + "\"") + ">")
+                    p.atomic_tag(Tag::TOOL_OPEN, "<function" + p.space() + "name=\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\">")
                     + p.space()
                     + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "funcn-" + name + "-args", parameters))
                     + p.space()
                     + p.token_tag(Tag::TOOL_CLOSE, "</function>")
-                ));
+                ) + p.space());
             });
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;

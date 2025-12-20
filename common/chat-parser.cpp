@@ -879,93 +879,6 @@ static void common_chat_parse_deepseek_v3_1(common_chat_msg_parser & builder) {
     }
 }
 
-static void common_chat_parse_minimax_m2(common_chat_msg_parser & builder) {
-    static const xml_tool_call_format form {
-        /* form.scope_start = */ "<minimax:tool_call>",
-        /* form.tool_start  = */ "<invoke name=\"",
-        /* form.tool_sep    = */ "\">",
-        /* form.key_start   = */ "<parameter name=\"",
-        /* form.key_val_sep = */ "\">",
-        /* form.val_end     = */ "</parameter>",
-        /* form.tool_end    = */ "</invoke>",
-        /* form.scope_end   = */ "</minimax:tool_call>",
-    };
-    builder.consume_reasoning_with_xml_tool_calls(form, "<think>", "</think>");
-}
-
-static void common_chat_parse_qwen3_coder_xml(common_chat_msg_parser & builder) {
-    static const xml_tool_call_format form = ([]() {
-        xml_tool_call_format form {};
-        form.scope_start = "<tool_call>";
-        form.tool_start  = "<function=";
-        form.tool_sep    = ">";
-        form.key_start   = "<parameter=";
-        form.key_val_sep = ">";
-        form.val_end     = "</parameter>";
-        form.tool_end    = "</function>";
-        form.scope_end   = "</tool_call>";
-        form.trim_raw_argval = true;
-        return form;
-    })();
-    builder.consume_reasoning_with_xml_tool_calls(form);
-}
-
-static void common_chat_parse_kimi_k2(common_chat_msg_parser & builder) {
-    static const xml_tool_call_format form = ([]() {
-        xml_tool_call_format form {};
-        form.scope_start = "<|tool_calls_section_begin|>";
-        form.tool_start  = "<|tool_call_begin|>";
-        form.tool_sep    = "<|tool_call_argument_begin|>{";
-        form.key_start   = "\"";
-        form.key_val_sep = "\":";
-        form.val_end     = ",";
-        form.tool_end    = "}<|tool_call_end|>";
-        form.scope_end   = "<|tool_calls_section_end|>";
-        form.raw_argval  = false;
-        form.last_val_end = "";
-        form.allow_toolcall_in_think = true;
-        return form;
-    })();
-    builder.consume_reasoning_with_xml_tool_calls(form, "<think>", "</think>");
-}
-
-static void common_chat_parse_apriel_1_5(common_chat_msg_parser & builder) {
-    static const xml_tool_call_format form = ([]() {
-        xml_tool_call_format form {};
-        form.scope_start = "<tool_calls>[";
-        form.tool_start  = "{\"name\": \"";
-        form.tool_sep    = "\", \"arguments\": {";
-        form.key_start   = "\"";
-        form.key_val_sep = "\": ";
-        form.val_end     = ", ";
-        form.tool_end    = "}, ";
-        form.scope_end   = "]</tool_calls>";
-        form.raw_argval  = false;
-        form.last_val_end = "";
-        form.last_tool_end = "}";
-        return form;
-    })();
-    builder.consume_reasoning_with_xml_tool_calls(form, "<thinking>", "</thinking>");
-}
-
-static void common_chat_parse_xiaomi_mimo(common_chat_msg_parser & builder) {
-    static const xml_tool_call_format form = ([]() {
-        xml_tool_call_format form {};
-        form.scope_start = "";
-        form.tool_start  = "<tool_call>\n{\"name\": \"";
-        form.tool_sep    = "\", \"arguments\": {";
-        form.key_start   = "\"";
-        form.key_val_sep = "\": ";
-        form.val_end     = ", ";
-        form.tool_end    = "}\n</tool_call>";
-        form.scope_end   = "";
-        form.raw_argval  = false;
-        form.last_val_end = "";
-        return form;
-    })();
-    builder.consume_reasoning_with_xml_tool_calls(form);
-}
-
 static void common_chat_parse_gpt_oss(common_chat_msg_parser & builder) {
     static const std::string constraint = "(?: (<\\|constrain\\|>)?([a-zA-Z0-9_-]+))";
     static const std::string recipient("(?: to=functions\\.([^<\\s]+))");
@@ -1052,21 +965,6 @@ static void common_chat_parse_gpt_oss(common_chat_msg_parser & builder) {
     if (!remaining.empty()) {
         LOG_DBG("%s: content after last message: %s\n", __func__, remaining.c_str());
     }
-}
-
-static void common_chat_parse_glm_4_5(common_chat_msg_parser & builder) {
-    static const xml_tool_call_format form {
-        /* form.scope_start  = */ "",
-        /* form.tool_start   = */ "<tool_call>",
-        /* form.tool_sep     = */ "",
-        /* form.key_start    = */ "<arg_key>",
-        /* form.key_val_sep  = */ "</arg_key>",
-        /* form.val_end      = */ "</arg_value>",
-        /* form.tool_end     = */ "</tool_call>",
-        /* form.scope_end    = */ "",
-        /* form.key_val_sep2 = */ "<arg_value>",
-    };
-    builder.consume_reasoning_with_xml_tool_calls(form, "<think>", "</think>");
 }
 
 static void common_chat_parse_firefunction_v2(common_chat_msg_parser & builder) {
@@ -1381,20 +1279,6 @@ static void common_chat_parse_lfm2(common_chat_msg_parser & builder) {
     }
 }
 
-static void common_chat_parse_seed_oss(common_chat_msg_parser & builder) {
-    static const xml_tool_call_format form {
-        /* form.scope_start = */ "<seed:tool_call>",
-        /* form.tool_start  = */ "<function=",
-        /* form.tool_sep    = */ ">",
-        /* form.key_start   = */ "<parameter=",
-        /* form.key_val_sep = */ ">",
-        /* form.val_end     = */ "</parameter>",
-        /* form.tool_end    = */ "</function>",
-        /* form.scope_end   = */ "</seed:tool_call>",
-    };
-    builder.consume_reasoning_with_xml_tool_calls(form, "<seed:think>", "</seed:think>");
-}
-
 // FunctionGemma format: <start_function_call>call:name{key:<escape>value<escape>,key2:123}<end_function_call>
 // Helper to find the closing brace of a FunctionGemma call, accounting for <escape> delimiters
 static size_t find_function_gemma_args_end(const std::string & input, size_t start) {
@@ -1590,9 +1474,6 @@ static void common_chat_parse(common_chat_msg_parser & builder) {
         case COMMON_CHAT_FORMAT_GPT_OSS:
             common_chat_parse_gpt_oss(builder);
             break;
-        case COMMON_CHAT_FORMAT_SEED_OSS:
-            common_chat_parse_seed_oss(builder);
-            break;
         case COMMON_CHAT_FORMAT_NEMOTRON_V2:
             common_chat_parse_nemotron_v2(builder);
             break;
@@ -1602,27 +1483,11 @@ static void common_chat_parse(common_chat_msg_parser & builder) {
         case COMMON_CHAT_FORMAT_LFM2_WITH_JSON_TOOLS:
             common_chat_parse_lfm2(builder);
             break;
-        case COMMON_CHAT_FORMAT_MINIMAX_M2:
-            common_chat_parse_minimax_m2(builder);
-            break;
-        case COMMON_CHAT_FORMAT_GLM_4_5:
-            common_chat_parse_glm_4_5(builder);
-            break;
-        case COMMON_CHAT_FORMAT_KIMI_K2:
-            common_chat_parse_kimi_k2(builder);
-            break;
-        case COMMON_CHAT_FORMAT_QWEN3_CODER_XML:
-            common_chat_parse_qwen3_coder_xml(builder);
-            break;
-        case COMMON_CHAT_FORMAT_APRIEL_1_5:
-            common_chat_parse_apriel_1_5(builder);
-            break;
-        case COMMON_CHAT_FORMAT_XIAOMI_MIMO:
-            common_chat_parse_xiaomi_mimo(builder);
-            break;
         case COMMON_CHAT_FORMAT_FUNCTION_GEMMA:
             common_chat_parse_function_gemma(builder);
             break;
+        // Formats SEED_OSS, MINIMAX_M2, GLM_4_5, KIMI_K2, APRIEL_1_5, QWEN3_CODER_XML, XIAOMI_MIMO
+        // are handled by on-demand PEG parsers above - should not reach here
         default:
             throw std::runtime_error(std::string("Unsupported format: ") + common_chat_format_name(builder.syntax().format));
     }
@@ -1634,6 +1499,7 @@ common_chat_msg common_chat_parse(const std::string & input, bool is_partial, co
     if (!syntax.parser.empty()) {
         return common_chat_peg_parse(syntax.parser, input, is_partial, syntax);
     }
+
     common_chat_msg_parser builder(input, is_partial, syntax);
     try {
         common_chat_parse(builder);
@@ -1668,18 +1534,33 @@ common_chat_msg common_chat_peg_parse(const common_peg_arena & parser, const std
     common_chat_msg msg;
     msg.role = "assistant";
 
+    // Select mapper based on format
+    // - constructed_mapper: XML-style formats with arg key/value pairs
+    // - function_gemma_mapper: FunctionGemma's custom format
+    // - short_form_mapper: Apertus short-form tool calls
+    // - native_mapper: JSON-based formats (default)
     if (syntax.format == COMMON_CHAT_FORMAT_NEMOTRON_V3 ||
         syntax.format == COMMON_CHAT_FORMAT_SEED_OSS ||
         syntax.format == COMMON_CHAT_FORMAT_MINIMAX_M2 ||
         syntax.format == COMMON_CHAT_FORMAT_QWEN3_CODER_XML ||
-        syntax.format == COMMON_CHAT_FORMAT_GLM_4_5) {
+        syntax.format == COMMON_CHAT_FORMAT_GLM_4_5 ||
+        syntax.format == COMMON_CHAT_FORMAT_LLAMA_3_X_WITH_BUILTIN_TOOLS) {
         apply_chat_peg_mapper(common_chat_peg_constructed_mapper(), ctx.ast, result, msg);
     } else if (syntax.format == COMMON_CHAT_FORMAT_FUNCTION_GEMMA) {
         apply_chat_peg_mapper(common_chat_peg_function_gemma_mapper(), ctx.ast, result, msg);
-    } else if (syntax.format == COMMON_CHAT_FORMAT_APERTUS) {
+    } else if (syntax.format == COMMON_CHAT_FORMAT_APERTUS ||
+               syntax.format == COMMON_CHAT_FORMAT_APRIEL_1_5) {
         apply_chat_peg_mapper(common_chat_peg_short_form_mapper(), ctx.ast, result, msg);
+    } else if (syntax.format == COMMON_CHAT_FORMAT_COMMAND_R7B) {
+        apply_chat_peg_mapper(common_chat_peg_command_r7b_mapper(), ctx.ast, result, msg);
+    } else if (syntax.format == COMMON_CHAT_FORMAT_GENERIC) {
+        apply_chat_peg_mapper(common_chat_peg_generic_mapper(), ctx.ast, result, msg);
+    } else if (syntax.format == COMMON_CHAT_FORMAT_MISTRAL_NEMO ||
+               syntax.format == COMMON_CHAT_FORMAT_MAGISTRAL ||
+               syntax.format == COMMON_CHAT_FORMAT_FIREFUNCTION_V2) {
+        apply_chat_peg_mapper(common_chat_peg_oai_array_mapper(), ctx.ast, result, msg);
     } else {
-        // Default to native mapper for all PEG-based formats
+        // Default to native mapper for JSON-based formats (including KIMI_K2, XIAOMI_MIMO)
         apply_chat_peg_mapper(common_chat_peg_native_mapper(), ctx.ast, result, msg);
     }
     if (!is_partial) {
