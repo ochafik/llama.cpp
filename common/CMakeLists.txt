@@ -44,6 +44,9 @@ endif()
 
 set(TARGET common)
 
+# Glob chat syntax files from the chat-syntax directory
+file(GLOB CHAT_SYNTAX_SOURCES "chat-syntax/*.cpp")
+
 add_library(${TARGET} STATIC
     arg.cpp
     arg.h
@@ -54,8 +57,10 @@ add_library(${TARGET} STATIC
     chat-parser-xml-toolcall.cpp
     chat-peg-parser.cpp
     chat-peg-parser.h
+    chat-template-internal.h
     chat.cpp
     chat.h
+    ${CHAT_SYNTAX_SOURCES}
     common.cpp
     common.h
     console.cpp
