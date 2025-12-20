@@ -162,3 +162,4 @@ common_chat_params common_chat_params_init_xiaomi_mimo(const common_chat_templat
 common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & tmpl, const struct templates_params & inputs);
 common_chat_params common_chat_params_init_granite(const common_chat_template & tmpl, const struct templates_params & inputs);
 common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1(const common_chat_template & tmpl, const struct templates_params & inputs);
+common_chat_params common_chat_params_init_functionary_v3_2(const common_chat_template & tmpl, const struct templates_params & inputs);

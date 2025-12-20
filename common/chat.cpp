@@ -920,56 +920,6 @@ static common_chat_params common_chat_params_init_gpt_oss(const common_chat_temp
     return data;
 }
 
-static common_chat_params common_chat_params_init_functionary_v3_2(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    // >>>all\nlet's call functions>>>fn1\n{"arg1": 1...}\n>>>fn2\n{"arg1": 1...}...
-    // Using ">>>f1\n", ">>>f2\n"... as trigger words for the grammar
-    // If the function is python, we also allow raw python code (if the line after `python\n` doesn't start w/ opening `{`), which the model seems to prefer for multiline code.
-    common_chat_params data;
-    data.prompt = apply(tmpl, inputs);
-    data.format = COMMON_CHAT_FORMAT_FUNCTIONARY_V3_2;
-    if (inputs.tools.is_array() && !inputs.tools.empty()) {
-        data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
-        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-            std::vector<std::string> first_tool_rules;
-            std::vector<std::string> subsequent_tool_rules;
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                std::string name = function.at("name");
-                auto parameters = function.at("parameters");
-                builder.resolve_refs(parameters);
-                std::string args_pattern = "[\\s\\S]*";
-                auto args_rule = builder.add_schema(name + "-args", parameters);
-                if (name == "python") {
-                    args_rule = builder.add_rule(name + "-maybe-raw-args", args_rule + " | [^{] .*");
-                } else {
-                    args_pattern = "\\{" + args_pattern;
-                }
-                auto call_rule = builder.add_rule(name + "-call", "\"" + name + "\\n\" " + args_rule);
-                first_tool_rules.push_back(call_rule);
-                if (inputs.parallel_tool_calls) {
-                    subsequent_tool_rules.push_back(builder.add_rule(name + "-call2", "\">>>\" " + call_rule));
-                }
-                data.grammar_triggers.push_back({
-                    COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
-                    "((?:[\\s\\S]+?>>>)?" + regex_escape(name) + "\n)" + args_pattern,
-                });
-            });
-            data.preserved_tokens = {
-                "<|end_header_id|>",
-            };
-            auto first_rule = first_tool_rules.empty() ? "" : builder.add_rule("first_tool_call", string_join(first_tool_rules, " | ")) + " space";
-            if (inputs.parallel_tool_calls) {
-                auto subsequent_rule = builder.add_rule("subsequent_tool_call", string_join(subsequent_tool_rules, " | ")) + " space";
-                builder.add_rule("root", first_rule + " (" + subsequent_rule + ")*");
-            } else {
-                builder.add_rule("root", first_rule);
-            }
-
-        });
-    }
-    return data;
-}
-
 static common_chat_params common_chat_params_init_without_tools(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
     data.prompt = apply(tmpl, inputs);
