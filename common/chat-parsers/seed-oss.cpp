@@ -53,6 +53,7 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
         }
 
         // Tool call parser
+    bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
             auto tool_choice = p.choice();
             foreach_function(inputs.tools, [&](const json & tool) {
@@ -98,6 +99,9 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
             auto tool_call = p.rule("tool-call", "<seed:tool_call>\n" + tool_choice + "</seed:tool_call>" + p.space());
             auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, /* min = */ min_calls, /* max = */ max_calls));
 
+            if (require_tools) {
+                return reasoning + tool_calls;
+            }
             return reasoning << p.tag(Tag::CONTENT, p.until("<seed:tool_call>")) << tool_calls;
         }
 
@@ -120,9 +124,13 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
             parser.build_grammar(builder, data.grammar_lazy);
         });
 
-        data.grammar_triggers = {
-            {COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<seed:tool_call>"}
-        };
+        if (data.grammar_lazy) {
+            data.grammar_triggers = {
+                {COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<seed:tool_call>"}
+            };
+        } else {
+            data.grammar_triggers.clear();
+        }
     }
 
     return data;

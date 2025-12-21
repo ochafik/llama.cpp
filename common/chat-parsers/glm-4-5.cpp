@@ -71,6 +71,7 @@ common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & 
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
     auto include_grammar = true;
 
+    const bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
 
@@ -139,17 +140,25 @@ common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & 
             auto content_chunk = p.tag(Tag::CONTENT, p.until_one_of({"<think>", "\n<tool_call>", "<tool_call>"}));
 
             if (extract_reasoning) {
-                // Mixed content with interleaved thinking: (thinking | content)* tool_calls (thinking | content)*
                 auto mixed = p.zero_or_more(thinking_block | content_chunk);
+                if (require_tools) {
+                    if (data.thinking_forced_open) {
+                        return forced_thinking + p.zero_or_more(thinking_block) + tool_calls;
+                    }
+                    auto think_only = p.zero_or_more(thinking_block);
+                    return think_only + tool_calls + think_only;
+                }
                 if (data.thinking_forced_open) {
                     return forced_thinking + mixed + tool_calls + mixed;
                 }
                 return mixed + tool_calls + mixed;
             }
 
-            // No reasoning extraction - simpler parser
             auto content_before = p.tag(Tag::CONTENT, p.until_one_of({"\n<tool_call>", "<tool_call>"}));
             auto content_after = p.tag(Tag::CONTENT, p.rest());
+            if (require_tools) {
+                return tool_calls;
+            }
             return content_before + tool_calls + content_after;
         }
 
@@ -181,7 +190,11 @@ common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & 
             parser.build_grammar(builder, data.grammar_lazy);
         });
 
-        data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_call>"});
+        if (data.grammar_lazy) {
+            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_call>"});
+        } else {
+            data.grammar_triggers.clear();
+        }
     }
 
     return data;

@@ -59,6 +59,7 @@ common_chat_params common_chat_params_init_ministral_3(const common_chat_templat
         "[ARGS]",
     };
 
+    bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
         auto reasoning = extract_reasoning ? p.optional("[THINK]" + p.tag(Tag::REASONING, p.until("[/THINK]")) + "[/THINK]") : p.eps();
@@ -91,6 +92,9 @@ common_chat_params common_chat_params_init_ministral_3(const common_chat_templat
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
             auto tool_calls = p.trigger_rule("tool-call", p.repeat(tool_choice, min_calls, max_calls));
 
+            if (require_tools) {
+                return reasoning << tool_calls;
+            }
             return reasoning << p.tag(Tag::CONTENT, p.until("[TOOL_CALLS]")) << tool_calls;
         }
 
@@ -113,9 +117,13 @@ common_chat_params common_chat_params_init_ministral_3(const common_chat_templat
             parser.build_grammar(builder, data.grammar_lazy);
         });
 
-        data.grammar_triggers = {
-            {COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "[TOOL_CALLS]"}
-        };
+        if (data.grammar_lazy) {
+            data.grammar_triggers = {
+                {COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "[TOOL_CALLS]"}
+            };
+        } else {
+            data.grammar_triggers.clear();
+        }
     }
 
     return data;

@@ -18,6 +18,7 @@ common_chat_params common_chat_params_init_magistral(const common_chat_template 
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
 
     // Build the PEG parser
+    bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
 
@@ -37,6 +38,9 @@ common_chat_params common_chat_params_init_magistral(const common_chat_template 
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
             auto tool_calls = p.trigger_rule("tool-call", p.repeat(tool_call, min_calls, max_calls));
 
+            if (require_tools) {
+                return reasoning << tool_calls;
+            }
             return reasoning << p.tag(Tag::CONTENT, p.until("[TOOL_CALLS]")) << tool_calls;
         }
 
@@ -78,7 +82,11 @@ common_chat_params common_chat_params_init_magistral(const common_chat_template 
             }
             builder.add_rule("root", "\"[TOOL_CALLS]\" " + builder.add_schema("tool_calls", schema));
         });
-        data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "[TOOL_CALLS]"});
+        if (data.grammar_lazy) {
+            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "[TOOL_CALLS]"});
+        } else {
+            data.grammar_triggers.clear();
+        }
         data.preserved_tokens.push_back("[TOOL_CALLS]");
     } else {
         data.grammar_lazy = false;

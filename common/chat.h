@@ -217,6 +217,7 @@ common_chat_msg           common_chat_peg_parse(const common_peg_arena & parser,
 common_chat_tool_choice common_chat_tool_choice_parse_oaicompat(const std::string & tool_choice);
 
 bool common_chat_templates_support_enable_thinking(const common_chat_templates * chat_templates);
+bool common_chat_templates_support_tools(const common_chat_templates * chat_templates);
 
 // Parses a JSON array of messages in OpenAI's chat completion API format.
 // T can be std::string containing JSON or nlohmann::ordered_json

@@ -163,6 +163,14 @@ bool common_chat_templates_support_enable_thinking(const common_chat_templates *
     return rendered_no_thinking.prompt != rendered_with_thinking.prompt;
 }
 
+bool common_chat_templates_support_tools(const common_chat_templates * chat_templates) {
+    // Check the template that would be used for tools (tool_use variant if available, otherwise default)
+    const auto & tmpl = chat_templates->template_tool_use
+        ? *chat_templates->template_tool_use
+        : *chat_templates->template_default;
+    return tmpl.original_caps().supports_tools;
+}
+
 template <>
 std::vector<common_chat_msg> common_chat_msgs_parse_oaicompat(const json & messages) {
     std::vector<common_chat_msg> msgs;
@@ -810,6 +818,17 @@ static common_chat_params common_chat_templates_apply_jinja(
         return common_chat_params_init_function_gemma(tmpl, params);
     }
 
+    // Apriel 1.5 format detection (must come before Hermes since template contains <tool_call> instructional text)
+    if (src.find("<thinking>") != std::string::npos &&
+        src.find("</thinking>") != std::string::npos &&
+        src.find("<available_tools>") != std::string::npos &&
+        src.find("<|assistant|>") != std::string::npos &&
+        src.find("<|tool_result|>") != std::string::npos &&
+        src.find("<tool_calls>[") != std::string::npos &&
+        src.find("]</tool_calls>") != std::string::npos) {
+        return common_chat_params_init_apriel_1_5(tmpl, params);
+    }
+
     // Hermes 2/3 Pro, Qwen 2.5 Instruct (w/ tools)
     if (src.find("<tool_call>") != std::string::npos && params.json_schema.is_null()) {
         return common_chat_params_init_hermes_2_pro(tmpl, params);
@@ -851,17 +870,6 @@ static common_chat_params common_chat_templates_apply_jinja(
         src.find("<|tool_calls_section_begin|>") != std::string::npos &&
         src.find("## Return of") != std::string::npos) {
         return common_chat_params_init_kimi_k2(tmpl, params);
-    }
-
-    // Apriel 1.5 format detection
-    if (src.find("<thinking>") != std::string::npos &&
-        src.find("</thinking>") != std::string::npos &&
-        src.find("<available_tools>") != std::string::npos &&
-        src.find("<|assistant|>") != std::string::npos &&
-        src.find("<|tool_result|>") != std::string::npos &&
-        src.find("<tool_calls>[") != std::string::npos &&
-        src.find("]</tool_calls>") != std::string::npos) {
-        return common_chat_params_init_apriel_1_5(tmpl, params);
     }
 
     // Use generic handler when mixing tools + JSON schema.
@@ -987,7 +995,11 @@ common_chat_params common_chat_templates_apply(
     const struct common_chat_templates_inputs & inputs)
 {
     GGML_ASSERT(tmpls != nullptr);
-    return inputs.use_jinja
+    common_chat_params params = inputs.use_jinja
         ? common_chat_templates_apply_jinja(tmpls, inputs)
         : common_chat_templates_apply_legacy(tmpls, inputs);
+    if (!params.grammar_lazy && !params.grammar_triggers.empty()) {
+        params.grammar_triggers.clear();
+    }
+    return params;
 }

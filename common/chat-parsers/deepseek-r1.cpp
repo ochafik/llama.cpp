@@ -55,6 +55,7 @@ common_chat_params common_chat_params_init_deepseek_r1(const common_chat_templat
     };
 
     // Build PEG parser
+    bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
 
@@ -108,6 +109,9 @@ common_chat_params common_chat_params_init_deepseek_r1(const common_chat_templat
                 "<｜tool▁calls｜>",
             }));
 
+            if (require_tools) {
+                return reasoning << tool_calls;
+            }
             return reasoning << content << tool_calls;
         }
 
@@ -141,11 +145,15 @@ common_chat_params common_chat_params_init_deepseek_r1(const common_chat_templat
                 " space");
         });
 
-        data.grammar_triggers.push_back({
-            COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
-            std::string(data.thinking_forced_open ? "[\\s\\S]*?(</think>\\s*)" : "(?:<think>[\\s\\S]*?</think>\\s*)?") +
-                "(<｜tool▁calls▁begin｜>|<｜tool_calls_begin｜>|<｜tool calls begin｜>|<｜tool\\\\_calls\\\\_begin｜>|<｜tool▁calls｜>)[\\s\\S]*"
-        });
+        if (data.grammar_lazy) {
+            data.grammar_triggers.push_back({
+                COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
+                std::string(data.thinking_forced_open ? "[\\s\\S]*?(</think>\\s*)" : "(?:<think>[\\s\\S]*?</think>\\s*)?") +
+                    "(<｜tool▁calls▁begin｜>|<｜tool_calls_begin｜>|<｜tool calls begin｜>|<｜tool\\\\_calls\\\\_begin｜>|<｜tool▁calls｜>)[\\s\\S]*"
+            });
+        } else {
+            data.grammar_triggers.clear();
+        }
     }
 
     return data;

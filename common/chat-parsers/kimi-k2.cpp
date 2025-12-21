@@ -47,6 +47,7 @@ common_chat_params common_chat_params_init_kimi_k2(const common_chat_template & 
 
         // Tool call parser
         // Format: <|tool_call_begin|>functions.{name}:{counter}<|tool_call_argument_begin|>{...}<|tool_call_end|>
+        bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
             auto tool_choice = p.choice();
 
@@ -55,10 +56,11 @@ common_chat_params common_chat_params_init_kimi_k2(const common_chat_template & 
                 std::string name = function.at("name");
                 auto parameters = function.at("parameters");
 
-                // Match: functions.{name}:{counter}
+                // Match: functions.{name}:{id}
                 // Use atomic_tag to ensure tool calls are only created when fully matched
                 auto tool_open = p.token("<|tool_call_begin|>")
-                    + "functions." + p.literal_tag(Tag::TOOL_NAME, name) + ":" + p.until("<|tool_call_argument_begin|>")
+                    + "functions." + p.literal_tag(Tag::TOOL_NAME, name) + ":"
+                    + p.tag(Tag::TOOL_ID, p.until("<|tool_call_argument_begin|>"))
                     + "<|tool_call_argument_begin|>";
                 auto tool_close = p.token("<|tool_call_end|>");
                 auto tool_args = p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters));
@@ -77,9 +79,11 @@ common_chat_params common_chat_params_init_kimi_k2(const common_chat_template & 
                 + "<|tool_calls_section_end|>"
             );
 
-            // Content before + tool calls + content after
             auto content_before = p.tag(Tag::CONTENT, p.until("<|tool_calls_section_begin|>"));
             auto content_after = p.tag(Tag::CONTENT, p.rest());
+            if (require_tools) {
+                return reasoning << tool_calls;
+            }
             return reasoning << content_before << tool_calls << content_after;
         }
 
@@ -101,8 +105,11 @@ common_chat_params common_chat_params_init_kimi_k2(const common_chat_template & 
             });
             parser.build_grammar(builder, data.grammar_lazy);
         });
-
-        data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<|tool_calls_section_begin|>"});
+        if (data.grammar_lazy) {
+            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<|tool_calls_section_begin|>"});
+        } else {
+            data.grammar_triggers.clear();
+        }
     }
 
     return data;

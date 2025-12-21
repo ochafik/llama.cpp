@@ -48,6 +48,7 @@ common_chat_params common_chat_params_init_command_r7b(const common_chat_templat
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
 
     // Build PEG parser
+    const bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
 
@@ -80,9 +81,11 @@ common_chat_params common_chat_params_init_command_r7b(const common_chat_templat
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
             auto tool_calls = p.trigger_rule("tool-call", p.repeat(tool_call, min_calls, max_calls));
 
-            // Content until we see the action marker
-            auto content = p.tag(Tag::CONTENT, p.until("<|START_ACTION|>"));
+            if (require_tools) {
+                return reasoning << tool_calls;
+            }
 
+            auto content = p.tag(Tag::CONTENT, p.until("<|START_ACTION|>"));
             return reasoning << content << tool_calls << p.tag(Tag::CONTENT, p.rest());
         }
 
@@ -127,11 +130,15 @@ common_chat_params common_chat_params_init_command_r7b(const common_chat_templat
                 "\"<|START_ACTION|>\" " + builder.add_schema("tool_calls", schema) + " \"<|END_ACTION|>\"");
         });
 
-        data.grammar_triggers.push_back({
-            COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
-            std::string(data.thinking_forced_open ? "[\\s\\S]*?(<\\|END_THINKING\\|>\\s*)" : "(?:<\\|START_THINKING\\|>[\\s\\S]*?<\\|END_THINKING\\|>\\s*)?") +
-                "(<\\|START_ACTION\\|>)[\\s\\S]*"
-        });
+        if (data.grammar_lazy) {
+            data.grammar_triggers.push_back({
+                COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
+                std::string(data.thinking_forced_open ? "[\\s\\S]*?(<\\|END_THINKING\\|>\\s*)" : "(?:<\\|START_THINKING\\|>[\\s\\S]*?<\\|END_THINKING\\|>\\s*)?") +
+                    "(<\\|START_ACTION\\|>)[\\s\\S]*"
+            });
+        } else {
+            data.grammar_triggers.clear();
+        }
     }
 
     return data;

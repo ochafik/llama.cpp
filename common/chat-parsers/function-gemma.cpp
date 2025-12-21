@@ -25,6 +25,7 @@ common_chat_params common_chat_params_init_function_gemma(const common_chat_temp
 
     // Build the PEG parser for FunctionGemma format
     // Format: <start_function_call>call:name{key:<escape>value<escape>,key2:123}<end_function_call>
+    bool require_tools = params.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
 
@@ -69,7 +70,11 @@ common_chat_params common_chat_params_init_function_gemma(const common_chat_temp
         if (has_tools && params.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
             int min_calls = params.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
             int max_calls = params.parallel_tool_calls ? -1 : 1;
-            return content + p.repeat(tool_call, min_calls, max_calls);
+            auto calls = p.repeat(tool_call, min_calls, max_calls);
+            if (require_tools) {
+                return calls;
+            }
+            return content + calls;
         }
 
         // Content only
@@ -154,7 +159,11 @@ common_chat_params common_chat_params_init_function_gemma(const common_chat_temp
             }
         });
 
-        data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<start_function_call>"});
+        if (data.grammar_lazy) {
+            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<start_function_call>"});
+        } else {
+            data.grammar_triggers.clear();
+        }
     }
 
     return data;

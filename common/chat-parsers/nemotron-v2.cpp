@@ -30,6 +30,7 @@ common_chat_params common_chat_params_init_nemotron_v2(const common_chat_templat
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
     auto include_grammar = true;
 
+    bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
         auto reasoning = p.eps();
@@ -59,6 +60,9 @@ common_chat_params common_chat_params_init_nemotron_v2(const common_chat_templat
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
             auto tool_calls = p.trigger_rule("tool-call", p.repeat(tool_call, min_calls, max_calls));
 
+            if (require_tools) {
+                return reasoning << tool_calls;
+            }
             return reasoning << p.tag(Tag::CONTENT, p.until("<TOOLCALL>")) << tool_calls;
         }
 
@@ -99,9 +103,13 @@ common_chat_params common_chat_params_init_nemotron_v2(const common_chat_templat
             builder.add_rule("root", "\"<TOOLCALL>\" " + builder.add_schema("tool_calls", schema) + " \"</TOOLCALL>\"");
         });
 
-        data.grammar_triggers = {
-            {COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<TOOLCALL>"}
-        };
+        if (data.grammar_lazy) {
+            data.grammar_triggers = {
+                {COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<TOOLCALL>"}
+            };
+        } else {
+            data.grammar_triggers.clear();
+        }
     }
 
     return data;

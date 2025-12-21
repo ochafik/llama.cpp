@@ -30,6 +30,7 @@ common_chat_params common_chat_params_init_apriel_1_5(const common_chat_template
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
     auto include_grammar = true;
 
+    bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
         auto reasoning = p.eps();
@@ -60,6 +61,9 @@ common_chat_params common_chat_params_init_apriel_1_5(const common_chat_template
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
             auto tool_calls = p.trigger_rule("tool-call", p.repeat(tool_call, min_calls, max_calls));
 
+            if (require_tools) {
+                return reasoning << tool_calls;
+            }
             return reasoning << p.tag(Tag::CONTENT, p.until("<tool_calls>")) << tool_calls;
         }
 
@@ -82,7 +86,11 @@ common_chat_params common_chat_params_init_apriel_1_5(const common_chat_template
             parser.build_grammar(builder, data.grammar_lazy);
         });
 
-        data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_calls>"});
+        if (data.grammar_lazy) {
+            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_calls>"});
+        } else {
+            data.grammar_triggers.clear();
+        }
     }
 
     return data;
