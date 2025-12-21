@@ -52,6 +52,14 @@ common_chat_params common_chat_params_init_command_r7b(const common_chat_templat
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
 
+        auto response_block = p.optional(
+            p.optional(p.literal("<|START_OF_TURN_TOKEN|>"))
+            + p.optional(p.literal("<|CHATBOT_TOKEN|>"))
+            + (p.literal("<|START_RESPONSE|>") | p.literal("RESPONSE|>"))
+            + p.tag(Tag::CONTENT, p.until_one_of({"<|END_RESPONSE|>", "END_RESPONSE|>"}))
+            + (p.literal("<|END_RESPONSE|>") | p.literal("END_RESPONSE|>"))
+        );
+
         // Always handle thinking block (consume tags even if not extracting reasoning)
         auto reasoning = p.eps();
         if (data.thinking_forced_open) {
@@ -82,15 +90,14 @@ common_chat_params common_chat_params_init_command_r7b(const common_chat_templat
             auto tool_calls = p.trigger_rule("tool-call", p.repeat(tool_call, min_calls, max_calls));
 
             if (require_tools) {
-                return reasoning << tool_calls;
+                return reasoning << response_block << tool_calls << p.optional(p.rest());
             }
 
-            auto content = p.tag(Tag::CONTENT, p.until("<|START_ACTION|>"));
-            return reasoning << content << tool_calls << p.tag(Tag::CONTENT, p.rest());
+            return reasoning << response_block << tool_calls << p.optional(p.rest());
         }
 
         // Content only parser
-        return reasoning << p.tag(Tag::CONTENT, p.rest());
+        return reasoning << response_block << p.optional(p.rest());
     });
 
     data.parser = parser.save();
