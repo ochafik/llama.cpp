@@ -24,6 +24,10 @@ common_chat_params common_chat_params_init_nemotron_v2(const common_chat_templat
         "</think>",
         "<TOOLCALL>",
         "</TOOLCALL>",
+        "<SPECIAL_12>",
+        "<SPECIAL_11>Assistant",
+        "<SPECIAL_11>User",
+        "<SPECIAL_10>System",
     };
 
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
@@ -33,6 +37,20 @@ common_chat_params common_chat_params_init_nemotron_v2(const common_chat_templat
     bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
+        auto skip_special_markers = [&]() {
+            auto marker = p.rule("nemotron-special-marker",
+                p.optional(p.literal("\n"))
+                + p.choice({
+                    p.literal("<SPECIAL_12>"),
+                    p.literal("<SPECIAL_11>Assistant"),
+                    p.literal("<SPECIAL_11>User"),
+                    p.literal("<SPECIAL_10>System")
+                })
+                + p.optional(p.literal("\n"))
+            );
+            return p.repeat(marker, 0, -1);
+        };
+
         auto reasoning = p.eps();
         if (inputs.enable_thinking && extract_reasoning) {
             auto reasoning_content = p.tag(Tag::REASONING, p.until("</think>")) + ("</think>" | p.end());
@@ -60,15 +78,23 @@ common_chat_params common_chat_params_init_nemotron_v2(const common_chat_templat
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
             auto tool_calls = p.trigger_rule("tool-call", p.repeat(tool_call, min_calls, max_calls));
 
+            auto specials = skip_special_markers();
             if (require_tools) {
-                return reasoning << tool_calls;
+                return reasoning << specials << tool_calls;
             }
-            return reasoning << p.tag(Tag::CONTENT, p.until("<TOOLCALL>")) << tool_calls;
+            auto content_before = p.tag(Tag::CONTENT, p.until_one_of({
+                "<TOOLCALL>",
+                "<SPECIAL_12>",
+                "<SPECIAL_11>Assistant",
+                "<SPECIAL_11>User",
+                "<SPECIAL_10>System"
+            }));
+            return reasoning << content_before << specials << tool_calls << specials << p.tag(Tag::CONTENT, p.rest());
         }
 
         // Content only parser
         include_grammar = false;
-        return reasoning << p.tag(Tag::CONTENT, p.rest());
+        return reasoning << skip_special_markers() << p.tag(Tag::CONTENT, p.rest());
     });
 
     data.parser = parser.save();
