@@ -21,13 +21,35 @@ common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_tem
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
     auto include_grammar = true;
 
-    bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
 
+        const auto consume_end_block = [&]() {
+            auto optional_end = p.optional(p.choice({
+                p.literal("<|im_end|>"),
+                p.literal("<|endoftext|>")
+            }));
+            return p.optional(p.literal("\n")) + optional_end + p.optional(p.literal("\n"));
+        };
+
+        const auto content_until = [&](const std::string & marker, bool allow_inline) {
+            auto choice = p.choice();
+            choice |= p.tag(Tag::CONTENT, p.until(std::string("\n") + marker));
+            if (allow_inline) {
+                choice |= p.tag(Tag::CONTENT, p.until(marker));
+            }
+            return choice;
+        };
+
+        const auto content_before_tool = p.optional(p.rule("qwen-tool-prefix",
+            p.tag(Tag::CONTENT, p.until("<tool_call>"))
+            + p.peek(p.literal("<tool_call>"))
+        ));
+
         // Response format parser
         if (inputs.json_schema.is_object() && !inputs.json_schema.empty()) {
-            return p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema));
+            return p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema))
+                << consume_end_block();
         }
 
         // Tool call parser
@@ -78,15 +100,16 @@ common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_tem
             auto tool_call = p.rule("tool-call", "<tool_call>" + p.space() + tool_choice + "</tool_call>" + p.space());
             auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, /* min = */ min_calls, /* max = */ max_calls));
 
-            if (require_tools) {
-                return tool_calls;
-            }
-            return p.tag(Tag::CONTENT, p.until("<tool_call>")) << tool_calls;
+            return content_before_tool << tool_calls << consume_end_block();
         }
 
         // Content only parser
         include_grammar = false;
-        return p.tag(Tag::CONTENT, p.rest());
+        return p.choice({
+            content_until("<|im_end|>", /* allow_inline = */ true) << consume_end_block(),
+            content_until("<|endoftext|>", /* allow_inline = */ true) << consume_end_block(),
+            p.tag(Tag::CONTENT, p.rest())
+        });
     });
 
     data.parser = parser.save();
