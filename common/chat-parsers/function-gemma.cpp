@@ -2,7 +2,7 @@
 // Format: <start_function_call>call:name{key:<escape>value<escape>,key2:123}<end_function_call>
 // String values are wrapped with <escape> tokens, non-string values are raw.
 
-#include "chat-template-internal.h"
+#include "chat-parsers-internal.h"
 
 common_chat_params common_chat_params_init_function_gemma(const common_chat_template & tmpl, const struct templates_params & params) {
     common_chat_params data;

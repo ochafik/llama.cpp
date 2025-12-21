@@ -3,7 +3,7 @@
 // First tool call without >>>, subsequent with >>>
 // Python tool can have raw code (without opening {)
 
-#include "chat-template-internal.h"
+#include "chat-parsers-internal.h"
 
 common_chat_params common_chat_params_init_functionary_v3_2(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;

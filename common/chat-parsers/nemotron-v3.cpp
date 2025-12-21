@@ -2,7 +2,7 @@
 // Format: <tool_call><function=name><parameter=key>value</parameter></function></tool_call>
 // With optional <think>...</think> reasoning blocks
 
-#include "chat-template-internal.h"
+#include "chat-parsers-internal.h"
 
 common_chat_params common_chat_params_init_nemotron_v3(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;

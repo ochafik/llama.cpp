@@ -2,7 +2,7 @@
 // Format: <|tool_calls_section_begin|><|tool_call_begin|>function_name<|tool_call_argument_begin|>{"key": value}<|tool_call_end|><|tool_calls_section_end|>
 // With optional <think>...</think> reasoning blocks
 
-#include "chat-template-internal.h"
+#include "chat-parsers-internal.h"
 
 common_chat_params common_chat_params_init_kimi_k2(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;

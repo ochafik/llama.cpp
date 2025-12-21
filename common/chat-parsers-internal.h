@@ -3,7 +3,7 @@
 // Internal header for chat template format implementations.
 // This header is NOT part of the public API and should only be included by:
 // - common/chat.cpp (main implementation)
-// - common/chat-syntax/*.cpp (per-format implementations)
+// - common/chat-parsers/*.cpp (per-format implementations)
 
 #include "chat.h"
 #include "chat-parser.h"
@@ -138,7 +138,7 @@ typedef common_chat_params (*common_chat_format_init_fn_llama3x)(
     bool allow_python_tag_builtin_tools
 );
 
-// Forward declarations for modular parser implementations in chat-syntax/
+// Forward declarations for modular parser implementations in chat-parsers/
 common_chat_params common_chat_params_init_mistral_nemo(const common_chat_template & tmpl, const struct templates_params & inputs);
 common_chat_params common_chat_params_init_magistral(const common_chat_template & tmpl, const struct templates_params & inputs);
 common_chat_params common_chat_params_init_command_r7b(const common_chat_template & tmpl, const struct templates_params & inputs);

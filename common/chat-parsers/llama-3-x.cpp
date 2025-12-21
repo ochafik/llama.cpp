@@ -2,7 +2,7 @@
 // Format: {"type":"function","name":"func","parameters":{...}}
 // Also supports builtin tools: <|python_tag|>python.call(code="...")
 
-#include "chat-template-internal.h"
+#include "chat-parsers-internal.h"
 
 static void expect_tool_parameters(const std::string & name, const json & parameters, const std::vector<std::string> & expected_properties) {
     if (!parameters.contains("properties") || !parameters.at("properties").is_object()) {

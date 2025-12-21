@@ -2,13 +2,22 @@
 // Format: <tool_calls>[{"name": "func", "arguments": {...}}]</tool_calls>
 // With optional <thinking>...</thinking> reasoning blocks
 
-#include "chat-template-internal.h"
+#include "chat-parsers-internal.h"
 
 common_chat_params common_chat_params_init_apriel_1_5(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
 
     data.prompt = apply(tmpl, inputs);
     data.format = COMMON_CHAT_FORMAT_APRIEL_1_5;
+
+    // Handle thinking tags appropriately based on inputs.enable_thinking
+    if (string_ends_with(data.prompt, "<thinking>\n") || string_ends_with(data.prompt, "<thinking>")) {
+        if (!inputs.enable_thinking) {
+            data.prompt += "</thinking>";
+        } else {
+            data.thinking_forced_open = true;
+        }
+    }
 
     data.preserved_tokens = {
         "<thinking>",
@@ -26,7 +35,11 @@ common_chat_params common_chat_params_init_apriel_1_5(const common_chat_template
         auto reasoning = p.eps();
         if (inputs.enable_thinking && extract_reasoning) {
             auto reasoning_content = p.tag(Tag::REASONING, p.until("</thinking>")) + ("</thinking>" | p.end());
-            reasoning = p.optional("<thinking>" + reasoning_content);
+            if (data.thinking_forced_open) {
+                reasoning = reasoning_content;
+            } else {
+                reasoning = p.optional("<thinking>" + reasoning_content);
+            }
         }
 
         // Response format parser

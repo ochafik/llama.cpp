@@ -1,8 +1,7 @@
 // LFM2 tool call format
 // Format: <|tool_call_start|>[{"name": "...", "arguments": {...}}]<|tool_call_end|>
 
-#include "chat-template-internal.h"
-#include "log.h"
+#include "chat-parsers-internal.h"
 
 // Helper to find case-insensitive substring (same as in chat.cpp)
 static size_t ifind_string(const std::string & str, const std::string & pattern) {
@@ -53,8 +52,6 @@ common_chat_params common_chat_params_init_lfm2(const common_chat_template & tmp
         // server/utils.hpp prohibits that branch for the custom grammar anyways
         throw std::runtime_error("Tools call must not use \"json_schema\" or \"grammar\", use non-tool invocation if you want to use custom grammar");
     } else if (are_tools_provided && replace_json_schema_marker(tweaked_messages)) {
-        LOG_INF("%s: Using tools to build a grammar\n", __func__);
-
         data.format = COMMON_CHAT_FORMAT_LFM2_WITH_JSON_TOOLS;
         data.preserved_tokens = {"<|tool_call_start|>", "<|tool_call_end|>"};
 
@@ -110,21 +107,14 @@ common_chat_params common_chat_params_init_lfm2(const common_chat_template & tmp
 
         data.grammar_triggers = {{COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL, "\\s*<\\|tool_call_start\\|>\\s*\\["}};
     } else if (are_tools_provided && (!is_json_schema_provided && !is_grammar_provided)) {
-        LOG_INF("%s: Using tools without json schema or grammar\n", __func__);
-        // output those tokens
         data.preserved_tokens = {"<|tool_call_start|>", "<|tool_call_end|>"};
     } else if (is_json_schema_provided) {
-        LOG_INF("%s: Using provided json schema to build a grammar\n", __func__);
         data.grammar = json_schema_to_grammar(inputs.json_schema);
     } else if (is_grammar_provided) {
-        LOG_INF("%s: Using provided grammar\n", __func__);
         data.grammar = inputs.grammar;
-    } else {
-        LOG_INF("%s: Using content relying on the template\n", __func__);
     }
 
     data.prompt = apply(tmpl, inputs, /* messages_override= */ tweaked_messages);
-    LOG_DBG("%s: Prompt: %s\n", __func__, data.prompt.c_str());
 
     return data;
 }

@@ -1,24 +1,36 @@
-// DeepSeek V3.1 tool call format
-// Format: <｜tool▁calls▁begin｜><｜tool▁call▁begin｜>name<｜tool▁sep｜>{"arg":"value"}<｜tool▁call▁end｜><｜tool▁calls▁end｜>
+// DeepSeek R1 tool call format
+// Format: <｜tool▁calls▁begin｜><｜tool▁call▁begin｜>function<｜tool▁sep｜>name
+// ```json
+// {"arg":"value"}
+// ```<｜tool▁call▁end｜><｜tool▁calls▁end｜>
 // With optional <think>...</think> reasoning blocks
 
-#include "chat-template-internal.h"
+#include "chat-parsers-internal.h"
 
-common_chat_params common_chat_params_init_deepseek_v3_1(const common_chat_template & tmpl, const struct templates_params & inputs) {
+common_chat_params common_chat_params_init_deepseek_r1(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
+    auto prompt = apply(tmpl, inputs);
 
-    // Pass thinking context for DeepSeek V3.1 template
-    json additional_context = {
-        {"thinking", inputs.enable_thinking},
-    };
-
-    auto prompt = apply(tmpl, inputs,
-                       /* messages_override= */ inputs.messages,
-                       /* tools_override= */ std::nullopt,
-                       additional_context);
+    // Hacks to fix the official (broken) prompt.
+    // It is advisable to use --chat-template-file models/templates/llama-cpp-deepseek-r1.jinja instead,
+    // until the official template is fixed.
+    if (tmpl.source().find("{% if ns.is_tool %}{{'<｜tool▁outputs▁end｜>'}}") != std::string::npos) {
+        // Don't leave the chat dangling after tool results
+        if (string_ends_with(prompt, "<｜tool▁outputs▁end｜>")) {
+            prompt += "<｜end▁of▁sentence｜>";
+            if (inputs.add_generation_prompt) {
+                prompt += "<｜Assistant｜>";
+            }
+        }
+        // Fix up tool call delta example added by Minja
+        prompt = std::regex_replace(
+            prompt,
+            std::regex("(<｜tool▁call▁end｜>)[\\s\\r\\n]*(<｜tool▁outputs▁begin｜>|<｜User｜>)"),
+            "$1<｜tool▁calls▁end｜><｜end▁of▁sentence｜>$2");
+    }
     data.prompt = prompt;
 
-    if (string_ends_with(data.prompt, "<think>")) {
+    if (string_ends_with(data.prompt, "<think>\n")) {
         if (!inputs.enable_thinking) {
             data.prompt += "</think>";
         } else {
@@ -29,7 +41,7 @@ common_chat_params common_chat_params_init_deepseek_v3_1(const common_chat_templ
     bool has_tools = inputs.tools.is_array() && !inputs.tools.empty();
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
 
-    data.format = COMMON_CHAT_FORMAT_DEEPSEEK_V3_1;
+    data.format = COMMON_CHAT_FORMAT_DEEPSEEK_R1;
     data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED && inputs.json_schema.is_null();
 
     data.preserved_tokens = {
@@ -64,12 +76,12 @@ common_chat_params common_chat_params_init_deepseek_v3_1(const common_chat_templ
                 std::string name = function.at("name");
                 auto parameters = function.at("parameters");
 
-                // Format: name<｜tool▁sep｜>{...}<｜tool▁call▁end｜>
+                // Format: function<｜tool▁sep｜>name\n```json\n{...}\n```<｜tool▁call▁end｜>
                 tool_choice |= p.rule("tool-" + name, p.tag(Tag::TOOL,
                     p.optional(p.token_tag(Tag::TOOL_OPEN, "<｜tool▁call▁begin｜>"))
-                    + p.literal_tag(Tag::TOOL_NAME, name) + p.token("<｜tool▁sep｜>")
+                    + "function" + p.token("<｜tool▁sep｜>") + p.literal_tag(Tag::TOOL_NAME, name) + "\n```json\n"
                     + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters))
-                    + p.token_tag(Tag::TOOL_CLOSE, "<｜tool▁call▁end｜>")
+                    + "\n```" + p.token_tag(Tag::TOOL_CLOSE, "<｜tool▁call▁end｜>")
                 ));
             });
 
@@ -115,9 +127,9 @@ common_chat_params common_chat_params_init_deepseek_v3_1(const common_chat_templ
                 auto parameters = function.at("parameters");
                 builder.resolve_refs(parameters);
                 tool_rules.push_back(builder.add_rule(name + "-call",
-                    "( \"<｜tool▁call▁begin｜>\" )? \"" + name + "<｜tool▁sep｜>"
-                    "\" " + builder.add_schema(name + "-args", parameters) + " "
-                    "\"<｜tool▁call▁end｜>\""));
+                    "( \"<｜tool▁call▁begin｜>\" )? \"function<｜tool▁sep｜>" + name + "\\n"
+                    "```json\\n\" " + builder.add_schema(name + "-args", parameters) + " "
+                    "\"\\n```<｜tool▁call▁end｜>\""));
             });
             // Distill Qwen 7B & 32B models seem confused re/ syntax of their tool call opening tag,
             // so we accept common variants (then it's all constrained)

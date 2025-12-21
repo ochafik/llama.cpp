@@ -1,7 +1,7 @@
 // Xiaomi MiMo tool call format
 // Format: <tool_call>{"name": "func", "arguments": {...}}</tool_call>
 
-#include "chat-template-internal.h"
+#include "chat-parsers-internal.h"
 
 common_chat_params common_chat_params_init_xiaomi_mimo(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;

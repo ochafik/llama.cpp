@@ -1,7 +1,7 @@
 // Command R7B tool call format
 // Format: <|START_THINKING|>...<|END_THINKING|><|START_ACTION|>[{"tool_call_id":"1","tool_name":"func","parameters":{}}]<|END_ACTION|>
 
-#include "chat-template-internal.h"
+#include "chat-parsers-internal.h"
 
 common_chat_params common_chat_params_init_command_r7b(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;

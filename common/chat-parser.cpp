@@ -1426,7 +1426,7 @@ static void common_chat_parse_content_only(common_chat_msg_parser & builder) {
 }
 
 static void common_chat_parse(common_chat_msg_parser & builder) {
-    LOG_DBG("Parsing input with format %s: %s\n", common_chat_format_name(builder.syntax().format), builder.input().c_str());
+    LOG_INF("Parsing input with format %s: %s\n", common_chat_format_name(builder.syntax().format), builder.input().c_str());
 
     switch (builder.syntax().format) {
         case COMMON_CHAT_FORMAT_CONTENT_ONLY:
@@ -1532,7 +1532,7 @@ common_chat_msg common_chat_peg_parse(const common_peg_arena & parser, const std
         throw std::runtime_error("Failed to parse due to missing parser definition.");
     }
 
-    LOG_DBG("Parsing input with format %s: %s\n", common_chat_format_name(syntax.format), input.c_str());
+    LOG_INF("Parsing input with format %s: %s\n", common_chat_format_name(syntax.format), input.c_str());
 
     common_peg_parse_context ctx(input, is_partial);
     auto result = parser.parse(ctx);

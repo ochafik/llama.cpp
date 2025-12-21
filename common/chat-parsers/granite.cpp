@@ -2,7 +2,7 @@
 // Format: <|tool_call|>[{"name": "func", "arguments": {...}}]
 // With optional <think>...</think> and <response>...</response> tags
 
-#include "chat-template-internal.h"
+#include "chat-parsers-internal.h"
 
 common_chat_params common_chat_params_init_granite(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;

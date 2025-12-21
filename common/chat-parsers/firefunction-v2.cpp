@@ -1,11 +1,8 @@
 // Firefunction V2 tool call format
 // Format: functools[{"name":"func","arguments":{}}]
 
-#include "chat-template-internal.h"
-#include "log.h"
-
+#include "chat-parsers-internal.h"
 common_chat_params common_chat_params_init_firefunction_v2(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    LOG_DBG("%s\n", __func__);
     common_chat_params data;
 
     const std::optional<json> tools_override = json();

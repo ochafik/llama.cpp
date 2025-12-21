@@ -44,8 +44,8 @@ endif()
 
 set(TARGET common)
 
-# Glob chat syntax files from the chat-syntax directory
-file(GLOB CHAT_SYNTAX_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/chat-syntax/*.cpp")
+# Glob chat parser files from the chat-parsers directory
+file(GLOB CHAT_SYNTAX_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/chat-parsers/*.cpp")
 
 add_library(${TARGET} STATIC
     arg.cpp
@@ -55,7 +55,7 @@ add_library(${TARGET} STATIC
     chat-parser.h
     chat-peg-parser.cpp
     chat-peg-parser.h
-    chat-template-internal.h
+    chat-parsers-internal.h
     chat.cpp
     chat.h
     ${CHAT_SYNTAX_SOURCES}

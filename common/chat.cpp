@@ -1,7 +1,7 @@
 #include "chat.h"
 #include "chat-parser.h"
 #include "chat-peg-parser.h"
-#include "chat-template-internal.h"
+#include "chat-parsers-internal.h"
 #include "common.h"
 #include "json-partial.h"
 #include "json-schema-to-grammar.h"

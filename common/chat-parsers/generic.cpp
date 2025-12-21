@@ -4,7 +4,7 @@
 // Multiple: {"tool_calls": [{"name": "func", "arguments": {...}}]}
 // Response: {"response": "..."}
 
-#include "chat-template-internal.h"
+#include "chat-parsers-internal.h"
 
 common_chat_params common_chat_params_init_generic(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;

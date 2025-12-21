@@ -2,7 +2,7 @@
 // Format: <function=name>{...}</function>
 // Also supports: <|python_tag|>code...
 
-#include "chat-template-internal.h"
+#include "chat-parsers-internal.h"
 
 common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
