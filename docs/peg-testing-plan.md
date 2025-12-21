@@ -58,6 +58,9 @@ We can collapse some rows when a template lacks the capability (e.g., no need to
    - `syntax.parser.empty()` before streaming (preventing legacy fallback).
 5. **Parallel tool-call support** – when `scenario.parallel_tool_calls` is true, stream a response with two tool calls (with individual needles in each call) and ensure `test_streaming_with_needles()` iterates over the vector rather than assuming a single call.
 
+## Parser guardrails
+- Once a grammar trigger (e.g. `<seed:tool_call>`) fires, the PEG definition must not offer “escape hatches” such as an alternate `.*` rule that treats the remainder as plain content. Grammar-constrained sampling keeps every alternative parse stack alive; leaving a fallback path effectively disables the constraint. Handle model misbehavior (wrong function name, missing tool call, bad argument types) outside the PEG parser by rejecting the output or surfacing a clear error.
+
 ## Incremental rollout plan
 1. **Refactor harness** – introduce the scenario structs, parser builder, and strict PEG-loading asserts without expanding the matrix yet. This guarantees every existing needle test is already hitting the PEG implementation.
 2. **Implement tool-call needle generator** – extend `make_needle_context()` to emit format-aware tool call strings and re-enable the currently skipped “Test 4” block.

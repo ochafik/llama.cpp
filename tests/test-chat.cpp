@@ -436,8 +436,9 @@ static void test_templates(const struct common_chat_templates * tmpls, const std
                           bool expect_grammar_triggered = true,
                           bool test_grammar_if_triggered = true,
                           common_reasoning_format reasoning_format = COMMON_REASONING_FORMAT_NONE,
-                          bool ignore_whitespace_differences = false
-                        ) {
+                          bool ignore_whitespace_differences = false,
+                          bool expect_parse_failure = false,
+                          const std::function<void(std::string &)> & mutate_delta = {}) {
     common_chat_msg user_message;
     user_message.role = "user";
     user_message.content = "Hello, world!";
@@ -452,6 +453,15 @@ static void test_templates(const struct common_chat_templates * tmpls, const std
             }
         }
 
+        std::string delta = data.delta;
+        if (mutate_delta) {
+            mutate_delta(delta);
+        }
+
+        if (expect_parse_failure && !expect_grammar_triggered) {
+            throw std::runtime_error("Cannot expect parse failure when grammar trigger is disabled");
+        }
+
         if (expect_grammar_triggered) {
             common_chat_syntax syntax;
             syntax.format = data.params.format;
@@ -459,8 +469,22 @@ static void test_templates(const struct common_chat_templates * tmpls, const std
             if (!data.params.parser.empty()) {
                 syntax.parser.load(data.params.parser);
             }
-            const auto msg = common_chat_parse(data.delta, /* is_partial= */ false, syntax);
-            assert_msg_equals(test_message, msg, ignore_whitespace_differences);
+            bool threw = false;
+            try {
+                const auto msg = common_chat_parse(delta, /* is_partial= */ false, syntax);
+                if (expect_parse_failure) {
+                    throw std::runtime_error("Expected parse failure but parsing succeeded");
+                }
+                assert_msg_equals(test_message, msg, ignore_whitespace_differences);
+            } catch (const std::exception & e) {
+                if (!expect_parse_failure) {
+                    throw;
+                }
+                threw = true;
+            }
+            if (expect_parse_failure && !threw) {
+                throw std::runtime_error("Expected parse failure but parsing succeeded");
+            }
         }
 
         if (!test_message.tool_calls.empty()) {
@@ -472,7 +496,7 @@ static void test_templates(const struct common_chat_templates * tmpls, const std
                 throw std::runtime_error("Failed to build grammar");
             }
             auto earliest_trigger_pos = std::string::npos;
-            auto constrained = data.delta;
+            auto constrained = delta;
             for (const auto & trigger : data.params.grammar_triggers) {
                 size_t pos = std::string::npos;
                 std::smatch match;
@@ -528,7 +552,7 @@ static void test_templates(const struct common_chat_templates * tmpls, const std
                 assert_equals(expect_grammar_triggered, grammar_triggered);
             }
 
-            if (grammar_triggered && test_grammar_if_triggered && !match_string(constrained, grammar.get())) {
+            if (grammar_triggered && test_grammar_if_triggered && !expect_parse_failure && !match_string(constrained, grammar.get())) {
                 throw std::runtime_error("Failed to match delta against grammar:\n\n" + data.delta +
                     "\n\nConstrained: " + constrained +
                     "\n\nGrammar: " + data.params.grammar);
@@ -2523,6 +2547,38 @@ static void test_template_output_parsers() {
                 "<parameter=input>\ntest",
                 /* is_partial= */ true,
                 syntax));
+
+        auto make_invalid_delta = [&](const std::function<void(std::string &)> & mutate) {
+            test_templates(
+                tmpls.get(), end_tokens, message_assist_call, tools,
+                /* expected_delta = */ "", /* expect_grammar_triggered = */ true,
+                /* test_grammar_if_triggered = */ true,
+                COMMON_REASONING_FORMAT_NONE,
+                /* ignore_whitespace_differences = */ false,
+                /* expect_parse_failure = */ true,
+                mutate);
+        };
+
+        // Wrong function name should fail parsing once tool-call trigger fires
+        make_invalid_delta([](std::string & delta) {
+            const std::string needle = "function=special_function";
+            auto pos = delta.find(needle);
+            GGML_ASSERT(pos != std::string::npos);
+            delta.replace(pos, needle.size(), "function=unknown_function");
+        });
+
+        // Wrong argument type should also fail (string instead of integer)
+        make_invalid_delta([](std::string & delta) {
+            const std::string param_open = "<parameter=arg1>";
+            const std::string param_close = "</parameter>";
+            auto start = delta.find(param_open);
+            GGML_ASSERT(start != std::string::npos);
+            auto end = delta.find(param_close, start);
+            GGML_ASSERT(end != std::string::npos);
+            end += param_close.size();
+            const std::string replacement = "<parameter=arg1>\n\"not-a-number\"\n</parameter>";
+            delta.replace(start, end - start, replacement);
+        });
 
         // Test incomplete reasoning tag
         assert_msg_equals(
