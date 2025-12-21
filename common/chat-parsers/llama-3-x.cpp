@@ -35,6 +35,17 @@ common_chat_params common_chat_params_init_llama_3_x(const common_chat_template 
         auto parser = build_chat_peg_parser([&](auto & p) {
             using Tag = common_chat_peg_tag;
 
+            const auto consume_message_end = [&]() {
+                auto seq = p.sequence();
+                seq += p.optional(p.choice({
+                    p.literal("<|eot_id|>"),
+                    p.literal("<|eom_id|>"),
+                    p.literal("<|end|>")
+                }));
+                seq += p.optional(p.space());
+                return seq;
+            };
+
             // Build tool call alternatives
             auto tool_choice = p.choice();
 
@@ -96,14 +107,18 @@ common_chat_params common_chat_params_init_llama_3_x(const common_chat_template 
                 if (!builtin_tool_names.empty()) {
                     delimiters.push_back("<|python_tag|>");
                 }
-                auto content = p.tag(Tag::CONTENT, p.until_one_of(delimiters));
+                auto content = p.tag(Tag::CONTENT, p.until_one_of(delimiters)) << consume_message_end();
                 auto tool_calls = p.trigger_rule("tool-call", p.repeat(tool_choice, min_calls, max_calls));
 
                 return content << tool_calls;
             }
 
             // Content only parser
-            return p.tag(Tag::CONTENT, p.rest());
+            auto content_only = p.sequence({
+                p.tag(Tag::CONTENT, p.until_one_of({"<|eot_id|>", "<|eom_id|>", "<|end|>"})),
+                consume_message_end()
+            });
+            return p.choice({content_only, p.tag(Tag::CONTENT, p.rest())});
         });
 
         data.parser = parser.save();
