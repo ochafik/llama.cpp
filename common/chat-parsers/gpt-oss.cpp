@@ -60,18 +60,39 @@ common_chat_params common_chat_params_init_gpt_oss(const common_chat_template & 
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
 
+        auto assistant_prefix = [&]() {
+            return p.optional(p.token("<|start|>") + "assistant");
+        };
+
+        auto commentary_content = p.rule("gpt-oss-commentary",
+            assistant_prefix()
+            + p.token("<|channel|>") + "commentary"
+            + p.token("<|message|>")
+            + p.tag(Tag::CONTENT, p.until("<|end|>"))
+            + p.token("<|end|>")
+        );
+
+        auto final_content = p.rule("gpt-oss-final",
+            assistant_prefix()
+            + p.token("<|channel|>") + "final"
+            + p.optional(p.literal(" ") + p.token("<|constrain|>") + p.until("<|message|>"))
+            + p.token("<|message|>")
+            + p.tag(Tag::CONTENT, p.until("<|end|>"))
+            + p.token("<|end|>")
+        );
+
+        auto reasoning_block = p.eps();
+        if (extract_reasoning) {
+            reasoning_block = p.optional(p.tag(Tag::REASONING,
+                p.token("<|channel|>") + "analysis" + p.token("<|message|>") + p.until("<|end|>")) + p.token("<|end|>")
+                + assistant_prefix()
+            );
+        }
+
         // Response format parser (with JSON schema constraint)
         if (inputs.json_schema.is_object() && !inputs.json_schema.empty()) {
-            auto reasoning = p.eps();
-            if (extract_reasoning) {
-                // Optional analysis channel for reasoning
-                reasoning = p.optional(p.tag(Tag::REASONING,
-                    p.token("<|channel|>") + "analysis" + p.token("<|message|>") + p.until("<|end|>")) + p.token("<|end|>")
-                    + p.optional(p.token("<|start|>") + "assistant")
-                );
-            }
             // Final channel with JSON content
-            return reasoning << p.optional(p.token("<|channel|>") + "final") << p.optional(p.space())
+            return reasoning_block << p.optional(p.token("<|channel|>") + "final") << p.optional(p.space())
                 << p.optional(p.token("<|constrain|>") + p.until("<|message|>"))
                 << p.token("<|message|>")
                 << p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema));
@@ -88,7 +109,8 @@ common_chat_params common_chat_params_init_gpt_oss(const common_chat_template & 
 
                 // Tool call in channel: <|channel|>analysis|commentary to=functions.name<|message|>{...}
                 tool_choice |= p.rule("tool-channel-" + name, p.tag(Tag::TOOL,
-                    p.token_tag(Tag::TOOL_OPEN, "<|channel|>")
+                    assistant_prefix()
+                    + p.token_tag(Tag::TOOL_OPEN, "<|channel|>")
                     + (p.literal("analysis") | "commentary")
                     + " to=functions." + p.literal_tag(Tag::TOOL_NAME, name)
                     + p.optional(" " + p.token("<|constrain|>") + "json")
@@ -98,7 +120,8 @@ common_chat_params common_chat_params_init_gpt_oss(const common_chat_template & 
 
                 // Tool call in role: to=functions.name<|channel|>analysis|commentary<|message|>{...}
                 tool_choice |= p.rule("tool-role-" + name, p.tag(Tag::TOOL,
-                    p.literal_tag(Tag::TOOL_OPEN, " to=functions.")
+                    assistant_prefix()
+                    + p.literal_tag(Tag::TOOL_OPEN, " to=functions.")
                     + p.literal_tag(Tag::TOOL_NAME, name)
                     + p.token("<|channel|>")
                     + (p.literal("analysis") | "commentary")
@@ -112,27 +135,17 @@ common_chat_params common_chat_params_init_gpt_oss(const common_chat_template & 
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
             auto tool_calls = p.trigger_rule("tool-call", p.repeat(tool_choice, min_calls, max_calls));
 
-            // Optional reasoning + content before tool calls
-            auto reasoning = p.eps();
-            if (extract_reasoning) {
-                reasoning = p.optional(p.tag(Tag::REASONING,
-                    p.token("<|channel|>") + "analysis" + p.token("<|message|>") + p.until("<|end|>")) + p.token("<|end|>")
-                    + p.optional(p.token("<|start|>") + "assistant")
-                );
-            }
+            auto pre_tool_content = p.repeat(commentary_content, 0, -1);
 
-            return reasoning << p.tag(Tag::CONTENT, p.until_one_of({"<|channel|>", " to=functions."})) << tool_calls;
+            return reasoning_block << pre_tool_content << tool_calls;
         }
 
         // Content only parser with optional reasoning
-        auto reasoning = p.eps();
-        if (extract_reasoning) {
-            reasoning = p.optional(p.tag(Tag::REASONING,
-                p.token("<|channel|>") + "analysis" + p.token("<|message|>") + p.until("<|end|>")) + p.token("<|end|>")
-                + p.optional(p.token("<|start|>") + "assistant")
-            );
-        }
-        return reasoning << p.tag(Tag::CONTENT, p.rest());
+        auto content_sequence = p.sequence();
+        content_sequence += p.repeat(commentary_content, 0, -1);
+        content_sequence += p.choice({final_content, commentary_content});
+
+        return reasoning_block << content_sequence;
     });
 
     data.parser = parser.save();
