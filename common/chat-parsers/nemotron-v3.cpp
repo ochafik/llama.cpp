@@ -24,6 +24,11 @@ common_chat_params common_chat_params_init_nemotron_v3(const common_chat_templat
         "</think>",
         "<tool_call>",
         "</tool_call>",
+        "<toolcall>",
+        "</toolcall>",
+        "<SPECIAL_11>Assistant",
+        "<SPECIAL_11>User",
+        "<SPECIAL_12>",
     };
 
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
