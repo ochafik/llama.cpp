@@ -56,6 +56,11 @@ common_chat_params common_chat_params_init_hermes_2_pro(const common_chat_templa
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
 
+        auto consume_message_end = [&]() {
+            return p.optional(p.choice({p.literal("<|im_end|>"), p.literal("<|eot_id|>"), p.literal("<|eom_id|>")}))
+                + p.optional(p.space());
+        };
+
         // Optional thinking block
         auto reasoning = p.eps();
         if (extract_reasoning) {
@@ -111,17 +116,20 @@ common_chat_params common_chat_params_init_hermes_2_pro(const common_chat_templa
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
             auto tool_calls = p.trigger_rule("tool-call", p.repeat(tool_choice, min_calls, max_calls));
 
-            // Content until we see tool call markers
-            auto content = p.tag(Tag::CONTENT, p.until_one_of({
+            auto content_prefix = p.optional(p.tag(Tag::CONTENT, p.until_one_of({
                 "<tool_call>",
                 "<function",
-            }));
+            })));
 
-            return reasoning << content << tool_calls;
+            return reasoning << content_prefix << tool_calls << consume_message_end();
         }
 
         // Content only parser
-        return reasoning << p.tag(Tag::CONTENT, p.rest());
+        auto content_block = p.sequence({
+            p.tag(Tag::CONTENT, p.until("<|im_end|>")),
+            consume_message_end()
+        });
+        return reasoning << p.choice({content_block, p.tag(Tag::CONTENT, p.rest()), p.eps()});
     });
 
     data.parser = parser.save();
