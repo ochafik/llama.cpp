@@ -61,8 +61,8 @@ common_chat_params common_chat_params_init_apertus(const common_chat_template & 
             // Tool call: <|tools_prefix|> + JSON array + <|tools_suffix|>
             auto tool_call = p.tag(Tag::TOOL,
                 p.token_tag(Tag::TOOL_OPEN, "<|tools_prefix|>")
-                + p.tag(Tag::TOOL_ARGS, p.json())
-                + p.token_tag(Tag::TOOL_CLOSE, "<|tools_suffix|>")
+                << p.tag(Tag::TOOL_ARGS, p.json())
+                << p.token_tag(Tag::TOOL_CLOSE, "<|tools_suffix|>")
             );
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
@@ -105,7 +105,7 @@ common_chat_params common_chat_params_init_apertus(const common_chat_template & 
             }
             builder.add_rule("root",
                 std::string(data.thinking_forced_open ? "( \"<|inner_suffix|>\" space )? " : "") +
-                "\"<|tools_prefix|>\" " + builder.add_schema("tool_calls", schema) + " \"<|tools_suffix|>\"");
+                "\"<|tools_prefix|>\" space " + builder.add_schema("tool_calls", schema) + " space \"<|tools_suffix|>\"");
         });
 
         data.grammar_triggers = {{COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,

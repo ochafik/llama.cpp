@@ -14,8 +14,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <functional>
 #include <string>
 
@@ -365,7 +367,8 @@ static delta_data init_delta(const struct common_chat_templates * tmpls, const s
                              const common_chat_msg & delta_message,
                              const std::vector<common_chat_tool> & tools,
                              const common_chat_tool_choice & tool_choice,
-                             common_reasoning_format reasoning_format = COMMON_REASONING_FORMAT_NONE) {
+                             common_reasoning_format reasoning_format = COMMON_REASONING_FORMAT_NONE,
+                             const std::function<void(common_chat_templates_inputs &)> & customize_inputs = {}) {
     common_chat_templates_inputs inputs;
     inputs.parallel_tool_calls = true;
     inputs.messages.push_back(user_message);
@@ -376,6 +379,10 @@ static delta_data init_delta(const struct common_chat_templates * tmpls, const s
         inputs.enable_thinking = true;
         inputs.reasoning_format = reasoning_format;
     }
+    if (customize_inputs) {
+        customize_inputs(inputs);
+    }
+
     auto params_prefix = common_chat_templates_apply(tmpls, inputs);
 
     inputs.messages.push_back(delta_message);
@@ -404,8 +411,9 @@ static delta_data init_delta(const struct common_chat_templates * tmpls, const s
     }
     auto delta = full.substr(common_prefix_length);
 
-    // Strip end tokens
-    for (const auto & end_token : end_tokens) {
+    // Strip end tokens (fall back to params_full.additional_stops when vector empty)
+    const std::vector<std::string> & tokens_to_strip = end_tokens.empty() ? params_full.additional_stops : end_tokens;
+    for (const auto & end_token : tokens_to_strip) {
         // rfind to find the last occurrence
         auto pos = delta.rfind(end_token);
         if (pos != std::string::npos) {
@@ -565,6 +573,7 @@ static void test_parser_with_streaming(const common_chat_msg & expected, const s
 
     auto merged = simple_assist_msg("");
     auto last_msg = parse_msg("");
+
     for (size_t i = 1; i <= raw_message.size(); ++i) {
         auto curr_msg = parse_msg(std::string(utf8_truncate_safe_view(std::string_view(raw_message).substr(0, i))));
         if (curr_msg == simple_assist_msg("")) continue;
@@ -606,27 +615,80 @@ static void test_parser_with_streaming(const common_chat_msg & expected, const s
 #define NEEDLE2_CONTENT   "<<<N2C>>>"
 #define NEEDLE1_REASONING "<<<N1R>>>"
 #define NEEDLE2_REASONING "<<<N2R>>>"
-#define NEEDLE1_ARG       "<<<N1A>>>"
-#define NEEDLE2_ARG       "<<<N2A>>>"
+#define NEEDLE1_ARG_KEY   "<<<N1AK>>>"
+#define NEEDLE2_ARG_KEY   "<<<N2AK>>>"
+#define NEEDLE1_ARG_VALUE "<<<N1AV>>>"
+#define NEEDLE2_ARG_VALUE "<<<N2AV>>>"
 
-struct needle_test_result {
-    bool saw_needle1_content = false;
-    bool saw_needle2_content = false;
-    bool saw_needle1_reasoning = false;
-    bool saw_needle2_reasoning = false;
-    bool saw_needle1_arg = false;
-    bool saw_needle2_arg = false;
-    bool needle2_before_needle1_content = false;
-    bool needle2_before_needle1_reasoning = false;
-    bool needle2_before_needle1_arg = false;
-    bool tool_name_was_split = false;
+struct needle_field_needles {
+    std::string first;
+    std::string second;
+};
+
+struct needle_arg_expectation {
+    needle_field_needles key_needles;
+    needle_field_needles value_needles;
+    std::string key_text;
+    std::string value_text;
+};
+
+struct needle_tool_expectation {
+    std::vector<needle_arg_expectation> args;
+};
+
+struct needle_test_context {
+    std::string scenario_name;
+    needle_field_needles content_needles;
+    needle_field_needles reasoning_needles;
+    std::vector<needle_tool_expectation> tool_expectations;
+    common_chat_msg expected_msg;
+    bool has_content = false;
+    bool has_reasoning = false;
+};
+
+struct needle_scenario {
+    std::string name;
+    bool provide_tools = false;
+    bool with_content = true;
+    bool with_reasoning = false;
+    bool with_tool_call = false;
+    size_t tool_call_count = 1;
+    common_chat_tool_choice tool_choice = COMMON_CHAT_TOOL_CHOICE_NONE;
+    bool enable_thinking = false;
+    bool force_disable_thinking = false;
+    bool require_thinking_support = false;
+    bool require_tool_support = false;
+    bool parallel_tool_calls = false;
+    bool skip_if_thinking_forced = false;
+    size_t args_per_tool_call = 2;
+    std::string tool_name = "python";
+};
+
+struct needle_field_state {
+    bool saw_first = false;
+    bool saw_second = false;
+    bool saw_second_before_first = false;
+};
+
+struct needle_arg_state {
+    needle_field_state key_state;
+    needle_field_state value_state;
+    bool key_split = false;
+    size_t key_completion_seq = 0;
+};
+
+struct needle_tool_state {
+    std::vector<needle_arg_state> arg_states;
     bool args_regressed = false;
     std::string longest_args_seen;
+};
 
-    // Final output from complete parse
-    std::string final_content;
-    std::string final_reasoning_content;
-    std::vector<common_chat_tool_call> final_tool_calls;
+struct needle_test_result {
+    needle_field_state content_state;
+    needle_field_state reasoning_state;
+    std::vector<needle_tool_state> tool_states;
+    bool unexpected_tool_count = false;
+    common_chat_msg final_msg;
 };
 
 // Check if tool call arguments regressed (got shorter)
@@ -638,189 +700,245 @@ static bool check_args_regression(const std::string & current, const std::string
     return false;
 }
 
-/**
- * Test streaming with needle verification.
- * Verifies:
- * 1. Needle1 appears before Needle2 for each field
- * 2. Tool names are never split (appear atomically)
- * 3. Tool arguments never regress (only grow)
- */
-template <typename T>
+static std::string make_indexed_needle(const char * base, size_t idx) {
+    return std::string(base) + "_" + std::to_string(idx);
+}
+
+static void update_field_state(needle_field_state & state, const needle_field_needles & needles, const std::string & text) {
+    if (needles.first.empty() && needles.second.empty()) {
+        return;
+    }
+    auto pos_first = text.find(needles.first);
+    auto pos_second = text.find(needles.second);
+
+    if (!state.saw_first && pos_second != std::string::npos) {
+        if (pos_first == std::string::npos || pos_second < pos_first) {
+            state.saw_second_before_first = true;
+        }
+    }
+    if (pos_first != std::string::npos) {
+        state.saw_first = true;
+    }
+    if (pos_second != std::string::npos) {
+        state.saw_second = true;
+    }
+}
+
+static needle_test_context make_needle_context(const needle_scenario & scenario) {
+    needle_test_context ctx;
+    ctx.scenario_name = scenario.name;
+    ctx.expected_msg.role = "assistant";
+
+    if (scenario.with_content) {
+        ctx.has_content = true;
+        ctx.content_needles = {NEEDLE1_CONTENT, NEEDLE2_CONTENT};
+        ctx.expected_msg.content = "Before " + ctx.content_needles.first + " middle " + ctx.content_needles.second + " after";
+    }
+
+    if (scenario.with_reasoning) {
+        ctx.has_reasoning = true;
+        ctx.reasoning_needles = {NEEDLE1_REASONING, NEEDLE2_REASONING};
+        ctx.expected_msg.reasoning_content = "Thinking " + ctx.reasoning_needles.first + " deeply " + ctx.reasoning_needles.second + " done";
+    }
+
+    if (scenario.with_tool_call) {
+        for (size_t call_idx = 0; call_idx < scenario.tool_call_count; ++call_idx) {
+            needle_tool_expectation expectation;
+            json args = json::object();
+
+            for (size_t arg_idx = 0; arg_idx < scenario.args_per_tool_call; ++arg_idx) {
+                needle_arg_expectation arg_expect;
+                arg_expect.key_needles.first  = make_indexed_needle(NEEDLE1_ARG_KEY, call_idx * scenario.args_per_tool_call + arg_idx);
+                arg_expect.key_needles.second = make_indexed_needle(NEEDLE2_ARG_KEY, call_idx * scenario.args_per_tool_call + arg_idx);
+                arg_expect.value_needles.first  = make_indexed_needle(NEEDLE1_ARG_VALUE, call_idx * scenario.args_per_tool_call + arg_idx);
+                arg_expect.value_needles.second = make_indexed_needle(NEEDLE2_ARG_VALUE, call_idx * scenario.args_per_tool_call + arg_idx);
+                arg_expect.key_text = arg_expect.key_needles.first + arg_expect.key_needles.second;
+                arg_expect.value_text = arg_expect.value_needles.first + arg_expect.value_needles.second;
+
+                std::string key = arg_expect.key_text;
+                std::string value = arg_expect.value_text;
+
+                args[key] = value;
+                expectation.args.push_back(arg_expect);
+            }
+
+            common_chat_tool_call call;
+            call.name = scenario.tool_name;
+            call.arguments = args.dump();
+            call.id = std::to_string(call_idx);
+
+            ctx.tool_expectations.push_back(expectation);
+            ctx.expected_msg.tool_calls.push_back(call);
+        }
+    }
+
+    return ctx;
+}
+
+static void verify_field_state(const char * label, const needle_field_state & state, const needle_field_needles & needles) {
+    if (needles.first.empty() && needles.second.empty()) {
+        return;
+    }
+    if (!state.saw_first) {
+        throw std::runtime_error(std::string(label) + ": Never saw NEEDLE1");
+    }
+    if (!state.saw_second) {
+        throw std::runtime_error(std::string(label) + ": Never saw NEEDLE2");
+    }
+    if (state.saw_second_before_first) {
+        throw std::runtime_error(std::string(label) + ": Saw NEEDLE2 before NEEDLE1 - streaming not incremental!");
+    }
+}
+
 static needle_test_result test_streaming_with_needles(
+    const needle_test_context & ctx,
     const std::string & raw_message,
-    T parse_msg,
-    const std::string & expected_tool_name = ""
-) {
+    const std::function<common_chat_msg(const std::string &, bool)> & parse_msg) {
+
+    constexpr auto utf8_truncate_safe_len = [](const std::string_view s) -> size_t {
+        auto len = s.size();
+        if (len == 0) return 0;
+        auto i = len;
+        for (size_t back = 0; back < 4 && i > 0; ++back) {
+            --i;
+            unsigned char c = s[i];
+            if ((c & 0x80) == 0) {
+                return len;
+            } else if ((c & 0xC0) == 0xC0) {
+                size_t expected_len = 0;
+                if ((c & 0xE0) == 0xC0) expected_len = 2;
+                else if ((c & 0xF0) == 0xE0) expected_len = 3;
+                else if ((c & 0xF8) == 0xF0) expected_len = 4;
+                else return i;
+                if (len - i >= expected_len) {
+                    return len;
+                } else {
+                    return i;
+                }
+            }
+        }
+        return len - std::min(len, size_t(3));
+    };
+    constexpr auto utf8_truncate_safe_view = [utf8_truncate_safe_len](const std::string_view s) {
+        return s.substr(0, utf8_truncate_safe_len(s));
+    };
+
     needle_test_result result;
-    std::string last_tool_name;
+    result.tool_states.resize(ctx.tool_expectations.size());
+    size_t key_sequence_counter = 1;
 
     for (size_t i = 1; i <= raw_message.size(); ++i) {
-        auto partial = raw_message.substr(0, i);
-        auto msg = parse_msg(partial);
+        auto safe_partial = std::string(utf8_truncate_safe_view(std::string_view(raw_message).substr(0, i)));
+        bool is_partial = i < raw_message.size();
+        auto msg = parse_msg(safe_partial, is_partial);
 
-        // Check content needles
-        if (msg.content.find(NEEDLE1_CONTENT) != std::string::npos) {
-            result.saw_needle1_content = true;
-        }
-        if (msg.content.find(NEEDLE2_CONTENT) != std::string::npos) {
-            result.saw_needle2_content = true;
-            if (!result.saw_needle1_content) {
-                result.needle2_before_needle1_content = true;
+        update_field_state(result.content_state, ctx.content_needles, msg.content);
+        update_field_state(result.reasoning_state, ctx.reasoning_needles, msg.reasoning_content);
+
+        if (!ctx.tool_expectations.empty()) {
+            if (msg.tool_calls.size() > ctx.tool_expectations.size()) {
+                result.unexpected_tool_count = true;
             }
-        }
-
-        // Check reasoning needles
-        if (msg.reasoning_content.find(NEEDLE1_REASONING) != std::string::npos) {
-            result.saw_needle1_reasoning = true;
-        }
-        if (msg.reasoning_content.find(NEEDLE2_REASONING) != std::string::npos) {
-            result.saw_needle2_reasoning = true;
-            if (!result.saw_needle1_reasoning) {
-                result.needle2_before_needle1_reasoning = true;
-            }
-        }
-
-        // Check tool calls
-        for (const auto & tc : msg.tool_calls) {
-            // Check tool name atomicity
-            if (!tc.name.empty() && !expected_tool_name.empty()) {
-                if (tc.name != expected_tool_name && !last_tool_name.empty() && last_tool_name != tc.name) {
-                    // Name changed but wasn't the expected name - it was split
-                    result.tool_name_was_split = true;
+            size_t limit = std::min(msg.tool_calls.size(), ctx.tool_expectations.size());
+            for (size_t idx = 0; idx < limit; ++idx) {
+                const auto & tc = msg.tool_calls[idx];
+                auto & tracker = result.tool_states[idx];
+                if (tracker.arg_states.size() < ctx.tool_expectations[idx].args.size()) {
+                    tracker.arg_states.resize(ctx.tool_expectations[idx].args.size());
                 }
-                last_tool_name = tc.name;
-            }
 
-            // Check argument needles
-            if (tc.arguments.find(NEEDLE1_ARG) != std::string::npos) {
-                result.saw_needle1_arg = true;
-            }
-            if (tc.arguments.find(NEEDLE2_ARG) != std::string::npos) {
-                result.saw_needle2_arg = true;
-                if (!result.saw_needle1_arg) {
-                    result.needle2_before_needle1_arg = true;
+                // Track full arguments JSON for regression detection
+                if (!tracker.longest_args_seen.empty() && !tc.arguments.empty()) {
+                    if (check_args_regression(tc.arguments, tracker.longest_args_seen)) {
+                        tracker.args_regressed = true;
+                    }
                 }
-            }
+                if (tc.arguments.length() > tracker.longest_args_seen.length()) {
+                    tracker.longest_args_seen = tc.arguments;
+                }
 
-            // Check for argument regression
-            if (!result.longest_args_seen.empty() && !tc.arguments.empty()) {
-                if (check_args_regression(tc.arguments, result.longest_args_seen)) {
-                    result.args_regressed = true;
+                for (size_t arg_idx = 0; arg_idx < ctx.tool_expectations[idx].args.size(); ++arg_idx) {
+                    const auto & expectation = ctx.tool_expectations[idx].args[arg_idx];
+                    auto & arg_state = tracker.arg_states[arg_idx];
+
+                    update_field_state(arg_state.key_state, expectation.key_needles, tc.arguments);
+                    update_field_state(arg_state.value_state, expectation.value_needles, tc.arguments);
+
+                    // Detect key splitting: key must appear atomically (first+second needle together)
+                    if (arg_state.key_state.saw_first && !arg_state.key_state.saw_second && !expectation.key_needles.second.empty()) {
+                        arg_state.key_split = true;
+                    }
+                    if (arg_state.key_state.saw_second && arg_state.key_completion_seq == 0) {
+                        arg_state.key_completion_seq = key_sequence_counter++;
+                    }
                 }
             }
-            if (tc.arguments.length() > result.longest_args_seen.length()) {
-                result.longest_args_seen = tc.arguments;
-            }
         }
 
-        // Store final output when we've processed the complete message
-        if (i == raw_message.size()) {
-            result.final_content = msg.content;
-            result.final_reasoning_content = msg.reasoning_content;
-            result.final_tool_calls = msg.tool_calls;
+        if (!is_partial) {
+            result.final_msg = msg;
         }
     }
 
     return result;
 }
 
-// Context for systematic needle testing
-struct needle_test_context {
-    std::string content;           // Content with NEEDLE1_CONTENT and NEEDLE2_CONTENT
-    std::string reasoning_content; // Reasoning with NEEDLE1_REASONING and NEEDLE2_REASONING
-    struct {
-        std::string name;
-        std::string arg_value;     // String arg with NEEDLE1_ARG and NEEDLE2_ARG
-    } tool_call;
-    bool has_content = false;
-    bool has_reasoning = false;
-    bool has_tool_call = false;
-};
-
-// Create a standard needle context for testing
-static needle_test_context make_needle_context(bool with_content, bool with_reasoning, bool with_tool) {
-    needle_test_context ctx;
-    if (with_content) {
-        ctx.content = "Before " NEEDLE1_CONTENT " middle " NEEDLE2_CONTENT " after";
-        ctx.has_content = true;
-    }
-    if (with_reasoning) {
-        ctx.reasoning_content = "Thinking " NEEDLE1_REASONING " deeply " NEEDLE2_REASONING " done";
-        ctx.has_reasoning = true;
-    }
-    if (with_tool) {
-        ctx.tool_call.name = "python";
-        ctx.tool_call.arg_value = "Start " NEEDLE1_ARG " code " NEEDLE2_ARG " end";
-        ctx.has_tool_call = true;
-    }
-    return ctx;
-}
-
-// Verify needle test results
-static void verify_needle_results(const needle_test_result & result, const needle_test_context & ctx) {
-    // Verify streaming behavior (needles in order, no regression)
+static void verify_needle_results(const needle_test_context & ctx, const needle_test_result & result) {
     if (ctx.has_content) {
-        if (!result.saw_needle1_content) {
-            throw std::runtime_error("Content: Never saw NEEDLE1");
-        }
-        if (!result.saw_needle2_content) {
-            throw std::runtime_error("Content: Never saw NEEDLE2");
-        }
-        if (result.needle2_before_needle1_content) {
-            throw std::runtime_error("Content: Saw NEEDLE2 before NEEDLE1 - streaming not incremental!");
-        }
-        // Verify final output matches expected
-        if (result.final_content != ctx.content) {
-            throw std::runtime_error("Content: Final output mismatch. Expected: '" + ctx.content +
-                                   "', got: '" + result.final_content + "'");
-        }
+        verify_field_state("Content", result.content_state, ctx.content_needles);
     }
     if (ctx.has_reasoning) {
-        if (!result.saw_needle1_reasoning) {
-            throw std::runtime_error("Reasoning: Never saw NEEDLE1");
-        }
-        if (!result.saw_needle2_reasoning) {
-            throw std::runtime_error("Reasoning: Never saw NEEDLE2");
-        }
-        if (result.needle2_before_needle1_reasoning) {
-            throw std::runtime_error("Reasoning: Saw NEEDLE2 before NEEDLE1 - streaming not incremental!");
-        }
-        // Verify final output matches expected
-        if (result.final_reasoning_content != ctx.reasoning_content) {
-            throw std::runtime_error("Reasoning: Final output mismatch. Expected: '" + ctx.reasoning_content +
-                                   "', got: '" + result.final_reasoning_content + "'");
-        }
+        verify_field_state("Reasoning", result.reasoning_state, ctx.reasoning_needles);
     }
-    if (ctx.has_tool_call) {
-        if (!result.saw_needle1_arg) {
-            throw std::runtime_error("Tool args: Never saw NEEDLE1");
+
+        if (!ctx.tool_expectations.empty()) {
+            if (result.unexpected_tool_count) {
+                throw std::runtime_error("Tool call: Parser produced more tool calls than expected");
+            }
+            if (result.final_msg.tool_calls.size() != ctx.tool_expectations.size()) {
+                throw std::runtime_error("Tool call: Final tool call count mismatch");
+            }
+            for (size_t call_idx = 0; call_idx < ctx.tool_expectations.size(); ++call_idx) {
+                const auto & expectation = ctx.tool_expectations[call_idx];
+                const auto & state = result.tool_states[call_idx];
+                const auto & final_call = result.final_msg.tool_calls[call_idx];
+
+                if (state.args_regressed) {
+                    throw std::runtime_error("Tool call: Arguments regressed (got shorter) during streaming!");
+                }
+
+                for (size_t arg_idx = 0; arg_idx < expectation.args.size(); ++arg_idx) {
+                    const auto & arg_expect = expectation.args[arg_idx];
+                    if (arg_idx >= state.arg_states.size()) {
+                        throw std::runtime_error("Tool call: Missing argument state in tracker");
+                    }
+                    const auto & arg_state = state.arg_states[arg_idx];
+
+                    verify_field_state("Tool arg key", arg_state.key_state, arg_expect.key_needles);
+                    verify_field_state("Tool arg value", arg_state.value_state, arg_expect.value_needles);
+                    if (arg_state.key_split) {
+                        throw std::runtime_error("Tool call: Argument key was split during streaming");
+                    }
+
+                    if (arg_idx > 0) {
+                        const auto & prev_state = state.arg_states[arg_idx - 1];
+                        if (prev_state.key_completion_seq == 0 || arg_state.key_completion_seq == 0 ||
+                            prev_state.key_completion_seq > arg_state.key_completion_seq) {
+                            throw std::runtime_error("Tool call: Argument keys streamed out of order");
+                        }
+                    }
+
+                    if (final_call.arguments.find(arg_expect.key_text) == std::string::npos) {
+                        throw std::runtime_error("Tool call: Final arguments missing expected key");
+                    }
+                    if (final_call.arguments.find(arg_expect.value_text) == std::string::npos) {
+                        throw std::runtime_error("Tool call: Final arguments missing expected value");
+                    }
+                }
+            }
         }
-        if (!result.saw_needle2_arg) {
-            throw std::runtime_error("Tool args: Never saw NEEDLE2");
-        }
-        if (result.needle2_before_needle1_arg) {
-            throw std::runtime_error("Tool args: Saw NEEDLE2 before NEEDLE1 - streaming not incremental!");
-        }
-        if (result.tool_name_was_split) {
-            throw std::runtime_error("Tool name was split during streaming!");
-        }
-        if (result.args_regressed) {
-            throw std::runtime_error("Tool arguments regressed (got shorter) during streaming!");
-        }
-        // Verify final tool call output
-        if (result.final_tool_calls.empty()) {
-            throw std::runtime_error("Tool call: No tool calls in final output");
-        }
-        if (result.final_tool_calls[0].name != ctx.tool_call.name) {
-            throw std::runtime_error("Tool call: Name mismatch. Expected: '" + ctx.tool_call.name +
-                                   "', got: '" + result.final_tool_calls[0].name + "'");
-        }
-        // Verify the argument value is present in the JSON arguments
-        if (result.final_tool_calls[0].arguments.find(ctx.tool_call.arg_value) == std::string::npos) {
-            throw std::runtime_error("Tool call: Arguments don't contain expected value. Expected to find: '" +
-                                   ctx.tool_call.arg_value + "' in: '" + result.final_tool_calls[0].arguments + "'");
-        }
-    }
+
+    assert_msg_equals(ctx.expected_msg, result.final_msg, false);
 }
 
 const common_chat_msg message_user {
@@ -4209,6 +4327,131 @@ struct template_capabilities {
     const char * think_close_tag; // Closing tag for thinking (nullptr = no thinking)
 };
 
+static const char * tool_choice_name(common_chat_tool_choice choice) {
+    switch (choice) {
+        case COMMON_CHAT_TOOL_CHOICE_AUTO: return "auto";
+        case COMMON_CHAT_TOOL_CHOICE_REQUIRED: return "required";
+        case COMMON_CHAT_TOOL_CHOICE_NONE: return "none";
+    }
+    return "unknown";
+}
+
+static std::vector<needle_scenario> build_needle_scenarios(const template_capabilities & info) {
+    std::vector<needle_scenario> scenarios;
+
+    needle_scenario content_no_tools;
+    content_no_tools.name = "content-no-tools";
+    content_no_tools.provide_tools = false;
+    content_no_tools.with_content = true;
+    content_no_tools.with_tool_call = false;
+    content_no_tools.tool_choice = COMMON_CHAT_TOOL_CHOICE_NONE;
+    content_no_tools.enable_thinking = false;
+    content_no_tools.force_disable_thinking = true;
+    content_no_tools.skip_if_thinking_forced = true;
+    scenarios.push_back(content_no_tools);
+
+    if (info.supports_thinking == ThinkingSupport::Yes) {
+        needle_scenario reasoning_with_content;
+        reasoning_with_content.name = "content-with-reasoning";
+        reasoning_with_content.with_reasoning = true;
+        reasoning_with_content.enable_thinking = true;
+        reasoning_with_content.require_thinking_support = true;
+        scenarios.push_back(reasoning_with_content);
+
+        needle_scenario reasoning_only;
+        reasoning_only.name = "reasoning-only";
+        reasoning_only.with_content = false;
+        reasoning_only.with_reasoning = true;
+        reasoning_only.enable_thinking = true;
+        reasoning_only.require_thinking_support = true;
+        scenarios.push_back(reasoning_only);
+
+        needle_scenario thinking_disabled;
+        thinking_disabled.name = "thinking-disabled";
+        thinking_disabled.with_content = true;
+        thinking_disabled.force_disable_thinking = true;
+        thinking_disabled.require_thinking_support = true;
+        thinking_disabled.skip_if_thinking_forced = true;
+        scenarios.push_back(thinking_disabled);
+    }
+
+    if (info.supports_tools == ToolSupport::Yes) {
+        needle_scenario tools_disabled;
+        tools_disabled.name = "tools-available-but-disabled";
+        tools_disabled.provide_tools = true;
+        tools_disabled.tool_choice = COMMON_CHAT_TOOL_CHOICE_NONE;
+        tools_disabled.with_tool_call = false;
+        tools_disabled.require_tool_support = true;
+        scenarios.push_back(tools_disabled);
+
+        needle_scenario tool_auto;
+        tool_auto.name = "tool-auto-single";
+        tool_auto.provide_tools = true;
+        tool_auto.tool_choice = COMMON_CHAT_TOOL_CHOICE_AUTO;
+        tool_auto.with_tool_call = true;
+        tool_auto.require_tool_support = true;
+        scenarios.push_back(tool_auto);
+
+        needle_scenario tool_required_only;
+        tool_required_only.name = "tool-required-only";
+        tool_required_only.provide_tools = true;
+        tool_required_only.tool_choice = COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+        tool_required_only.with_tool_call = true;
+        tool_required_only.with_content = false;
+        tool_required_only.require_tool_support = true;
+        scenarios.push_back(tool_required_only);
+
+        needle_scenario tool_parallel;
+        tool_parallel.name = "parallel-tool-calls";
+        tool_parallel.provide_tools = true;
+        tool_parallel.tool_choice = COMMON_CHAT_TOOL_CHOICE_AUTO;
+        tool_parallel.with_tool_call = true;
+        tool_parallel.tool_call_count = 2;
+        tool_parallel.parallel_tool_calls = true;
+        tool_parallel.require_tool_support = true;
+        scenarios.push_back(tool_parallel);
+
+        if (info.supports_thinking == ThinkingSupport::Yes) {
+            needle_scenario tool_with_reasoning;
+            tool_with_reasoning.name = "tool-with-reasoning";
+            tool_with_reasoning.provide_tools = true;
+            tool_with_reasoning.with_tool_call = true;
+            tool_with_reasoning.with_reasoning = true;
+            tool_with_reasoning.enable_thinking = true;
+            tool_with_reasoning.require_tool_support = true;
+            tool_with_reasoning.require_thinking_support = true;
+            scenarios.push_back(tool_with_reasoning);
+        }
+    }
+
+    return scenarios;
+}
+
+static std::string describe_scenario(const needle_scenario & scenario) {
+    std::ostringstream oss;
+    oss << "tools=" << (scenario.provide_tools ? "yes" : "no");
+    oss << ", choice=" << tool_choice_name(scenario.tool_choice);
+    if (scenario.parallel_tool_calls) {
+        oss << ", parallel";
+    }
+    oss << ", tool_calls=";
+    if (scenario.with_tool_call) {
+        oss << scenario.tool_call_count;
+        oss << "x" << scenario.args_per_tool_call << "args";
+    } else {
+        oss << 0;
+    }
+    if (scenario.with_reasoning) {
+        oss << ", reasoning";
+    }
+    if (scenario.enable_thinking) {
+        oss << ", thinking=on";
+    } else if (scenario.force_disable_thinking) {
+        oss << ", thinking=forced-off";
+    }
+    return oss.str();
+}
+
 static void test_systematic_needle_streaming() {
     printf("[%s]\n", __func__);
 
@@ -4312,127 +4555,75 @@ static void test_systematic_needle_streaming() {
             throw std::runtime_error("Template capabilities mismatch for " + std::string(tmpl_info.name));
         }
 
-        // Build parser with python tool (for needle testing with string args)
-        common_chat_templates_inputs inputs;
-        inputs.messages = {message_user};
-        inputs.tools = {python_tool};  // python tool has string 'code' parameter
-        inputs.parallel_tool_calls = false;
-        if (tmpl_info.supports_thinking == ThinkingSupport::Yes) {
-            inputs.enable_thinking = true;
-            inputs.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
-        }
+        auto scenarios = build_needle_scenarios(tmpl_info);
+        for (const auto & scenario : scenarios) {
+            if (scenario.require_thinking_support && tmpl_info.supports_thinking == ThinkingSupport::No) {
+                printf("    - Scenario %s skipped (no thinking support)\n", scenario.name.c_str());
+                continue;
+            }
+            if (scenario.require_tool_support && tmpl_info.supports_tools == ToolSupport::No) {
+                printf("    - Scenario %s skipped (no tool support)\n", scenario.name.c_str());
+                continue;
+            }
 
-        printf("    Applying template...\n"); fflush(stdout);
-        auto params = common_chat_templates_apply(tmpls.get(), inputs);
-        printf("    Template applied, loading parser...\n"); fflush(stdout);
-
-        common_chat_syntax syntax;
-        syntax.format = params.format;
-        syntax.reasoning_format = inputs.reasoning_format;
-        syntax.thinking_forced_open = params.thinking_forced_open;
-        if (!params.parser.empty()) {
-            syntax.parser.load(params.parser);
-        }
-        printf("    Parser loaded\n"); fflush(stdout);
-
-        // Test 1: Content-only needle test (only when thinking not forced open)
-        // When thinking_forced_open=true, parser expects reasoning first, so skip content-only test
-        if (!params.thinking_forced_open || tmpl_info.supports_thinking == ThinkingSupport::No) {
-            printf("    Running content-only test...\n");
+            printf("    Scenario %s (%s)\n", scenario.name.c_str(), describe_scenario(scenario).c_str());
             fflush(stdout);
-            auto ctx = make_needle_context(true, false, false);
-            std::string input = ctx.content;
-
-            // Use syntax without reasoning for content-only test
-            common_chat_syntax syntax_no_reasoning = syntax;
-            syntax_no_reasoning.reasoning_format = COMMON_REASONING_FORMAT_NONE;
-
-            auto result = test_streaming_with_needles(input,
-                [&](const std::string & msg) {
-                    return common_chat_parse(msg, true, syntax_no_reasoning);
-                });
 
             try {
-                verify_needle_results(result, ctx);
-                printf("    ✓ Content streaming incremental\n");
+                auto ctx = make_needle_context(scenario);
+                std::vector<common_chat_tool> scenario_tools;
+                if (scenario.provide_tools) {
+                    scenario_tools = {python_tool};
+                }
+
+                auto reasoning_format = scenario.with_reasoning ? COMMON_REASONING_FORMAT_DEEPSEEK : COMMON_REASONING_FORMAT_NONE;
+
+                auto data = init_delta(tmpls.get(), {}, message_user, ctx.expected_msg, scenario_tools,
+                                       scenario.tool_choice, reasoning_format,
+                                       [&](common_chat_templates_inputs & inputs) {
+                                           inputs.parallel_tool_calls = scenario.parallel_tool_calls;
+                                           if (scenario.force_disable_thinking) {
+                                               inputs.enable_thinking = false;
+                                               inputs.reasoning_format = COMMON_REASONING_FORMAT_NONE;
+                                           } else if (scenario.enable_thinking || scenario.with_reasoning) {
+                                               inputs.enable_thinking = true;
+                                               inputs.reasoning_format = reasoning_format;
+                                           } else {
+                                               inputs.enable_thinking = false;
+                                               inputs.reasoning_format = COMMON_REASONING_FORMAT_NONE;
+                                           }
+                                       });
+
+                if (scenario.skip_if_thinking_forced && data.params.thinking_forced_open) {
+                    printf("      - Skipped (template forces thinking open)\n");
+                    continue;
+                }
+                if (scenario.force_disable_thinking && data.params.thinking_forced_open) {
+                    printf("      - Skipped (template forces thinking open)\n");
+                    continue;
+                }
+
+                if (data.params.parser.empty()) {
+                    throw std::runtime_error("Template returned empty parser definition");
+                }
+
+                auto syntax = get_syntax(data.params, reasoning_format);
+                if (syntax.parser.empty()) {
+                    throw std::runtime_error("PEG arena failed to load");
+                }
+
+                auto syntax_copy = syntax;
+                auto parse_fn = [syntax_copy](const std::string & msg, bool is_partial) mutable {
+                    return common_chat_peg_parse(syntax_copy.parser, msg, is_partial, syntax_copy);
+                };
+
+                auto result = test_streaming_with_needles(ctx, data.delta, parse_fn);
+                verify_needle_results(ctx, result);
+                printf("      ✓ Passed\n");
             } catch (const std::exception & e) {
-                printf("    ✗ Content streaming: %s\n", e.what());
-            }
-        } else {
-            printf("    - Content-only test skipped (thinking forced open)\n");
-        }
-
-        // Test 2: Reasoning needle test (if supported)
-        if (tmpl_info.supports_thinking == ThinkingSupport::Yes && tmpl_info.think_close_tag) {
-            auto ctx = make_needle_context(true, true, false);
-
-            // Build input based on thinking format - use format-specific tags
-            std::string input;
-            if (params.thinking_forced_open) {
-                // thinking_forced_open: output starts with reasoning directly
-                input = ctx.reasoning_content + tmpl_info.think_close_tag + ctx.content;
-            } else {
-                // Need to include open tag since thinking not forced open
-                input = std::string(tmpl_info.think_open_tag) + ctx.reasoning_content +
-                        tmpl_info.think_close_tag + ctx.content;
-            }
-
-            // Need syntax with reasoning enabled
-            common_chat_syntax syntax_reasoning = syntax;
-            syntax_reasoning.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
-
-            auto result = test_streaming_with_needles(input,
-                [&](const std::string & msg) {
-                    return common_chat_parse(msg, true, syntax_reasoning);
-                });
-
-            try {
-                verify_needle_results(result, ctx);
-                printf("    ✓ Reasoning streaming incremental\n");
-            } catch (const std::exception & e) {
-                printf("    ✗ Reasoning streaming: %s\n", e.what());
-            }
-        }
-
-        // Test 3: Disabled thinking mode - verify content parsing works when thinking disabled
-        if (tmpl_info.supports_thinking == ThinkingSupport::Yes) {
-            // Re-apply template with thinking disabled
-            common_chat_templates_inputs inputs_no_think;
-            inputs_no_think.messages = {message_user};
-            inputs_no_think.tools = {python_tool};
-            inputs_no_think.parallel_tool_calls = false;
-            inputs_no_think.enable_thinking = false;  // Explicitly disable
-            inputs_no_think.reasoning_format = COMMON_REASONING_FORMAT_NONE;
-
-            auto params_no_think = common_chat_templates_apply(tmpls.get(), inputs_no_think);
-
-            common_chat_syntax syntax_no_think;
-            syntax_no_think.format = params_no_think.format;
-            syntax_no_think.reasoning_format = COMMON_REASONING_FORMAT_NONE;
-            syntax_no_think.thinking_forced_open = false;
-            if (!params_no_think.parser.empty()) {
-                syntax_no_think.parser.load(params_no_think.parser);
-            }
-
-            auto ctx = make_needle_context(true, false, false);
-            std::string input = ctx.content;
-
-            auto result = test_streaming_with_needles(input,
-                [&](const std::string & msg) {
-                    return common_chat_parse(msg, true, syntax_no_think);
-                });
-
-            try {
-                verify_needle_results(result, ctx);
-                printf("    ✓ Disabled thinking mode content streaming\n");
-            } catch (const std::exception & e) {
-                printf("    ✗ Disabled thinking mode: %s\n", e.what());
+                printf("      ✗ %s\n", e.what());
             }
         }
-
-        // Test 4: Tool call needle test (if supported) - format-specific
-        // Skip for now as each format has different tool call syntax
-        // TODO: Add format-specific tool call needle generation
     }
 }
 
