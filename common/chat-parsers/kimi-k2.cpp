@@ -34,10 +34,14 @@ common_chat_params common_chat_params_init_kimi_k2(const common_chat_template & 
 
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
+        auto optional_newline = [&]() {
+            return p.optional(p.literal("\n"));
+        };
+
         auto reasoning = p.eps();
         if (inputs.enable_thinking && extract_reasoning) {
             auto reasoning_content = p.tag(Tag::REASONING, p.until("</think>")) + ("</think>" | p.end());
-            reasoning = p.optional("<think>" + reasoning_content);
+            reasoning = p.optional(optional_newline() + "<think>" + reasoning_content);
         }
 
         // Response format parser
@@ -79,8 +83,8 @@ common_chat_params common_chat_params_init_kimi_k2(const common_chat_template & 
                 + "<|tool_calls_section_end|>"
             );
 
-            auto content_before = p.tag(Tag::CONTENT, p.until("<|tool_calls_section_begin|>"));
-            auto content_after = p.tag(Tag::CONTENT, p.rest());
+            auto content_before = optional_newline() + p.tag(Tag::CONTENT, p.until("<|tool_calls_section_begin|>"));
+            auto content_after = optional_newline() + p.tag(Tag::CONTENT, p.rest());
             if (require_tools) {
                 return reasoning << tool_calls;
             }
@@ -89,7 +93,7 @@ common_chat_params common_chat_params_init_kimi_k2(const common_chat_template & 
 
         // Content only parser
         include_grammar = false;
-        return reasoning << p.tag(Tag::CONTENT, p.rest());
+        return reasoning << optional_newline() << p.tag(Tag::CONTENT, p.rest());
     });
 
     data.parser = parser.save();
