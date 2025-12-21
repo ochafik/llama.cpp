@@ -98,7 +98,9 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
             auto tool_call = p.rule("tool-call", "<seed:tool_call>\n" + tool_choice + "</seed:tool_call>" + p.space());
             auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, /* min = */ min_calls, /* max = */ max_calls));
 
-            return reasoning << p.tag(Tag::CONTENT, p.until("<seed:tool_call>")) << tool_calls;
+            auto with_tool_calls = reasoning << p.tag(Tag::CONTENT, p.until("<seed:tool_call>")) << tool_calls;
+            auto content_only = reasoning << p.tag(Tag::CONTENT, p.rest());
+            return p.choice({with_tool_calls, content_only});
         }
 
         // Content only parser
