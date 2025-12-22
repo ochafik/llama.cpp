@@ -34,19 +34,26 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
     auto include_grammar = true;
+    bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
 
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
+        auto newline = p.choice({p.literal("\r\n"), p.literal("\n")});
+        auto eos = p.optional(p.repeat(newline, 0, -1) + p.literal("<seed:eos>") + p.repeat(newline, 0, -1));
         auto reasoning = p.eps();
-        auto eos = p.optional(p.literal("<seed:eos>"));
-        if (inputs.enable_thinking && extract_reasoning) {
-            auto reasoning_content = p.tag(Tag::REASONING, p.until("</seed:think>")) + ("</seed:think>" | p.end());
-            if (data.thinking_forced_open) {
-                reasoning = reasoning_content;
+        auto reasoning_block = p.literal("<seed:think>")
+            + p.tag(Tag::REASONING, p.until("</seed:think>"))
+            + (p.literal("</seed:think>") | p.end());
+        if (extract_reasoning) {
+            if (inputs.enable_thinking && data.thinking_forced_open) {
+                reasoning = reasoning_block;
+            } else if (inputs.enable_thinking) {
+                reasoning = p.optional(reasoning_block);
             } else {
-                // Handle optional <seed:think>...</seed:think> at start of output
-                reasoning = p.optional("<seed:think>" + reasoning_content);
+                reasoning = p.optional(reasoning_block);
             }
+        } else {
+            reasoning = p.optional(reasoning_block);
         }
 
         // Response format parser
@@ -55,7 +62,6 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
         }
 
         // Tool call parser
-        bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
             auto tool_choice = p.choice();
             foreach_function(inputs.tools, [&](const json & tool) {
@@ -85,6 +91,7 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
                 auto args = p.sequence();
 
                 foreach_parameter(function, [&](const auto & param_name, const json & param_schema, bool is_required) {
+                    (void) is_required;
                     auto rule_name = "tool-" + name + "-arg-" + param_name;
 
                     auto arg_open = "<parameter=" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + ">";
@@ -139,19 +146,35 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
                 p.literal("<seed:tool_call>")
                 << tool_choice
                 << p.literal("</seed:tool_call>")
-                + p.space());
+                + p.repeat(newline, 0, -1));
             auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, /* min = */ min_calls, /* max = */ max_calls));
 
+            auto stop_before = std::vector<std::string> {
+                "\r\n\r\n<seed:tool_call>", "\n\n<seed:tool_call>",
+                "\r\n<seed:tool_call>", "\n<seed:tool_call>", "<seed:tool_call>",
+                "\r\n\r\n<seed:toolcall>", "\n\n<seed:toolcall>",
+                "\r\n<seed:toolcall>", "\n<seed:toolcall>", "<seed:toolcall>",
+            };
+            auto content_before = p.optional(p.tag(Tag::CONTENT, p.until_one_of(stop_before)));
+            auto content_after = p.optional(p.tag(Tag::CONTENT, p.until_one_of({
+                "\r\n\r\n<seed:eos>", "\n\n<seed:eos>",
+                "\r\n<seed:eos>", "\n<seed:eos>", "<seed:eos>"
+            })));
+            auto pre_calls_gap = p.repeat(newline, 0, -1);
             if (require_tools) {
-                return reasoning << tool_calls << eos;
+                return reasoning << pre_calls_gap << tool_calls << eos;
             }
-            auto content_before = p.tag(Tag::CONTENT, p.until("<seed:tool_call>"));
-            return reasoning << content_before << tool_calls << eos;
+            return reasoning << content_before << pre_calls_gap << tool_calls << content_after << eos;
         }
 
         // Content only parser
         include_grammar = false;
-        return reasoning << p.tag(Tag::CONTENT, p.until("<seed:eos>")) << eos;
+        auto content_tail = p.optional(p.tag(Tag::CONTENT, p.until_one_of({
+            "\r\n\r\n<seed:eos>", "\n\n<seed:eos>",
+            "\r\n<seed:eos>", "\n<seed:eos>", "<seed:eos>"
+        })));
+        auto pre_eos_gap = p.repeat(newline, 0, -1);
+        return reasoning << content_tail << pre_eos_gap << eos;
     });
 
     data.parser = parser.save();
