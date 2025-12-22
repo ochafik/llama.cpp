@@ -61,7 +61,7 @@ common_chat_params common_chat_params_init_apertus(const common_chat_template & 
             // Tool call: <|tools_prefix|> + JSON array + <|tools_suffix|>
             auto tool_call = p.tag(Tag::TOOL,
                 p.token_tag(Tag::TOOL_OPEN, "<|tools_prefix|>")
-                << p.tag(Tag::TOOL_ARGS, p.json())
+                << p.tag(Tag::TOOL_ARGS, p.until("<|tools_suffix|>"))
                 << p.token_tag(Tag::TOOL_CLOSE, "<|tools_suffix|>")
             );
 
