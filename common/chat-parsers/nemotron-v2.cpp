@@ -30,6 +30,7 @@ common_chat_params common_chat_params_init_nemotron_v2(const common_chat_templat
         "<SPECIAL_10>System",
     };
 
+
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
     auto include_grammar = true;
@@ -80,21 +81,35 @@ common_chat_params common_chat_params_init_nemotron_v2(const common_chat_templat
 
             auto specials = skip_special_markers();
             if (require_tools) {
-                return reasoning << specials << tool_calls;
+                return reasoning << specials << tool_calls << specials;
             }
-            auto content_before = p.tag(Tag::CONTENT, p.until_one_of({
-                "<TOOLCALL>",
-                "<SPECIAL_12>",
-                "<SPECIAL_11>Assistant",
-                "<SPECIAL_11>User",
-                "<SPECIAL_10>System"
-            }));
-            return reasoning << content_before << specials << tool_calls << specials << p.tag(Tag::CONTENT, p.rest());
+            auto stop_before = std::vector<std::string> {
+                "\n<TOOLCALL>", "<TOOLCALL>",
+                "\n<SPECIAL_12>", "<SPECIAL_12>",
+                "\n<SPECIAL_11>Assistant", "<SPECIAL_11>Assistant",
+                "\n<SPECIAL_11>User", "<SPECIAL_11>User",
+                "\n<SPECIAL_10>System", "<SPECIAL_10>System",
+            };
+            auto stop_after = std::vector<std::string> {
+                "\n<SPECIAL_12>", "<SPECIAL_12>",
+                "\n<SPECIAL_11>Assistant", "<SPECIAL_11>Assistant",
+                "\n<SPECIAL_11>User", "<SPECIAL_11>User",
+                "\n<SPECIAL_10>System", "<SPECIAL_10>System",
+            };
+            auto content_before = p.optional(p.tag(Tag::CONTENT, p.until_one_of(stop_before)));
+            auto content_after = (p.optional(p.tag(Tag::CONTENT, p.until_one_of(stop_after))) << specials);
+            return reasoning << specials << content_before << specials << tool_calls << specials << content_after;
         }
 
         // Content only parser
         include_grammar = false;
-        return reasoning << skip_special_markers() << p.tag(Tag::CONTENT, p.rest());
+        auto stop_only = std::vector<std::string> {
+            "\n<SPECIAL_12>", "<SPECIAL_12>",
+            "\n<SPECIAL_11>Assistant", "<SPECIAL_11>Assistant",
+            "\n<SPECIAL_11>User", "<SPECIAL_11>User",
+            "\n<SPECIAL_10>System", "<SPECIAL_10>System",
+        };
+        return reasoning << skip_special_markers() << p.tag(Tag::CONTENT, p.until_one_of(stop_only)) << skip_special_markers();
     });
 
     data.parser = parser.save();
