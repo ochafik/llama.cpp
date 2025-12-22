@@ -74,29 +74,76 @@ common_chat_params common_chat_params_init_minimax_m2(const common_chat_template
                 // Format: <invoke name="function_name"><parameter name="key">value</parameter></invoke>
                 auto tool_open = "<invoke name=\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\">" + p.space();
                 auto tool_close = p.space() + p.literal("</invoke>") + p.space();
-                auto args = p.sequence();
+
                 auto arg_string = p.rule("xml-arg-string", p.until_one_of({
                     "</parameter>",
                     "<parameter name=",
                     "</invoke>"
                 }));
 
-                foreach_parameter(function, [&](const auto & param_name, const json & param_schema, bool is_required) {
+                auto parameter_choice = p.choice();
+                bool has_parameter_rules = false;
+
+                auto arg_close = p.literal("</parameter>") + p.space();
+
+                foreach_parameter(function, [&](const auto & param_name, const json & param_schema, bool /* is_required */) {
                     auto rule_name = "tool-" + name + "-arg-" + param_name;
 
                     auto arg_open = "<parameter name=\"" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + "\">";
-                    auto arg_close = p.literal("</parameter>") + p.space();
                     auto arg_value = p.eps();
 
                     if (schema_info.resolves_to_string(param_schema)) {
                         arg_value = p.tag(Tag::TOOL_ARG_STRING_VALUE, arg_string);
                     } else {
-                        arg_value = p.tag(Tag::TOOL_ARG_JSON_VALUE, p.schema(p.json(), rule_name + "-schema", param_schema));
+                        arg_value = p.tag(Tag::TOOL_ARG_JSON_VALUE,
+                            p.schema(p.json(), rule_name + "-schema", param_schema));
                     }
 
-                    auto arg_rule = p.rule(rule_name, p.atomic_tag(Tag::TOOL_ARG_OPEN, arg_open) + arg_value + p.atomic_tag(Tag::TOOL_ARG_CLOSE, arg_close));
-                    args += p.repeat(arg_rule, /* min = */ is_required ? 1 : 0, /* max = */ 1);
+                    auto arg_rule = p.rule(rule_name,
+                        p.atomic_tag(Tag::TOOL_ARG_OPEN, arg_open)
+                        + arg_value
+                        + p.atomic_tag(Tag::TOOL_ARG_CLOSE, arg_close));
+                    parameter_choice |= arg_rule;
+                    has_parameter_rules = true;
                 });
+
+                bool allow_additional = false;
+                bool additional_has_schema = false;
+                json additional_schema;
+                if (parameters.contains("additionalProperties")) {
+                    const auto & additional = parameters.at("additionalProperties");
+                    if (additional.is_boolean()) {
+                        allow_additional = additional.get<bool>();
+                    } else if (additional.is_object()) {
+                        allow_additional = true;
+                        additional_has_schema = true;
+                        additional_schema = additional;
+                    }
+                }
+
+                if (allow_additional || !has_parameter_rules) {
+                    auto dynamic_key = "<parameter name=\"" + p.tag(Tag::TOOL_ARG_NAME, p.until("\"")) + "\">";
+                    auto additional_value = p.choice();
+                    if (additional_has_schema) {
+                        if (schema_info.resolves_to_string(additional_schema)) {
+                            additional_value |= p.tag(Tag::TOOL_ARG_STRING_VALUE, arg_string);
+                        } else {
+                            additional_value |= p.tag(Tag::TOOL_ARG_JSON_VALUE,
+                                p.schema(p.json(), "tool-" + name + "-arg-generic", additional_schema));
+                        }
+                    } else {
+                        additional_value |= p.tag(Tag::TOOL_ARG_STRING_VALUE, arg_string);
+                    }
+
+                    auto additional_rule = p.rule("tool-" + name + "-arg-generic",
+                        p.atomic_tag(Tag::TOOL_ARG_OPEN, dynamic_key)
+                        + additional_value
+                        + p.atomic_tag(Tag::TOOL_ARG_CLOSE, arg_close));
+                    parameter_choice |= additional_rule;
+                    has_parameter_rules = true;
+                }
+
+                common_peg_parser args = has_parameter_rules ? p.repeat(parameter_choice, 0, -1) : p.eps();
 
                 invoke_choice |= p.rule("tool-" + name, p.tag(Tag::TOOL,
                     p.atomic_tag(Tag::TOOL_OPEN, tool_open)
