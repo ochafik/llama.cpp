@@ -98,7 +98,10 @@ common_chat_params common_chat_params_init_minimax_m2(const common_chat_template
                     args += p.repeat(arg_rule, /* min = */ is_required ? 1 : 0, /* max = */ 1);
                 });
 
-                invoke_choice |= p.rule("tool-" + name, p.atomic_tag(Tag::TOOL_OPEN, tool_open) + args + p.atomic_tag(Tag::TOOL_CLOSE, tool_close));
+                invoke_choice |= p.rule("tool-" + name, p.tag(Tag::TOOL,
+                    p.atomic_tag(Tag::TOOL_OPEN, tool_open)
+                    + args
+                    + p.atomic_tag(Tag::TOOL_CLOSE, tool_close)));
             });
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
@@ -111,9 +114,25 @@ common_chat_params common_chat_params_init_minimax_m2(const common_chat_template
                 + p.space());
             auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_block, /* min = */ min_calls, /* max = */ max_calls));
 
-            auto content_before = p.optional(p.tag(Tag::CONTENT, p.until("<minimax:tool_call>")));
+            auto stop_before = std::vector<std::string> {
+                "\n<minimax:tool_call>", "<minimax:tool_call>",
+                "\n<TOOLCALL>", "<TOOLCALL>",
+                "\n<SPECIAL_12>", "<SPECIAL_12>",
+                "\n<SPECIAL_11>Assistant", "<SPECIAL_11>Assistant",
+                "\n<SPECIAL_11>User", "<SPECIAL_11>User",
+                "\n<SPECIAL_10>System", "<SPECIAL_10>System",
+            };
+            auto stop_after = std::vector<std::string> {
+                "\n<SPECIAL_12>", "<SPECIAL_12>",
+                "\n<TOOLCALL>", "<TOOLCALL>",
+                "\n<SPECIAL_11>Assistant", "<SPECIAL_11>Assistant",
+                "\n<SPECIAL_11>User", "<SPECIAL_11>User",
+                "\n<SPECIAL_10>System", "<SPECIAL_10>System",
+                "\n<minimax:tool_call>", "<minimax:tool_call>",
+            };
+            auto content_before = p.optional(p.tag(Tag::CONTENT, p.until_one_of(stop_before)));
             auto content_after = p.optional(p.choice({
-                p.sequence({p.tag(Tag::CONTENT, p.until("[e~[")), consume_footer()}),
+                p.sequence({p.tag(Tag::CONTENT, p.until_one_of(stop_after)), consume_footer()}),
                 p.tag(Tag::CONTENT, p.rest())
             }));
             return reasoning << content_before << tool_calls << content_after;
@@ -121,8 +140,16 @@ common_chat_params common_chat_params_init_minimax_m2(const common_chat_template
 
         // Content only parser
         include_grammar = false;
+        auto stop_only = std::vector<std::string> {
+            "\n<SPECIAL_12>", "<SPECIAL_12>",
+            "\n<minimax:tool_call>", "<minimax:tool_call>",
+            "\n<TOOLCALL>", "<TOOLCALL>",
+            "\n<SPECIAL_11>Assistant", "<SPECIAL_11>Assistant",
+            "\n<SPECIAL_11>User", "<SPECIAL_11>User",
+            "\n<SPECIAL_10>System", "<SPECIAL_10>System",
+        };
         auto content_tail = p.choice({
-            p.sequence({p.tag(Tag::CONTENT, p.until("[e~[")), consume_footer()}),
+            p.sequence({p.tag(Tag::CONTENT, p.until_one_of(stop_only)), consume_footer()}),
             p.tag(Tag::CONTENT, p.rest())
         });
         return reasoning << content_tail;
