@@ -30,22 +30,28 @@ common_chat_params common_chat_params_init_minimax_m2(const common_chat_template
         "</parameter>",
     };
 
+    data.additional_stops.push_back("[e~[");
+
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
     auto include_grammar = true;
 
-    bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
+        auto consume_footer = [&]() {
+            return p.optional(p.literal("[e~[")) + p.optional(p.space());
+        };
         auto reasoning = p.eps();
         if (inputs.enable_thinking && extract_reasoning) {
             auto reasoning_content = p.tag(Tag::REASONING, p.until("</think>")) + ("</think>" | p.end());
             if (data.thinking_forced_open) {
-                // Thinking was forced open in prompt - model output starts with reasoning content directly
                 reasoning = reasoning_content;
             } else {
-                // Handle optional <think>...</think> at start of output
-                reasoning = p.optional("<think>" + reasoning_content);
+                auto reasoning_block = p.choice({
+                    p.literal("<think>") + reasoning_content,
+                    reasoning_content,
+                });
+                reasoning = p.optional(reasoning_block);
             }
         }
 
@@ -56,7 +62,7 @@ common_chat_params common_chat_params_init_minimax_m2(const common_chat_template
 
         // Tool call parser
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
-            auto tool_choice = p.choice();
+            auto invoke_choice = p.choice();
             foreach_function(inputs.tools, [&](const json & tool) {
                 const auto & function = tool.at("function");
                 std::string name = function.at("name");
@@ -92,23 +98,34 @@ common_chat_params common_chat_params_init_minimax_m2(const common_chat_template
                     args += p.repeat(arg_rule, /* min = */ is_required ? 1 : 0, /* max = */ 1);
                 });
 
-                tool_choice |= p.rule("tool-" + name, p.atomic_tag(Tag::TOOL_OPEN, tool_open) + args + p.atomic_tag(Tag::TOOL_CLOSE, tool_close));
+                invoke_choice |= p.rule("tool-" + name, p.atomic_tag(Tag::TOOL_OPEN, tool_open) + args + p.atomic_tag(Tag::TOOL_CLOSE, tool_close));
             });
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            auto tool_call = p.rule("tool-call", "<minimax:tool_call>" + p.space() + tool_choice + "</minimax:tool_call>" + p.space());
-            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, /* min = */ min_calls, /* max = */ max_calls));
+            auto tool_block = p.rule("tool-call-block",
+                p.literal("<minimax:tool_call>")
+                + p.space()
+                + p.repeat(invoke_choice, /* min = */ 1, /* max = */ -1)
+                + p.literal("</minimax:tool_call>")
+                + p.space());
+            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_block, /* min = */ min_calls, /* max = */ max_calls));
 
-            if (require_tools) {
-                return reasoning << tool_calls;
-            }
-            return reasoning << p.tag(Tag::CONTENT, p.until("<minimax:tool_call>")) << tool_calls << p.tag(Tag::CONTENT, p.rest());
+            auto content_before = p.optional(p.tag(Tag::CONTENT, p.until("<minimax:tool_call>")));
+            auto content_after = p.optional(p.choice({
+                p.sequence({p.tag(Tag::CONTENT, p.until("[e~[")), consume_footer()}),
+                p.tag(Tag::CONTENT, p.rest())
+            }));
+            return reasoning << content_before << tool_calls << content_after;
         }
 
         // Content only parser
         include_grammar = false;
-        return reasoning << p.tag(Tag::CONTENT, p.rest());
+        auto content_tail = p.choice({
+            p.sequence({p.tag(Tag::CONTENT, p.until("[e~[")), consume_footer()}),
+            p.tag(Tag::CONTENT, p.rest())
+        });
+        return reasoning << content_tail;
     });
 
     data.parser = parser.save();
