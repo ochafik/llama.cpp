@@ -1,5 +1,5 @@
 // Granite tool call format
-// Format: <|tool_call|>[{"name": "func", "arguments": {...}}]
+// Format: {"tool_calls": [{"name": "func", "arguments": {...}}], "content": "..."}
 // With optional <think>...</think> and <response>...</response> tags
 
 #include "chat-parsers-internal.h"
@@ -28,7 +28,7 @@ common_chat_params common_chat_params_init_granite(const common_chat_template & 
         "</think>",
         "<response>",
         "</response>",
-        "<|tool_call|>",
+        "<|end_of_text|>",
     };
 
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
@@ -37,6 +37,10 @@ common_chat_params common_chat_params_init_granite(const common_chat_template & 
 
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
+
+        auto consume_eot = [&]() {
+            return p.optional(p.token("<|end_of_text|>")) + p.optional(p.space());
+        };
 
         auto reasoning = p.eps();
         if (inputs.enable_thinking && extract_reasoning) {
@@ -53,27 +57,18 @@ common_chat_params common_chat_params_init_granite(const common_chat_template & 
             return reasoning << p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema));
         }
 
-        // Tool call parser
-        // Format: <|tool_call|>[{"name": "func", "arguments": {...}}]
+        // Tool call parser: Granite emits a JSON object with tool_calls + content fields
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
-            auto tool_call = p.tag(Tag::TOOL,
-                p.token_tag(Tag::TOOL_OPEN, "<|tool_call|>")
-                + p.tag(Tag::TOOL_ARGS, p.json())
-            );
-
-            auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
-            auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            auto tool_calls = p.trigger_rule("tool-call", p.repeat(tool_call, min_calls, max_calls));
-
-            // Content may be wrapped in <response>...</response>
-            auto content = p.tag(Tag::CONTENT, p.until("<|tool_call|>"));
-
-            return reasoning << content << tool_calls;
+            auto payload = p.tag(Tag::TOOL_ARGS, p.json());
+            return reasoning << p.optional(p.space()) << payload << consume_eot();
         }
 
-        // Content only parser
+        // Content-only parser: trim trailing <|end_of_text|> and optionally handle <response> blocks
+        auto response_block = p.literal("<response>") + p.tag(Tag::CONTENT, p.until("</response>")) + (p.literal("</response>") | p.end());
+        auto content_until_eot = p.tag(Tag::CONTENT, p.until("<|end_of_text|>")) << consume_eot();
+
         include_grammar = false;
-        return reasoning << p.tag(Tag::CONTENT, p.rest());
+        return reasoning << p.choice({response_block, content_until_eot, p.tag(Tag::CONTENT, p.rest())});
     });
 
     data.parser = parser.save();
@@ -81,36 +76,13 @@ common_chat_params common_chat_params_init_granite(const common_chat_template & 
     if (include_grammar) {
         data.grammar_lazy = has_tools && inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
         data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-            std::vector<std::string> tool_rules;
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                std::string name = function.at("name");
-                auto parameters = function.at("parameters");
-                builder.resolve_refs(parameters);
-                tool_rules.push_back(builder.add_rule(name + "-call", builder.add_schema(name + "-args", {
-                    {"type", "object"},
-                    {"properties", {
-                        {"name", {{"const", name}}},
-                        {"arguments", parameters},
-                    }},
-                    {"required", json::array({"name", "arguments"})},
-                })));
-            });
-
-            auto tool_call = builder.add_rule("tool_call", string_join(tool_rules, " | "));
-            auto tool_list = builder.add_rule("tool_list", "\"[\" space " + tool_call + " (\",\" space " + tool_call + ")* space \"]\"");
-
-            if (data.thinking_forced_open) {
-                builder.add_rule("root", "\"</think>\" space \"<response>\" space [^<]* \"</response>\" space \"<|tool_call|>\" space " + tool_list);
-            } else {
-                builder.add_rule("root", "\"<|tool_call|>\" space " + tool_list);
-            }
-
-            data.grammar_triggers.push_back({
-                COMMON_GRAMMAR_TRIGGER_TYPE_WORD,
-                "<|tool_call|>"
-            });
+            parser.build_grammar(builder, data.grammar_lazy);
         });
+        if (data.grammar_lazy) {
+            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, R"("tool_calls")"});
+        } else {
+            data.grammar_triggers.clear();
+        }
     }
 
     return data;
