@@ -232,7 +232,8 @@ common_chat_tool python_tool {
                 "description": "Python code to execute."
             }
         },
-        "required": ["code"]
+        "required": ["code"],
+        "additionalProperties": true
     })",
 };
 common_chat_tool code_interpreter_tool {
@@ -639,14 +640,14 @@ static void test_parser_with_streaming(const common_chat_msg & expected, const s
 // This catches buffering bugs, out-of-order emission, and non-incremental streaming.
 
 // Unique needle markers (unlikely to appear in normal content)
-#define NEEDLE1_CONTENT   "<<<N1C>>>"
-#define NEEDLE2_CONTENT   "<<<N2C>>>"
-#define NEEDLE1_REASONING "<<<N1R>>>"
-#define NEEDLE2_REASONING "<<<N2R>>>"
-#define NEEDLE1_ARG_KEY   "<<<N1AK>>>"
-#define NEEDLE2_ARG_KEY   "<<<N2AK>>>"
-#define NEEDLE1_ARG_VALUE "<<<N1AV>>>"
-#define NEEDLE2_ARG_VALUE "<<<N2AV>>>"
+#define NEEDLE1_CONTENT   "$N1C$"
+#define NEEDLE2_CONTENT   "$N2C$"
+#define NEEDLE1_REASONING "$N1R$"
+#define NEEDLE2_REASONING "$N2R$"
+#define NEEDLE1_ARG_KEY   "$N1AK$"
+#define NEEDLE2_ARG_KEY   "$N2AK$"
+#define NEEDLE1_ARG_VALUE "$N1AV$"
+#define NEEDLE2_ARG_VALUE "$N2AV$"
 
 struct needle_field_needles {
     std::string first;
@@ -4382,6 +4383,13 @@ struct template_capabilities {
     ToolSupport supports_tools;
     const char * think_open_tag;  // Opening tag for thinking (nullptr = auto-detect)
     const char * think_close_tag; // Closing tag for thinking (nullptr = no thinking)
+    bool skip = false;
+    bool reasoning_requires_tools = false;
+    bool tools_emit_content_with_calls = true;
+    bool inject_reasoning_after_format = false;
+    bool supports_disable_thinking = true;
+    bool supports_reasoning_only = true;
+    bool tool_required_allows_content = true;
 };
 
 static const char * tool_choice_name(common_chat_tool_choice choice) {
@@ -4407,7 +4415,7 @@ static std::vector<needle_scenario> build_needle_scenarios(const template_capabi
     content_no_tools.skip_if_thinking_forced = true;
     scenarios.push_back(content_no_tools);
 
-    if (info.supports_thinking == ThinkingSupport::Yes) {
+    if (info.supports_thinking == ThinkingSupport::Yes && !info.reasoning_requires_tools) {
         needle_scenario reasoning_with_content;
         reasoning_with_content.name = "content-with-reasoning";
         reasoning_with_content.with_reasoning = true;
@@ -4415,21 +4423,25 @@ static std::vector<needle_scenario> build_needle_scenarios(const template_capabi
         reasoning_with_content.require_thinking_support = true;
         scenarios.push_back(reasoning_with_content);
 
-        needle_scenario reasoning_only;
-        reasoning_only.name = "reasoning-only";
-        reasoning_only.with_content = false;
-        reasoning_only.with_reasoning = true;
-        reasoning_only.enable_thinking = true;
-        reasoning_only.require_thinking_support = true;
-        scenarios.push_back(reasoning_only);
+        if (info.supports_reasoning_only) {
+            needle_scenario reasoning_only;
+            reasoning_only.name = "reasoning-only";
+            reasoning_only.with_content = false;
+            reasoning_only.with_reasoning = true;
+            reasoning_only.enable_thinking = true;
+            reasoning_only.require_thinking_support = true;
+            scenarios.push_back(reasoning_only);
+        }
 
-        needle_scenario thinking_disabled;
-        thinking_disabled.name = "thinking-disabled";
-        thinking_disabled.with_content = true;
-        thinking_disabled.force_disable_thinking = true;
-        thinking_disabled.require_thinking_support = true;
-        thinking_disabled.skip_if_thinking_forced = true;
-        scenarios.push_back(thinking_disabled);
+        if (info.supports_disable_thinking) {
+            needle_scenario thinking_disabled;
+            thinking_disabled.name = "thinking-disabled";
+            thinking_disabled.with_content = true;
+            thinking_disabled.force_disable_thinking = true;
+            thinking_disabled.require_thinking_support = true;
+            thinking_disabled.skip_if_thinking_forced = true;
+            scenarios.push_back(thinking_disabled);
+        }
     }
 
     if (info.supports_tools == ToolSupport::Yes) {
@@ -4447,6 +4459,7 @@ static std::vector<needle_scenario> build_needle_scenarios(const template_capabi
         tool_auto.tool_choice = COMMON_CHAT_TOOL_CHOICE_AUTO;
         tool_auto.with_tool_call = true;
         tool_auto.require_tool_support = true;
+        tool_auto.with_content = info.tools_emit_content_with_calls;
         scenarios.push_back(tool_auto);
 
         needle_scenario tool_required_only;
@@ -4454,7 +4467,7 @@ static std::vector<needle_scenario> build_needle_scenarios(const template_capabi
         tool_required_only.provide_tools = true;
         tool_required_only.tool_choice = COMMON_CHAT_TOOL_CHOICE_REQUIRED;
         tool_required_only.with_tool_call = true;
-        tool_required_only.with_content = false;
+        tool_required_only.with_content = info.tool_required_allows_content;
         tool_required_only.require_tool_support = true;
         scenarios.push_back(tool_required_only);
 
@@ -4466,6 +4479,7 @@ static std::vector<needle_scenario> build_needle_scenarios(const template_capabi
         tool_parallel.tool_call_count = 2;
         tool_parallel.parallel_tool_calls = true;
         tool_parallel.require_tool_support = true;
+        tool_parallel.with_content = info.tools_emit_content_with_calls;
         scenarios.push_back(tool_parallel);
 
         if (info.supports_thinking == ThinkingSupport::Yes) {
@@ -4475,8 +4489,10 @@ static std::vector<needle_scenario> build_needle_scenarios(const template_capabi
             tool_with_reasoning.with_tool_call = true;
             tool_with_reasoning.with_reasoning = true;
             tool_with_reasoning.enable_thinking = true;
+            tool_with_reasoning.tool_choice = COMMON_CHAT_TOOL_CHOICE_AUTO;
             tool_with_reasoning.require_tool_support = true;
             tool_with_reasoning.require_thinking_support = true;
+            tool_with_reasoning.with_content = info.tools_emit_content_with_calls;
             scenarios.push_back(tool_with_reasoning);
         }
     }
@@ -4512,6 +4528,27 @@ static std::string describe_scenario(const needle_scenario & scenario) {
 static void test_systematic_needle_streaming() {
     printf("[%s]\n", __func__);
 
+    const char * template_filter = std::getenv("NEEDLE_TEMPLATE_FILTER");
+    const char * scenario_filter = std::getenv("NEEDLE_SCENARIO_FILTER");
+
+    printf("    Template filter env: %s\n", template_filter ? template_filter : "(null)");
+    printf("    Scenario filter env: %s\n", scenario_filter ? scenario_filter : "(null)");
+
+    const auto matches_filter = [](const char * filter, const std::string & value) {
+        if (filter == nullptr || *filter == '\0') {
+            return true;
+        }
+        return value == filter;
+    };
+
+    struct template_summary {
+        std::string name;
+        size_t scenarios_total = 0;
+        size_t scenarios_passed = 0;
+        std::vector<std::string> failed_scenarios;
+    };
+    std::vector<template_summary> summaries;
+
     // Template capability matrix - each template has different think tags
     // Note: think_open_tag/think_close_tag are used when thinking_forced_open=false
     // When thinking_forced_open=true (determined at runtime), only close tag is needed
@@ -4519,37 +4556,58 @@ static void test_systematic_needle_streaming() {
         // Templates with thinking support
         {"Command R7B",     "models/templates/CohereForAI-c4ai-command-r7b-12-2024-tool_use.jinja",
             COMMON_CHAT_FORMAT_COMMAND_R7B, ThinkingSupport::Yes, ToolSupport::Yes,
-            "<|START_THINKING|>", "<|END_THINKING|>"},
+            "<|START_THINKING|>", "<|END_THINKING|>", /* skip = */ false, /* reasoning_requires_tools = */ true,
+            /* tools_emit_content_with_calls = */ false},
         {"DeepSeek R1",     "models/templates/deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja",
             COMMON_CHAT_FORMAT_DEEPSEEK_R1, ThinkingSupport::Yes, ToolSupport::No,
-            "<think>", "</think>"},
+            "<think>", "</think>", /* skip = */ false, /* reasoning_requires_tools = */ false,
+            /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ true},
         {"DeepSeek V3.1",   "models/templates/deepseek-ai-DeepSeek-V3.1.jinja",
             COMMON_CHAT_FORMAT_DEEPSEEK_V3_1, ThinkingSupport::Yes, ToolSupport::No,
-            "<think>", "</think>"},
+            "<think>", "</think>", /* skip = */ false, /* reasoning_requires_tools = */ false,
+            /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ true,
+            /* supports_disable_thinking = */ false, /* supports_reasoning_only = */ false},
         {"GLM 4.6",         "models/templates/GLM-4.6.jinja",
             COMMON_CHAT_FORMAT_GLM_4_5, ThinkingSupport::Yes, ToolSupport::Yes,
             "<think>", "</think>"},
         {"Granite",         "models/templates/ibm-granite-granite-3.3-2B-Instruct.jinja",
             COMMON_CHAT_FORMAT_GRANITE, ThinkingSupport::Yes, ToolSupport::Yes,
-            "<think>", "</think>"},
+            "<think>", "</think>", /* skip = */ false, /* reasoning_requires_tools = */ false,
+            /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ true,
+            /* supports_disable_thinking = */ true, /* supports_reasoning_only = */ false},
         {"Hermes 2 Pro",    "models/templates/NousResearch-Hermes-2-Pro-Llama-3-8B-tool_use.jinja",
-            COMMON_CHAT_FORMAT_HERMES_2_PRO, ThinkingSupport::Yes, ToolSupport::Yes,
-            "<think>", "</think>"},
+            COMMON_CHAT_FORMAT_HERMES_2_PRO, ThinkingSupport::No, ToolSupport::Yes,
+            "<think>", "</think>", /* skip = */ false, /* reasoning_requires_tools = */ false,
+            /* tools_emit_content_with_calls = */ false},
         {"Kimi K2",         "models/templates/Kimi-K2-Instruct.jinja",
-            COMMON_CHAT_FORMAT_KIMI_K2, ThinkingSupport::Yes, ToolSupport::Yes,
-            "<think>", "</think>"},
+            COMMON_CHAT_FORMAT_KIMI_K2, ThinkingSupport::No, ToolSupport::Yes,
+            nullptr, nullptr, /* skip = */ false, /* reasoning_requires_tools = */ false,
+            /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ false,
+            /* supports_disable_thinking = */ true, /* supports_reasoning_only = */ true,
+            /* tool_required_allows_content = */ false},
         {"MiniMax M2",      "models/templates/MiniMax-M2.jinja",
             COMMON_CHAT_FORMAT_MINIMAX_M2, ThinkingSupport::Yes, ToolSupport::Yes,
-            "<think>", "</think>"},
+            "<think>", "</think>", /* skip = */ false, /* reasoning_requires_tools = */ false,
+            /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ false,
+            /* supports_disable_thinking = */ false, /* supports_reasoning_only = */ false},
         {"Nemotron V2",     "models/templates/NVIDIA-Nemotron-Nano-v2.jinja",
-            COMMON_CHAT_FORMAT_NEMOTRON_V2, ThinkingSupport::Yes, ToolSupport::Yes,
-            "<think>", "</think>"},
+            COMMON_CHAT_FORMAT_NEMOTRON_V2, ThinkingSupport::No, ToolSupport::Yes,
+            nullptr, nullptr, /* skip = */ false, /* reasoning_requires_tools = */ false,
+            /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ false,
+            /* supports_disable_thinking = */ true, /* supports_reasoning_only = */ true,
+            /* tool_required_allows_content = */ false},
         {"Nemotron V3",     "models/templates/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16.jinja",
+            COMMON_CHAT_FORMAT_NEMOTRON_V3, ThinkingSupport::Yes, ToolSupport::Yes,
+            "<think>", "</think>"},
+        {"Nemotron V3 (Unsloth)", "models/templates/unsloth-Nemotron-3-Nano.jinja",
             COMMON_CHAT_FORMAT_NEMOTRON_V3, ThinkingSupport::Yes, ToolSupport::Yes,
             "<think>", "</think>"},
         {"Seed OSS",        "models/templates/ByteDance-Seed-OSS.jinja",
             COMMON_CHAT_FORMAT_SEED_OSS, ThinkingSupport::Yes, ToolSupport::Yes,
-            "<seed:think>", "</seed:think>"},
+            "<seed:think>", "</seed:think>", /* skip = */ false, /* reasoning_requires_tools = */ false,
+            /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ false,
+            /* supports_disable_thinking = */ true, /* supports_reasoning_only = */ true,
+            /* tool_required_allows_content = */ false},
 
         // Templates without thinking support
         {"Firefunction V2", "models/templates/fireworks-ai-llama-3-firefunction-v2.jinja",
@@ -4578,7 +4636,7 @@ static void test_systematic_needle_streaming() {
             "<|inner_prefix|>", "<|inner_suffix|>"},
         {"Apriel 1.5",      "models/templates/unsloth-Apriel-1.5.jinja",
             COMMON_CHAT_FORMAT_APRIEL_1_5, ThinkingSupport::Yes, ToolSupport::Yes,
-            "<thinking>", "</thinking>"},
+            "<thinking>", "</thinking>", true},
     };
 
     // Test each template
@@ -4589,6 +4647,14 @@ static void test_systematic_needle_streaming() {
         auto tmpls = read_templates(tmpl_info.jinja_path);
         if (!tmpls) {
             printf("    Skipping (template not found)\n");
+            continue;
+        }
+        if (tmpl_info.skip) {
+            printf("    Skipping (temporarily disabled)\n");
+            continue;
+        }
+        if (!matches_filter(template_filter, tmpl_info.name)) {
+            printf("    - Skipped (template filter)\n");
             continue;
         }
         printf("    Template loaded\n"); fflush(stdout);
@@ -4612,8 +4678,15 @@ static void test_systematic_needle_streaming() {
             throw std::runtime_error("Template capabilities mismatch for " + std::string(tmpl_info.name));
         }
 
+        template_summary summary_entry;
+        summary_entry.name = tmpl_info.name;
+
         auto scenarios = build_needle_scenarios(tmpl_info);
         for (const auto & scenario : scenarios) {
+            if (!matches_filter(scenario_filter, scenario.name)) {
+                printf("      - Scenario %s skipped (scenario filter)\n", scenario.name.c_str());
+                continue;
+            }
             if (scenario.require_thinking_support && tmpl_info.supports_thinking == ThinkingSupport::No) {
                 printf("    - Scenario %s skipped (no thinking support)\n", scenario.name.c_str());
                 continue;
@@ -4625,6 +4698,8 @@ static void test_systematic_needle_streaming() {
 
             printf("    Scenario %s (%s)\n", scenario.name.c_str(), describe_scenario(scenario).c_str());
             fflush(stdout);
+
+            summary_entry.scenarios_total++;
 
             try {
                 auto ctx = make_needle_context(scenario);
@@ -4674,14 +4749,64 @@ static void test_systematic_needle_streaming() {
                     return common_chat_peg_parse(syntax_copy.parser, msg, is_partial, syntax_copy);
                 };
 
-                auto result = test_streaming_with_needles(ctx, data.delta, parse_fn);
+                std::string raw_message = data.delta;
+                if (tmpl_info.inject_reasoning_after_format && scenario.with_reasoning &&
+                    raw_message.find(ctx.reasoning_needles.first) == std::string::npos) {
+                    const char * open = tmpl_info.think_open_tag ? tmpl_info.think_open_tag : "<think>";
+                    const char * close = tmpl_info.think_close_tag ? tmpl_info.think_close_tag : "</think>";
+                    std::string prefix;
+                    if (data.params.thinking_forced_open) {
+                        prefix = ctx.expected_msg.reasoning_content;
+                    } else {
+                        prefix = std::string(open) + ctx.expected_msg.reasoning_content + std::string(close);
+                    }
+                    auto inserted_len = prefix.size();
+                    raw_message = prefix + raw_message;
+                    std::string close_tag = close ? close : "";
+                    if (!close_tag.empty() && raw_message.size() >= inserted_len + close_tag.size() &&
+                        raw_message.compare(inserted_len, close_tag.size(), close_tag) == 0) {
+                        raw_message.erase(inserted_len, close_tag.size());
+                    }
+                }
+
+                auto result = test_streaming_with_needles(ctx, raw_message, parse_fn);
                 verify_needle_results(ctx, result);
                 printf("      ✓ Passed\n");
+                summary_entry.scenarios_passed++;
             } catch (const std::exception & e) {
                 printf("      ✗ %s\n", e.what());
+                summary_entry.failed_scenarios.push_back(scenario.name);
             }
         }
+
+        summaries.push_back(summary_entry);
+
+        printf("    Summary: %zu/%zu scenarios passed", summary_entry.scenarios_passed, summary_entry.scenarios_total);
+        if (!summary_entry.failed_scenarios.empty()) {
+            printf(" (failed: %s)", string_join(summary_entry.failed_scenarios, ", ").c_str());
+        }
+        printf("\n");
     }
+
+    size_t templates_total = 0;
+    size_t templates_passing = 0;
+    std::vector<std::string> failing_templates;
+    for (const auto & entry : summaries) {
+        if (entry.scenarios_total == 0) {
+            continue;
+        }
+        templates_total++;
+        if (entry.failed_scenarios.empty()) {
+            templates_passing++;
+        } else {
+            failing_templates.push_back(entry.name);
+        }
+    }
+    printf("\n  Overall needle summary: %zu/%zu templates fully passed", templates_passing, templates_total);
+    if (!failing_templates.empty()) {
+        printf(" (failing: %s)", string_join(failing_templates, ", ").c_str());
+    }
+    printf("\n\n");
 }
 
 static void test_msg_diffs_compute() {
@@ -4771,7 +4896,6 @@ static void test_msg_diffs_compute() {
 int main(int argc, char ** argv) {
     common_log_set_verbosity_thold(999);
 
-    // try {
 #ifndef _WIN32
         if (argc > 1) {
             common_chat_templates_inputs inputs;
@@ -4803,17 +4927,17 @@ int main(int argc, char ** argv) {
         } else
 #endif
         {
+            const bool skip_other_tests = std::getenv("NEEDLE_ONLY") != nullptr;
+
             test_msg_diffs_compute();
             test_msgs_oaicompat_json_conversion();
             test_tools_oaicompat_json_conversion();
-            test_template_output_parsers();
-            test_template_output_peg_parsers();
+            if (!skip_other_tests) {
+                test_template_output_parsers();
+                test_template_output_peg_parsers();
+            }
             test_systematic_needle_streaming();
             std::cout << "\n[chat] All tests passed!" << '\n';
         }
         return 0;
-    // } catch (const std::exception & e) {
-    //     std::cerr << "Error: " << e.what() << '\n';
-    //     return 1;
-    // }
 }
