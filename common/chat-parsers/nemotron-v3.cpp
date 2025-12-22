@@ -38,10 +38,12 @@ common_chat_params common_chat_params_init_nemotron_v3(const common_chat_templat
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
         auto newline = p.choice({p.literal("\r\n"), p.literal("\n")});
-        auto skip_blank_lines = p.repeat(newline, 0, -1);
-        auto assistant_prefix = skip_blank_lines + p.optional(p.literal("<|im_start|>assistant\n"));
-        auto assistant_suffix = p.repeat(newline, 0, -1) + p.optional(p.literal("<|im_end|>")) + skip_blank_lines;
-        auto after_reasoning_gap = p.repeat(newline, 0, -1);
+        auto whitespace = p.repeat(p.choice({newline, p.literal(" "), p.literal("\t")}), 0, -1);
+        auto skip_blank_lines = whitespace;
+        auto assistant_header = p.literal("<|im_start|>assistant") + p.choice({p.literal("\r\n"), p.literal("\n")});
+        auto assistant_prefix = whitespace + p.optional(assistant_header);
+        auto assistant_suffix = whitespace + p.optional(p.literal("<|im_end|>")) + whitespace;
+        auto after_reasoning_gap = whitespace;
         auto think_open = p.literal("<think>") + p.optional(newline);
         auto think_close = p.literal("</think>");
         auto reasoning = p.eps();
