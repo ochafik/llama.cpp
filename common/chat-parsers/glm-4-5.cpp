@@ -100,6 +100,20 @@ common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & 
                 auto schema_info = common_schema_info();
                 schema_info.resolve_refs(parameters);
 
+                bool allow_additional = false;
+                bool additional_has_schema = false;
+                json additional_schema;
+                if (parameters.contains("additionalProperties")) {
+                    const auto & additional = parameters.at("additionalProperties");
+                    if (additional.is_boolean()) {
+                        allow_additional = additional.get<bool>();
+                    } else if (additional.is_object()) {
+                        allow_additional = true;
+                        additional_has_schema = true;
+                        additional_schema = additional;
+                    }
+                }
+
                 // Format: <tool_call>name<arg_key>key</arg_key><arg_value>value</arg_value></tool_call>
                 // Optional leading newline to handle both start-of-output and mid-content cases
                 auto tool_open = p.optional(p.literal("\n")) + "<tool_call>" + p.literal_tag(Tag::TOOL_NAME, name) + "\n";
@@ -126,8 +140,30 @@ common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & 
                     }
 
                     auto arg_rule = p.rule(rule_name, p.atomic_tag(Tag::TOOL_ARG_OPEN, arg_open) + arg_value + p.atomic_tag(Tag::TOOL_ARG_CLOSE, arg_close));
-                    args += p.repeat(arg_rule, /* min = */ is_required ? 1 : 0, /* max = */ 1);
+                    args += p.repeat(arg_rule, /* min = */ 0, /* max = */ 1);
                 });
+
+                if (allow_additional) {
+                    auto dynamic_key = p.literal("<arg_key>") + p.tag(Tag::TOOL_ARG_NAME, p.until("</arg_key>")) + p.literal("</arg_key>\n<arg_value>");
+                    auto dynamic_close = p.literal("</arg_value>\n");
+                    auto additional_value = p.choice();
+                    if (additional_has_schema) {
+                        if (schema_info.resolves_to_string(additional_schema)) {
+                            additional_value |= p.tag(Tag::TOOL_ARG_STRING_VALUE, arg_string);
+                        } else {
+                            additional_value |= p.tag(Tag::TOOL_ARG_JSON_VALUE,
+                                p.schema(p.json(), "glm-additional-" + name, additional_schema));
+                        }
+                    } else {
+                        additional_value |= p.tag(Tag::TOOL_ARG_STRING_VALUE, arg_string);
+                    }
+
+                    auto additional_rule = p.rule("tool-" + name + "-arg-generic",
+                        p.atomic_tag(Tag::TOOL_ARG_OPEN, dynamic_key)
+                        + additional_value
+                        + p.atomic_tag(Tag::TOOL_ARG_CLOSE, dynamic_close));
+                    args += p.repeat(additional_rule, 0, -1);
+                }
 
                 tool_choice |= p.rule("tool-" + name, p.atomic_tag(Tag::TOOL_OPEN, tool_open) + args + p.atomic_tag(Tag::TOOL_CLOSE, tool_close));
             });
@@ -141,13 +177,6 @@ common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & 
 
             if (extract_reasoning) {
                 auto mixed = p.zero_or_more(thinking_block | content_chunk);
-                if (require_tools) {
-                    if (data.thinking_forced_open) {
-                        return forced_thinking + p.zero_or_more(thinking_block) + tool_calls;
-                    }
-                    auto think_only = p.zero_or_more(thinking_block);
-                    return think_only + tool_calls + think_only;
-                }
                 if (data.thinking_forced_open) {
                     return forced_thinking + mixed + tool_calls + mixed;
                 }
@@ -156,9 +185,6 @@ common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & 
 
             auto content_before = p.optional(p.literal("\n")) + p.tag(Tag::CONTENT, p.until_one_of({"\n<tool_call>", "<tool_call>"}));
             auto content_after = p.tag(Tag::CONTENT, p.rest());
-            if (require_tools) {
-                return tool_calls;
-            }
             return content_before + tool_calls + content_after;
         }
 
