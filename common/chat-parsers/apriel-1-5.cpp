@@ -30,22 +30,47 @@ common_chat_params common_chat_params_init_apriel_1_5(const common_chat_template
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
     auto include_grammar = true;
 
-    bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+    const bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
-        auto reasoning = p.eps();
-        if (inputs.enable_thinking && extract_reasoning) {
+        const bool has_reasoning = inputs.enable_thinking && extract_reasoning;
+
+        auto reasoning_block = p.eps();
+        if (has_reasoning) {
             auto reasoning_content = p.tag(Tag::REASONING, p.until("</thinking>")) + ("</thinking>" | p.end());
-            if (data.thinking_forced_open) {
-                reasoning = reasoning_content;
-            } else {
-                reasoning = p.optional("<thinking>" + reasoning_content);
-            }
+            reasoning_block = data.thinking_forced_open
+                ? reasoning_content
+                : p.token("<thinking>") + reasoning_content;
         }
+
+        auto build_content_expr = [&](const std::string & delimiter) {
+            auto base_content = p.tag(Tag::CONTENT, p.until(delimiter));
+            if (!has_reasoning) {
+                return base_content;
+            }
+
+            auto content_before_reasoning = p.tag(Tag::CONTENT, p.until("<thinking>"));
+            auto content_after_reasoning = p.tag(Tag::CONTENT, p.until(delimiter));
+            auto reasoning_after_content = p.atomic(content_before_reasoning + reasoning_block + content_after_reasoning);
+            auto reasoning_only = p.atomic(reasoning_block + content_after_reasoning);
+            return p.choice({reasoning_after_content, reasoning_only, base_content});
+        };
+
+        auto parse_content_until = [&](const std::string & marker) {
+            return p.choice({build_content_expr("\n" + marker), build_content_expr(marker)});
+        };
+
+        auto consume_end = [&]() {
+            return p.optional(p.literal("\n"))
+                + p.optional(p.literal("<|end|>"))
+                + p.optional(p.literal("\n"));
+        };
 
         // Response format parser
         if (inputs.json_schema.is_object() && !inputs.json_schema.empty()) {
-            return reasoning << p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema));
+            return (has_reasoning ? p.optional(reasoning_block) : p.eps())
+                << p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema))
+                << consume_end();
         }
 
         // Tool call parser
@@ -53,23 +78,29 @@ common_chat_params common_chat_params_init_apriel_1_5(const common_chat_template
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
             auto tool_call = p.tag(Tag::TOOL,
                 p.token_tag(Tag::TOOL_OPEN, "<tool_calls>")
-                + p.tag(Tag::TOOL_ARGS, p.json())
+                + p.tag(Tag::TOOL_ARGS, p.until("</tool_calls>"))
                 + p.token_tag(Tag::TOOL_CLOSE, "</tool_calls>")
             );
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
             auto tool_calls = p.trigger_rule("tool-call", p.repeat(tool_call, min_calls, max_calls));
+            auto newline_before_tools = p.optional(p.literal("\n"));
 
             if (require_tools) {
-                return reasoning << tool_calls;
+                return (has_reasoning ? p.optional(reasoning_block) : p.eps())
+                    << newline_before_tools
+                    << tool_calls
+                    << consume_end();
             }
-            return reasoning << p.tag(Tag::CONTENT, p.until("<tool_calls>")) << tool_calls;
+
+            auto content_before_tools = parse_content_until("<tool_calls>");
+            return content_before_tools << newline_before_tools << tool_calls << consume_end();
         }
 
         // Content only parser
         include_grammar = false;
-        return reasoning << p.tag(Tag::CONTENT, p.rest());
+        return parse_content_until("<|end|>") << consume_end();
     });
 
     data.parser = parser.save();
