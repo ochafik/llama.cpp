@@ -722,6 +722,17 @@ static common_chat_params common_chat_templates_apply_jinja(
     const auto & src = tmpl.source();
     const auto & caps = tmpl.original_caps();
     params.messages = common_chat_msgs_to_json_oaicompat<json>(inputs.messages, /* concat_text= */ !tmpl.original_caps().requires_typed_content);
+    if (params.messages.is_array()) {
+        for (auto & msg : params.messages) {
+            if (!msg.contains("reasoning_content") || msg.at("reasoning_content").is_null()) {
+                continue;
+            }
+            // Some templates (e.g., Apriel 1.5) expect the reasoning text under a 'thought' key.
+            if (!msg.contains("thought") || msg.at("thought").is_null()) {
+                msg["thought"] = msg.at("reasoning_content");
+            }
+        }
+    }
     params.add_generation_prompt = inputs.add_generation_prompt;
     params.tool_choice = inputs.tool_choice;
     params.reasoning_format = inputs.reasoning_format;
@@ -734,6 +745,9 @@ static common_chat_params common_chat_templates_apply_jinja(
     params.extra_context = json::object();
     for (auto el : inputs.chat_template_kwargs) {
         params.extra_context[el.first] = json::parse(el.second);
+    }
+    if (!params.extra_context.contains("add_thoughts")) {
+        params.extra_context["add_thoughts"] = inputs.enable_thinking;
     }
 
     if (!inputs.json_schema.empty()) {
