@@ -47,6 +47,10 @@ common_chat_params common_chat_params_init_deepseek_v3_1(const common_chat_templ
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
 
+        auto consume_eos = [&]() {
+            return p.optional(p.literal("<｜end▁of▁sentence｜>")) + p.optional(p.space());
+        };
+
         // Optional thinking block
         auto reasoning = p.eps();
         if (extract_reasoning) {
@@ -86,7 +90,7 @@ common_chat_params common_chat_params_init_deepseek_v3_1(const common_chat_templ
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
             auto tool_calls = p.trigger_rule("tool-call",
                 tool_calls_begin + p.repeat(tool_choice, min_calls, max_calls) + "<｜tool▁calls▁end｜>"
-            );
+            ) << consume_eos();
 
             // Content until tool calls marker
             auto content = p.tag(Tag::CONTENT, p.until_one_of({
@@ -104,7 +108,11 @@ common_chat_params common_chat_params_init_deepseek_v3_1(const common_chat_templ
         }
 
         // Content only parser
-        return reasoning << p.tag(Tag::CONTENT, p.rest());
+        auto content_only = p.sequence({
+            p.tag(Tag::CONTENT, p.until("<｜end▁of▁sentence｜>")),
+            consume_eos()
+        });
+        return reasoning << p.choice({content_only, p.tag(Tag::CONTENT, p.rest())});
     });
 
     data.parser = parser.save();
