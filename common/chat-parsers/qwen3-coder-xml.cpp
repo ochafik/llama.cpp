@@ -33,12 +33,14 @@ common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_tem
         };
 
         const auto content_until = [&](const std::string & marker, bool allow_inline) {
-            auto choice = p.choice();
-            choice |= p.tag(Tag::CONTENT, p.until(std::string("\n") + marker));
+            std::vector<std::string> delimiters = {
+                std::string("\r\n") + marker,
+                std::string("\n") + marker,
+            };
             if (allow_inline) {
-                choice |= p.tag(Tag::CONTENT, p.until(marker));
+                delimiters.push_back(marker);
             }
-            return choice;
+            return p.tag(Tag::CONTENT, p.until_one_of(delimiters));
         };
 
         const auto content_before_tool = p.optional(p.rule("qwen-tool-prefix",
@@ -54,6 +56,17 @@ common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_tem
 
         // Tool call parser
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+            auto ws = p.space();  // matches any whitespace including newlines
+            auto parameter_name = p.choice();
+            parameter_name |= p.tag(Tag::TOOL_ARG_NAME, p.until(">\r\n"));
+            parameter_name |= p.tag(Tag::TOOL_ARG_NAME, p.until(">\n"));
+            parameter_name |= p.tag(Tag::TOOL_ARG_NAME, p.until(">"));
+            auto parameter_terminator = p.choice({
+                p.literal(">\r\n"),
+                p.literal(">\n"),
+                p.literal(">"),
+            });
+
             auto tool_choice = p.choice();
             foreach_function(inputs.tools, [&](const json & tool) {
                 const auto & function = tool.at("function");
@@ -63,36 +76,71 @@ common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_tem
                 auto schema_info = common_schema_info();
                 schema_info.resolve_refs(parameters);
 
-                // Format: <function=name><parameter=key>value</parameter></function>
-                // Allow optional whitespace/indentation for flexibility
-                auto ws = p.space();  // matches any whitespace including newlines
-                auto tool_open = ws + "<function=" + p.literal_tag(Tag::TOOL_NAME, name) + ">" + ws;
-                auto tool_close = ws + "</function>" + ws;
+                bool allow_additional = false;
+                bool additional_has_schema = false;
+                json additional_schema;
+                if (parameters.contains("additionalProperties")) {
+                    const auto & additional = parameters.at("additionalProperties");
+                    if (additional.is_boolean()) {
+                        allow_additional = additional.get<bool>();
+                    } else if (additional.is_object()) {
+                        allow_additional = true;
+                        additional_has_schema = true;
+                        additional_schema = additional;
+                    }
+                }
+
                 auto args = p.sequence();
-                auto arg_string = p.rule("xml-arg-string", p.until_one_of({
-                    "</parameter>",
-                    "<parameter=",
-                    "</function>"
-                }));
-
-                foreach_parameter(function, [&](const auto & param_name, const json & param_schema, bool is_required) {
-                    auto rule_name = "tool-" + name + "-arg-" + param_name;
-
-                    auto arg_open = ws + "<parameter=" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + ">" + ws;
-                    auto arg_close = ws + "</parameter>" + ws;
-                    auto arg_value = p.eps();
-
+                foreach_parameter(function, [&](const std::string & param_name, const json & param_schema, bool /* is_required */) {
+                    auto parameter_value = p.choice();
                     if (schema_info.resolves_to_string(param_schema)) {
-                        arg_value = p.tag(Tag::TOOL_ARG_STRING_VALUE, arg_string);
+                        parameter_value |= p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));
                     } else {
-                        arg_value = p.tag(Tag::TOOL_ARG_JSON_VALUE, p.schema(p.json(), rule_name + "-schema", param_schema));
+                        parameter_value |= p.tag(Tag::TOOL_ARG_JSON_VALUE,
+                            p.schema(p.json(), "qwen-param-" + name + "-" + param_name, param_schema));
                     }
 
-                    auto arg_rule = p.rule(rule_name, p.atomic_tag(Tag::TOOL_ARG_OPEN, arg_open) + arg_value + p.atomic_tag(Tag::TOOL_ARG_CLOSE, arg_close));
-                    args += p.repeat(arg_rule, /* min = */ is_required ? 1 : 0, /* max = */ 1);
+                    auto arg_rule = p.rule("qwen-parameter-" + name + "-" + param_name,
+                        p.atomic_tag(Tag::TOOL_ARG_OPEN, ws + "<parameter=" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + parameter_terminator + ws)
+                        + parameter_value
+                        + p.atomic_tag(Tag::TOOL_ARG_CLOSE, ws + "</parameter>" + ws)
+                    );
+
+                    args += p.repeat(arg_rule, /* min = */ 0, /* max = */ 1);
                 });
 
-                tool_choice |= p.rule("tool-" + name, p.atomic_tag(Tag::TOOL_OPEN, tool_open) + args + p.atomic_tag(Tag::TOOL_CLOSE, tool_close));
+                if (allow_additional) {
+                    auto additional_value = p.choice();
+                    if (additional_has_schema) {
+                        if (schema_info.resolves_to_string(additional_schema)) {
+                            additional_value |= p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));
+                        } else {
+                            additional_value |= p.tag(Tag::TOOL_ARG_JSON_VALUE,
+                                p.schema(p.json(), "qwen-param-" + name + "-additional", additional_schema));
+                        }
+                    } else {
+                        additional_value |= p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));
+                    }
+
+                    auto additional_rule = p.rule("qwen-parameter-generic-" + name,
+                        p.atomic_tag(Tag::TOOL_ARG_OPEN, ws + "<parameter=" + parameter_name + parameter_terminator + ws)
+                        + additional_value
+                        + p.atomic_tag(Tag::TOOL_ARG_CLOSE, ws + "</parameter>" + ws)
+                    );
+
+                    args += p.repeat(additional_rule, 0, -1);
+                }
+
+                // Format: <function=name><parameter=key>value</parameter></function>
+                // Allow optional whitespace/indentation for flexibility
+                auto tool_open = ws + "<function=" + p.literal_tag(Tag::TOOL_NAME, name) + ">" + ws;
+                auto tool_close = ws + "</function>" + ws;
+
+                tool_choice |= p.rule("tool-" + name,
+                    p.atomic_tag(Tag::TOOL_OPEN, tool_open)
+                    + args
+                    + p.atomic_tag(Tag::TOOL_CLOSE, tool_close)
+                );
             });
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
