@@ -56,7 +56,6 @@ common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_tem
 
         // Tool call parser
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
-            auto ws = p.space();  // matches any whitespace including newlines
             auto parameter_name = p.choice();
             parameter_name |= p.tag(Tag::TOOL_ARG_NAME, p.until(">\r\n"));
             parameter_name |= p.tag(Tag::TOOL_ARG_NAME, p.until(">\n"));
@@ -100,10 +99,14 @@ common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_tem
                             p.schema(p.json(), "qwen-param-" + name + "-" + param_name, param_schema));
                     }
 
+                    auto param_open = p.literal("<parameter=")
+                        << p.literal_tag(Tag::TOOL_ARG_NAME, param_name)
+                        << parameter_terminator;
+                    auto param_close = p.literal("</parameter>");
                     auto arg_rule = p.rule("qwen-parameter-" + name + "-" + param_name,
-                        p.atomic_tag(Tag::TOOL_ARG_OPEN, ws + "<parameter=" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + parameter_terminator + ws)
+                        p.atomic_tag(Tag::TOOL_ARG_OPEN, param_open)
                         + parameter_value
-                        + p.atomic_tag(Tag::TOOL_ARG_CLOSE, ws + "</parameter>" + ws)
+                        + p.atomic_tag(Tag::TOOL_ARG_CLOSE, param_close)
                     );
 
                     args += p.repeat(arg_rule, /* min = */ 0, /* max = */ 1);
@@ -122,10 +125,14 @@ common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_tem
                         additional_value |= p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));
                     }
 
+                    auto generic_open = p.literal("<parameter=")
+                        << parameter_name
+                        << parameter_terminator;
+                    auto generic_close = p.literal("</parameter>");
                     auto additional_rule = p.rule("qwen-parameter-generic-" + name,
-                        p.atomic_tag(Tag::TOOL_ARG_OPEN, ws + "<parameter=" + parameter_name + parameter_terminator + ws)
+                        p.atomic_tag(Tag::TOOL_ARG_OPEN, generic_open)
                         + additional_value
-                        + p.atomic_tag(Tag::TOOL_ARG_CLOSE, ws + "</parameter>" + ws)
+                        + p.atomic_tag(Tag::TOOL_ARG_CLOSE, generic_close)
                     );
 
                     args += p.repeat(additional_rule, 0, -1);
@@ -133,8 +140,10 @@ common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_tem
 
                 // Format: <function=name><parameter=key>value</parameter></function>
                 // Allow optional whitespace/indentation for flexibility
-                auto tool_open = ws + "<function=" + p.literal_tag(Tag::TOOL_NAME, name) + ">" + ws;
-                auto tool_close = ws + "</function>" + ws;
+                auto tool_open = p.literal("<function=")
+                    << p.literal_tag(Tag::TOOL_NAME, name)
+                    << p.literal(">");
+                auto tool_close = p.literal("</function>");
 
                 tool_choice |= p.rule("tool-" + name,
                     p.atomic_tag(Tag::TOOL_OPEN, tool_open)
@@ -145,10 +154,16 @@ common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_tem
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            auto tool_call = p.rule("tool-call", "<tool_call>" + p.space() + tool_choice + "</tool_call>" + p.space());
+            auto tool_call = p.rule("tool-call",
+                p.tag(Tag::TOOL,
+                    p.literal("<tool_call>")
+                    << tool_choice
+                    << p.literal("</tool_call>")
+                )
+            );
             auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, /* min = */ min_calls, /* max = */ max_calls));
 
-            return content_before_tool << tool_calls << consume_end_block();
+            return p.optional(content_before_tool) << tool_calls << consume_end_block();
         }
 
         // Content only parser
