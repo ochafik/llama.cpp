@@ -17,6 +17,7 @@ common_chat_params common_chat_params_init_function_gemma(const common_chat_temp
         "<start_function_response>",
         "<end_function_response>",
         "<escape>",
+        "<end_of_turn>",
     };
 
     data.additional_stops.push_back("<end_function_call>");
@@ -56,6 +57,8 @@ common_chat_params common_chat_params_init_function_gemma(const common_chat_temp
         // Tool name: alphanumeric identifier after "call:"
         auto tool_name = p.atomic_tag(Tag::TOOL_NAME, identifier);
 
+        auto end_of_turn = p.optional(p.literal("<end_of_turn>"));
+
         // Tool call: <start_function_call>call:name{...}<end_function_call>
         auto tool_call = p.tag(Tag::TOOL,
             p.atomic_tag(Tag::TOOL_OPEN, start_function_call + "call:")
@@ -72,13 +75,17 @@ common_chat_params common_chat_params_init_function_gemma(const common_chat_temp
             int max_calls = params.parallel_tool_calls ? -1 : 1;
             auto calls = p.repeat(tool_call, min_calls, max_calls);
             if (require_tools) {
-                return calls;
+                return calls + end_of_turn;
             }
-            return content + calls;
+            return content + calls + end_of_turn;
         }
 
         // Content only
-        return p.tag(Tag::CONTENT, p.rest());
+        auto content_only = p.choice({
+            p.tag(Tag::CONTENT, p.until_token("<end_of_turn>")) + end_of_turn,
+            p.tag(Tag::CONTENT, p.rest())
+        });
+        return content_only;
     });
 
     data.parser = parser.save();
