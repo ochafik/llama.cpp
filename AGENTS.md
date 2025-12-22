@@ -198,10 +198,10 @@ Based on current pass rates (higher = easier to fix):
 
 ### Needle Test Structure
 Each scenario injects "needles" (markers) into content/reasoning/args:
-- `<<<N1C>>>`, `<<<N2C>>>` - Content needles
-- `<<<N1R>>>`, `<<<N2R>>>` - Reasoning needles
-- `<<<N1AK>>>_N`, `<<<N2AK>>>_N` - Arg key needles
-- `<<<N1AV>>>_N`, `<<<N2AV>>>_N` - Arg value needles
+- `$N1C$`, `$N2C$` - Content needles
+- `$N1R$`, `$N2R$` - Reasoning needles
+- `$N1AK$_N`, `$N2AK$_N` - Arg key needles
+- `$N1AV$_N`, `$N2AV$_N` - Arg value needles
 
 Tests verify:
 1. Needles appear in order (N1 before N2)
