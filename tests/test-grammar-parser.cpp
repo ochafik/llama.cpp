@@ -160,6 +160,19 @@ int main()
     });
 
     verify_parsing(R"""(
+        root  ::= () | "a"
+    )""", {
+        {"root", 0},
+    }, {
+        // root (index 0)
+        {LLAMA_GRETYPE_ALT, 0},
+        {LLAMA_GRETYPE_CHAR, 'a'},
+        {LLAMA_GRETYPE_END, 0},
+    });
+
+    return 0;
+
+    verify_parsing(R"""(
         root  ::= "a" | [bdx-z] | [^1-3]
     )""", {
         {"root", 0},

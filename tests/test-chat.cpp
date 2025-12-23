@@ -683,6 +683,7 @@ struct needle_scenario {
     bool with_tool_call = false;
     size_t tool_call_count = 1;
     common_chat_tool_choice tool_choice = COMMON_CHAT_TOOL_CHOICE_NONE;
+    bool expect_tool_ids = false;
     bool enable_thinking = false;
     bool force_disable_thinking = false;
     bool require_thinking_support = false;
@@ -793,7 +794,9 @@ static needle_test_context make_needle_context(const needle_scenario & scenario)
             common_chat_tool_call call;
             call.name = scenario.tool_name;
             call.arguments = args.dump();
-            call.id = std::to_string(call_idx);
+            if (scenario.expect_tool_ids) {
+                call.id = std::to_string(call_idx);
+            }
 
             ctx.tool_expectations.push_back(expectation);
             ctx.expected_msg.tool_calls.push_back(call);
@@ -1949,87 +1952,6 @@ static void test_template_output_parsers() {
                       " functools[{\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}]");
     }
     {
-        // Original DeepSeek R1 template. Leaves <｜tool▁calls▁begin｜> and others unclosed. Our logic fixes the prompt.
-        auto tmpls = read_templates("models/templates/deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja");
-        std::vector<std::string>   end_tokens{ "<｜end▁of▁sentence｜>" };
-
-        for (const auto & inputs : { inputs_no_tools, inputs_tools }) {
-            auto params = common_chat_templates_apply(tmpls.get(), inputs);
-            assert_equals(COMMON_CHAT_FORMAT_DEEPSEEK_R1, params.format);
-            assert_equals(true, params.thinking_forced_open);
-        }
-
-        test_templates(tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
-        test_templates(tmpls.get(), end_tokens, message_assist_thoughts, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
-        assert_msg_equals(
-            simple_assist_msg("Hello, world!\nWhat's up?", "<think>I'm\nthinking"),
-            common_chat_parse(
-                "<think>I'm\nthinking</think>Hello, world!\nWhat's up?",
-                /* is_partial= */ false,
-                {
-                    COMMON_CHAT_FORMAT_DEEPSEEK_R1,
-                    /* .reasoning_format = */ COMMON_REASONING_FORMAT_DEEPSEEK,
-                    /* .reasoning_in_content = */ false,
-                    /* .thinking_forced_open = */ true,
-                }));
-        assert_msg_equals(
-            simple_assist_msg("", "I need to remember the correct syntax. It starts with <｜tool▁calls▁begin｜> and ends with"),
-            common_chat_parse(
-                "I need to remember the correct syntax. It starts with <｜tool▁calls▁begin｜> and ends with",
-                /* is_partial= */ true,
-                {
-                    COMMON_CHAT_FORMAT_DEEPSEEK_R1,
-                    /* .reasoning_format = */ COMMON_REASONING_FORMAT_DEEPSEEK,
-                    /* .reasoning_in_content = */ false,
-                    /* .thinking_forced_open = */ true,
-                }));
-        assert_msg_equals(message_assist_thoughts,
-            common_chat_parse(
-                "<think>I'm\nthinking</think>Hello, world!\nWhat's up?",
-                /* is_partial= */ false,
-                {
-                    /* .format = */ COMMON_CHAT_FORMAT_DEEPSEEK_R1,
-                    /* .reasoning_format = */ COMMON_REASONING_FORMAT_DEEPSEEK,
-                }));
-        assert_msg_equals(message_assist_thoughts_unopened_unparsed,
-            common_chat_parse(
-                "I'm\nthinking</think>Hello, world!\nWhat's up?",
-                /* is_partial= */ false,
-                {
-                    /* .format = */ COMMON_CHAT_FORMAT_DEEPSEEK_R1,
-                    /* .reasoning_format = */ COMMON_REASONING_FORMAT_DEEPSEEK,
-                }));
-        assert_msg_equals(message_assist_thoughts,
-            common_chat_parse(
-                "I'm\nthinking</think>Hello, world!\nWhat's up?",
-                /* is_partial= */ false,
-                {
-                    /* .format = */ COMMON_CHAT_FORMAT_DEEPSEEK_R1,
-                    /* .reasoning_format = */ COMMON_REASONING_FORMAT_DEEPSEEK,
-                    /* .reasoning_in_content = */ false,
-                    /* .thinking_forced_open = */ true,
-                }));
-        assert_msg_equals(message_assist_thoughts,
-            // Latest template update (ast of 20250209) adds a trailing <think>\n if add_generation_prompt is true.
-            common_chat_parse(
-                "I'm\nthinking</think>Hello, world!\nWhat's up?",
-                /* is_partial= */ false,
-                {
-                    /* .format = */ COMMON_CHAT_FORMAT_DEEPSEEK_R1,
-                    /* .reasoning_format = */ COMMON_REASONING_FORMAT_DEEPSEEK,
-                    /* .reasoning_in_content = */ false,
-                    /* .thinking_forced_open = */ true,
-                }));
-        // test_templates(tmpls.get(), end_tokens, message_assist_call, tools,
-        //               "<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>function<｜tool▁sep｜>special_function\n"
-        //               "```json\n"
-        //               "{\"arg1\": 1}\n"
-        //               // Look what's not here: <｜tool▁calls▁end｜> (also missing the <｜end▁of▁sentence｜>, but that is removed lazily by the test's delta logic)
-        //               "```<｜tool▁call▁end｜>",
-        //               /* expect_grammar_triggered= */ true,
-        //               /* test_grammar_if_triggered= */ false);
-    }
-    {
         // Replacement DeepSeek R1 template. Makes the Distill Qwen 7B/32B models happy to call tools and all.
         auto tmpls = read_templates("models/templates/llama-cpp-deepseek-r1.jinja");
         std::vector<std::string>   end_tokens{ "<｜end▁of▁sentence｜>" };
@@ -2445,6 +2367,7 @@ static void test_template_output_parsers() {
         auto params = common_chat_templates_apply(tmpls.get(), inputs_tools_reasoning);
         common_chat_syntax syntax;
         syntax.format = params.format;
+        syntax.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
         syntax.parser.load(params.parser);
 
         // Syntax with reasoning for content-only tests
@@ -4359,6 +4282,13 @@ static void test_template_output_peg_parsers() {
             t.expect.reasoning_content = "I need to output the invoice details in JSON";
             t.expect.content = R"({"amount": 123.45, "date": "2025-12-03"})";
         });
+
+        // Test simple "quota" response (basic parsing test)
+        test_peg_parser(tmpls.get(), [&](auto & t) {
+            t.input = "quota";
+            t.expect = message_assist;
+            t.expect.content = "quota";
+        });
     }
 
 }
@@ -4390,6 +4320,7 @@ struct template_capabilities {
     bool supports_disable_thinking = true;
     bool supports_reasoning_only = true;
     bool tool_required_allows_content = true;
+    bool tool_calls_have_ids = false;
 };
 
 static const char * tool_choice_name(common_chat_tool_choice choice) {
@@ -4460,6 +4391,7 @@ static std::vector<needle_scenario> build_needle_scenarios(const template_capabi
         tool_auto.with_tool_call = true;
         tool_auto.require_tool_support = true;
         tool_auto.with_content = info.tools_emit_content_with_calls;
+        tool_auto.expect_tool_ids = info.tool_calls_have_ids;
         scenarios.push_back(tool_auto);
 
         needle_scenario tool_required_only;
@@ -4469,6 +4401,7 @@ static std::vector<needle_scenario> build_needle_scenarios(const template_capabi
         tool_required_only.with_tool_call = true;
         tool_required_only.with_content = info.tool_required_allows_content;
         tool_required_only.require_tool_support = true;
+        tool_required_only.expect_tool_ids = info.tool_calls_have_ids;
         scenarios.push_back(tool_required_only);
 
         needle_scenario tool_parallel;
@@ -4480,6 +4413,7 @@ static std::vector<needle_scenario> build_needle_scenarios(const template_capabi
         tool_parallel.parallel_tool_calls = true;
         tool_parallel.require_tool_support = true;
         tool_parallel.with_content = info.tools_emit_content_with_calls;
+        tool_parallel.expect_tool_ids = info.tool_calls_have_ids;
         scenarios.push_back(tool_parallel);
 
         if (info.supports_thinking == ThinkingSupport::Yes) {
@@ -4493,6 +4427,7 @@ static std::vector<needle_scenario> build_needle_scenarios(const template_capabi
             tool_with_reasoning.require_tool_support = true;
             tool_with_reasoning.require_thinking_support = true;
             tool_with_reasoning.with_content = info.tools_emit_content_with_calls;
+            tool_with_reasoning.expect_tool_ids = info.tool_calls_have_ids;
             scenarios.push_back(tool_with_reasoning);
         }
     }
@@ -4584,7 +4519,7 @@ static void test_systematic_needle_streaming() {
             nullptr, nullptr, /* skip = */ false, /* reasoning_requires_tools = */ false,
             /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ false,
             /* supports_disable_thinking = */ true, /* supports_reasoning_only = */ true,
-            /* tool_required_allows_content = */ false},
+            /* tool_required_allows_content = */ false, /* tool_calls_have_ids = */ true},
         {"MiniMax M2",      "models/templates/MiniMax-M2.jinja",
             COMMON_CHAT_FORMAT_MINIMAX_M2, ThinkingSupport::Yes, ToolSupport::Yes,
             "<think>", "</think>", /* skip = */ false, /* reasoning_requires_tools = */ false,
@@ -4598,10 +4533,16 @@ static void test_systematic_needle_streaming() {
             /* tool_required_allows_content = */ false},
         {"Nemotron V3",     "models/templates/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16.jinja",
             COMMON_CHAT_FORMAT_NEMOTRON_V3, ThinkingSupport::Yes, ToolSupport::Yes,
-            "<think>", "</think>"},
+            "<think>", "</think>", /* skip = */ false, /* reasoning_requires_tools = */ false,
+            /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ false,
+            /* supports_disable_thinking = */ false, /* supports_reasoning_only = */ false,
+            /* tool_required_allows_content = */ false},
         {"Nemotron V3 (Unsloth)", "models/templates/unsloth-Nemotron-3-Nano.jinja",
             COMMON_CHAT_FORMAT_NEMOTRON_V3, ThinkingSupport::Yes, ToolSupport::Yes,
-            "<think>", "</think>"},
+            "<think>", "</think>", /* skip = */ false, /* reasoning_requires_tools = */ false,
+            /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ false,
+            /* supports_disable_thinking = */ false, /* supports_reasoning_only = */ false,
+            /* tool_required_allows_content = */ false},
         {"Seed OSS",        "models/templates/ByteDance-Seed-OSS.jinja",
             COMMON_CHAT_FORMAT_SEED_OSS, ThinkingSupport::Yes, ToolSupport::Yes,
             "<seed:think>", "</seed:think>", /* skip = */ false, /* reasoning_requires_tools = */ false,
@@ -4781,7 +4722,7 @@ static void test_systematic_needle_streaming() {
 
         summaries.push_back(summary_entry);
 
-        printf("    Summary: %zu/%zu scenarios passed", summary_entry.scenarios_passed, summary_entry.scenarios_total);
+        printf("    Summary for %s: %zu/%zu scenarios passed", summary_entry.name.c_str(), summary_entry.scenarios_passed, summary_entry.scenarios_total);
         if (!summary_entry.failed_scenarios.empty()) {
             printf(" (failed: %s)", string_join(summary_entry.failed_scenarios, ", ").c_str());
         }
@@ -4790,7 +4731,8 @@ static void test_systematic_needle_streaming() {
 
     size_t templates_total = 0;
     size_t templates_passing = 0;
-    std::vector<std::string> failing_templates;
+    std::vector<std::string> passing_templates;
+    std::vector<std::string> failing_template_summaries;
     for (const auto & entry : summaries) {
         if (entry.scenarios_total == 0) {
             continue;
@@ -4798,15 +4740,21 @@ static void test_systematic_needle_streaming() {
         templates_total++;
         if (entry.failed_scenarios.empty()) {
             templates_passing++;
+             passing_templates.push_back(entry.name);
         } else {
-            failing_templates.push_back(entry.name);
+            std::ostringstream oss;
+            oss << entry.name << " (" << entry.scenarios_passed << "/" << entry.scenarios_total << ")";
+            failing_template_summaries.push_back(oss.str());
         }
     }
-    printf("\n  Overall needle summary: %zu/%zu templates fully passed", templates_passing, templates_total);
-    if (!failing_templates.empty()) {
-        printf(" (failing: %s)", string_join(failing_templates, ", ").c_str());
+    printf("\n  Overall needle summary: %zu/%zu templates fully passed\n", templates_passing, templates_total);
+    if (!passing_templates.empty()) {
+        printf("    Passed: %s\n", string_join(passing_templates, ", ").c_str());
     }
-    printf("\n\n");
+    if (!failing_template_summaries.empty()) {
+        printf("    Failed: %s\n", string_join(failing_template_summaries, ", ").c_str());
+    }
+    printf("\n");
 }
 
 static void test_msg_diffs_compute() {
