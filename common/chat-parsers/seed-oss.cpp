@@ -72,8 +72,8 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
                 auto schema_info = common_schema_info();
                 schema_info.resolve_refs(parameters);
 
-                // By JSON Schema spec, missing additionalProperties defaults to true
-                bool allow_additional = true;
+                // Default to false for stricter parsing - only allow explicitly defined parameters
+                bool allow_additional = false;
                 bool additional_has_schema = false;
                 json additional_schema;
                 if (parameters.contains("additionalProperties")) {
@@ -100,9 +100,11 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
                     auto arg_value = p.eps();
 
                     if (schema_info.resolves_to_string(param_schema)) {
+                        // For string types, capture everything and strip whitespace during processing
                         arg_value = p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));
                     } else {
-                        arg_value = p.tag(Tag::TOOL_ARG_JSON_VALUE, p.schema(p.json(), rule_name + "-schema", param_schema));
+                        // For non-string types (integers, booleans, etc.), consume surrounding whitespace
+                        arg_value = p.space() + p.tag(Tag::TOOL_ARG_JSON_VALUE, p.schema(p.json(), rule_name + "-schema", param_schema)) + p.space();
                     }
 
                     auto arg_rule = p.rule(rule_name,
@@ -120,8 +122,9 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
                         if (schema_info.resolves_to_string(additional_schema)) {
                             additional_value |= p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));
                         } else {
-                            additional_value |= p.tag(Tag::TOOL_ARG_JSON_VALUE,
-                                p.schema(p.json(), "seed-oss-additional-" + name, additional_schema));
+                            // For non-string types, consume surrounding whitespace
+                            additional_value |= p.space() + p.tag(Tag::TOOL_ARG_JSON_VALUE,
+                                p.schema(p.json(), "seed-oss-additional-" + name, additional_schema)) + p.space();
                         }
                     } else {
                         additional_value |= p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));

@@ -94,10 +94,12 @@ common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_tem
                 foreach_parameter(function, [&](const std::string & param_name, const json & param_schema, bool /* is_required */) {
                     auto parameter_value = p.choice();
                     if (schema_info.resolves_to_string(param_schema)) {
+                        // For string types, capture everything and strip whitespace during processing
                         parameter_value |= p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));
                     } else {
-                        parameter_value |= p.tag(Tag::TOOL_ARG_JSON_VALUE,
-                            p.schema(p.json(), "qwen-param-" + name + "-" + param_name, param_schema));
+                        // For non-string types (integers, booleans, etc.), consume surrounding whitespace
+                        parameter_value |= p.space() + p.tag(Tag::TOOL_ARG_JSON_VALUE,
+                            p.schema(p.json(), "qwen-param-" + name + "-" + param_name, param_schema)) + p.space();
                     }
 
                     auto arg_rule = p.rule("qwen-parameter-" + name + "-" + param_name,
@@ -107,6 +109,7 @@ common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_tem
                             + parameter_terminator)
                         + parameter_value
                         + p.atomic_tag(Tag::TOOL_ARG_CLOSE, p.literal("</parameter>"))
+                        + p.space()  // Allow whitespace after </parameter>
                     );
 
                     args += p.repeat(arg_rule, /* min = */ 0, /* max = */ 1);
@@ -118,8 +121,9 @@ common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_tem
                         if (schema_info.resolves_to_string(additional_schema)) {
                             additional_value |= p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));
                         } else {
-                            additional_value |= p.tag(Tag::TOOL_ARG_JSON_VALUE,
-                                p.schema(p.json(), "qwen-param-" + name + "-additional", additional_schema));
+                            // For non-string types, consume surrounding whitespace
+                            additional_value |= p.space() + p.tag(Tag::TOOL_ARG_JSON_VALUE,
+                                p.schema(p.json(), "qwen-param-" + name + "-additional", additional_schema)) + p.space();
                         }
                     } else {
                         additional_value |= p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));
@@ -132,6 +136,7 @@ common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_tem
                             + parameter_terminator)
                         + additional_value
                         + p.atomic_tag(Tag::TOOL_ARG_CLOSE, p.literal("</parameter>"))
+                        + p.space()  // Allow whitespace after </parameter>
                     );
 
                     args += p.repeat(additional_rule, 0, -1);
@@ -141,7 +146,9 @@ common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_tem
                 // Allow optional whitespace/indentation for flexibility
                 tool_choice |= p.rule("tool-" + name,
                     p.atomic_tag(Tag::TOOL_OPEN, p.literal("<function=") + p.literal_tag(Tag::TOOL_NAME, name) + p.literal(">"))
+                    + p.space()  // Allow whitespace after <function=name>
                     + args
+                    + p.space()  // Allow whitespace before </function>
                     + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("</function>"))
                 );
             });

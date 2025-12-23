@@ -187,13 +187,15 @@ common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & 
                 return mixed + tool_calls + mixed;
             }
 
-            // For non-reasoning case, match optional content before tool calls
+            // For non-reasoning case, match optional content before and after tool calls
             // Content stops at tool_call markers so tool_calls can match them
             auto content_prefix = p.optional(
                 p.optional(p.literal("\n"))
                 + p.tag(Tag::CONTENT, p.until_one_of({"\n<tool_call>", "<tool_call>"}))
             );
-            return content_prefix + tool_calls;
+            // Content after tool calls: capture remaining text
+            auto content_suffix = p.optional(p.tag(Tag::CONTENT, p.rest()));
+            return content_prefix + tool_calls + content_suffix;
         }
 
         // Content only parser

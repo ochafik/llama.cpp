@@ -4723,22 +4723,28 @@ static void test_systematic_needle_streaming() {
                 if (scenario_copy.provide_tools) {
                     // Create a dynamic tool with parameter names matching the needle markers
                     // This is needed for parsers that use literal_tag for parameter names (e.g., Llama 3.1 builtin tools)
-                    if (!ctx.expected_msg.tool_calls.empty() && !ctx.expected_msg.tool_calls[0].arguments.empty()) {
+                    if (!ctx.expected_msg.tool_calls.empty()) {
                         common_chat_tool dynamic_tool;
                         dynamic_tool.name = scenario_copy.tool_name;
                         dynamic_tool.description = "Dynamic tool for needle testing";
 
-                        // Build parameters schema from the needle-based argument names
-                        json args_json = json::parse(ctx.expected_msg.tool_calls[0].arguments);
+                        // Build parameters schema from ALL tool calls' argument names
+                        // This is important for parallel tool calls where each call may have different parameter names
                         json properties = json::object();
                         json required = json::array();
 
-                        for (auto& [key, value] : args_json.items()) {
-                            properties[key] = {
-                                {"type", "string"},
-                                {"description", "Needle test parameter"}
-                            };
-                            required.push_back(key);
+                        for (const auto& tool_call : ctx.expected_msg.tool_calls) {
+                            if (tool_call.arguments.empty()) continue;
+                            json args_json = json::parse(tool_call.arguments);
+                            for (auto& [key, value] : args_json.items()) {
+                                if (!properties.contains(key)) {  // Avoid duplicates
+                                    properties[key] = {
+                                        {"type", "string"},
+                                        {"description", "Needle test parameter"}
+                                    };
+                                    required.push_back(key);
+                                }
+                            }
                         }
 
                         dynamic_tool.parameters = json({
