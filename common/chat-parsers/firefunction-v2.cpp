@@ -45,7 +45,7 @@ common_chat_params common_chat_params_init_firefunction_v2(const common_chat_tem
 
     data.parser = parser.save();
 
-    data.format = COMMON_CHAT_FORMAT_FIREFUNCTION_V2;
+    data.format = has_tools ? COMMON_CHAT_FORMAT_FIREFUNCTION_V2 : COMMON_CHAT_FORMAT_CONTENT_ONLY;
 
     // Add stop tokens
     data.additional_stops = {
