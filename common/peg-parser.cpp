@@ -1388,8 +1388,21 @@ void common_peg_arena::build_grammar(const common_grammar_builder & builder, boo
                     }
                     auto child_gbnf = to_gbnf(child);
                     const auto & child_parser = parsers_.at(child);
-                    if (std::holds_alternative<common_peg_choice_parser>(child_parser) ||
-                        std::holds_alternative<common_peg_sequence_parser>(child_parser)) {
+                    // Check if child is an optional (min=0, max=1) repetition that was already wrapped
+                    // Don't double-wrap: if child is optional repetition wrapping a choice/sequence,
+                    // it's already formatted as "( ... )?" by the repetition handler
+                    bool child_is_optional_wrapped = false;
+                    if (const auto * rep = std::get_if<common_peg_repetition_parser>(&child_parser)) {
+                        if (rep->min_count == 0 && rep->max_count == 1) {
+                            const auto & grandchild_parser = parsers_.at(rep->child);
+                            if (std::holds_alternative<common_peg_choice_parser>(grandchild_parser) ||
+                                std::holds_alternative<common_peg_sequence_parser>(grandchild_parser)) {
+                                child_is_optional_wrapped = true;
+                            }
+                        }
+                    }
+                    if (!child_is_optional_wrapped && (std::holds_alternative<common_peg_choice_parser>(child_parser) ||
+                        std::holds_alternative<common_peg_sequence_parser>(child_parser))) {
                         s += "(" + child_gbnf + ")";
                     } else {
                         s += child_gbnf;
@@ -1414,12 +1427,21 @@ void common_peg_arena::build_grammar(const common_grammar_builder & builder, boo
             } else if constexpr (std::is_same_v<T, common_peg_repetition_parser>) {
                 auto child_gbnf = to_gbnf(p.child);
                 const auto & child_parser = parsers_.at(p.child);
+                if (p.min_count == 0 && p.max_count == 1) {
+                    // For optional (min=0, max=1), check original type before adding "?"
+                    // If child is choice/sequence and was wrapped, the "?" goes BEFORE the closing ")"
+                    // Otherwise "?" is added after the child
+                    if (std::holds_alternative<common_peg_choice_parser>(child_parser) ||
+                        std::holds_alternative<common_peg_sequence_parser>(child_parser)) {
+                        child_gbnf = "(" + child_gbnf + ")?";
+                    } else {
+                        child_gbnf += "?";
+                    }
+                    return child_gbnf;
+                }
                 if (std::holds_alternative<common_peg_choice_parser>(child_parser) ||
                     std::holds_alternative<common_peg_sequence_parser>(child_parser)) {
                     child_gbnf = "(" + child_gbnf + ")";
-                }
-                if (p.min_count == 0 && p.max_count == 1) {
-                    return child_gbnf + "?";
                 }
                 if (p.min_count == 0 && p.max_count == -1) {
                     return child_gbnf + "*";
@@ -1504,6 +1526,7 @@ void common_peg_arena::build_grammar(const common_grammar_builder & builder, boo
 
     // Collect reachable rules
     std::unordered_set<std::string> reachable_rules;
+    bool has_trigger_rules = false;
 
     if (lazy) {
         // Collect rules reachable from trigger rules
@@ -1512,11 +1535,16 @@ void common_peg_arena::build_grammar(const common_grammar_builder & builder, boo
             if (auto rule = std::get_if<common_peg_rule_parser>(&parser)) {
                 if (rule->trigger) {
                     // Mark trigger as reachable and visit it
+                    has_trigger_rules = true;
                     reachable_rules.insert(name);
                     auto add_rules = collect_reachable_rules(*this, id);
                     reachable_rules.insert(add_rules.begin(), add_rules.end());
                 }
             }
+        }
+        // If no trigger rules found, fall back to non-lazy mode
+        if (!has_trigger_rules) {
+            reachable_rules = collect_reachable_rules(*this, root_);
         }
     } else {
         // Collect rules reachable from root
@@ -1535,7 +1563,7 @@ void common_peg_arena::build_grammar(const common_grammar_builder & builder, boo
         }
     }
 
-    if (lazy) {
+    if (lazy && has_trigger_rules) {
         // Generate root rule from trigger rules only
         std::vector<std::string> trigger_names;
         for (const auto & [name, rule_id] : rules_) {
