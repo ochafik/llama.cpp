@@ -171,6 +171,14 @@ bool common_chat_templates_support_tools(const common_chat_templates * chat_temp
     return tmpl.original_caps().supports_tools;
 }
 
+bool common_chat_templates_support_parallel_tool_calls(const common_chat_templates * chat_templates) {
+    // Check the template that would be used for tools (tool_use variant if available, otherwise default)
+    const auto & tmpl = chat_templates->template_tool_use
+        ? *chat_templates->template_tool_use
+        : *chat_templates->template_default;
+    return tmpl.original_caps().supports_parallel_tool_calls;
+}
+
 template <>
 std::vector<common_chat_msg> common_chat_msgs_parse_oaicompat(const json & messages) {
     std::vector<common_chat_msg> msgs;
