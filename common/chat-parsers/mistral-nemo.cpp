@@ -21,15 +21,16 @@ common_chat_params common_chat_params_init_mistral_nemo(const common_chat_templa
         using Tag = common_chat_peg_tag;
 
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
-            // Tool call parser: content followed by [TOOL_CALLS] and JSON array
+            // Tool call parser: [TOOL_CALLS] followed by a JSON array of tool calls
+            // The template generates: [TOOL_CALLS][{"name": "fn1", ...}, {"name": "fn2", ...}]
+            // So we capture [TOOL_CALLS] once, then the entire JSON array
             auto tool_call = p.tag(Tag::TOOL,
                 p.token_tag(Tag::TOOL_OPEN, "[TOOL_CALLS]")
                 + p.tag(Tag::TOOL_ARGS, p.json())
             );
 
-            auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
-            auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, min_calls, max_calls));
+            // No repeat needed - [TOOL_CALLS] appears once with the entire array
+            auto tool_calls = p.trigger_rule("tool-call-root", tool_call);
 
             return p.tag(Tag::CONTENT, p.until("[TOOL_CALLS]")) << tool_calls;
         }

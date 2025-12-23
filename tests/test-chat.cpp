@@ -667,6 +667,7 @@ struct needle_tool_expectation {
 
 struct needle_test_context {
     std::string scenario_name;
+    common_chat_format format = COMMON_CHAT_FORMAT_CONTENT_ONLY;
     needle_field_needles content_needles;
     needle_field_needles reasoning_needles;
     std::vector<needle_tool_expectation> tool_expectations;
@@ -753,9 +754,10 @@ static void update_field_state(needle_field_state & state, const needle_field_ne
     }
 }
 
-static needle_test_context make_needle_context(const needle_scenario & scenario) {
+static needle_test_context make_needle_context(const needle_scenario & scenario, common_chat_format format = COMMON_CHAT_FORMAT_CONTENT_ONLY) {
     needle_test_context ctx;
     ctx.scenario_name = scenario.name;
+    ctx.format = format;
     ctx.expected_msg.role = "assistant";
 
     if (scenario.with_content) {
@@ -795,7 +797,22 @@ static needle_test_context make_needle_context(const needle_scenario & scenario)
             call.name = scenario.tool_name;
             call.arguments = args.dump();
             if (scenario.expect_tool_ids) {
-                call.id = std::to_string(call_idx);
+                // Mistral Nemo requires 9-character alphanumeric IDs
+                if (ctx.format == COMMON_CHAT_FORMAT_MISTRAL_NEMO) {
+                    // Generate 9-character alphanumeric ID (e.g., "call00123", "abc456789")
+                    std::string id = "call";
+                    id += std::to_string(call_idx);
+                    while (id.length() < 9) {
+                        id += "0";
+                    }
+                    // Pad or truncate to exactly 9 characters
+                    if (id.length() > 9) {
+                        id = id.substr(0, 9);
+                    }
+                    call.id = id;
+                } else {
+                    call.id = std::to_string(call_idx);
+                }
             }
 
             ctx.tool_expectations.push_back(expectation);
@@ -4568,7 +4585,10 @@ static void test_systematic_needle_streaming() {
             nullptr, nullptr},
         {"Mistral Nemo",    "models/templates/mistralai-Mistral-Nemo-Instruct-2407.jinja",
             COMMON_CHAT_FORMAT_MISTRAL_NEMO, ThinkingSupport::No, ToolSupport::Yes,
-            nullptr, nullptr},
+            nullptr, nullptr, /* skip = */ false, /* reasoning_requires_tools = */ false,
+            /* tools_emit_content_with_calls = */ false, /* inject_reasoning_after_format = */ false,
+            /* supports_disable_thinking = */ false, /* supports_reasoning_only = */ false,
+            /* tool_required_allows_content = */ false, /* tool_calls_have_ids = */ true},
         {"Qwen3 Coder",     "models/templates/Qwen3-Coder.jinja",
             COMMON_CHAT_FORMAT_QWEN3_CODER_XML, ThinkingSupport::No, ToolSupport::Yes,
             nullptr, nullptr},
@@ -4643,7 +4663,7 @@ static void test_systematic_needle_streaming() {
             summary_entry.scenarios_total++;
 
             try {
-                auto ctx = make_needle_context(scenario);
+                auto ctx = make_needle_context(scenario, tmpl_info.format);
                 std::vector<common_chat_tool> scenario_tools;
                 if (scenario.provide_tools) {
                     scenario_tools = {python_tool};
