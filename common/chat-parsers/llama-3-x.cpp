@@ -22,7 +22,7 @@ common_chat_params common_chat_params_init_llama_3_x(const common_chat_template 
 
     bool has_tools = inputs.tools.is_array() && !inputs.tools.empty();
     data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
-    data.format = COMMON_CHAT_FORMAT_LLAMA_3_X;
+    data.format = has_tools ? COMMON_CHAT_FORMAT_LLAMA_3_X : COMMON_CHAT_FORMAT_CONTENT_ONLY;
 
     data.preserved_tokens = {};
     if (allow_python_tag_builtin_tools) {
