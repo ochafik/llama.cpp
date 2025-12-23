@@ -83,10 +83,10 @@ common_chat_params common_chat_params_init_functionary_v3_2(const common_chat_te
             if (inputs.parallel_tool_calls) {
                 // Subsequent tool calls with >>> prefix
                 auto subsequent_calls = p.repeat(subsequent_tool_choice, 0, -1);
-                return p.trigger_rule("first-element", first_element) << subsequent_calls << p.tag(Tag::CONTENT, p.rest());
+                return p.trigger_rule("tool-call-root", first_element) << subsequent_calls << p.tag(Tag::CONTENT, p.rest());
             } else {
                 // Just the first element
-                return p.trigger_rule("first-element", first_element) << p.tag(Tag::CONTENT, p.rest());
+                return p.trigger_rule("tool-call-root", first_element) << p.tag(Tag::CONTENT, p.rest());
             }
         }
 

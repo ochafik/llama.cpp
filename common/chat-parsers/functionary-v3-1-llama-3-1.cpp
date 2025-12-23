@@ -97,7 +97,7 @@ common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1(const comm
                 delimiters.push_back("<|python_tag|>");
             }
 
-            auto tool_calls = p.trigger_rule("tool-call", p.repeat(tool_choice, min_calls, max_calls));
+            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_choice, min_calls, max_calls));
             return p.tag(Tag::CONTENT, p.until_one_of(delimiters)) << tool_calls;
         }
 

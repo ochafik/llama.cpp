@@ -68,7 +68,7 @@ common_chat_params common_chat_params_init_lfm2(const common_chat_template & tmp
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            auto tool_calls = p.trigger_rule("tool-call", p.repeat(tool_call, min_calls, max_calls));
+            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, min_calls, max_calls));
 
             return p.tag(Tag::CONTENT, p.until("<|tool_call_start|>")) << tool_calls;
         });

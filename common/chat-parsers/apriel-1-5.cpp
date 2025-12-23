@@ -84,7 +84,7 @@ common_chat_params common_chat_params_init_apriel_1_5(const common_chat_template
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            auto tool_calls = p.trigger_rule("tool-call", p.repeat(tool_call, min_calls, max_calls));
+            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, min_calls, max_calls));
             auto newline_before_tools = p.optional(p.literal("\n"));
 
             if (require_tools) {

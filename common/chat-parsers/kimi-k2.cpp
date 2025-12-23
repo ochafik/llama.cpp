@@ -77,7 +77,7 @@ common_chat_params common_chat_params_init_kimi_k2(const common_chat_template & 
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            auto tool_calls = p.trigger_rule("tool-call",
+            auto tool_calls = p.trigger_rule("tool-call-root",
                 "<|tool_calls_section_begin|>"
                 + p.repeat(tool_choice, min_calls, max_calls)
                 + "<|tool_calls_section_end|>"
