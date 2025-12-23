@@ -496,3 +496,23 @@ def test_chat_completions_multiple_choices():
         assert "assistant" == choice["message"]["role"]
         assert match_regex("Suddenly", choice["message"]["content"])
         assert choice["finish_reason"] == "length"
+
+
+def test_simple_quota_request():
+    global server
+    server = ServerPreset.nemotron_nano()
+    server.start()
+    res = server.make_request("POST", "/chat/completions", data={
+        "max_tokens": 1,
+        "messages": [
+            {"role": "user", "content": "quota"},
+        ],
+    })
+    assert res.status_code == 200
+    assert "choices" in res.body
+    assert len(res.body["choices"]) == 1
+    choice = res.body["choices"][0]
+    assert "message" in choice
+    assert choice["message"]["role"] == "assistant"
+    assert choice["message"]["content"] is not None
+    assert choice["finish_reason"] == "length"
