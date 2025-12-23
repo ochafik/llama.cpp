@@ -1567,7 +1567,8 @@ common_chat_msg common_chat_peg_parse(const common_peg_arena & parser, const std
     } else if (syntax.format == COMMON_CHAT_FORMAT_MISTRAL_NEMO ||
                syntax.format == COMMON_CHAT_FORMAT_MAGISTRAL ||
                syntax.format == COMMON_CHAT_FORMAT_FIREFUNCTION_V2 ||
-               syntax.format == COMMON_CHAT_FORMAT_NEMOTRON_V2) {
+               syntax.format == COMMON_CHAT_FORMAT_NEMOTRON_V2 ||
+               syntax.format == COMMON_CHAT_FORMAT_GRANITE) {
         apply_chat_peg_mapper(common_chat_peg_oai_array_mapper(), ctx.ast, result, msg);
     } else {
         // Default to native mapper for JSON-based formats (including KIMI_K2, XIAOMI_MIMO)

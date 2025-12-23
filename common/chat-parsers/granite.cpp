@@ -57,10 +57,22 @@ common_chat_params common_chat_params_init_granite(const common_chat_template & 
             return reasoning << p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema));
         }
 
-        // Tool call parser: Granite emits a JSON object with tool_calls + content fields
+        // Tool call parser: Granite emits <|tool_call|>[{"name": "func", "arguments": {...}}]
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
-            auto payload = p.tag(Tag::TOOL_ARGS, p.json());
-            return reasoning << p.optional(p.space()) << payload << consume_eot();
+            auto tool_call = p.tag(Tag::TOOL,
+                p.token_tag(Tag::TOOL_OPEN, "<|tool_call|>")
+                + p.tag(Tag::TOOL_ARGS, p.json())
+            );
+
+            auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
+            auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
+            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, min_calls, max_calls));
+
+            bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+            if (require_tools) {
+                return reasoning << tool_calls << consume_eot();
+            }
+            return reasoning << p.tag(Tag::CONTENT, p.until("<|tool_call|>")) << tool_calls << consume_eot();
         }
 
         // Content-only parser: trim trailing <|end_of_text|> and optionally handle <response> blocks
@@ -80,11 +92,11 @@ common_chat_params common_chat_params_init_granite(const common_chat_template & 
         });
         // If lazy mode was requested but the trigger word doesn't appear in the grammar,
         // it means no trigger rules were defined, so disable lazy mode
-        if (data.grammar_lazy && data.grammar.find(R"("tool_calls")") == std::string::npos) {
+        if (data.grammar_lazy && data.grammar.find("<|tool_call|>") == std::string::npos) {
             data.grammar_lazy = false;
             data.grammar_triggers.clear();
         } else if (data.grammar_lazy) {
-            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, R"("tool_calls")"});
+            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<|tool_call|>"});
         } else {
             data.grammar_triggers.clear();
         }
