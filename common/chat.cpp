@@ -707,6 +707,14 @@ static common_chat_params common_chat_params_init_without_tools(const common_cha
     } else {
         data.grammar = inputs.grammar;
     }
+
+    // Build a basic content-only parser
+    auto parser = build_chat_peg_parser([&](auto & p) {
+        using Tag = common_chat_peg_tag;
+        return p.tag(Tag::CONTENT, p.rest());
+    });
+    data.parser = parser.save();
+
     return data;
 }
 

@@ -11,11 +11,11 @@ common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1(const comm
     auto has_raw_python = false;
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
 
-    if (has_tools) {
-        data.format = COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1;
-        data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+    data.format = COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1;
+    data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
 
-        // Detect python tool with string argument
+    // Detect python tool with string argument
+    if (has_tools) {
         foreach_function(inputs.tools, [&](const json & tool) {
             const auto & function = tool.at("function");
             const auto & parameters = function.at("parameters");
@@ -44,67 +44,71 @@ common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1(const comm
                 }
             }
         });
+    }
 
-        // Set up preserved tokens
-        data.preserved_tokens = {};
-        if (has_raw_python) {
-            data.preserved_tokens.push_back("<|python_tag|>");
+    // Set up preserved tokens
+    data.preserved_tokens = {};
+    if (has_raw_python) {
+        data.preserved_tokens.push_back("<|python_tag|>");
+    }
+
+    // Build PEG parser for <function=name>{...}</function> format
+    auto parser = build_chat_peg_parser([&](auto & p) {
+        using Tag = common_chat_peg_tag;
+
+        // Response format parser
+        if (inputs.json_schema.is_object() && !inputs.json_schema.empty()) {
+            return p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema));
         }
 
-        // Build PEG parser for <function=name>{...}</function> format
-        auto parser = build_chat_peg_parser([&](auto & p) {
-            using Tag = common_chat_peg_tag;
+        // Tool call parser
+        if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+            auto tool_choice = p.choice();
 
-            // Response format parser
-            if (inputs.json_schema.is_object() && !inputs.json_schema.empty()) {
-                return p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema));
+            foreach_function(inputs.tools, [&](const json & tool) {
+                const auto & function = tool.at("function");
+                std::string name = function.at("name");
+                auto parameters = function.at("parameters");
+
+                // Format: <function=name>{...}</function>
+                tool_choice |= p.rule("tool-" + name, p.tag(Tag::TOOL,
+                    p.token_tag(Tag::TOOL_OPEN, "<function=")
+                    + p.literal_tag(Tag::TOOL_NAME, name)
+                    + ">"
+                    + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-params", parameters))
+                    + p.token_tag(Tag::TOOL_CLOSE, "</function>")
+                ));
+            });
+
+            // Add python tag support if present
+            if (has_raw_python) {
+                // <|python_tag|>code... (raw python code wrapped in arguments)
+                tool_choice |= p.rule("python-raw", p.tag(Tag::TOOL,
+                    p.atomic_tag(Tag::TOOL_OPEN, p.token("<|python_tag|>") + p.literal_tag(Tag::TOOL_NAME, "python"))
+                    + p.tag(Tag::TOOL_ARGS, p.rest())
+                ));
             }
 
-            // Tool call parser
-            if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
-                auto tool_choice = p.choice();
+            auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
+            auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
 
-                foreach_function(inputs.tools, [&](const json & tool) {
-                    const auto & function = tool.at("function");
-                    std::string name = function.at("name");
-                    auto parameters = function.at("parameters");
-
-                    // Format: <function=name>{...}</function>
-                    tool_choice |= p.rule("tool-" + name, p.tag(Tag::TOOL,
-                        p.token_tag(Tag::TOOL_OPEN, "<function=")
-                        + p.literal_tag(Tag::TOOL_NAME, name)
-                        + ">"
-                        + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-params", parameters))
-                        + p.token_tag(Tag::TOOL_CLOSE, "</function>")
-                    ));
-                });
-
-                // Add python tag support if present
-                if (has_raw_python) {
-                    // <|python_tag|>code... (raw python code wrapped in arguments)
-                    tool_choice |= p.rule("python-raw", p.tag(Tag::TOOL,
-                        p.atomic_tag(Tag::TOOL_OPEN, p.token("<|python_tag|>") + p.literal_tag(Tag::TOOL_NAME, "python"))
-                        + p.tag(Tag::TOOL_ARGS, p.rest())
-                    ));
-                }
-
-                auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
-                auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-
-                std::vector<std::string> delimiters = {"<function="};
-                if (has_raw_python) {
-                    delimiters.push_back("<|python_tag|>");
-                }
-
-                auto tool_calls = p.trigger_rule("tool-call", p.repeat(tool_choice, min_calls, max_calls));
-                return p.tag(Tag::CONTENT, p.until_one_of(delimiters)) << tool_calls;
+            std::vector<std::string> delimiters = {"<function="};
+            if (has_raw_python) {
+                delimiters.push_back("<|python_tag|>");
             }
 
-            // Content only parser
-            return p.tag(Tag::CONTENT, p.rest());
-        });
+            auto tool_calls = p.trigger_rule("tool-call", p.repeat(tool_choice, min_calls, max_calls));
+            return p.tag(Tag::CONTENT, p.until_one_of(delimiters)) << tool_calls;
+        }
 
-        data.parser = parser.save();
+        // Content only parser
+        // Stop tokens for Functionary v3.1
+        return p.tag(Tag::CONTENT, p.until_one_of({"<|eot_id|>", "<|eom_id|>", "<|end|>", "<|start_header_id|>"}));
+    });
+
+    data.parser = parser.save();
+
+    if (has_tools) {
 
         // Build grammar
         data.grammar = build_grammar([&](const common_grammar_builder & builder) {
@@ -126,8 +130,6 @@ common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1(const comm
             builder.add_rule("root", inputs.parallel_tool_calls ? "(" + tool_call + ")+" : tool_call);
             data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<function="});
         });
-    } else {
-        data.format = COMMON_CHAT_FORMAT_CONTENT_ONLY;
     }
 
     data.prompt = apply(tmpl, inputs);

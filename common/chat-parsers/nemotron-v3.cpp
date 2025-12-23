@@ -35,6 +35,8 @@ common_chat_params common_chat_params_init_nemotron_v3(const common_chat_templat
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
     auto include_grammar = true;
 
+    bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
         auto newline = p.choice({p.literal("\r\n"), p.literal("\n")});
@@ -101,14 +103,21 @@ common_chat_params common_chat_params_init_nemotron_v3(const common_chat_templat
                 + skip_blank_lines);
             auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, /* min = */ min_calls, /* max = */ max_calls));
 
-            auto content_before = p.optional(p.tag(Tag::CONTENT, p.until_one_of({
+            auto stop_before = std::vector<std::string>{
                 "\n<tool_call>", "\r\n<tool_call>", "<tool_call>",
                 "\n<toolcall>", "\r\n<toolcall>", "<toolcall>"
-            })));
-            auto content_after = p.optional(p.tag(Tag::CONTENT, p.until_one_of({
+            };
+            auto stop_after = std::vector<std::string>{
                 "\n<|im_end|>", "\r\n<|im_end|>", "<|im_end|>"
-            })));
+            };
+            auto skip_content_before = p.optional(p.until_one_of(stop_before));
+            auto skip_content_after = p.optional(p.until_one_of(stop_after));
+            auto content_before = p.optional(p.tag(Tag::CONTENT, p.until_one_of(stop_before)));
+            auto content_after = p.optional(p.tag(Tag::CONTENT, p.until_one_of(stop_after)));
             auto pre_tool_gap = p.repeat(newline, 0, -1);
+            if (require_tools) {
+                return assistant_prefix + reasoning + after_reasoning_gap + skip_content_before + pre_tool_gap + tool_calls + skip_content_after + assistant_suffix;
+            }
             return assistant_prefix + reasoning + after_reasoning_gap + content_before + pre_tool_gap + tool_calls + content_after + assistant_suffix;
         }
 

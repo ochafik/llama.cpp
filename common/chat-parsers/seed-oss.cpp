@@ -144,8 +144,10 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
             auto tool_call = p.rule("tool-call",
                 p.literal("<seed:tool_call>")
-                << tool_choice
-                << p.literal("</seed:tool_call>")
+                + p.space()
+                + tool_choice
+                + p.space()
+                + p.literal("</seed:tool_call>")
                 + p.repeat(newline, 0, -1));
             auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, /* min = */ min_calls, /* max = */ max_calls));
 
@@ -155,11 +157,12 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
                 "\r\n\r\n<seed:toolcall>", "\n\n<seed:toolcall>",
                 "\r\n<seed:toolcall>", "\n<seed:toolcall>", "<seed:toolcall>",
             };
-            auto content_before = p.optional(p.tag(Tag::CONTENT, p.until_one_of(stop_before)));
-            auto content_after = p.optional(p.tag(Tag::CONTENT, p.until_one_of({
+            auto stop_after = std::vector<std::string> {
                 "\r\n\r\n<seed:eos>", "\n\n<seed:eos>",
-                "\r\n<seed:eos>", "\n<seed:eos>", "<seed:eos>"
-            })));
+                "\r\n<seed:eos>", "\n<seed:eos>", "<seed:eos>",
+            };
+            auto content_before = p.optional(p.tag(Tag::CONTENT, p.until_one_of(stop_before)));
+            auto content_after = p.optional(p.tag(Tag::CONTENT, p.until_one_of(stop_after)));
             auto pre_calls_gap = p.repeat(newline, 0, -1);
             if (require_tools) {
                 return reasoning << pre_calls_gap << tool_calls << eos;

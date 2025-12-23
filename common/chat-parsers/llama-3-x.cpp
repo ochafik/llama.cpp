@@ -21,107 +21,107 @@ common_chat_params common_chat_params_init_llama_3_x(const common_chat_template 
     common_chat_params data;
 
     bool has_tools = inputs.tools.is_array() && !inputs.tools.empty();
+    data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+    data.format = COMMON_CHAT_FORMAT_LLAMA_3_X;
 
-    if (has_tools) {
-        data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
-        data.format = COMMON_CHAT_FORMAT_LLAMA_3_X;
+    data.preserved_tokens = {};
+    if (allow_python_tag_builtin_tools) {
+        data.preserved_tokens.push_back("<|python_tag|>");
+    }
 
-        data.preserved_tokens = {};
-        if (allow_python_tag_builtin_tools) {
-            data.preserved_tokens.push_back("<|python_tag|>");
-        }
+    // Build PEG parser
+    auto parser = build_chat_peg_parser([&](auto & p) {
+        using Tag = common_chat_peg_tag;
 
-        // Build PEG parser
-        auto parser = build_chat_peg_parser([&](auto & p) {
-            using Tag = common_chat_peg_tag;
+        const auto consume_message_end = [&]() {
+            auto seq = p.sequence();
+            seq += p.optional(p.choice({
+                p.literal("<|eot_id|>"),
+                p.literal("<|eom_id|>"),
+                p.literal("<|end|>")
+            }));
+            seq += p.optional(p.space());
+            return seq;
+        };
 
-            const auto consume_message_end = [&]() {
-                auto seq = p.sequence();
-                seq += p.optional(p.choice({
-                    p.literal("<|eot_id|>"),
-                    p.literal("<|eom_id|>"),
-                    p.literal("<|end|>")
-                }));
-                seq += p.optional(p.space());
-                return seq;
-            };
+        // Build tool call alternatives
+        auto tool_choice = p.choice();
 
-            // Build tool call alternatives
-            auto tool_choice = p.choice();
+        // Check for builtin tools
+        std::vector<std::string> builtin_tool_names;
 
-            // Check for builtin tools
-            std::vector<std::string> builtin_tool_names;
+        foreach_function(inputs.tools, [&](const json & tool) {
+            const auto & function = tool.at("function");
+            std::string name = function.at("name");
+            auto parameters = function.at("parameters");
 
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                std::string name = function.at("name");
-                auto parameters = function.at("parameters");
+            // Check if this is a builtin tool
+            if (allow_python_tag_builtin_tools) {
+                if (name == "wolfram_alpha" || name == "web_search" || name == "brave_search" ||
+                    name == "python" || name == "code_interpreter") {
+                    builtin_tool_names.push_back(name);
+                    builtin_tools.push_back(name);
 
-                // Check if this is a builtin tool
-                if (allow_python_tag_builtin_tools) {
-                    if (name == "wolfram_alpha" || name == "web_search" || name == "brave_search" ||
-                        name == "python" || name == "code_interpreter") {
-                        builtin_tool_names.push_back(name);
-                        builtin_tools.push_back(name);
-
-                        // Builtin tool format: <|python_tag|>name.call(key="value")
-                        common_peg_parser args = p.eps();
-                        if (parameters.contains("properties")) {
-                            bool first = true;
-                            for (auto it = parameters.at("properties").begin(); it != parameters.at("properties").end(); ++it) {
-                                if (!first) {
-                                    args = args + ", ";
-                                }
-                                // Use constructed mapper tags: TOOL_ARG_NAME and TOOL_ARG_JSON_VALUE
-                                args = args + p.literal_tag(Tag::TOOL_ARG_NAME, it.key()) + "=" + p.tag(Tag::TOOL_ARG_JSON_VALUE, p.json_string());
-                                first = false;
+                    // Builtin tool format: <|python_tag|>name.call(key="value")
+                    common_peg_parser args = p.eps();
+                    if (parameters.contains("properties")) {
+                        bool first = true;
+                        for (auto it = parameters.at("properties").begin(); it != parameters.at("properties").end(); ++it) {
+                            if (!first) {
+                                args = args + ", ";
                             }
+                            // Use constructed mapper tags: TOOL_ARG_NAME and TOOL_ARG_JSON_VALUE
+                            args = args + p.literal_tag(Tag::TOOL_ARG_NAME, it.key()) + "=" + p.tag(Tag::TOOL_ARG_JSON_VALUE, p.json_string());
+                            first = false;
                         }
-
-                        tool_choice |= p.rule("builtin-" + name, p.tag(Tag::TOOL,
-                            p.atomic_tag(Tag::TOOL_OPEN, p.token("<|python_tag|>") + p.literal_tag(Tag::TOOL_NAME, name) + ".call(")
-                            + args
-                            + p.literal_tag(Tag::TOOL_CLOSE, ")")
-                        ));
                     }
+
+                    tool_choice |= p.rule("builtin-" + name, p.tag(Tag::TOOL,
+                        p.atomic_tag(Tag::TOOL_OPEN, p.token("<|python_tag|>") + p.literal_tag(Tag::TOOL_NAME, name) + ".call(")
+                        + args
+                        + p.literal_tag(Tag::TOOL_CLOSE, ")")
+                    ));
                 }
-
-                // Standard JSON format: {"type":"function","name":"name","parameters":{...}}
-                tool_choice |= p.rule("tool-" + name, p.tag(Tag::TOOL,
-                    p.literal_tag(Tag::TOOL_OPEN, "{")
-                    + p.optional("\"type\"" + p.space() + ":" + p.space() + "\"function\"" + p.space() + "," + p.space())
-                    + "\"name\"" + p.space() + ":" + p.space()
-                    + "\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"" + p.space() + "," + p.space()
-                    + "\"parameters\"" + p.space() + ":" + p.space()
-                    + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-params", parameters))
-                    + p.atomic_tag(Tag::TOOL_CLOSE, p.space() + "}")
-                ));
-            });
-
-            if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
-                auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
-                auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-
-                // Content until we see start of JSON object or python_tag
-                std::vector<std::string> delimiters = {"{"};
-                if (!builtin_tool_names.empty()) {
-                    delimiters.push_back("<|python_tag|>");
-                }
-                auto content = p.tag(Tag::CONTENT, p.until_one_of(delimiters)) << consume_message_end();
-                auto tool_calls = p.trigger_rule("tool-call", p.repeat(tool_choice, min_calls, max_calls));
-
-                return content << tool_calls;
             }
 
-            // Content only parser
-            auto content_only = p.sequence({
-                p.tag(Tag::CONTENT, p.until_one_of({"<|eot_id|>", "<|eom_id|>", "<|end|>"})),
-                consume_message_end()
-            });
-            return p.choice({content_only, p.tag(Tag::CONTENT, p.rest())});
+            // Standard JSON format: {"type":"function","name":"name","parameters":{...}}
+            tool_choice |= p.rule("tool-" + name, p.tag(Tag::TOOL,
+                p.literal_tag(Tag::TOOL_OPEN, "{")
+                + p.optional("\"type\"" + p.space() + ":" + p.space() + "\"function\"" + p.space() + "," + p.space())
+                + "\"name\"" + p.space() + ":" + p.space()
+                + "\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"" + p.space() + "," + p.space()
+                + "\"parameters\"" + p.space() + ":" + p.space()
+                + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-params", parameters))
+                + p.atomic_tag(Tag::TOOL_CLOSE, p.space() + "}")
+            ));
         });
 
-        data.parser = parser.save();
+        if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+            auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
+            auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
+
+            // Content until we see start of JSON object or python_tag
+            std::vector<std::string> delimiters = {"{"};
+            if (!builtin_tool_names.empty()) {
+                delimiters.push_back("<|python_tag|>");
+            }
+            auto content = p.tag(Tag::CONTENT, p.until_one_of(delimiters)) << consume_message_end();
+            auto tool_calls = p.trigger_rule("tool-call", p.repeat(tool_choice, min_calls, max_calls));
+
+            return content << tool_calls;
+        }
+
+        // Content only parser
+        auto content_only = p.sequence({
+            p.tag(Tag::CONTENT, p.until_one_of({"<|eot_id|>", "<|eom_id|>", "<|end|>"})),
+            consume_message_end()
+        });
+        return p.choice({content_only, p.tag(Tag::CONTENT, p.rest())});
+    });
+
+    data.parser = parser.save();
+
+    if (has_tools) {
 
         data.grammar = build_grammar([&](const common_grammar_builder & builder) {
             foreach_function(inputs.tools, [&](const json & tool) {
@@ -143,8 +143,6 @@ common_chat_params common_chat_params_init_llama_3_x(const common_chat_template 
         }
 
         data.additional_stops.push_back("<|eom_id|>");
-    } else {
-        data.format = COMMON_CHAT_FORMAT_CONTENT_ONLY;
     }
 
     data.prompt = apply(tmpl, inputs, /* messages_override =*/ std::nullopt, /* tools_override= */ std::nullopt, json {
