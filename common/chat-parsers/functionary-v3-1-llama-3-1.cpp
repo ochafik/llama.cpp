@@ -11,7 +11,7 @@ common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1(const comm
     auto has_raw_python = false;
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
 
-    data.format = COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1;
+    data.format = has_tools ? COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1 : COMMON_CHAT_FORMAT_CONTENT_ONLY;
     data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
 
     // Detect python tool with string argument
