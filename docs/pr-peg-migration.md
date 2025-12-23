@@ -172,7 +172,7 @@ Each template is tested with "needle" markers that must appear in order during s
 
 ```cpp
 // Input with needles in content, reasoning, and tool arguments
-"<think>Thinking <<<N1R>>> deeply <<<N2R>>></think>Content <<<N1C>>> here <<<N2C>>>"
+"<think>Thinking $N1R$ deeply $N2R$</think>Content $N1C$ here $N2C$"
 
 // Test verifies streaming behavior:
 // 1. Needles appear in order (N1 before N2) for each field
