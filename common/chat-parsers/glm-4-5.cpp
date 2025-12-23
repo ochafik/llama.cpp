@@ -99,7 +99,8 @@ common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & 
                 auto schema_info = common_schema_info();
                 schema_info.resolve_refs(parameters);
 
-                bool allow_additional = false;
+                // By JSON Schema spec, missing additionalProperties defaults to true
+                bool allow_additional = true;
                 bool additional_has_schema = false;
                 json additional_schema;
                 if (parameters.contains("additionalProperties")) {
@@ -114,8 +115,9 @@ common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & 
                 }
 
                 // Format: <tool_call>name<arg_key>key</arg_key><arg_value>value</arg_value></tool_call>
-                // Optional leading newline to handle both start-of-output and mid-content cases
-                auto tool_open = p.optional(p.literal("\n")) + "<tool_call>" + p.literal_tag(Tag::TOOL_NAME, name) + "\n";
+                // Note: whitespace before first <tool_call> handled by content stopping at markers;
+                // whitespace between tool calls handled by trailing p.space() on each tool
+                auto tool_open = p.space() + "<tool_call>" + p.literal_tag(Tag::TOOL_NAME, name) + "\n";
                 // Tool close: just </tool_call>, optional newline consumed by content_after
                 auto tool_close = p.literal("</tool_call>");
                 auto args = p.sequence();
@@ -129,7 +131,8 @@ common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & 
                     auto rule_name = "tool-" + name + "-arg-" + param_name;
 
                     auto arg_open = "<arg_key>" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + "</arg_key>\n<arg_value>";
-                    auto arg_close = p.literal("</arg_value>\n");
+                    // Newline after </arg_value> is optional - may not be present before </tool_call>
+                    auto arg_close = p.literal("</arg_value>") + p.optional(p.literal("\n"));
                     auto arg_value = p.eps();
 
                     if (schema_info.resolves_to_string(param_schema)) {
@@ -144,7 +147,8 @@ common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & 
 
                 if (allow_additional) {
                     auto dynamic_key = p.literal("<arg_key>") + p.tag(Tag::TOOL_ARG_NAME, p.until("</arg_key>")) + p.literal("</arg_key>\n<arg_value>");
-                    auto dynamic_close = p.literal("</arg_value>\n");
+                    // Newline after </arg_value> is optional - may not be present before </tool_call>
+                    auto dynamic_close = p.literal("</arg_value>") + p.optional(p.literal("\n"));
                     auto additional_value = p.choice();
                     if (additional_has_schema) {
                         if (schema_info.resolves_to_string(additional_schema)) {
@@ -164,7 +168,8 @@ common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & 
                     args += p.repeat(additional_rule, 0, -1);
                 }
 
-                tool_choice |= p.rule("tool-" + name, p.atomic_tag(Tag::TOOL_OPEN, tool_open) + args + p.atomic_tag(Tag::TOOL_CLOSE, tool_close));
+                // Add p.space() after tool_close to consume whitespace between parallel tool calls
+                tool_choice |= p.rule("tool-" + name, p.atomic_tag(Tag::TOOL_OPEN, tool_open) + args + p.atomic_tag(Tag::TOOL_CLOSE, tool_close) + p.space());
             });
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
@@ -182,9 +187,13 @@ common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & 
                 return mixed + tool_calls + mixed;
             }
 
-            auto content_before = p.optional(p.literal("\n")) + p.tag(Tag::CONTENT, p.until_one_of({"\n<tool_call>", "<tool_call>"}));
-            auto content_after = p.tag(Tag::CONTENT, p.rest());
-            return content_before + tool_calls + content_after;
+            // For non-reasoning case, match optional content before tool calls
+            // Content stops at tool_call markers so tool_calls can match them
+            auto content_prefix = p.optional(
+                p.optional(p.literal("\n"))
+                + p.tag(Tag::CONTENT, p.until_one_of({"\n<tool_call>", "<tool_call>"}))
+            );
+            return content_prefix + tool_calls;
         }
 
         // Content only parser

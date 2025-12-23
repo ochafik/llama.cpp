@@ -260,6 +260,61 @@ ls common/chat-parsers/*.cpp
 2. **Streaming merge**: Fixed `test_parser_with_streaming` to preserve tool IDs
 3. **Test constants**: Added `message_assist_call_idx`, `message_assist_call_content_idx`, etc.
 4. **Removed key atomicity**: Argument keys can stream incrementally (only tool names must be atomic)
+5. **GLM 4.5 parallel tool calls**: Fixed to correctly parse multiple tool calls (see insights below)
+
+## Learned Insights
+
+### Parallel Tool Calls - Whitespace Between Calls
+
+When implementing `p.repeat()` for parallel tool calls, each tool call alternative must consume trailing whitespace so the next iteration can match:
+
+```cpp
+// WRONG - second tool call won't match because newline isn't consumed
+tool_choice |= p.rule("tool-" + name, tool_open + args + tool_close);
+
+// RIGHT - trailing p.space() consumes whitespace between calls
+tool_choice |= p.rule("tool-" + name, tool_open + args + tool_close + p.space());
+```
+
+See Hermes 2 Pro parser for reference (line 94) - each tool alternative ends with `+ p.space()`.
+
+### JSON Schema additionalProperties Default
+
+Per JSON Schema spec, missing `additionalProperties` should default to `true`. If a parser only handles additional properties when explicitly set, it will fail when the schema doesn't include the key:
+
+```cpp
+// WRONG - won't handle dynamic keys if additionalProperties not in schema
+bool allow_additional = false;
+if (parameters.contains("additionalProperties")) { ... }
+
+// RIGHT - default to true per JSON Schema spec
+bool allow_additional = true;
+if (parameters.contains("additionalProperties")) { ... }
+```
+
+This is critical for the needle streaming tests where the test schema is built from the first tool call's arguments, but parallel tool calls may have different argument keys.
+
+### Debugging Parallel Tool Call Failures
+
+When `p.repeat(tool_choice, min, max)` only matches once when it should match multiple times:
+
+1. Check if trailing whitespace is consumed after each match
+2. Check if argument keys in subsequent calls match the schema (or if `additionalProperties` allows them)
+3. Use `LOG_LEVEL=2` environment variable to see each parsing step
+4. Verify the input format by examining template output (check for newlines between `</tool_call>` and next `<tool_call>`)
+
+### Running Specific Tests
+
+```bash
+# Run needle streaming tests for a specific template
+NEEDLE_ONLY=1 NEEDLE_TEMPLATE_FILTER="GLM 4.6" ./buildDebug/bin/test-chat
+
+# Filter to specific scenario
+NEEDLE_SCENARIO_FILTER="parallel-tool-calls" ./buildDebug/bin/test-chat
+
+# Enable debug logging
+LOG_LEVEL=2 ./buildDebug/bin/test-chat
+```
 
 ## Next Steps
 
