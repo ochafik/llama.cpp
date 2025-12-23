@@ -21,22 +21,25 @@ common_chat_params common_chat_params_init_apertus(const common_chat_template & 
             });
 
             // Apertus template expects content to be a mapping with blocks inside
-            // If there's already content, we need to merge it with blocks
+            // If there's already content, add it as a "response" block after the "thoughts" block
             if (msg.contains("content")) {
-                json content_obj;
-                if (msg.at("content").is_string()) {
-                    // Preserve existing content text
-                    content_obj["text"] = msg.at("content");
-                } else if (msg.at("content").is_object()) {
-                    content_obj = msg.at("content");
+                if (msg.at("content").is_string() && !msg.at("content").get<std::string>().empty()) {
+                    // Add content as a response block after thoughts
+                    blocks.push_back({
+                        {"type", "response"},
+                        {"text", msg.at("content")}
+                    });
+                } else if (msg.at("content").is_object() && msg.at("content").contains("blocks")) {
+                    // Merge existing blocks with our thoughts block
+                    auto existing_blocks = msg.at("content").at("blocks");
+                    for (const auto & block : existing_blocks) {
+                        blocks.push_back(block);
+                    }
                 }
-                content_obj["blocks"] = blocks;
-                adjusted_message["content"] = content_obj;
-            } else {
-                adjusted_message["content"] = json::object({
-                    {"blocks", blocks}
-                });
             }
+            adjusted_message["content"] = json::object({
+                {"blocks", blocks}
+            });
             adjusted_message.erase("reasoning_content");
             adjusted_messages.push_back(adjusted_message);
         } else {
