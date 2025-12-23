@@ -78,7 +78,12 @@ common_chat_params common_chat_params_init_granite(const common_chat_template & 
         data.grammar = build_grammar([&](const common_grammar_builder & builder) {
             parser.build_grammar(builder, data.grammar_lazy);
         });
-        if (data.grammar_lazy) {
+        // If lazy mode was requested but the trigger word doesn't appear in the grammar,
+        // it means no trigger rules were defined, so disable lazy mode
+        if (data.grammar_lazy && data.grammar.find(R"("tool_calls")") == std::string::npos) {
+            data.grammar_lazy = false;
+            data.grammar_triggers.clear();
+        } else if (data.grammar_lazy) {
             data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, R"("tool_calls")"});
         } else {
             data.grammar_triggers.clear();
