@@ -4509,7 +4509,9 @@ static void test_systematic_needle_streaming() {
         {"Command R7B",     "models/templates/CohereForAI-c4ai-command-r7b-12-2024-tool_use.jinja",
             COMMON_CHAT_FORMAT_COMMAND_R7B, ThinkingSupport::Yes, ToolSupport::Yes,
             "<|START_THINKING|>", "<|END_THINKING|>", /* skip = */ false, /* reasoning_requires_tools = */ true,
-            /* tools_emit_content_with_calls = */ false},
+            /* tools_emit_content_with_calls = */ false, /* inject_reasoning_after_format = */ false,
+            /* supports_disable_thinking = */ true, /* supports_reasoning_only = */ true,
+            /* tool_required_allows_content = */ false, /* tool_calls_have_ids = */ true},
         {"DeepSeek R1",     "models/templates/deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja",
             COMMON_CHAT_FORMAT_DEEPSEEK_R1, ThinkingSupport::Yes, ToolSupport::No,
             "<think>", "</think>", /* skip = */ false, /* reasoning_requires_tools = */ false,
@@ -4530,7 +4532,9 @@ static void test_systematic_needle_streaming() {
         {"Hermes 2 Pro",    "models/templates/NousResearch-Hermes-2-Pro-Llama-3-8B-tool_use.jinja",
             COMMON_CHAT_FORMAT_HERMES_2_PRO, ThinkingSupport::No, ToolSupport::Yes,
             "<think>", "</think>", /* skip = */ false, /* reasoning_requires_tools = */ false,
-            /* tools_emit_content_with_calls = */ false},
+            /* tools_emit_content_with_calls = */ false, /* inject_reasoning_after_format = */ false,
+            /* supports_disable_thinking = */ false, /* supports_reasoning_only = */ false,
+            /* tool_required_allows_content = */ false},
         {"Kimi K2",         "models/templates/Kimi-K2-Instruct.jinja",
             COMMON_CHAT_FORMAT_KIMI_K2, ThinkingSupport::No, ToolSupport::Yes,
             nullptr, nullptr, /* skip = */ false, /* reasoning_requires_tools = */ false,
@@ -4660,6 +4664,10 @@ static void test_systematic_needle_streaming() {
             }
             if (scenario.require_tool_support && tmpl_info.supports_tools == ToolSupport::No) {
                 printf("    - Scenario %s skipped (no tool support)\n", scenario.name.c_str());
+                continue;
+            }
+            if (scenario.parallel_tool_calls && !common_chat_templates_support_parallel_tool_calls(tmpls.get())) {
+                printf("    - Scenario %s skipped (no parallel tool calls support)\n", scenario.name.c_str());
                 continue;
             }
 
