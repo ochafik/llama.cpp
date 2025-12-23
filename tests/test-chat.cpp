@@ -4355,6 +4355,7 @@ struct template_capabilities {
     bool supports_reasoning_only = true;
     bool tool_required_allows_content = true;
     bool tool_calls_have_ids = false;
+    const char * needle_tool_name = nullptr;  // Tool name for needle tests (nullptr = use "python")
 };
 
 static const char * tool_choice_name(common_chat_tool_choice choice) {
@@ -4601,7 +4602,11 @@ static void test_systematic_needle_streaming() {
             nullptr, nullptr},
         {"Functionary V3.1","models/templates/meetkai-functionary-medium-v3.1.jinja",
             COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1, ThinkingSupport::No, ToolSupport::Yes,
-            nullptr, nullptr},
+            nullptr, nullptr, /* skip = */ false, /* reasoning_requires_tools = */ false,
+            /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ false,
+            /* supports_disable_thinking = */ true, /* supports_reasoning_only = */ true,
+            /* tool_required_allows_content = */ true, /* tool_calls_have_ids = */ false,
+            /* needle_tool_name = */ "test_function"},
         {"Functionary V3.2","models/templates/meetkai-functionary-medium-v3.2.jinja",
             COMMON_CHAT_FORMAT_FUNCTIONARY_V3_2, ThinkingSupport::No, ToolSupport::Yes,
             nullptr, nullptr},
@@ -4715,14 +4720,20 @@ static void test_systematic_needle_streaming() {
             summary_entry.scenarios_total++;
 
             try {
-                auto ctx = make_needle_context(scenario, tmpl_info.format);
+                // Override tool name if template specifies a custom one
+                auto scenario_copy = scenario;
+                if (tmpl_info.needle_tool_name != nullptr) {
+                    scenario_copy.tool_name = tmpl_info.needle_tool_name;
+                }
+
+                auto ctx = make_needle_context(scenario_copy, tmpl_info.format);
                 std::vector<common_chat_tool> scenario_tools;
-                if (scenario.provide_tools) {
+                if (scenario_copy.provide_tools) {
                     // Create a dynamic tool with parameter names matching the needle markers
                     // This is needed for parsers that use literal_tag for parameter names (e.g., Llama 3.1 builtin tools)
                     if (!ctx.expected_msg.tool_calls.empty() && !ctx.expected_msg.tool_calls[0].arguments.empty()) {
                         common_chat_tool dynamic_tool;
-                        dynamic_tool.name = scenario.tool_name;
+                        dynamic_tool.name = scenario_copy.tool_name;
                         dynamic_tool.description = "Dynamic tool for needle testing";
 
                         // Build parameters schema from the needle-based argument names

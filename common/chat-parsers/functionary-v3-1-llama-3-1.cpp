@@ -7,41 +7,19 @@
 common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
 
-    std::string python_code_argument_name;
     auto has_raw_python = false;
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
 
     data.format = has_tools ? COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1 : COMMON_CHAT_FORMAT_CONTENT_ONLY;
     data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
 
-    // Detect python tool with string argument
+    // Detect python tool (for <|python_tag|> support)
     if (has_tools) {
         foreach_function(inputs.tools, [&](const json & tool) {
             const auto & function = tool.at("function");
-            const auto & parameters = function.at("parameters");
             std::string name = function.at("name");
             if (name == "python" || name == "ipython") {
-                if (!parameters.contains("type")) {
-                    throw std::runtime_error("Missing type in python tool");
-                }
                 has_raw_python = true;
-                const auto & type = parameters.at("type");
-                if (type == "object") {
-                    auto properties = parameters.at("properties");
-                    for (auto it = properties.begin(); it != properties.end(); ++it) {
-                        if (it.value().at("type") == "string") {
-                            if (!python_code_argument_name.empty()) {
-                                throw std::runtime_error("Multiple string arguments found in python tool");
-                            }
-                            python_code_argument_name = it.key();
-                        }
-                    }
-                    if (python_code_argument_name.empty()) {
-                        throw std::runtime_error("No string argument found in python tool");
-                    }
-                } else if (type != "string") {
-                    throw std::runtime_error("Invalid type in python tool: " + type.dump());
-                }
             }
         });
     }

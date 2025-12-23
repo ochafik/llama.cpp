@@ -72,7 +72,8 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
                 auto schema_info = common_schema_info();
                 schema_info.resolve_refs(parameters);
 
-                bool allow_additional = false;
+                // By JSON Schema spec, missing additionalProperties defaults to true
+                bool allow_additional = true;
                 bool additional_has_schema = false;
                 json additional_schema;
                 if (parameters.contains("additionalProperties")) {
@@ -142,13 +143,14 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
+            // Add p.space() after </seed:tool_call> to consume whitespace between parallel tool calls
             auto tool_call = p.rule("tool-call",
                 p.literal("<seed:tool_call>")
                 + p.space()
                 + tool_choice
                 + p.space()
                 + p.literal("</seed:tool_call>")
-                + p.repeat(newline, 0, -1));
+                + p.space());
             auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, /* min = */ min_calls, /* max = */ max_calls));
 
             auto stop_before = std::vector<std::string> {

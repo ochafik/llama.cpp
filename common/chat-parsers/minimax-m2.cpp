@@ -107,7 +107,8 @@ common_chat_params common_chat_params_init_minimax_m2(const common_chat_template
                     has_parameter_rules = true;
                 });
 
-                bool allow_additional = false;
+                // By JSON Schema spec, missing additionalProperties defaults to true
+                bool allow_additional = true;
                 bool additional_has_schema = false;
                 json additional_schema;
                 if (parameters.contains("additionalProperties")) {
@@ -145,10 +146,11 @@ common_chat_params common_chat_params_init_minimax_m2(const common_chat_template
 
                 common_peg_parser args = has_parameter_rules ? p.repeat(parameter_choice, 0, -1) : p.eps();
 
+                // Add p.space() after TOOL tag to consume whitespace between parallel tool calls
                 invoke_choice |= p.rule("tool-" + name, p.tag(Tag::TOOL,
                     p.atomic_tag(Tag::TOOL_OPEN, tool_open)
                     + args
-                    + p.atomic_tag(Tag::TOOL_CLOSE, tool_close)));
+                    + p.atomic_tag(Tag::TOOL_CLOSE, tool_close)) + p.space());
             });
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
