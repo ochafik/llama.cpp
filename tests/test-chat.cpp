@@ -4582,7 +4582,10 @@ static void test_systematic_needle_streaming() {
             nullptr, nullptr},
         {"Llama 3.1",       "models/templates/meta-llama-Llama-3.1-8B-Instruct.jinja",
             COMMON_CHAT_FORMAT_LLAMA_3_X, ThinkingSupport::No, ToolSupport::Yes,
-            nullptr, nullptr},
+            nullptr, nullptr, /* skip = */ false, /* reasoning_requires_tools = */ false,
+            /* tools_emit_content_with_calls = */ false, /* inject_reasoning_after_format = */ false,
+            /* supports_disable_thinking = */ false, /* supports_reasoning_only = */ false,
+            /* tool_required_allows_content = */ false, /* tool_calls_have_ids = */ false},
         {"Mistral Nemo",    "models/templates/mistralai-Mistral-Nemo-Instruct-2407.jinja",
             COMMON_CHAT_FORMAT_MISTRAL_NEMO, ThinkingSupport::No, ToolSupport::Yes,
             nullptr, nullptr, /* skip = */ false, /* reasoning_requires_tools = */ false,
@@ -4666,7 +4669,35 @@ static void test_systematic_needle_streaming() {
                 auto ctx = make_needle_context(scenario, tmpl_info.format);
                 std::vector<common_chat_tool> scenario_tools;
                 if (scenario.provide_tools) {
-                    scenario_tools = {python_tool};
+                    // Create a dynamic tool with parameter names matching the needle markers
+                    // This is needed for parsers that use literal_tag for parameter names (e.g., Llama 3.1 builtin tools)
+                    if (!ctx.expected_msg.tool_calls.empty() && !ctx.expected_msg.tool_calls[0].arguments.empty()) {
+                        common_chat_tool dynamic_tool;
+                        dynamic_tool.name = scenario.tool_name;
+                        dynamic_tool.description = "Dynamic tool for needle testing";
+
+                        // Build parameters schema from the needle-based argument names
+                        json args_json = json::parse(ctx.expected_msg.tool_calls[0].arguments);
+                        json properties = json::object();
+                        json required = json::array();
+
+                        for (auto& [key, value] : args_json.items()) {
+                            properties[key] = {
+                                {"type", "string"},
+                                {"description", "Needle test parameter"}
+                            };
+                            required.push_back(key);
+                        }
+
+                        dynamic_tool.parameters = json({
+                            {"type", "object"},
+                            {"properties", properties},
+                            {"required", required}
+                        }).dump();
+                        scenario_tools = {dynamic_tool};
+                    } else {
+                        scenario_tools = {python_tool};
+                    }
                 }
 
                 auto reasoning_format = scenario.with_reasoning ? COMMON_REASONING_FORMAT_DEEPSEEK : COMMON_REASONING_FORMAT_NONE;
