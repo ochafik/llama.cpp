@@ -3,20 +3,29 @@
 	import {
 		ChevronDown,
 		ChevronRight,
-		Circle,
-		CircleDashed,
 		Loader2,
 		Plug,
+		Power,
 		RefreshCw,
-		X,
 		FileJson,
 		Wrench
 	} from '@lucide/svelte';
 	import * as Popover from '$lib/components/ui/popover';
+	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { cn } from '$lib/components/ui/utils';
 	import { mcpStore } from '$lib/stores/mcp.svelte';
 	import { SearchInput } from '$lib/components/app';
 	import { SvelteSet, SvelteMap } from 'svelte/reactivity';
+
+	// LocalStorage key for remembering disconnection preferences
+	const MCP_PREFS_KEY = 'mcp-connection-prefs';
+
+	interface McpConnectionPrefs {
+		// Servers that were explicitly disconnected by user
+		explicitlyDisconnected: string[];
+		// If true, user disconnected all - new convos start disconnected
+		allDisconnectedByUser: boolean;
+	}
 
 	interface Props {
 		class?: string;
@@ -36,6 +45,77 @@
 	let availableServers = $state<string[]>([]);
 	let loadingServers = $state(true);
 	let fetchingTools = new SvelteSet<string>();
+
+	// Connection preferences (persisted)
+	let connectionPrefs = $state<McpConnectionPrefs>({
+		explicitlyDisconnected: [],
+		allDisconnectedByUser: false
+	});
+
+	// Load preferences from localStorage
+	function loadConnectionPrefs(): McpConnectionPrefs {
+		try {
+			const stored = localStorage.getItem(MCP_PREFS_KEY);
+			if (stored) {
+				return JSON.parse(stored);
+			}
+		} catch (e) {
+			console.warn('[MCP] Failed to load connection prefs:', e);
+		}
+		return { explicitlyDisconnected: [], allDisconnectedByUser: false };
+	}
+
+	// Save preferences to localStorage
+	function saveConnectionPrefs(prefs: McpConnectionPrefs) {
+		try {
+			localStorage.setItem(MCP_PREFS_KEY, JSON.stringify(prefs));
+		} catch (e) {
+			console.warn('[MCP] Failed to save connection prefs:', e);
+		}
+	}
+
+	// Mark server as explicitly disconnected
+	function markExplicitlyDisconnected(serverName: string) {
+		if (!connectionPrefs.explicitlyDisconnected.includes(serverName)) {
+			connectionPrefs = {
+				...connectionPrefs,
+				explicitlyDisconnected: [...connectionPrefs.explicitlyDisconnected, serverName]
+			};
+			saveConnectionPrefs(connectionPrefs);
+		}
+	}
+
+	// Clear explicit disconnection for a server (user connected it)
+	function clearExplicitDisconnection(serverName: string) {
+		// If user was in "all disconnected" mode, convert to explicit list
+		// so other servers stay disconnected
+		if (connectionPrefs.allDisconnectedByUser) {
+			// Add all OTHER servers to explicitly disconnected
+			const otherServers = availableServers.filter((s) => s !== serverName);
+			connectionPrefs = {
+				explicitlyDisconnected: otherServers,
+				allDisconnectedByUser: false
+			};
+			saveConnectionPrefs(connectionPrefs);
+		} else if (connectionPrefs.explicitlyDisconnected.includes(serverName)) {
+			// Just remove this server from the explicit list
+			connectionPrefs = {
+				...connectionPrefs,
+				explicitlyDisconnected: connectionPrefs.explicitlyDisconnected.filter(
+					(s) => s !== serverName
+				)
+			};
+			saveConnectionPrefs(connectionPrefs);
+		}
+	}
+
+	// Check if server was explicitly disconnected
+	function wasExplicitlyDisconnected(serverName: string): boolean {
+		return (
+			connectionPrefs.allDisconnectedByUser ||
+			connectionPrefs.explicitlyDisconnected.includes(serverName)
+		);
+	}
 
 	// Filtered servers for search
 	let filteredServers = $derived(
@@ -82,38 +162,61 @@
 		return serverStatus.get(serverName) ?? { connected: false, connecting: false };
 	}
 
-	// Get status color and icon for server
+	// Get status color for server (used for dot indicator)
 	function getStatusDisplay(status: { connected: boolean; connecting: boolean; error?: string }) {
 		if (status.connecting) {
 			return {
-				color: 'text-orange-500',
-				bgColor: 'bg-orange-500',
-				icon: Loader2,
+				dotColor: 'bg-orange-500',
 				label: 'Connecting...'
 			};
 		}
 		if (status.connected) {
-			return { color: 'text-green-500', bgColor: 'bg-green-500', icon: Circle, label: 'Connected' };
+			return {
+				dotColor: 'bg-green-500',
+				label: 'Connected'
+			};
 		}
 		if (status.error) {
-			return { color: 'text-red-500', bgColor: 'bg-red-500', icon: Circle, label: 'Error' };
+			return {
+				dotColor: 'bg-red-500',
+				label: 'Error'
+			};
 		}
 		return {
-			color: 'text-muted-foreground',
-			bgColor: 'bg-muted-foreground',
-			icon: CircleDashed,
+			dotColor: 'bg-muted-foreground/50',
 			label: 'Disconnected'
 		};
 	}
 
 	// Fetch available servers
-	async function fetchAvailableServers() {
+	async function fetchAvailableServers(autoConnect = false) {
 		loadingServers = true;
 		try {
 			const response = await fetch('/mcp/servers');
 			if (!response.ok) throw new Error('Failed to fetch MCP servers');
 			const data = await response.json();
 			availableServers = data.servers.map((s: { name: string }) => s.name);
+
+			// Auto-connect servers if requested and not explicitly disconnected
+			if (autoConnect && availableServers.length > 0) {
+				// If user previously disconnected all, don't auto-connect
+				if (connectionPrefs.allDisconnectedByUser) {
+					console.log('[MCP] Skipping auto-connect: user previously disconnected all');
+					return;
+				}
+
+				// Connect servers that weren't explicitly disconnected
+				for (const serverName of availableServers) {
+					if (!wasExplicitlyDisconnected(serverName)) {
+						console.log(`[MCP] Auto-connecting to: ${serverName}`);
+						mcpStore.connect(serverName).catch((err) => {
+							console.error(`[MCP] Auto-connect failed for ${serverName}:`, err);
+						});
+					} else {
+						console.log(`[MCP] Skipping auto-connect for ${serverName}: explicitly disconnected`);
+					}
+				}
+			}
 		} catch (error) {
 			console.error('Failed to fetch MCP servers:', error);
 			availableServers = [];
@@ -123,7 +226,10 @@
 	}
 
 	onMount(() => {
-		fetchAvailableServers();
+		// Load saved connection preferences
+		connectionPrefs = loadConnectionPrefs();
+		// Fetch servers and auto-connect on initial load
+		fetchAvailableServers(true);
 	});
 
 	// Handle popover open/close
@@ -149,44 +255,19 @@
 		if (status.connecting) return;
 
 		if (status.connected) {
+			// User explicitly disconnecting - remember this
+			markExplicitlyDisconnected(serverName);
 			mcpStore.disconnect(serverName);
 		} else {
+			// User explicitly connecting - clear disconnection preference
+			clearExplicitDisconnection(serverName);
 			await mcpStore.connect(serverName);
 		}
 	}
 
-	// Connect to all servers
-	async function connectAll() {
-		for (const serverName of availableServers) {
-			const status = getServerStatus(serverName);
-			if (!status.connected && !status.connecting) {
-				mcpStore.connect(serverName).catch((err) => {
-					console.error(`[MCP] Failed to connect to ${serverName}:`, err);
-				});
-			}
-		}
-	}
-
-	// Disconnect all servers
-	function disconnectAll() {
-		for (const serverName of availableServers) {
-			mcpStore.disconnect(serverName);
-		}
-	}
-
-	// Check if any servers are connected or connecting
-	let hasAnyConnection = $derived(() => {
-		return availableServers.some((s) => {
-			const status = getServerStatus(s);
-			return status.connected || status.connecting;
-		});
-	});
-
-	// Check if all servers are connected
-	let allConnected = $derived(() => {
-		return (
-			availableServers.length > 0 && availableServers.every((s) => getServerStatus(s).connected)
-		);
+	// Check if any servers are currently connecting (for shimmer effect)
+	let anyConnecting = $derived(() => {
+		return availableServers.some((s) => getServerStatus(s).connecting);
 	});
 
 	// Force reconnect
@@ -258,12 +339,19 @@
 	<Popover.Root bind:open={isOpen} onOpenChange={handleOpenChange}>
 		<Popover.Trigger
 			class={cn(
-				`inline-flex cursor-pointer items-center gap-1.5 rounded-sm bg-muted-foreground/10 px-1.5 py-1 text-xs transition hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60`,
-				isOpen ? 'text-foreground' : 'text-muted-foreground'
+				`inline-flex cursor-pointer items-center gap-1.5 rounded-sm px-1.5 py-1 text-xs transition hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60`,
+				isOpen ? 'text-foreground' : 'text-muted-foreground',
+				loadingServers || anyConnecting()
+					? 'animate-shimmer bg-gradient-to-r from-muted-foreground/10 via-muted-foreground/20 to-muted-foreground/10 bg-[length:200%_100%]'
+					: 'bg-muted-foreground/10'
 			)}
 			{disabled}
 		>
-			<Plug class="h-3.5 w-3.5" />
+			{#if loadingServers || anyConnecting()}
+				<Loader2 class="h-3.5 w-3.5 animate-spin" />
+			{:else}
+				<Plug class="h-3.5 w-3.5" />
+			{/if}
 			<span class="truncate font-medium">
 				{availableServers.length > 0 ? `${connectedCount}/${availableServers.length} MCP` : 'MCP'}
 			</span>
@@ -271,7 +359,8 @@
 		</Popover.Trigger>
 
 		<Popover.Content
-			class="w-96 max-w-[calc(100vw-2rem)] p-0"
+			class="group/popover-content w-96 max-w-[calc(100vw-2rem)] p-0"
+			side="top"
 			align="end"
 			sideOffset={8}
 			collisionPadding={16}
@@ -293,9 +382,11 @@
 							<ChevronDown class="h-4 w-4 rotate-90" />
 						</button>
 						<div class="flex min-w-0 flex-1 items-center gap-2">
-							<statusDisplay.icon
-								class="h-4 w-4 {statusDisplay.color} {status.connecting ? 'animate-spin' : ''}"
-							/>
+							{#if status.connecting}
+								<Loader2 class="h-4 w-4 shrink-0 animate-spin text-orange-500" />
+							{:else}
+								<span class="h-2 w-2 shrink-0 rounded-full {statusDisplay.dotColor}"></span>
+							{/if}
 							<span class="truncate font-medium">{selectedServerName}</span>
 						</div>
 						<button
@@ -367,7 +458,9 @@
 					</div>
 				{:else}
 					<!-- Server List View -->
-					<div class="shrink-0 border-b p-4">
+					<div
+						class="order-1 shrink-0 border-b p-4 group-data-[side=top]/popover-content:order-2 group-data-[side=top]/popover-content:border-t group-data-[side=top]/popover-content:border-b-0"
+					>
 						<SearchInput
 							id="mcp-search"
 							placeholder="Search servers..."
@@ -378,7 +471,9 @@
 						/>
 					</div>
 
-					<div class="min-h-0 flex-1 overflow-y-auto">
+					<div
+						class="order-2 min-h-0 flex-1 overflow-y-auto group-data-[side=top]/popover-content:order-1"
+					>
 						{#if loadingServers}
 							<div class="flex items-center justify-center py-8 text-muted-foreground">
 								<Loader2 class="mr-2 h-5 w-5 animate-spin" />
@@ -396,18 +491,19 @@
 						{:else}
 							{#each filteredServers as serverName, index (serverName)}
 								{@const status = getServerStatus(serverName)}
-								{@const statusDisplay = getStatusDisplay(status)}
 								{@const isHighlighted = index === highlightedIndex}
 
 								<div
 									class={cn(
-										'group flex w-full items-center gap-2 px-4 py-2 text-sm transition',
+										'group flex w-full cursor-pointer items-center gap-2 px-4 py-2 text-left text-sm transition focus:outline-none',
 										isHighlighted
 											? 'bg-accent text-accent-foreground'
-											: 'hover:bg-accent hover:text-accent-foreground'
+											: 'hover:bg-accent hover:text-accent-foreground',
+										status.connected ? 'text-popover-foreground' : 'text-muted-foreground'
 									)}
 									onmouseenter={() => (highlightedIndex = index)}
-									role="button"
+									role="option"
+									aria-selected={isHighlighted}
 									tabindex="0"
 									onclick={() => showServerDetails(serverName)}
 									onkeydown={(e) => {
@@ -417,34 +513,71 @@
 										}
 									}}
 								>
-									<statusDisplay.icon
-										class="h-3.5 w-3.5 shrink-0 {statusDisplay.color} {status.connecting
-											? 'animate-spin'
-											: ''}"
-									/>
-
 									<span class="min-w-0 flex-1 truncate">{serverName}</span>
 
-									<button
-										type="button"
-										onclick={(e) => {
-											e.stopPropagation();
-											toggleConnection(serverName);
-										}}
-										class="shrink-0 rounded p-1 transition hover:bg-muted disabled:opacity-50"
-										disabled={status.connecting}
-										aria-label={status.connected ? 'Disconnect' : 'Connect'}
-										title={status.connected ? 'Disconnect' : 'Connect'}
-									>
-										{#if status.connecting}
-											<Loader2 class="h-3.5 w-3.5 animate-spin text-orange-500" />
-										{:else if status.connected}
-											<X class="h-3.5 w-3.5 text-red-500" />
-										{:else}
-											<Plug class="h-3.5 w-3.5 text-muted-foreground" />
-										{/if}
-									</button>
+									<!-- Status dot with hover action button (like model picker) -->
+									{#if status.connecting}
+										<Tooltip.Root>
+											<Tooltip.Trigger>
+												<Loader2 class="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+											</Tooltip.Trigger>
+											<Tooltip.Content class="z-[9999]">
+												<p>Connecting...</p>
+											</Tooltip.Content>
+										</Tooltip.Root>
+									{:else if status.connected}
+										<!-- Connected: show green dot, Power icon on hover to disconnect -->
+										<Tooltip.Root>
+											<Tooltip.Trigger>
+												<button
+													type="button"
+													class="relative ml-2 flex h-4 w-4 shrink-0 items-center justify-center"
+													onclick={(e) => {
+														e.stopPropagation();
+														toggleConnection(serverName);
+													}}
+													aria-label="Disconnect"
+												>
+													<span
+														class="mr-2 h-2 w-2 rounded-full bg-green-500 transition-opacity group-hover:opacity-0"
+													></span>
+													<Power
+														class="absolute mr-2 h-4 w-4 text-red-500 opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-600"
+													/>
+												</button>
+											</Tooltip.Trigger>
+											<Tooltip.Content class="z-[9999]">
+												<p>Disconnect</p>
+											</Tooltip.Content>
+										</Tooltip.Root>
+									{:else}
+										<!-- Disconnected: show gray dot, Plug icon on hover to connect -->
+										<Tooltip.Root>
+											<Tooltip.Trigger>
+												<button
+													type="button"
+													class="relative ml-2 flex h-4 w-4 shrink-0 items-center justify-center"
+													onclick={(e) => {
+														e.stopPropagation();
+														toggleConnection(serverName);
+													}}
+													aria-label="Connect"
+												>
+													<span
+														class="mr-2 h-2 w-2 rounded-full bg-muted-foreground/50 transition-opacity group-hover:opacity-0"
+													></span>
+													<Plug
+														class="absolute mr-2 h-4 w-4 text-green-500 opacity-0 transition-opacity group-hover:opacity-100 hover:text-green-600"
+													/>
+												</button>
+											</Tooltip.Trigger>
+											<Tooltip.Content class="z-[9999]">
+												<p>Connect</p>
+											</Tooltip.Content>
+										</Tooltip.Root>
+									{/if}
 
+									<!-- Arrow to view server details/tools -->
 									<ChevronRight
 										class="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
 									/>
@@ -452,43 +585,23 @@
 							{/each}
 						{/if}
 					</div>
-
-					{#if availableServers.length > 0}
-						<div class="shrink-0 border-t p-3">
-							<div class="flex items-center justify-between gap-2">
-								<span class="text-xs text-muted-foreground">
-									{connectedCount} of {availableServers.length} servers connected
-								</span>
-								<div class="flex gap-1">
-									{#if !allConnected()}
-										<button
-											type="button"
-											onclick={connectAll}
-											disabled={availableServers.every((s) => getServerStatus(s).connecting)}
-											class="inline-flex items-center gap-1 rounded-md bg-primary px-2 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-											title="Connect to all servers"
-										>
-											<Plug class="h-3 w-3" />
-											Connect All
-										</button>
-									{/if}
-									{#if hasAnyConnection()}
-										<button
-											type="button"
-											onclick={disconnectAll}
-											class="text-destructive-foreground inline-flex items-center gap-1 rounded-md bg-destructive px-2 py-1 text-xs font-medium hover:bg-destructive/90"
-											title="Disconnect from all servers"
-										>
-											<X class="h-3 w-3" />
-											Disconnect All
-										</button>
-									{/if}
-								</div>
-							</div>
-						</div>
-					{/if}
 				{/if}
 			</div>
 		</Popover.Content>
 	</Popover.Root>
 </div>
+
+<style>
+	@keyframes shimmer {
+		0% {
+			background-position: 200% 0;
+		}
+		100% {
+			background-position: -200% 0;
+		}
+	}
+
+	:global(.animate-shimmer) {
+		animation: shimmer 2s ease-in-out infinite;
+	}
+</style>
