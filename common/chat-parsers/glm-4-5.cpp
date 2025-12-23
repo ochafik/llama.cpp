@@ -71,7 +71,6 @@ common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & 
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
     auto include_grammar = true;
 
-    const bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
 
@@ -126,7 +125,7 @@ common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & 
                     "</tool_call>"
                 }));
 
-                foreach_parameter(function, [&](const auto & param_name, const json & param_schema, bool is_required) {
+                foreach_parameter(function, [&](const auto & param_name, const json & param_schema, bool /* is_required */) {
                     auto rule_name = "tool-" + name + "-arg-" + param_name;
 
                     auto arg_open = "<arg_key>" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + "</arg_key>\n<arg_value>";
