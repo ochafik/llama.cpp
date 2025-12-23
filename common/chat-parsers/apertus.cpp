@@ -7,7 +7,43 @@
 common_chat_params common_chat_params_init_apertus(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
 
-    data.prompt = apply(tmpl, inputs);
+    // Apertus template uses 'content.blocks' format for reasoning, not 'reasoning_content'
+    // Convert reasoning_content to content.blocks format before applying template
+    auto adjusted_messages = json::array();
+    for (const auto & msg : inputs.messages) {
+        if (msg.contains("reasoning_content") && msg.at("reasoning_content").is_string() &&
+            !msg.at("reasoning_content").get<std::string>().empty()) {
+            auto adjusted_message = msg;
+            json blocks = json::array();
+            blocks.push_back({
+                {"type", "thoughts"},
+                {"text", msg.at("reasoning_content")}
+            });
+
+            // Apertus template expects content to be a mapping with blocks inside
+            // If there's already content, we need to merge it with blocks
+            if (msg.contains("content")) {
+                json content_obj;
+                if (msg.at("content").is_string()) {
+                    // Preserve existing content text
+                    content_obj["text"] = msg.at("content");
+                } else if (msg.at("content").is_object()) {
+                    content_obj = msg.at("content");
+                }
+                content_obj["blocks"] = blocks;
+                adjusted_message["content"] = content_obj;
+            } else {
+                adjusted_message["content"] = json::object({
+                    {"blocks", blocks}
+                });
+            }
+            adjusted_message.erase("reasoning_content");
+            adjusted_messages.push_back(adjusted_message);
+        } else {
+            adjusted_messages.push_back(msg);
+        }
+    }
+    data.prompt = apply(tmpl, inputs, /* messages_override= */ adjusted_messages);
     data.format = COMMON_CHAT_FORMAT_APERTUS;
 
     // Handle thinking tags appropriately based on inputs.enable_thinking
