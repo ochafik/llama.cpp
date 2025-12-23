@@ -15,6 +15,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -22,6 +23,19 @@
 #include <string>
 
 using json = nlohmann::ordered_json;
+
+// ANSI color codes for terminal output
+#define ANSI_COLOR_RED     "\033[1;31m"
+#define ANSI_COLOR_GREEN   "\033[1;32m"
+#define ANSI_COLOR_YELLOW  "\033[0;33m"
+#define ANSI_COLOR_RESET   "\033[0m"
+
+// Verbose mode control - set LOG_LEVEL=2 or higher for debug output
+static int get_verbosity() {
+    const char * level = std::getenv("LOG_LEVEL");
+    return level ? std::atoi(level) : 0;
+}
+static const int g_verbose = get_verbosity();
 
 static std::ostream & operator<<(std::ostream & os, const common_chat_msg_diff & diff) {
     os << "{ content_delta: " << diff.content_delta << "; ";
@@ -94,7 +108,9 @@ template <class T> static void assert_equals(const T & expected, const T & actua
 }
 
 static std::string read_file(const std::string & path) {
-    std::cerr << "# Reading: " << path << '\n' << std::flush;
+    if (g_verbose >= 2) {
+        std::cerr << "# Reading: " << path << '\n' << std::flush;
+    }
     std::ifstream fs(path, std::ios_base::binary);
     if (!fs.is_open()) {
         fs = std::ifstream("../" + path, std::ios_base::binary);
@@ -4483,8 +4499,11 @@ static void test_systematic_needle_streaming() {
     const char * template_filter = std::getenv("NEEDLE_TEMPLATE_FILTER");
     const char * scenario_filter = std::getenv("NEEDLE_SCENARIO_FILTER");
 
-    printf("    Template filter env: %s\n", template_filter ? template_filter : "(null)");
-    printf("    Scenario filter env: %s\n", scenario_filter ? scenario_filter : "(null)");
+    if (g_verbose >= 1 || template_filter || scenario_filter) {
+        printf("    Filters: template=%s, scenario=%s\n",
+               template_filter ? template_filter : "(all)",
+               scenario_filter ? scenario_filter : "(all)");
+    }
 
     const auto matches_filter = [](const char * filter, const std::string & value) {
         if (filter == nullptr || *filter == '\0') {
@@ -4612,23 +4631,30 @@ static void test_systematic_needle_streaming() {
 
     // Test each template
     for (const auto & tmpl_info : templates) {
-        printf("  Testing needle streaming for %s...\n", tmpl_info.name);
-        fflush(stdout);
+        if (g_verbose >= 1) {
+            printf("  ⚫ %s\n", tmpl_info.name);
+            fflush(stdout);
+        }
 
         auto tmpls = read_templates(tmpl_info.jinja_path);
         if (!tmpls) {
-            printf("    Skipping (template not found)\n");
+            if (g_verbose >= 1) {
+                printf("    " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " (template not found)\n");
+            }
             continue;
         }
         if (tmpl_info.skip) {
-            printf("    Skipping (temporarily disabled)\n");
+            if (g_verbose >= 1) {
+                printf("    " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " (temporarily disabled)\n");
+            }
             continue;
         }
         if (!matches_filter(template_filter, tmpl_info.name)) {
-            printf("    - Skipped (template filter)\n");
+            if (g_verbose >= 2) {
+                printf("    " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " (template filter)\n");
+            }
             continue;
         }
-        printf("    Template loaded\n"); fflush(stdout);
 
         // Cross-check static template info with minja's capabilities detection
         // Note: minja detection relies on the template using 'enable_thinking' variable.
@@ -4639,12 +4665,12 @@ static void test_systematic_needle_streaming() {
         bool static_thinks = (tmpl_info.supports_thinking == ThinkingSupport::Yes);
         bool static_tools = (tmpl_info.supports_tools == ToolSupport::Yes);
 
-        if (minja_thinks != static_thinks) {
-            printf("    ⚠ Capability note: thinking support - static=%s, minja=%s (minja uses enable_thinking variable)\n",
+        if (minja_thinks != static_thinks && g_verbose >= 1) {
+            printf("    " ANSI_COLOR_YELLOW "⚠" ANSI_COLOR_RESET " thinking support: static=%s, minja=%s\n",
                    static_thinks ? "Yes" : "No", minja_thinks ? "Yes" : "No");
         }
         if (minja_tools != static_tools) {
-            printf("    ✗ Capability mismatch: tools support - static=%s, minja=%s\n",
+            printf("    " ANSI_COLOR_RED "✗ FAIL" ANSI_COLOR_RESET " tools mismatch: static=%s, minja=%s\n",
                    static_tools ? "Yes" : "No", minja_tools ? "Yes" : "No");
             throw std::runtime_error("Template capabilities mismatch for " + std::string(tmpl_info.name));
         }
@@ -4655,24 +4681,34 @@ static void test_systematic_needle_streaming() {
         auto scenarios = build_needle_scenarios(tmpl_info);
         for (const auto & scenario : scenarios) {
             if (!matches_filter(scenario_filter, scenario.name)) {
-                printf("      - Scenario %s skipped (scenario filter)\n", scenario.name.c_str());
+                if (g_verbose >= 2) {
+                    printf("      - %s: " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " (filter)\n", scenario.name.c_str());
+                }
                 continue;
             }
             if (scenario.require_thinking_support && tmpl_info.supports_thinking == ThinkingSupport::No) {
-                printf("    - Scenario %s skipped (no thinking support)\n", scenario.name.c_str());
+                if (g_verbose >= 2) {
+                    printf("      - %s: " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " (no thinking)\n", scenario.name.c_str());
+                }
                 continue;
             }
             if (scenario.require_tool_support && tmpl_info.supports_tools == ToolSupport::No) {
-                printf("    - Scenario %s skipped (no tool support)\n", scenario.name.c_str());
+                if (g_verbose >= 2) {
+                    printf("      - %s: " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " (no tools)\n", scenario.name.c_str());
+                }
                 continue;
             }
             if (scenario.parallel_tool_calls && !common_chat_templates_support_parallel_tool_calls(tmpls.get())) {
-                printf("    - Scenario %s skipped (no parallel tool calls support)\n", scenario.name.c_str());
+                if (g_verbose >= 2) {
+                    printf("      - %s: " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " (no parallel)\n", scenario.name.c_str());
+                }
                 continue;
             }
 
-            printf("    Scenario %s (%s)\n", scenario.name.c_str(), describe_scenario(scenario).c_str());
-            fflush(stdout);
+            if (g_verbose >= 2) {
+                printf("    🔵 %s (%s)\n", scenario.name.c_str(), describe_scenario(scenario).c_str());
+                fflush(stdout);
+            }
 
             summary_entry.scenarios_total++;
 
@@ -4730,11 +4766,15 @@ static void test_systematic_needle_streaming() {
                                        });
 
                 if (scenario.skip_if_thinking_forced && data.params.thinking_forced_open) {
-                    printf("      - Skipped (template forces thinking open)\n");
+                    if (g_verbose >= 2) {
+                        printf("      - %s: " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " (forces thinking)\n", scenario.name.c_str());
+                    }
                     continue;
                 }
                 if (scenario.force_disable_thinking && data.params.thinking_forced_open) {
-                    printf("      - Skipped (template forces thinking open)\n");
+                    if (g_verbose >= 2) {
+                        printf("      - %s: " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " (forces thinking)\n", scenario.name.c_str());
+                    }
                     continue;
                 }
 
@@ -4774,21 +4814,29 @@ static void test_systematic_needle_streaming() {
 
                 auto result = test_streaming_with_needles(ctx, raw_message, parse_fn);
                 verify_needle_results(ctx, result);
-                printf("      ✓ Passed\n");
+                if (g_verbose >= 1) {
+                    printf("    %s: " ANSI_COLOR_GREEN "✓ OK" ANSI_COLOR_RESET "\n", scenario.name.c_str());
+                }
                 summary_entry.scenarios_passed++;
             } catch (const std::exception & e) {
-                printf("      ✗ %s\n", e.what());
+                printf("    %s: " ANSI_COLOR_RED "✗ FAIL" ANSI_COLOR_RESET " %s\n", scenario.name.c_str(), e.what());
                 summary_entry.failed_scenarios.push_back(scenario.name);
             }
         }
 
         summaries.push_back(summary_entry);
 
-        printf("    Summary for %s: %zu/%zu scenarios passed", summary_entry.name.c_str(), summary_entry.scenarios_passed, summary_entry.scenarios_total);
-        if (!summary_entry.failed_scenarios.empty()) {
-            printf(" (failed: %s)", string_join(summary_entry.failed_scenarios, ", ").c_str());
+        // Print per-template summary (always show for templates that were tested)
+        if (summary_entry.scenarios_total > 0) {
+            if (summary_entry.failed_scenarios.empty()) {
+                printf("  %s: " ANSI_COLOR_GREEN "%zu/%zu passed" ANSI_COLOR_RESET "\n",
+                       summary_entry.name.c_str(), summary_entry.scenarios_passed, summary_entry.scenarios_total);
+            } else {
+                printf("  %s: " ANSI_COLOR_RED "%zu/%zu passed" ANSI_COLOR_RESET " (failed: %s)\n",
+                       summary_entry.name.c_str(), summary_entry.scenarios_passed, summary_entry.scenarios_total,
+                       string_join(summary_entry.failed_scenarios, ", ").c_str());
+            }
         }
-        printf("\n");
     }
 
     size_t templates_total = 0;
@@ -4802,19 +4850,26 @@ static void test_systematic_needle_streaming() {
         templates_total++;
         if (entry.failed_scenarios.empty()) {
             templates_passing++;
-             passing_templates.push_back(entry.name);
+            passing_templates.push_back(entry.name);
         } else {
             std::ostringstream oss;
             oss << entry.name << " (" << entry.scenarios_passed << "/" << entry.scenarios_total << ")";
             failing_template_summaries.push_back(oss.str());
         }
     }
-    printf("\n  Overall needle summary: %zu/%zu templates fully passed\n", templates_passing, templates_total);
-    if (!passing_templates.empty()) {
-        printf("    Passed: %s\n", string_join(passing_templates, ", ").c_str());
+
+    // Print overall summary with colors
+    printf("\n  Summary: ");
+    if (templates_passing == templates_total) {
+        printf(ANSI_COLOR_GREEN "%zu/%zu templates passed" ANSI_COLOR_RESET "\n", templates_passing, templates_total);
+    } else {
+        printf(ANSI_COLOR_RED "%zu/%zu templates passed" ANSI_COLOR_RESET "\n", templates_passing, templates_total);
+    }
+    if (g_verbose >= 1 && !passing_templates.empty()) {
+        printf("    " ANSI_COLOR_GREEN "Passed" ANSI_COLOR_RESET ": %s\n", string_join(passing_templates, ", ").c_str());
     }
     if (!failing_template_summaries.empty()) {
-        printf("    Failed: %s\n", string_join(failing_template_summaries, ", ").c_str());
+        printf("    " ANSI_COLOR_RED "Failed" ANSI_COLOR_RESET ": %s\n", string_join(failing_template_summaries, ", ").c_str());
     }
     printf("\n");
 }
@@ -4904,7 +4959,11 @@ static void test_msg_diffs_compute() {
 }
 
 int main(int argc, char ** argv) {
-    common_log_set_verbosity_thold(999);
+    // Set log verbosity based on LOG_LEVEL env var (0=quiet, 1=info, 2+=debug)
+    // Lower threshold = less logging. Set to -1 by default to suppress all logs.
+    // LOG_LEVEL=2 enables all debug output.
+    int log_thold = g_verbose >= 2 ? 999 : -1;
+    common_log_set_verbosity_thold(log_thold);
 
 #ifndef _WIN32
         if (argc > 1) {
@@ -4937,16 +4996,26 @@ int main(int argc, char ** argv) {
         } else
 #endif
         {
-            const bool skip_other_tests = std::getenv("NEEDLE_ONLY") != nullptr;
-
-            test_msg_diffs_compute();
-            test_msgs_oaicompat_json_conversion();
-            test_tools_oaicompat_json_conversion();
-            if (!skip_other_tests) {
+            const std::string chat_test = std::getenv("CHAT_TEST") ? std::getenv("CHAT_TEST") : "";
+            
+            if (chat_test == "" || chat_test == "msg_diffs_compute") {
+                test_msg_diffs_compute();
+            }
+            if (chat_test == "" || chat_test == "msgs_oaicompat_json_conversion") {
+                test_msgs_oaicompat_json_conversion();
+            }
+            if (chat_test == "" || chat_test == "tools_oaicompat_json_conversion") {
+                test_tools_oaicompat_json_conversion();
+            }
+            if (chat_test == "" || chat_test == "template_output_parsers") {
                 test_template_output_parsers();
+            }
+            if (chat_test == "" || chat_test == "template_output_peg_parsers") {
                 test_template_output_peg_parsers();
             }
-            test_systematic_needle_streaming();
+            if (chat_test == "" || chat_test == "systematic_needle_streaming") {
+                test_systematic_needle_streaming();
+            }
             std::cout << "\n[chat] All tests passed!" << '\n';
         }
         return 0;
