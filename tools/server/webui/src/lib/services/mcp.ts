@@ -169,24 +169,40 @@ export class McpService {
 	 * Call a tool on the MCP server
 	 */
 	async callTool(name: string, args?: Record<string, unknown>): Promise<unknown> {
+		console.log(`[MCP] McpService.callTool: ${this.serverName}/${name}`, args);
+
 		if (!this.client) {
+			console.error(`[MCP] McpService.callTool: client not initialized for ${this.serverName}`);
 			throw new Error(`MCP client not initialized for: ${this.serverName}`);
 		}
 
-		const response = await this.client.callTool(
-			{
-				name,
-				arguments: args
-			},
-			undefined,
-			{ timeout: REQUEST_TIMEOUT_MS }
-		);
+		console.log(`[MCP] McpService.callTool: calling client.callTool for ${name}...`);
+		const startTime = Date.now();
 
-		if (response.isError) {
-			throw new Error(`Tool call failed: ${JSON.stringify(response.content)}`);
+		try {
+			const response = await this.client.callTool(
+				{
+					name,
+					arguments: args
+				},
+				undefined,
+				{ timeout: REQUEST_TIMEOUT_MS }
+			);
+
+			const duration = Date.now() - startTime;
+			console.log(`[MCP] McpService.callTool: got response for ${name} in ${duration}ms`, response);
+
+			if (response.isError) {
+				console.error(`[MCP] McpService.callTool: tool returned error for ${name}`, response.content);
+				throw new Error(`Tool call failed: ${JSON.stringify(response.content)}`);
+			}
+
+			return response.content;
+		} catch (error) {
+			const duration = Date.now() - startTime;
+			console.error(`[MCP] McpService.callTool: exception for ${name} after ${duration}ms`, error);
+			throw error;
 		}
-
-		return response.content;
 	}
 
 	/**

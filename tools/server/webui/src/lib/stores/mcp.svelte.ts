@@ -330,16 +330,23 @@ class McpStore {
 		toolName: string,
 		args?: Record<string, unknown>
 	): Promise<unknown> {
+		console.log(`[MCP] callTool started: ${serverName}/${toolName}`, args);
+
 		const service = this.services.get(serverName);
 		if (!service) {
+			console.error(`[MCP] callTool: server not connected: ${serverName}`);
 			throw new Error(`MCP server not connected: ${serverName}`);
 		}
 
 		if (!service.isConnected()) {
+			console.error(`[MCP] callTool: server not ready: ${serverName}`);
 			throw new Error(`MCP server not ready: ${serverName}`);
 		}
 
-		return await service.callTool(toolName, args);
+		console.log(`[MCP] callTool: calling service.callTool for ${serverName}/${toolName}`);
+		const result = await service.callTool(toolName, args);
+		console.log(`[MCP] callTool completed: ${serverName}/${toolName}`, result);
+		return result;
 	}
 
 	/**
