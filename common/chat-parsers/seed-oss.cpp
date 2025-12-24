@@ -39,7 +39,8 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
         auto newline = p.choice({p.literal("\r\n"), p.literal("\n")});
-        auto eos = p.optional(p.repeat(newline, 0, -1) + p.literal("<seed:eos>") + p.repeat(newline, 0, -1));
+        // Limit newlines around <seed:eos> to prevent grammar from accepting unlimited newlines
+        auto eos = p.optional(p.repeat(newline, 0, 2) + p.literal("<seed:eos>") + p.repeat(newline, 0, 2));
         auto reasoning = p.eps();
         auto reasoning_block = p.literal("<seed:think>")
             + p.tag(Tag::REASONING, p.until("</seed:think>"))
@@ -92,7 +93,6 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
                 auto args = p.sequence();
 
                 foreach_parameter(function, [&](const auto & param_name, const json & param_schema, bool is_required) {
-                    (void) is_required;
                     auto rule_name = "tool-" + name + "-arg-" + param_name;
 
                     auto arg_open = "<parameter=" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + ">";
@@ -112,7 +112,10 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
                         + arg_value
                         + p.atomic_tag(Tag::TOOL_ARG_CLOSE, arg_close)
                         + p.space());
-                    args += p.repeat(arg_rule, /* min = */ 0, /* max = */ 1);
+                    // Use is_required to enforce required non-string parameters in the grammar
+                    // String parameters are not enforced because the p.until() pattern doesn't play well with is_required
+                    bool enforce_required = is_required && !schema_info.resolves_to_string(param_schema);
+                    args += p.repeat(arg_rule, /* min = */ enforce_required ? 1 : 0, /* max = */ 1);
                 });
 
                 if (allow_additional) {
@@ -162,17 +165,15 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
                 "\r\n\r\n<seed:toolcall>", "\n\n<seed:toolcall>",
                 "\r\n<seed:toolcall>", "\n<seed:toolcall>", "<seed:toolcall>",
             };
-            auto stop_after = std::vector<std::string> {
-                "\r\n\r\n<seed:eos>", "\n\n<seed:eos>",
-                "\r\n<seed:eos>", "\n<seed:eos>", "<seed:eos>",
-            };
             auto content_before = p.optional(p.tag(Tag::CONTENT, p.until_one_of(stop_before)));
-            auto content_after = p.optional(p.tag(Tag::CONTENT, p.until_one_of(stop_after)));
+            // After tool calls, only allow limited trailing whitespace (not arbitrary content)
+            // to prevent the grammar from allowing unlimited newlines
+            auto post_tool_gap = p.repeat(newline, 0, 2);
             auto pre_calls_gap = p.repeat(newline, 0, -1);
             if (require_tools) {
-                return reasoning << pre_calls_gap << tool_calls << eos;
+                return reasoning << pre_calls_gap << tool_calls << post_tool_gap << eos;
             }
-            return reasoning << content_before << pre_calls_gap << tool_calls << content_after << eos;
+            return reasoning << content_before << pre_calls_gap << tool_calls << post_tool_gap << eos;
         }
 
         // Content only parser
@@ -181,7 +182,8 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
             "\r\n\r\n<seed:eos>", "\n\n<seed:eos>",
             "\r\n<seed:eos>", "\n<seed:eos>", "<seed:eos>"
         })));
-        auto pre_eos_gap = p.repeat(newline, 0, -1);
+        // Limit trailing newlines before eos to prevent grammar from accepting unlimited newlines
+        auto pre_eos_gap = p.repeat(newline, 0, 2);
         return reasoning << content_tail << pre_eos_gap << eos;
     });
 
