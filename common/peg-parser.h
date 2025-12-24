@@ -11,6 +11,7 @@
 #include <variant>
 
 struct common_grammar_builder;
+class common_schema_info;
 
 class common_peg_parser_builder;
 
@@ -437,6 +438,43 @@ class common_peg_parser_builder {
     // Wraps a parser with JSON schema metadata for grammar generation.
     // Used internally to convert JSON schemas to GBNF grammar rules.
     common_peg_parser schema(const common_peg_parser & p, const std::string & name, const nlohmann::ordered_json & schema, bool raw = false);
+
+    // Creates a parser for schema-based values in XML-like formats.
+    // Handles the common pattern of string vs non-string schema types:
+    // - For string schemas: tag(string_tag, until[_max](delimiter, maxLength?))
+    // - For non-string schemas: [space?] + tag(json_tag, schema(...)) + [space?]
+    //
+    // Parameters:
+    //   rule_name: Name for the schema rule (used in grammar generation)
+    //   param_schema: JSON schema for the parameter
+    //   end_delimiter: The closing tag/delimiter (e.g., "</parameter>")
+    //   schema_info: Schema info instance for type resolution
+    //   string_tag: Tag to apply for string values
+    //   json_tag: Tag to apply for JSON values
+    //   space_around_json: Whether to wrap non-string values with space()
+    common_peg_parser schema_or_raw_string_until(
+        const std::string & rule_name,
+        const nlohmann::ordered_json & param_schema,
+        const std::string & end_delimiter,
+        common_schema_info & schema_info,
+        int string_tag,
+        int json_tag,
+        bool space_around_json = false);
+
+    // Convenience overload for enum tags
+    template<typename E, typename = std::enable_if_t<std::is_enum_v<E>>>
+    common_peg_parser schema_or_raw_string_until(
+        const std::string & rule_name,
+        const nlohmann::ordered_json & param_schema,
+        const std::string & end_delimiter,
+        common_schema_info & schema_info,
+        E string_tag,
+        E json_tag,
+        bool space_around_json = false)
+    {
+        return schema_or_raw_string_until(rule_name, param_schema, end_delimiter, schema_info,
+            static_cast<int>(string_tag), static_cast<int>(json_tag), space_around_json);
+    }
 
     // Creates a named rule, stores it in the grammar, and returns a ref.
     // If trigger=true, marks this rule as an entry point for lazy grammar generation.

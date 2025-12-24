@@ -121,11 +121,6 @@ common_chat_params common_chat_params_init_glm_4_5_peg(const common_chat_templat
                 // Tool close: just </tool_call>, optional newline consumed by content_after
                 auto tool_close = p.literal("</tool_call>");
                 auto args = p.sequence();
-                auto arg_string = p.rule("xml-arg-string", p.until_one_of({
-                    "</arg_value>",
-                    "<arg_key>",
-                    "</tool_call>"
-                }));
 
                 foreach_parameter(function, [&](const auto & param_name, const json & param_schema, bool /* is_required */) {
                     auto rule_name = "tool-" + name + "-arg-" + param_name;
@@ -133,13 +128,8 @@ common_chat_params common_chat_params_init_glm_4_5_peg(const common_chat_templat
                     auto arg_open = "<arg_key>" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + "</arg_key>\n<arg_value>";
                     // Newline after </arg_value> is optional - may not be present before </tool_call>
                     auto arg_close = p.literal("</arg_value>") + p.optional(p.literal("\n"));
-                    auto arg_value = p.eps();
-
-                    if (schema_info.resolves_to_string(param_schema)) {
-                        arg_value = p.tag(Tag::TOOL_ARG_STRING_VALUE, arg_string);
-                    } else {
-                        arg_value = p.tag(Tag::TOOL_ARG_JSON_VALUE, p.schema(p.json(), rule_name + "-schema", param_schema));
-                    }
+                    auto arg_value = p.schema_or_raw_string_until(rule_name + "-schema", param_schema, "</arg_value>",
+                        schema_info, Tag::TOOL_ARG_STRING_VALUE, Tag::TOOL_ARG_JSON_VALUE, false);
 
                     auto arg_rule = p.rule(rule_name, p.atomic_tag(Tag::TOOL_ARG_OPEN, arg_open) + arg_value + p.atomic_tag(Tag::TOOL_ARG_CLOSE, arg_close));
                     args += p.repeat(arg_rule, /* min = */ 0, /* max = */ 1);
@@ -149,17 +139,10 @@ common_chat_params common_chat_params_init_glm_4_5_peg(const common_chat_templat
                     auto dynamic_key = p.literal("<arg_key>") + p.tag(Tag::TOOL_ARG_NAME, p.until("</arg_key>")) + p.literal("</arg_key>\n<arg_value>");
                     // Newline after </arg_value> is optional - may not be present before </tool_call>
                     auto dynamic_close = p.literal("</arg_value>") + p.optional(p.literal("\n"));
-                    auto additional_value = p.choice();
-                    if (additional_has_schema) {
-                        if (schema_info.resolves_to_string(additional_schema)) {
-                            additional_value |= p.tag(Tag::TOOL_ARG_STRING_VALUE, arg_string);
-                        } else {
-                            additional_value |= p.tag(Tag::TOOL_ARG_JSON_VALUE,
-                                p.schema(p.json(), "glm-additional-" + name, additional_schema));
-                        }
-                    } else {
-                        additional_value |= p.tag(Tag::TOOL_ARG_STRING_VALUE, arg_string);
-                    }
+                    auto additional_value = additional_has_schema
+                        ? p.schema_or_raw_string_until("glm-additional-" + name, additional_schema, "</arg_value>",
+                            schema_info, Tag::TOOL_ARG_STRING_VALUE, Tag::TOOL_ARG_JSON_VALUE, false)
+                        : p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</arg_value>"));
 
                     auto additional_rule = p.rule("tool-" + name + "-arg-generic",
                         p.atomic_tag(Tag::TOOL_ARG_OPEN, dynamic_key)

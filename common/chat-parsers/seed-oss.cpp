@@ -97,24 +97,8 @@ common_chat_params common_chat_params_init_seed_oss_peg(const common_chat_templa
 
                     auto arg_open = "<parameter=" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + ">";
                     auto arg_close = p.literal("</parameter>");
-                    auto arg_value = p.eps();
-
-                    // Check if string has maxLength constraint for length-limited parsing
-                    bool has_max_length = param_schema.contains("maxLength") && param_schema["maxLength"].is_number_integer();
-                    int max_length = has_max_length ? param_schema["maxLength"].get<int>() : -1;
-
-                    if (schema_info.resolves_to_string(param_schema)) {
-                        // For string types with maxLength, use length-limited until
-                        // For strings without maxLength, capture everything until closing tag
-                        if (max_length > 0) {
-                            arg_value = p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until_max("</parameter>", max_length));
-                        } else {
-                            arg_value = p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));
-                        }
-                    } else {
-                        // For non-string types (integers, booleans, etc.), consume surrounding whitespace
-                        arg_value = p.space() + p.tag(Tag::TOOL_ARG_JSON_VALUE, p.schema(p.json(), rule_name + "-schema", param_schema)) + p.space();
-                    }
+                    auto arg_value = p.schema_or_raw_string_until(rule_name + "-schema", param_schema, "</parameter>",
+                        schema_info, Tag::TOOL_ARG_STRING_VALUE, Tag::TOOL_ARG_JSON_VALUE, true);
 
                     auto arg_rule = p.rule(rule_name,
                         p.atomic_tag(Tag::TOOL_ARG_OPEN, arg_open)
@@ -125,6 +109,8 @@ common_chat_params common_chat_params_init_seed_oss_peg(const common_chat_templa
                     // - Non-string types: always enforced via schema
                     // - String types with maxLength: enforced via length-limited grammar
                     // - String types without maxLength: not enforced (unlimited p.until doesn't constrain model)
+                    int max_length = param_schema.contains("maxLength") && param_schema["maxLength"].is_number_integer()
+                        ? param_schema["maxLength"].get<int>() : -1;
                     bool can_enforce = !schema_info.resolves_to_string(param_schema) || max_length > 0;
                     bool enforce_required = is_required && can_enforce;
                     args += p.repeat(arg_rule, /* min = */ enforce_required ? 1 : 0, /* max = */ 1);
@@ -132,18 +118,10 @@ common_chat_params common_chat_params_init_seed_oss_peg(const common_chat_templa
 
                 if (allow_additional) {
                     auto dynamic_name = p.tag(Tag::TOOL_ARG_NAME, p.until(">"));
-                    auto additional_value = p.choice();
-                    if (additional_has_schema) {
-                        if (schema_info.resolves_to_string(additional_schema)) {
-                            additional_value |= p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));
-                        } else {
-                            // For non-string types, consume surrounding whitespace
-                            additional_value |= p.space() + p.tag(Tag::TOOL_ARG_JSON_VALUE,
-                                p.schema(p.json(), "seed-oss-additional-" + name, additional_schema)) + p.space();
-                        }
-                    } else {
-                        additional_value |= p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));
-                    }
+                    auto additional_value = additional_has_schema
+                        ? p.schema_or_raw_string_until("seed-oss-additional-" + name, additional_schema, "</parameter>",
+                            schema_info, Tag::TOOL_ARG_STRING_VALUE, Tag::TOOL_ARG_JSON_VALUE, true)
+                        : p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));
 
                     auto additional_rule = p.rule("seed-parameter-generic-" + name,
                         p.atomic_tag(Tag::TOOL_ARG_OPEN, "<parameter=" + dynamic_name + ">")

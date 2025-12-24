@@ -92,15 +92,8 @@ common_chat_params common_chat_params_init_qwen3_coder_xml_peg(const common_chat
 
                 auto args = p.sequence();
                 foreach_parameter(function, [&](const std::string & param_name, const json & param_schema, bool /* is_required */) {
-                    auto parameter_value = p.choice();
-                    if (schema_info.resolves_to_string(param_schema)) {
-                        // For string types, capture everything and strip whitespace during processing
-                        parameter_value |= p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));
-                    } else {
-                        // For non-string types (integers, booleans, etc.), consume surrounding whitespace
-                        parameter_value |= p.space() + p.tag(Tag::TOOL_ARG_JSON_VALUE,
-                            p.schema(p.json(), "qwen-param-" + name + "-" + param_name, param_schema)) + p.space();
-                    }
+                    auto parameter_value = p.schema_or_raw_string_until("qwen-param-" + name + "-" + param_name, param_schema, "</parameter>",
+                        schema_info, Tag::TOOL_ARG_STRING_VALUE, Tag::TOOL_ARG_JSON_VALUE, true);
 
                     auto arg_rule = p.rule("qwen-parameter-" + name + "-" + param_name,
                         p.atomic_tag(Tag::TOOL_ARG_OPEN,
@@ -116,18 +109,10 @@ common_chat_params common_chat_params_init_qwen3_coder_xml_peg(const common_chat
                 });
 
                 if (allow_additional) {
-                    auto additional_value = p.choice();
-                    if (additional_has_schema) {
-                        if (schema_info.resolves_to_string(additional_schema)) {
-                            additional_value |= p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));
-                        } else {
-                            // For non-string types, consume surrounding whitespace
-                            additional_value |= p.space() + p.tag(Tag::TOOL_ARG_JSON_VALUE,
-                                p.schema(p.json(), "qwen-param-" + name + "-additional", additional_schema)) + p.space();
-                        }
-                    } else {
-                        additional_value |= p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));
-                    }
+                    auto additional_value = additional_has_schema
+                        ? p.schema_or_raw_string_until("qwen-param-" + name + "-additional", additional_schema, "</parameter>",
+                            schema_info, Tag::TOOL_ARG_STRING_VALUE, Tag::TOOL_ARG_JSON_VALUE, true)
+                        : p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));
 
                     auto additional_rule = p.rule("qwen-parameter-generic-" + name,
                         p.atomic_tag(Tag::TOOL_ARG_OPEN,
