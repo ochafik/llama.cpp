@@ -163,6 +163,11 @@ common_chat_params common_chat_params_init_minimax_m2_peg(const common_chat_temp
                 + p.space());
             auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_block, /* min = */ min_calls, /* max = */ max_calls));
 
+            bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+            if (require_tools) {
+                return reasoning << tool_calls;
+            }
+
             auto stop_before = std::vector<std::string> {
                 "\n<minimax:tool_call>", "<minimax:tool_call>",
                 "\n<TOOLCALL>", "<TOOLCALL>",

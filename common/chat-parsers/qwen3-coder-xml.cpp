@@ -155,7 +155,7 @@ common_chat_params common_chat_params_init_qwen3_coder_xml_peg(const common_chat
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            // Format: <tool_call>\n<function=name>...</function>\n</tool_call>
+            // Format:<tool_call>\n<function=name>...</function>\n</tool_call>
             // Add p.space() to consume whitespace between parallel tool calls
             auto tool_call = p.rule("tool-call",
                 p.space()
@@ -168,6 +168,10 @@ common_chat_params common_chat_params_init_qwen3_coder_xml_peg(const common_chat
             );
             auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, /* min = */ min_calls, /* max = */ max_calls));
 
+            bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+            if (require_tools) {
+                return tool_calls + consume_end_block();
+            }
             return p.optional(content_before_tool) + tool_calls + consume_end_block();
         }
 

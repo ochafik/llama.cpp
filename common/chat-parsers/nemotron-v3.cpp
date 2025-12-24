@@ -176,7 +176,7 @@ common_chat_params common_chat_params_init_nemotron_v3_peg(const common_chat_tem
             auto content_after = p.optional(p.tag(Tag::CONTENT, p.until_one_of(stop_after)));
             auto pre_tool_gap = p.repeat(newline, 0, -1);
             if (require_tools) {
-                return assistant_prefix + reasoning + after_reasoning_gap + skip_content_before + pre_tool_gap + tool_calls + skip_content_after + assistant_suffix;
+                return assistant_prefix + reasoning + after_reasoning_gap + pre_tool_gap + tool_calls + assistant_suffix;
             }
             return assistant_prefix + reasoning + after_reasoning_gap + content_before + pre_tool_gap + tool_calls + content_after + assistant_suffix;
         }

@@ -176,10 +176,18 @@ common_chat_params common_chat_params_init_glm_4_5_peg(const common_chat_templat
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
             auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_choice, /* min = */ min_calls, /* max = */ max_calls));
 
+            bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+
             // Content chunks are text until thinking or tool call markers
             auto content_chunk = p.optional(p.literal("\n")) + p.tag(Tag::CONTENT, p.until_one_of({"<think>", "\n<tool_call>", "<tool_call>"}));
 
             if (extract_reasoning) {
+                if (require_tools) {
+                    if (data.thinking_forced_open) {
+                        return forced_thinking + tool_calls;
+                    }
+                    return tool_calls;
+                }
                 auto mixed = p.zero_or_more(thinking_block | content_chunk);
                 if (data.thinking_forced_open) {
                     return forced_thinking + mixed + tool_calls + mixed;
@@ -189,6 +197,9 @@ common_chat_params common_chat_params_init_glm_4_5_peg(const common_chat_templat
 
             // For non-reasoning case, match optional content before and after tool calls
             // Content stops at tool_call markers so tool_calls can match them
+            if (require_tools) {
+                return tool_calls;
+            }
             auto content_prefix = p.optional(
                 p.optional(p.literal("\n"))
                 + p.tag(Tag::CONTENT, p.until_one_of({"\n<tool_call>", "<tool_call>"}))
