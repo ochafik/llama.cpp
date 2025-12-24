@@ -213,133 +213,9 @@ class TestMcpWebSocket:
             ws.close()
 
 
-def create_mcp_echo_script():
-    """Create a Python MCP server script with echo and get_env_vars tools."""
-    script_content = '''#!/usr/bin/env python3
-import sys
-import json
-import os
-
-def main():
-    # Read JSON-RPC messages from stdin, respond on stdout
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            request = json.loads(line)
-            method = request.get("method", "")
-            req_id = request.get("id")
-
-            # Notifications (no id) should not get a response
-            if req_id is None or method.startswith("notifications/"):
-                continue
-
-            if method == "initialize":
-                response = {
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "result": {
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {"tools": {}},
-                        "serverInfo": {"name": "test-echo", "version": "1.0.0"}
-                    }
-                }
-            elif method == "tools/list":
-                response = {
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "result": {
-                        "tools": [
-                            {
-                                "name": "echo",
-                                "description": "Echo back the input",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "message": {"type": "string"}
-                                    },
-                                    "required": ["message"]
-                                }
-                            },
-                            {
-                                "name": "get_env_vars",
-                                "description": "Return all environment variables visible to this process",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {},
-                                    "required": []
-                                }
-                            }
-                        ]
-                    }
-                }
-            elif method == "tools/call":
-                params = request.get("params", {})
-                tool_name = params.get("name", "")
-                args = params.get("arguments", {})
-                if tool_name == "echo":
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": req_id,
-                        "result": {
-                            "content": [{"type": "text", "text": args.get("message", "")}]
-                        }
-                    }
-                elif tool_name == "get_env_vars":
-                    # Return environment variables as structured content
-                    env_vars = dict(os.environ)
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": req_id,
-                        "result": {
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": json.dumps({"env_vars": env_vars}, indent=2)
-                                }
-                            ],
-                            "structuredContent": {"env_vars": env_vars}
-                        }
-                    }
-                else:
-                    response = {
-                        "jsonrpc": "2.0",
-                        "id": req_id,
-                        "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"}
-                    }
-            else:
-                response = {
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "error": {"code": -32601, "message": f"Method not found: {method}"}
-                }
-
-            print(json.dumps(response), flush=True)
-        except Exception as e:
-            if req_id:
-                error_response = {
-                    "jsonrpc": "2.0",
-                    "id": req_id,
-                    "error": {"code": -32603, "message": str(e)}
-                }
-                print(json.dumps(error_response), flush=True)
-
-if __name__ == "__main__":
-    main()
-'''
-    # Create temp script file
-    with tempfile.NamedTemporaryFile(
-        mode='w',
-        suffix='.py',
-        delete=False
-    ) as script_file:
-        script_file.write(script_content)
-        script_path = script_file.name
-
-    # Make it executable
-    os.chmod(script_path, 0o755)
-    return script_path
+def get_mcp_echo_script_path():
+    """Get the path to the MCP echo server fixture script."""
+    return str(Path(__file__).parent.parent / "fixtures" / "mcp_echo_server.py")
 
 
 class TestMcpJsonRpcProtocol:
@@ -348,7 +224,7 @@ class TestMcpJsonRpcProtocol:
     @pytest.fixture
     def python_mcp_config(self):
         """Create config with a Python-based echo MCP server for testing."""
-        script_path = create_mcp_echo_script()
+        script_path = get_mcp_echo_script_path()
 
         # Create config pointing to the script
         config = {
@@ -369,19 +245,17 @@ class TestMcpJsonRpcProtocol:
             json.dump(config, config_file)
             config_path = config_file.name
 
-        yield config_path, script_path
+        yield config_path
 
-        # Cleanup
+        # Cleanup config file (script is a fixture, not temp)
         try:
             os.unlink(config_path)
-            os.unlink(script_path)
         except:
             pass
 
     def test_mcp_initialize_handshake(self, python_mcp_config):
         """Test MCP initialize handshake via WebSocket."""
-        config_path, _ = python_mcp_config
-        server.mcp_config = config_path
+        server.mcp_config = python_mcp_config
         server.start(timeout_seconds=TIMEOUT_SERVER_START)
 
         ws_port = server.server_port + 1
@@ -416,8 +290,7 @@ class TestMcpJsonRpcProtocol:
 
     def test_mcp_tools_list(self, python_mcp_config):
         """Test MCP tools/list method."""
-        config_path, _ = python_mcp_config
-        server.mcp_config = config_path
+        server.mcp_config = python_mcp_config
         server.start(timeout_seconds=TIMEOUT_SERVER_START)
 
         ws_port = server.server_port + 1
@@ -472,8 +345,7 @@ class TestMcpJsonRpcProtocol:
 
     def test_mcp_tool_call(self, python_mcp_config):
         """Test MCP tools/call method."""
-        config_path, _ = python_mcp_config
-        server.mcp_config = config_path
+        server.mcp_config = python_mcp_config
         server.start(timeout_seconds=TIMEOUT_SERVER_START)
 
         ws_port = server.server_port + 1
@@ -527,8 +399,8 @@ class TestMcpEnvVarFiltering:
 
     @pytest.fixture
     def python_mcp_config_with_secret(self):
-        """Create config with a Python-based MCP server and set a secret env var."""
-        script_path = create_mcp_echo_script()
+        """Create config with a Python-based MCP server and config-specified env var."""
+        script_path = get_mcp_echo_script_path()
 
         # Create config pointing to the script
         config = {
@@ -552,18 +424,17 @@ class TestMcpEnvVarFiltering:
             json.dump(config, config_file)
             config_path = config_file.name
 
-        yield config_path, script_path
+        yield config_path
 
-        # Cleanup
+        # Cleanup config file (script is a fixture, not temp)
         try:
             os.unlink(config_path)
-            os.unlink(script_path)
         except:
             pass
 
     def test_env_vars_filtering(self, python_mcp_config_with_secret):
         """Test that MCP subprocess only receives allowed env vars."""
-        config_path, _ = python_mcp_config_with_secret
+        config_path = python_mcp_config_with_secret
 
         # Set some secret env vars that should NOT be passed to subprocess
         secret_vars = {
