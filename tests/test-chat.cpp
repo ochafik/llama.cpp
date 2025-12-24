@@ -396,6 +396,10 @@ static delta_data init_delta(const struct common_chat_templates * tmpls, const s
         inputs.enable_thinking = true;
         inputs.reasoning_format = reasoning_format;
     }
+    // Check for environment variable to enable new parsers (default: false for no regression)
+    if (std::getenv("LLAMA_USE_NEW_PARSERS")) {
+        inputs.use_new_parsers = true;
+    }
     if (customize_inputs) {
         customize_inputs(inputs);
     }
@@ -4715,6 +4719,7 @@ static bool test_systematic_needle_streaming() {
                                        scenario.tool_choice, reasoning_format,
                                        [&](common_chat_templates_inputs & inputs) {
                                            inputs.parallel_tool_calls = scenario.parallel_tool_calls;
+                                           inputs.use_new_parsers = true;  // Needle tests use new PEG parsers
                                            if (scenario.force_disable_thinking) {
                                                inputs.enable_thinking = false;
                                                inputs.reasoning_format = COMMON_REASONING_FORMAT_NONE;

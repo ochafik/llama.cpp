@@ -44,8 +44,8 @@ struct templates_params {
     bool add_bos;
     bool add_eos;
     bool is_inference = true;
-    // When true, use legacy monolithic parsers instead of modular chat-parsers/*.cpp
-    bool use_legacy_parsers = false;
+    // When true, use new modular PEG parsers from chat-parsers/*.cpp instead of legacy monolithic parsers
+    bool use_new_parsers = false;
 };
 
 // Helper to iterate over function tools
