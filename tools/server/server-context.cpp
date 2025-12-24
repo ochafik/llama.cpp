@@ -826,6 +826,7 @@ struct server_context_impl {
             /* allow_audio           */ mctx ? mtmd_support_audio (mctx) : false,
             /* enable_thinking       */ enable_thinking,
             /* media_path            */ params_base.media_path,
+            /* use_new_parsers       */ params_base.use_new_parsers,
         };
 
         // print sample chat example to make it clear which template is used
@@ -1497,6 +1498,7 @@ struct server_context_impl {
             inputs.add_generation_prompt = true;
             inputs.reasoning_format      = opt.reasoning_format;
             inputs.enable_thinking       = opt.enable_thinking;
+            inputs.use_new_parsers       = opt.use_new_parsers;
 
             // Apply chat template to the list of messages
             auto chat_params = common_chat_templates_apply(opt.tmpls, inputs);
