@@ -1,6 +1,25 @@
 #include "server-mcp-bridge.h"
 #include "log.h"
+#include <cstdlib>
 #include <filesystem>
+
+// Security limits
+static constexpr size_t MCP_MAX_LINE_BUFFER = 10 * 1024 * 1024;  // 10MB max line buffer
+
+// Environment variables deemed safe to inherit for MCP subprocesses.
+// Keep in sync with MCP TypeScript SDK:
+// https://github.com/modelcontextprotocol/typescript-sdk/blob/main/packages/client/src/client/stdio.ts
+#ifdef _WIN32
+static const std::vector<std::string> MCP_INHERITED_ENV_VARS = {
+    "APPDATA", "HOMEDRIVE", "HOMEPATH", "LOCALAPPDATA", "PATH",
+    "PROCESSOR_ARCHITECTURE", "SYSTEMDRIVE", "SYSTEMROOT", "TEMP",
+    "USERNAME", "USERPROFILE", "PROGRAMFILES"
+};
+#else
+static const std::vector<std::string> MCP_INHERITED_ENV_VARS = {
+    "HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER"
+};
+#endif
 
 // Helper to convert string vectors to char* arrays for subprocess
 static std::vector<const char*> to_cstr_array(const std::vector<std::string> & strings) {
@@ -18,14 +37,17 @@ static std::vector<const char*> to_cstr_array(const std::vector<std::string> & s
 server_mcp_bridge::mcp_subprocess::~mcp_subprocess() {
     should_stop = true;
 
+    // Terminate process FIRST to unblock any pending reads
+    if (proc && subprocess_alive(proc.get())) {
+        subprocess_terminate(proc.get());
+    }
+
+    // Now safe to join - read will return 0 since process is dead
     if (read_thread.joinable()) {
         read_thread.join();
     }
 
     if (proc) {
-        if (subprocess_alive(proc.get())) {
-            subprocess_terminate(proc.get());
-        }
         subprocess_destroy(proc.get());
     }
 }
@@ -41,22 +63,39 @@ bool server_mcp_bridge::mcp_subprocess::start(const mcp_server_config & config) 
     }
     auto argv = to_cstr_array(cmd_strings);
 
-    // Build environment: KEY=VALUE format
-    std::vector<std::string> env_strings;
-    for (const auto & [key, value] : config.env) {
-        env_strings.push_back(key + "=" + value);
-    }
-    auto envp = to_cstr_array(env_strings);
-
     // Create subprocess with combined stdout/stderr and async reading
     int options = subprocess_option_no_window
                 | subprocess_option_combined_stdout_stderr
                 | subprocess_option_enable_async
                 | subprocess_option_search_user_path;
 
-    int result = subprocess_create_ex(argv.data(), options,
-                                      env_strings.empty() ? nullptr : envp.data(),
-                                      proc.get());
+    // Build safe environment: inherit only safe vars, then merge config env
+    std::vector<std::string> env_strings;
+
+    // Inherit only safe environment variables (matching MCP SDK behavior)
+    for (const auto & var : MCP_INHERITED_ENV_VARS) {
+        const char * val = std::getenv(var.c_str());
+        if (val != nullptr) {
+            env_strings.push_back(var + "=" + val);
+        }
+    }
+
+    // Merge with config env vars (config overrides inherited)
+    for (const auto & [key, value] : config.env) {
+        // Remove any existing entry for this key
+        std::string prefix = key + "=";
+        env_strings.erase(
+            std::remove_if(env_strings.begin(), env_strings.end(),
+                [&prefix](const std::string & s) {
+                    return s.compare(0, prefix.size(), prefix) == 0;
+                }),
+            env_strings.end());
+        // Add the new value
+        env_strings.push_back(key + "=" + value);
+    }
+
+    auto envp = to_cstr_array(env_strings);
+    int result = subprocess_create_ex(argv.data(), options, envp.data(), proc.get());
     if (result != 0) {
         SRV_ERR("%s: failed to spawn MCP process: %s\n", __func__, name.c_str());
         return false;
@@ -279,6 +318,14 @@ server_mcp_bridge::mcp_subprocess * server_mcp_bridge::get_or_create_process(con
             }
 
             buffer[bytes_read] = '\0';
+
+            // Prevent unbounded buffer growth from malicious MCP servers
+            if (line_buffer.size() + bytes_read > MCP_MAX_LINE_BUFFER) {
+                SRV_ERR("%s: line buffer overflow from %s, dropping data\n",
+                        __func__, proc->name.c_str());
+                line_buffer.clear();
+            }
+
             line_buffer += std::string(buffer.data(), bytes_read);
 
             // Process complete lines
