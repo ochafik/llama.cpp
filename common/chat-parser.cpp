@@ -1518,7 +1518,7 @@ common_chat_msg common_chat_parse(const std::string & input, bool is_partial, co
         syntax.format == COMMON_CHAT_FORMAT_PEG_CONSTRUCTED) {
         return common_chat_peg_parse(syntax.parser, input, is_partial, syntax);
     }
-    // Also use PEG parser if one is provided (new preferred path)
+    // Use PEG parser if one is provided (implies experimental_new_parsers is enabled)
     if (!syntax.parser.empty()) {
         return common_chat_peg_parse(syntax.parser, input, is_partial, syntax);
     }
