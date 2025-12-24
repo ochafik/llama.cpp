@@ -167,8 +167,8 @@ static std::string renormalize_json(const std::string & json_str) {
     try {
         auto json_obj = json::parse(json_str);
         return json_obj.dump();
-    } catch (const std::exception & e) {
-        std::cerr << "Failed to parse JSON: " << e.what() << '\n';
+    } catch (const std::exception &) {
+        // JSON parsing can fail for partial streaming content - that's expected
         return json_str;
     }
 }
