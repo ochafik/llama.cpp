@@ -4366,15 +4366,75 @@ struct template_capabilities {
     const char * think_open_tag;  // Opening tag for thinking (nullptr = auto-detect)
     const char * think_close_tag; // Closing tag for thinking (nullptr = no thinking)
     bool skip = false;
-    bool reasoning_requires_tools = false;
-    bool tools_emit_content_with_calls = true;
-    bool inject_reasoning_after_format = false;
-    bool supports_disable_thinking = true;
-    bool supports_reasoning_only = true;
-    bool tool_required_allows_content = true;
-    bool tool_calls_have_ids = false;
-    const char * needle_tool_name = nullptr;  // Tool name for needle tests (nullptr = use "python")
+    // TODO(ochafik): Add minja detection for these capabilities (see https://github.com/ochafik/minja/pull/20)
+    bool reasoning_requires_tools = false;      // Thinking only works when tools are provided
+    bool tools_emit_content_with_calls = true;  // Tool calls can include content text
+    bool inject_reasoning_after_format = false; // Test workaround: inject thinking after format
+    bool supports_disable_thinking = true;      // Template respects enable_thinking=false
+    bool supports_reasoning_only = true;        // Can have reasoning without content
+    bool tool_required_allows_content = true;   // tool_choice=required allows content
+    bool tool_calls_have_ids = false;           // Tool calls include IDs (cross-check with minja)
+    const char * needle_tool_name = nullptr;    // Tool name for needle tests (nullptr = use "python")
 };
+
+// Cross-check declared capabilities against minja's detected capabilities.
+// This ensures our test configuration stays in sync with what minja detects from templates.
+// Note: minja's detection is heuristic (checks if output differs with capability enabled).
+// Our declarations may intentionally differ if we know the template's actual behavior.
+static bool verify_template_capabilities(const std::vector<template_capabilities> & templates) {
+    printf("[%s]\n", __func__);
+    size_t checked = 0;
+    size_t tools_mismatches = 0;
+    size_t thinking_mismatches = 0;
+
+    for (const auto & info : templates) {
+        auto tmpls = read_templates(info.jinja_path);
+        if (!tmpls) {
+            continue;
+        }
+
+        // Cross-check tools support (this should always match)
+        bool minja_tools = common_chat_templates_support_tools(tmpls.get());
+        bool our_tools = info.supports_tools == ToolSupport::Yes;
+        if (minja_tools != our_tools) {
+            printf("  " ANSI_COLOR_RED "MISMATCH" ANSI_COLOR_RESET " %s: minja.supports_tools=%s, declared=%s\n",
+                   info.name, minja_tools ? "yes" : "no", our_tools ? "yes" : "no");
+            tools_mismatches++;
+        }
+
+        // Cross-check thinking support
+        // Note: minja checks if enable_thinking changes output, which may differ from
+        // whether the template has explicit thinking tags we can parse.
+        bool minja_thinking = common_chat_templates_support_enable_thinking(tmpls.get());
+        bool our_thinking = info.supports_thinking == ThinkingSupport::Yes;
+        if (minja_thinking != our_thinking) {
+            if (g_verbose >= 1) {
+                printf("  " ANSI_COLOR_YELLOW "NOTE" ANSI_COLOR_RESET " %s: minja.supports_thinking=%s, declared=%s\n",
+                       info.name, minja_thinking ? "yes" : "no", our_thinking ? "yes" : "no");
+            }
+            thinking_mismatches++;
+        }
+
+        // TODO(ochafik): Cross-check tool_calls_have_ids with minja's supports_tool_call_id
+        // once minja exposes this capability (see https://github.com/ochafik/minja/pull/20)
+
+        checked++;
+    }
+
+    // Tools mismatch is a hard failure - should always match
+    if (tools_mismatches > 0) {
+        printf("  " ANSI_COLOR_RED "FAIL" ANSI_COLOR_RESET " %zu tools capability mismatches\n", tools_mismatches);
+        return false;
+    }
+
+    // Thinking mismatches are informational - minja detection is heuristic
+    if (thinking_mismatches > 0 && g_verbose >= 1) {
+        printf("  " ANSI_COLOR_YELLOW "INFO" ANSI_COLOR_RESET " %zu thinking capability differences (may be intentional)\n", thinking_mismatches);
+    }
+
+    printf("  " ANSI_COLOR_GREEN "OK" ANSI_COLOR_RESET " (%zu templates verified against minja)\n", checked);
+    return true;
+}
 
 static const char * tool_choice_name(common_chat_tool_choice choice) {
     switch (choice) {
@@ -4651,6 +4711,11 @@ static bool test_systematic_needle_streaming() {
             COMMON_CHAT_FORMAT_APRIEL_1_5, ThinkingSupport::Yes, ToolSupport::Yes,
             "<thinking>", "</thinking>", true},
     };
+
+    // Verify declared capabilities match what minja detects
+    if (!verify_template_capabilities(templates)) {
+        return false;
+    }
 
     // Test each template
     for (const auto & tmpl_info : templates) {
