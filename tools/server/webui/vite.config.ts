@@ -157,10 +157,9 @@ export default defineConfig({
 			'/v1': 'http://localhost:8080',
 			'/props': 'http://localhost:8080',
 			'/models': 'http://localhost:8080',
-			// HTTP endpoints for MCP
+			// HTTP endpoint for MCP
 			'/mcp/servers': 'http://localhost:8080',
-			'/mcp/ws-port': 'http://localhost:8080',
-			// WebSocket endpoint for MCP (connects to port 8081)
+			// WebSocket endpoint for MCP (on HTTP port + 1)
 			'/mcp': {
 				target: 'http://localhost:8081',
 				ws: true,

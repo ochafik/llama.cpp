@@ -3,8 +3,8 @@
 Tests for MCP (Model Context Protocol) server functionality.
 
 Tests cover:
-- HTTP endpoints: /mcp/servers, /mcp/ws-port
-- WebSocket connection lifecycle
+- HTTP endpoint: /mcp/servers
+- WebSocket connection lifecycle (on HTTP port + 1)
 - MCP JSON-RPC protocol
 """
 
@@ -57,20 +57,6 @@ class TestMcpHttpEndpoints:
         # Without config, should return empty list or available servers
         assert isinstance(body["servers"], list), f"Expected list, got {type(body['servers'])}"
 
-    def test_mcp_ws_port_endpoint(self):
-        """Test /mcp/ws-port returns the WebSocket port."""
-        server.start(timeout_seconds=TIMEOUT_SERVER_START)
-
-        res = server.make_request("GET", "/mcp/ws-port", timeout=TIMEOUT_HTTP_REQUEST)
-        assert res.status_code == 200, f"Expected 200, got {res.status_code}"
-
-        body = res.body
-        assert "port" in body, f"Expected 'port' key in response: {body}"
-
-        # WebSocket port should be HTTP port + 1
-        expected_ws_port = server.server_port + 1
-        assert body["port"] == expected_ws_port, \
-            f"Expected WebSocket port {expected_ws_port}, got {body['port']}"
 
 
 class TestMcpWithConfig:

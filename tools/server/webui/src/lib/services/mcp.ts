@@ -265,27 +265,12 @@ export class McpService {
  */
 export const mcpServiceFactory = {
 	/**
-	 * Get the actual WebSocket port from the server
+	 * Create an MCP service for a given server name.
+	 * WebSocket runs on HTTP port + 1.
 	 */
-	async getWebSocketPort(): Promise<number> {
-		try {
-			const response = await fetch('/mcp/ws-port');
-			const data = await response.json();
-			return data.port;
-		} catch {
-			// Fallback: assume WebSocket is on HTTP port + 1
-			const url = new URL(window.location.href);
-			return parseInt(url.port) + 1;
-		}
-	},
-
-	/**
-	 * Create an MCP service for a given server name
-	 */
-	create: async (serverName: string): Promise<McpService> => {
-		// Fetch the actual WebSocket port from the server
-		const wsPort = await mcpServiceFactory.getWebSocketPort();
+	create: (serverName: string): McpService => {
 		const url = new URL(window.location.href);
+		const wsPort = (parseInt(url.port) || 80) + 1;
 		const wsUrl = `ws://${url.hostname}:${wsPort}/mcp?server=${encodeURIComponent(serverName)}`;
 		return new McpService(serverName, wsUrl);
 	}

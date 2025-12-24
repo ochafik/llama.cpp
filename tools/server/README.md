@@ -1729,15 +1729,14 @@ LLAMA_MCP_CONFIG=/path/to/mcp.json ./llama-server -m model.gguf
 
 #### MCP WebSocket Port
 
-MCP uses WebSocket on HTTP port + 1 (default: 8081 when HTTP is on 8080). The frontend discovers the actual port via the `/mcp/ws-port` endpoint.
+MCP uses WebSocket on HTTP port + 1 (default: 8081 when HTTP is on 8080).
 
 #### MCP API Endpoints
 
 | Endpoint | Description |
 |----------|-------------|
 | `GET /mcp/servers` | List available MCP servers from configuration |
-| `GET /mcp/ws-port` | Get the WebSocket port number |
-| `WS /mcp?server=<name>` | WebSocket connection (on port+1) |
+| `WS /mcp?server=<name>` | WebSocket connection (on HTTP port + 1) |
 
 #### MCP Protocol
 
