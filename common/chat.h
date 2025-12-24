@@ -152,7 +152,7 @@ struct common_chat_templates_inputs {
     std::map<std::string, std::string> chat_template_kwargs;
     bool add_bos = false;
     bool add_eos = false;
-    // When true, use new modular PEG parsers from chat-parsers/*.cpp instead of legacy monolithic parsers
+    // When true, use experimental new PEG parsers from chat-parsers/*.cpp instead of legacy parsers
     bool experimental_new_parsers = false;
 };
 

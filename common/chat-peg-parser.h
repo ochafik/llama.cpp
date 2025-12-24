@@ -163,7 +163,7 @@ inline common_peg_arena build_chat_peg_constructed_parser(const std::function<co
 }
 
 // ============================================================================
-// New functional mapper infrastructure (used by modular implementations in chat-parsers/)
+// Functional mapper infrastructure (used by experimental new PEG parsers in chat-parsers/)
 // ============================================================================
 
 // Mapper types: curried functions for AST-to-message conversion

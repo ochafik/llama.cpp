@@ -18,7 +18,7 @@ static std::string_view trim_trailing_space(std::string_view sv, int max = -1) {
 }
 
 // ============================================================================
-// Original class-based mapper implementations (used by legacy code in chat.cpp)
+// Class-based mapper implementations (used by legacy parsers in chat.cpp)
 // ============================================================================
 
 void common_chat_peg_mapper::from_ast(const common_peg_ast_arena & arena, const common_peg_parse_result & result) {
@@ -127,7 +127,7 @@ void common_chat_peg_constructed_mapper::map(const common_peg_ast_node & node) {
 }
 
 // ============================================================================
-// New functional mapper implementations (used by modular code in chat-parsers/)
+// Functional mapper implementations (used by experimental new PEG parsers in chat-parsers/)
 // ============================================================================
 
 // Helper: Convert JSON value to arguments string (handles object, string, null cases)

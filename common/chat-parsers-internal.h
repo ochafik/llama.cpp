@@ -44,7 +44,7 @@ struct templates_params {
     bool add_bos;
     bool add_eos;
     bool is_inference = true;
-    // When true, use new modular PEG parsers from chat-parsers/*.cpp instead of legacy monolithic parsers
+    // When true, use experimental new PEG parsers from chat-parsers/*.cpp instead of legacy parsers
     bool experimental_new_parsers = false;
 };
 
@@ -140,7 +140,7 @@ typedef common_chat_params (*common_chat_format_init_fn_llama3x)(
     bool allow_python_tag_builtin_tools
 );
 
-// Forward declarations for modular PEG parser implementations in chat-parsers/
+// Forward declarations for experimental new PEG parser implementations in chat-parsers/
 common_chat_params common_chat_params_init_mistral_nemo_peg(const common_chat_template & tmpl, const struct templates_params & inputs);
 common_chat_params common_chat_params_init_magistral_peg(const common_chat_template & tmpl, const struct templates_params & inputs);
 common_chat_params common_chat_params_init_command_r7b_peg(const common_chat_template & tmpl, const struct templates_params & inputs);

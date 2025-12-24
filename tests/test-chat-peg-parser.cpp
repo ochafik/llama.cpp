@@ -417,7 +417,8 @@ static void test_example_native(testing & t) {
             t.assert_true("success", result.success());
 
             common_chat_msg msg;
-            apply_chat_peg_mapper(common_chat_peg_native_mapper(), ctx.ast, result, msg);
+            common_chat_peg_native_mapper mapper(msg);
+            mapper.from_ast(ctx.ast, result);
 
             t.assert_equal("content equal", tc.expect_content, msg.content);
             t.assert_equal("reasoning equal", tc.expect_reasoning, msg.reasoning_content);
@@ -539,7 +540,8 @@ static void test_example_qwen3_coder(testing & t) {
             }
 
             common_chat_msg msg;
-            apply_chat_peg_mapper(common_chat_peg_constructed_mapper(), ctx.ast, result, msg);
+            common_chat_peg_constructed_mapper mapper(msg);
+            mapper.from_ast(ctx.ast, result);
 
             //t.log("Input: " + input);
             t.log("===========================================");
@@ -597,7 +599,8 @@ void test_command7_parser_compare(testing & t) {
         auto result = p.parse(ctx);
 
         common_chat_msg msg;
-        apply_chat_peg_mapper(common_chat_peg_native_mapper(), ctx.ast, result, msg);
+        common_chat_peg_native_mapper mapper(msg);
+        mapper.from_ast(ctx.ast, result);
 
         if (print_results) {
             std::cout << "== Parsed (new) ==\n";

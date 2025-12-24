@@ -476,7 +476,7 @@ struct common_params {
     common_reasoning_format reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
     int reasoning_budget = -1;
     bool prefill_assistant = true;                                                                          // if true, any trailing assistant message will be prefilled into the response
-    bool experimental_new_parsers = false;                                                                           // experimental: use new modular PEG parsers instead of legacy
+    bool experimental_new_parsers = false;                                                                           // use experimental new PEG parsers instead of legacy
 
     std::vector<std::string> api_keys;
 
