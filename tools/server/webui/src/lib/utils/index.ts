@@ -104,5 +104,5 @@ export {
 	formatMcpToolName,
 	createToolResultContent,
 	getContentTypeLabel,
-	type ToolResultInfo,
+	type ToolResultInfo
 } from './tool-results';

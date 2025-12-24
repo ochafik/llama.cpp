@@ -13,8 +13,27 @@
 static constexpr size_t WS_MAX_PAYLOAD_SIZE    = 10 * 1024 * 1024;   // 10MB per frame
 static constexpr size_t WS_MAX_MESSAGE_SIZE    = 100 * 1024 * 1024;  // 100MB assembled message
 static constexpr size_t WS_MAX_RECEIVE_BUFFER  = 16 * 1024 * 1024;   // 16MB receive buffer
-static constexpr size_t WS_MAX_CONNECTIONS     = 1000;               // Max concurrent connections
+static constexpr size_t WS_MAX_CONNECTIONS_DEFAULT = 10;             // Default max concurrent connections
 static constexpr int    WS_SOCKET_TIMEOUT_SEC  = 30;                 // Socket read timeout
+
+// Get max connections limit from environment or use default
+static size_t get_ws_max_connections() {
+    static size_t cached = 0;
+    static bool initialized = false;
+    if (!initialized) {
+        const char * env = std::getenv("LLAMA_WS_MAX_CONNECTIONS");
+        if (env) {
+            cached = static_cast<size_t>(std::atoi(env));
+            if (cached == 0) {
+                cached = WS_MAX_CONNECTIONS_DEFAULT;
+            }
+        } else {
+            cached = WS_MAX_CONNECTIONS_DEFAULT;
+        }
+        initialized = true;
+    }
+    return cached;
+}
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -618,9 +637,10 @@ void server_ws_context::Impl::accept_loop() {
         // Check connection limit to prevent resource exhaustion
         {
             std::lock_guard<std::mutex> lock(connections_mutex);
-            if (connections.size() >= WS_MAX_CONNECTIONS) {
+            const size_t max_conn = get_ws_max_connections();
+            if (connections.size() >= max_conn) {
                 SRV_WRN("%s: connection limit reached (%zu), rejecting\n",
-                        __func__, WS_MAX_CONNECTIONS);
+                        __func__, max_conn);
                 const char * response = "HTTP/1.1 503 Service Unavailable\r\n\r\n";
                 send(client_sock, response, strlen(response), 0);
 #ifdef _WIN32

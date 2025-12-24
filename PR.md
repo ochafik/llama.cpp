@@ -47,7 +47,7 @@ Use `--mcp-config /path/to/mcp.json` to override default config location.
 
 WebSocket server includes:
 - Payload size limits (10MB per frame, 100MB assembled)
-- Connection limits (1000 max concurrent)
+- Connection limits (10 by default, configurable via `LLAMA_WS_MAX_CONNECTIONS`)
 - Socket timeouts (30s) to prevent slow-loris attacks
 - RFC 6455 compliance (RSV bits, client masking)
 
