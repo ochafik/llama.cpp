@@ -164,7 +164,7 @@ def test_completion_with_required_tool_tiny_fast(template_name: str, tool: dict,
     # ("fireworks-ai-llama-3-firefunction-v2",          PYTHON_TOOL,          "code"),
 
 ])
-def test_completion_with_required_tool_tiny_slow(template_file: str, tool: dict, argument_key: str | None, stream: CompletionMode):
+def test_completion_with_required_tool_tiny_slow(template_name: str, tool: dict, argument_key: str | None, stream: CompletionMode):
     global server
     n_predict = 512
     # server = ServerPreset.stories15m_moe()
