@@ -193,7 +193,10 @@ export class McpService {
 			console.log(`[MCP] McpService.callTool: got response for ${name} in ${duration}ms`, response);
 
 			if (response.isError) {
-				console.error(`[MCP] McpService.callTool: tool returned error for ${name}`, response.content);
+				console.error(
+					`[MCP] McpService.callTool: tool returned error for ${name}`,
+					response.content
+				);
 				throw new Error(`Tool call failed: ${JSON.stringify(response.content)}`);
 			}
 

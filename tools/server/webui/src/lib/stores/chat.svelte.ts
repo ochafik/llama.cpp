@@ -1549,7 +1549,9 @@ class ChatStore {
 			console.log(`[MCP] executeToolCalls: executing ${fn.name}`, fn.arguments);
 			try {
 				const args = JSON.parse(fn.arguments);
-				console.log(`[MCP] executeToolCalls: calling conversationMcpStore.executeToolCall for ${fn.name}`);
+				console.log(
+					`[MCP] executeToolCalls: calling conversationMcpStore.executeToolCall for ${fn.name}`
+				);
 				const result = await conversationMcpStore.executeToolCall(fn.name, args);
 				console.log(`[MCP] executeToolCalls: got result for ${fn.name}`, result);
 
