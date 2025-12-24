@@ -92,6 +92,7 @@ class ServerProcess:
     draft_min: int | None = None
     draft_max: int | None = None
     no_webui: bool | None = None
+    webui_mcp: bool | None = None
     jinja: bool | None = None
     reasoning_format: Literal['deepseek', 'none', 'nothink'] | None = None
     reasoning_budget: int | None = None
@@ -213,6 +214,8 @@ class ServerProcess:
             server_args.extend(["--draft-min", self.draft_min])
         if self.no_webui:
             server_args.append("--no-webui")
+        if self.webui_mcp:
+            server_args.append("--webui-mcp")
         if self.no_models_autoload:
             server_args.append("--no-models-autoload")
         if self.jinja:
