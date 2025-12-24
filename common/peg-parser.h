@@ -53,6 +53,8 @@ class common_peg_parser {
     common_peg_parser operator<<(const std::string & str) const;
     common_peg_parser operator|(const char * str) const;
     common_peg_parser operator|(const std::string & str) const;
+
+    // common_peg_parser tag(const std::string & tag) const;
 };
 
 common_peg_parser operator+(const char * str, const common_peg_parser & p);
@@ -73,7 +75,7 @@ const char * common_peg_parse_result_type_name(common_peg_parse_result_type type
 struct common_peg_ast_node {
     common_peg_ast_id id;
     std::string rule;
-    std::string tag;
+    int tag_id = 0;  // Enum value for switch-based dispatch (0 = no tag)
     size_t start;
     size_t end;
     std::string_view text;
@@ -91,7 +93,7 @@ class common_peg_ast_arena {
   public:
     common_peg_ast_id add_node(
         const std::string & rule,
-        const std::string & tag,
+        int tag_id,
         size_t start,
         size_t end,
         std::string_view text,
@@ -99,7 +101,7 @@ class common_peg_ast_arena {
         bool is_partial = false
     ) {
         common_peg_ast_id id = nodes_.size();
-        nodes_.push_back({id, rule, tag, start, end, text, std::move(children), is_partial});
+        nodes_.push_back({id, rule, tag_id, start, end, text, std::move(children), is_partial});
         return id;
     }
 
@@ -210,6 +212,7 @@ struct common_peg_json_string_parser {};
 
 struct common_peg_until_parser {
     std::vector<std::string> delimiters;
+    int max_length = -1;  // -1 for unbounded, otherwise max characters to match
 };
 
 struct common_peg_schema_parser {
@@ -237,7 +240,7 @@ struct common_peg_atomic_parser {
 
 struct common_peg_tag_parser {
     common_peg_parser_id child;
-    std::string tag;
+    int tag_id = 0;
 };
 
 // Variant holding all parser types
@@ -385,11 +388,20 @@ class common_peg_parser_builder {
 
     // Matches all characters until a delimiter is found (delimiter not consumed).
     //   S -> (!delim .)*
-    common_peg_parser until(const std::string & delimiter) { return add(common_peg_until_parser{{delimiter}}); }
+    common_peg_parser until(const std::string & delimiter) { return add(common_peg_until_parser{{delimiter}, -1}); }
 
     // Matches all characters until one of the delimiters in the list is found (delimiter not consumed).
     //   S -> (!delim .)*
-    common_peg_parser until_one_of(const std::vector<std::string> & delimiters) { return add(common_peg_until_parser{delimiters}); }
+    common_peg_parser until_one_of(const std::vector<std::string> & delimiters) { return add(common_peg_until_parser{delimiters, -1}); }
+
+    // Matches up to max_length characters until a delimiter is found (delimiter not consumed).
+    // Grammar enforces both the delimiter exclusion and the length limit.
+    //   S -> (!delim .){0,max_length}
+    common_peg_parser until_max(const std::string & delimiter, int max_length) { return add(common_peg_until_parser{{delimiter}, max_length}); }
+
+    // Matches up to max_length characters until one of the delimiters is found (delimiter not consumed).
+    //   S -> (!delim .){0,max_length}
+    common_peg_parser until_max_one_of(const std::vector<std::string> & delimiters, int max_length) { return add(common_peg_until_parser{delimiters, max_length}); }
 
     // Matches everything
     //   S -> .*
@@ -448,7 +460,20 @@ class common_peg_parser_builder {
 
     // Tags create nodes in the generated AST for semantic purposes.
     // Unlike rules, you can tag multiple nodes with the same tag.
-    common_peg_parser tag(const std::string & tag, const common_peg_parser & p) { return add(common_peg_tag_parser{p.id(), tag}); }
+    // Use an enum cast to int for type-safe tags.
+    common_peg_parser tag(int tag_id, const common_peg_parser & p) { return add(common_peg_tag_parser{p.id(), tag_id}); }
+
+    // Convenience: tag with enum
+    template<typename E, typename = std::enable_if_t<std::is_enum_v<E>>>
+    common_peg_parser tag(E tag_id, const common_peg_parser & p) { return tag(static_cast<int>(tag_id), p); }
+
+    // Atomic tag: combines atomic() and tag() - common pattern
+    template<typename E, typename = std::enable_if_t<std::is_enum_v<E>>>
+    common_peg_parser atomic_tag(E tag_id, const common_peg_parser & p) { return atomic(tag(tag_id, p)); }
+
+    // Literal tag: combines atomic(), tag(), and literal() - for tagging string literals
+    template<typename E, typename = std::enable_if_t<std::is_enum_v<E>>>
+    common_peg_parser literal_tag(E tag_id, const std::string & s) { return atomic(tag(tag_id, literal(s))); }
 
     void set_root(const common_peg_parser & p);
 

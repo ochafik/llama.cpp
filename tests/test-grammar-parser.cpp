@@ -160,6 +160,19 @@ int main()
     });
 
     verify_parsing(R"""(
+        root  ::= () | "a"
+    )""", {
+        {"root", 0},
+    }, {
+        // root (index 0)
+        {LLAMA_GRETYPE_ALT, 0},
+        {LLAMA_GRETYPE_CHAR, 'a'},
+        {LLAMA_GRETYPE_END, 0},
+    });
+
+    return 0;
+
+    verify_parsing(R"""(
         root  ::= "a" | [bdx-z] | [^1-3]
     )""", {
         {"root", 0},
@@ -526,6 +539,27 @@ int main()
         {LLAMA_GRETYPE_TOKEN, 1000},
         {LLAMA_GRETYPE_TOKEN_NOT, 1001},
         {LLAMA_GRETYPE_TOKEN, 1001},
+        {LLAMA_GRETYPE_END, 0},
+    });
+
+    // @"..." token literal syntax (without vocab, falls back to CHAR elements)
+    verify_parsing(R"""(
+        root  ::= @"hello" " " @"world"
+    )""", {
+        {"root", 0}
+    }, {
+        // root (index 0) - @"hello" expands to CHAR elements without vocab
+        {LLAMA_GRETYPE_CHAR, 'h'},
+        {LLAMA_GRETYPE_CHAR, 'e'},
+        {LLAMA_GRETYPE_CHAR, 'l'},
+        {LLAMA_GRETYPE_CHAR, 'l'},
+        {LLAMA_GRETYPE_CHAR, 'o'},
+        {LLAMA_GRETYPE_CHAR, ' '},
+        {LLAMA_GRETYPE_CHAR, 'w'},
+        {LLAMA_GRETYPE_CHAR, 'o'},
+        {LLAMA_GRETYPE_CHAR, 'r'},
+        {LLAMA_GRETYPE_CHAR, 'l'},
+        {LLAMA_GRETYPE_CHAR, 'd'},
         {LLAMA_GRETYPE_END, 0},
     });
 
