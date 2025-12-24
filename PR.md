@@ -82,6 +82,7 @@ WebSocket server includes:
 - [x] Remove unused JSON-RPC types (~170 lines)
 - [ ] Coordinate with @allozaur / #17487 on best approach
 - [ ] Consider SSE/streamable HTTP vs custom WS (per @ngxson feedback)
+- [ ] Evaluate `subprocess.h` for `server-mproc.cpp` (per @ngxson feedback) - current gaps: no cwd support, blocking async reads, no graceful shutdown
 - [ ] Support more tool result types (images, resources)
 
 ## Possible follow-ups
