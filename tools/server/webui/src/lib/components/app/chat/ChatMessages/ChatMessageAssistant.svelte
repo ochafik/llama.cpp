@@ -239,6 +239,24 @@
 		</div>
 	{/if}
 
+	<!-- Tool calls with unified display (always shown when present) -->
+	{#if toolCalls && toolCalls.length > 0}
+		<div class="mt-4 space-y-2">
+			{#each toolCalls as toolCall, index (toolCall.id ?? `${index}`)}
+				<ToolCallBlock
+					{toolCall}
+					result={getToolCallResult(toolCall)}
+					status={getToolCallStatus(toolCall)}
+					durationMs={getToolCallDuration(toolCall)}
+				/>
+			{/each}
+		</div>
+	{:else if fallbackToolCalls}
+		<div class="mt-4 text-xs text-muted-foreground">
+			<pre class="overflow-x-auto rounded bg-muted/30 p-2">{fallbackToolCalls}</pre>
+		</div>
+	{/if}
+
 	<div class="info my-6 grid gap-4">
 		{#if displayedModel()}
 			<div class="inline-flex flex-wrap items-start gap-2 text-xs text-muted-foreground">
@@ -264,24 +282,6 @@
 			</div>
 		{/if}
 	</div>
-
-	<!-- Tool calls with unified display (always shown when present) -->
-	{#if toolCalls && toolCalls.length > 0}
-		<div class="mt-4 space-y-2">
-			{#each toolCalls as toolCall, index (toolCall.id ?? `${index}`)}
-				<ToolCallBlock
-					{toolCall}
-					result={getToolCallResult(toolCall)}
-					status={getToolCallStatus(toolCall)}
-					durationMs={getToolCallDuration(toolCall)}
-				/>
-			{/each}
-		</div>
-	{:else if fallbackToolCalls}
-		<div class="mt-4 text-xs text-muted-foreground">
-			<pre class="overflow-x-auto rounded bg-muted/30 p-2">{fallbackToolCalls}</pre>
-		</div>
-	{/if}
 
 	{#if message.timestamp && !isEditing}
 		<ChatMessageActions

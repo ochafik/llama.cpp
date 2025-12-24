@@ -164,50 +164,50 @@
 
 		<!-- Status / Result Section (only show when calling or have results) -->
 		{#if status !== 'streaming'}
-		<div class="border-t">
-			{#if status === 'calling'}
-				<div class="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
-					<Loader2 class="h-3 w-3 animate-spin" />
-					<span>Calling tool...</span>
-				</div>
-			{:else if status === 'complete' && formattedResult()}
-				<button
-					type="button"
-					onclick={() => (isResultExpanded = !isResultExpanded)}
-					class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition hover:bg-muted-foreground/5"
-				>
+			<div class="border-t">
+				{#if status === 'calling'}
+					<div class="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+						<Loader2 class="h-3 w-3 animate-spin" />
+						<span>Calling tool...</span>
+					</div>
+				{:else if status === 'complete' && formattedResult()}
+					<button
+						type="button"
+						onclick={() => (isResultExpanded = !isResultExpanded)}
+						class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition hover:bg-muted-foreground/5"
+					>
+						{#if isResultExpanded}
+							<ChevronDown class="h-3 w-3 text-muted-foreground" />
+						{:else}
+							<ChevronRight class="h-3 w-3 text-muted-foreground" />
+						{/if}
+						<span>Result</span>
+						{#if durationMs !== null && durationMs > 0}
+							<span class="text-muted-foreground">({formatDuration(durationMs)})</span>
+						{/if}
+					</button>
 					{#if isResultExpanded}
-						<ChevronDown class="h-3 w-3 text-muted-foreground" />
-					{:else}
-						<ChevronRight class="h-3 w-3 text-muted-foreground" />
+						<div class="px-3 pb-2">
+							<pre
+								class="max-h-64 overflow-x-auto overflow-y-auto rounded bg-background/50 p-2 text-xs break-words whitespace-pre-wrap">{formattedResult()}</pre>
+						</div>
 					{/if}
-					<span>Result</span>
-					{#if durationMs !== null && durationMs > 0}
-						<span class="text-muted-foreground">({formatDuration(durationMs)})</span>
-					{/if}
-				</button>
-				{#if isResultExpanded}
-					<div class="px-3 pb-2">
-						<pre
-							class="max-h-64 overflow-x-auto overflow-y-auto rounded bg-background/50 p-2 text-xs break-words whitespace-pre-wrap">{formattedResult()}</pre>
+				{:else if status === 'error'}
+					<div class="px-3 py-2">
+						<div class="text-xs text-destructive">
+							{result || 'Tool call failed'}
+						</div>
+					</div>
+				{:else if status === 'complete' && !formattedResult()}
+					<div class="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+						<CheckCircle2 class="h-3 w-3" />
+						<span>Completed (no result)</span>
+						{#if durationMs !== null && durationMs > 0}
+							<span>({formatDuration(durationMs)})</span>
+						{/if}
 					</div>
 				{/if}
-			{:else if status === 'error'}
-				<div class="px-3 py-2">
-					<div class="text-xs text-destructive">
-						{result || 'Tool call failed'}
-					</div>
-				</div>
-			{:else if status === 'complete' && !formattedResult()}
-				<div class="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
-					<CheckCircle2 class="h-3 w-3" />
-					<span>Completed (no result)</span>
-					{#if durationMs !== null && durationMs > 0}
-						<span>({formatDuration(durationMs)})</span>
-					{/if}
-				</div>
-			{/if}
-		</div>
+			</div>
 		{/if}
 	</div>
 </div>
