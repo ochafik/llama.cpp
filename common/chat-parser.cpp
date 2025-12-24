@@ -1,5 +1,4 @@
 #include "chat-parser.h"
-#include "chat-parser-xml-toolcall.h"
 #include "chat-peg-parser.h"
 #include "common.h"
 #include "log.h"
@@ -1070,20 +1069,6 @@ static void common_chat_parse_glm_4_5(common_chat_msg_parser & builder) {
     builder.consume_reasoning_with_xml_tool_calls(form, "<think>", "</think>");
 }
 
-static void common_chat_parse_seed_oss(common_chat_msg_parser & builder) {
-    static const xml_tool_call_format form {
-        /* form.scope_start = */ "<seed:tool_call>",
-        /* form.tool_start  = */ "<function=",
-        /* form.tool_sep    = */ ">",
-        /* form.key_start   = */ "<parameter=",
-        /* form.key_val_sep = */ ">",
-        /* form.val_end     = */ "</parameter>",
-        /* form.tool_end    = */ "</function>",
-        /* form.scope_end   = */ "</seed:tool_call>",
-    };
-    builder.consume_reasoning_with_xml_tool_calls(form, "<seed:think>", "</seed:think>");
-}
-
 static void common_chat_parse_firefunction_v2(common_chat_msg_parser & builder) {
     if (!builder.syntax().parse_tool_calls) {
         builder.add_content(builder.consume_rest());
@@ -1396,13 +1381,27 @@ static void common_chat_parse_lfm2(common_chat_msg_parser & builder) {
     }
 }
 
+static void common_chat_parse_seed_oss(common_chat_msg_parser & builder) {
+    static const xml_tool_call_format form {
+        /* form.scope_start = */ "<seed:tool_call>",
+        /* form.tool_start  = */ "<function=",
+        /* form.tool_sep    = */ ">",
+        /* form.key_start   = */ "<parameter=",
+        /* form.key_val_sep = */ ">",
+        /* form.val_end     = */ "</parameter>",
+        /* form.tool_end    = */ "</function>",
+        /* form.scope_end   = */ "</seed:tool_call>",
+    };
+    builder.consume_reasoning_with_xml_tool_calls(form, "<seed:think>", "</seed:think>");
+}
+
 static void common_chat_parse_content_only(common_chat_msg_parser & builder) {
     builder.try_parse_reasoning("<think>", "</think>");
     builder.add_content(builder.consume_rest());
 }
 
 static void common_chat_parse(common_chat_msg_parser & builder) {
-    LOG_INF("Parsing input with format %s: %s\n", common_chat_format_name(builder.syntax().format), builder.input().c_str());
+    LOG_DBG("Parsing input with format %s: %s\n", common_chat_format_name(builder.syntax().format), builder.input().c_str());
 
     switch (builder.syntax().format) {
         case COMMON_CHAT_FORMAT_CONTENT_ONLY:
@@ -1450,6 +1449,9 @@ static void common_chat_parse(common_chat_msg_parser & builder) {
         case COMMON_CHAT_FORMAT_GPT_OSS:
             common_chat_parse_gpt_oss(builder);
             break;
+        case COMMON_CHAT_FORMAT_SEED_OSS:
+            common_chat_parse_seed_oss(builder);
+            break;
         case COMMON_CHAT_FORMAT_NEMOTRON_V2:
             common_chat_parse_nemotron_v2(builder);
             break;
@@ -1458,9 +1460,6 @@ static void common_chat_parse(common_chat_msg_parser & builder) {
             break;
         case COMMON_CHAT_FORMAT_LFM2_WITH_JSON_TOOLS:
             common_chat_parse_lfm2(builder);
-            break;
-        case COMMON_CHAT_FORMAT_SEED_OSS:
-            common_chat_parse_seed_oss(builder);
             break;
         case COMMON_CHAT_FORMAT_MINIMAX_M2:
             common_chat_parse_minimax_m2(builder);
@@ -1471,11 +1470,11 @@ static void common_chat_parse(common_chat_msg_parser & builder) {
         case COMMON_CHAT_FORMAT_KIMI_K2:
             common_chat_parse_kimi_k2(builder);
             break;
-        case COMMON_CHAT_FORMAT_APRIEL_1_5:
-            common_chat_parse_apriel_1_5(builder);
-            break;
         case COMMON_CHAT_FORMAT_QWEN3_CODER_XML:
             common_chat_parse_qwen3_coder_xml(builder);
+            break;
+        case COMMON_CHAT_FORMAT_APRIEL_1_5:
+            common_chat_parse_apriel_1_5(builder);
             break;
         case COMMON_CHAT_FORMAT_XIAOMI_MIMO:
             common_chat_parse_xiaomi_mimo(builder);
@@ -1487,12 +1486,18 @@ static void common_chat_parse(common_chat_msg_parser & builder) {
 }
 
 common_chat_msg common_chat_parse(const std::string & input, bool is_partial, const common_chat_syntax & syntax) {
-    // If a PEG parser is available, use it (this is the preferred path - always provide a parser)
+    // Use PEG parser if format explicitly requires it (backward compatibility)
+    if (syntax.format == COMMON_CHAT_FORMAT_PEG_SIMPLE ||
+        syntax.format == COMMON_CHAT_FORMAT_PEG_NATIVE ||
+        syntax.format == COMMON_CHAT_FORMAT_PEG_CONSTRUCTED) {
+        return common_chat_peg_parse(syntax.parser, input, is_partial, syntax);
+    }
+    // Also use PEG parser if one is provided (new preferred path)
     if (!syntax.parser.empty()) {
         return common_chat_peg_parse(syntax.parser, input, is_partial, syntax);
     }
 
-    // Legacy non-PEG parsing path for older formats (deprecated - prefer using PEG parser)
+    // Legacy non-PEG parsing path
     common_chat_msg_parser builder(input, is_partial, syntax);
     try {
         common_chat_parse(builder);
@@ -1516,7 +1521,7 @@ common_chat_msg common_chat_peg_parse(const common_peg_arena & parser, const std
         throw std::runtime_error("Failed to parse due to missing parser definition.");
     }
 
-    LOG_INF("Parsing input with format %s: %s\n", common_chat_format_name(syntax.format), input.c_str());
+    LOG_DBG("Parsing input with format %s: %s\n", common_chat_format_name(syntax.format), input.c_str());
 
     common_peg_parse_context ctx(input, is_partial);
     auto result = parser.parse(ctx);
@@ -1527,16 +1532,25 @@ common_chat_msg common_chat_peg_parse(const common_peg_arena & parser, const std
     common_chat_msg msg;
     msg.role = "assistant";
 
-    // Select mapper based on format
-    // - constructed_mapper: XML-style formats with arg key/value pairs
-    // - short_form_mapper: Apertus short-form tool calls
-    // - native_mapper: JSON-based formats (default)
-    if (syntax.format == COMMON_CHAT_FORMAT_NEMOTRON_V3 ||
-        syntax.format == COMMON_CHAT_FORMAT_SEED_OSS ||
-        syntax.format == COMMON_CHAT_FORMAT_MINIMAX_M2 ||
-        syntax.format == COMMON_CHAT_FORMAT_QWEN3_CODER_XML ||
-        syntax.format == COMMON_CHAT_FORMAT_GLM_4_5 ||
-        syntax.format == COMMON_CHAT_FORMAT_LLAMA_3_X_WITH_BUILTIN_TOOLS) {
+    // Backward-compatible mapper selection: use explicit PEG format types first
+    if (syntax.format == COMMON_CHAT_FORMAT_PEG_NATIVE) {
+        auto mapper = common_chat_peg_native_mapper(msg);
+        mapper.from_ast(ctx.ast, result);
+    } else if (syntax.format == COMMON_CHAT_FORMAT_PEG_CONSTRUCTED) {
+        auto mapper = common_chat_peg_constructed_mapper(msg);
+        mapper.from_ast(ctx.ast, result);
+    } else if (syntax.format == COMMON_CHAT_FORMAT_PEG_SIMPLE) {
+        // Generic mapper for simple PEG format
+        auto mapper = common_chat_peg_mapper(msg);
+        mapper.from_ast(ctx.ast, result);
+    }
+    // Format-specific mapper selection for new parsers
+    else if (syntax.format == COMMON_CHAT_FORMAT_NEMOTRON_V3 ||
+             syntax.format == COMMON_CHAT_FORMAT_SEED_OSS ||
+             syntax.format == COMMON_CHAT_FORMAT_MINIMAX_M2 ||
+             syntax.format == COMMON_CHAT_FORMAT_QWEN3_CODER_XML ||
+             syntax.format == COMMON_CHAT_FORMAT_GLM_4_5 ||
+             syntax.format == COMMON_CHAT_FORMAT_LLAMA_3_X_WITH_BUILTIN_TOOLS) {
         apply_chat_peg_mapper(common_chat_peg_constructed_mapper_func(), ctx.ast, result, msg);
     } else if (syntax.format == COMMON_CHAT_FORMAT_APERTUS ||
                syntax.format == COMMON_CHAT_FORMAT_APRIEL_1_5) {

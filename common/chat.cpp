@@ -662,6 +662,9 @@ const char * common_chat_format_name(common_chat_format format) {
         case COMMON_CHAT_FORMAT_QWEN3_CODER_XML: return "Qwen3 Coder";
         case COMMON_CHAT_FORMAT_APRIEL_1_5: return "Apriel 1.5";
         case COMMON_CHAT_FORMAT_XIAOMI_MIMO: return "Xiaomi MiMo";
+        case COMMON_CHAT_FORMAT_PEG_SIMPLE: return "peg-simple";
+        case COMMON_CHAT_FORMAT_PEG_NATIVE: return "peg-native";
+        case COMMON_CHAT_FORMAT_PEG_CONSTRUCTED: return "peg-constructed";
         default:
             throw std::runtime_error("Unknown chat format");
     }
@@ -689,17 +692,6 @@ common_reasoning_format common_reasoning_format_from_name(const std::string & fo
         return COMMON_REASONING_FORMAT_DEEPSEEK_LEGACY;
     }
     throw std::runtime_error("Unknown reasoning format: " + format);
-}
-
-
-// Case-insensitive find
-static size_t ifind_string(const std::string & haystack, const std::string & needle, size_t pos = 0) {
-    auto it = std::search(
-        haystack.begin() + pos, haystack.end(),
-        needle.begin(), needle.end(),
-        [](char a, char b) { return std::tolower(a) == std::tolower(b); }
-    );
-    return (it == haystack.end()) ? std::string::npos : std::distance(haystack.begin(), it);
 }
 
 static common_chat_params common_chat_params_init_without_tools(const common_chat_template & tmpl, const struct templates_params & inputs) {
@@ -864,6 +856,17 @@ static common_chat_params common_chat_params_init_mistral_nemo(const common_chat
     data.format = COMMON_CHAT_FORMAT_MISTRAL_NEMO;
     return data;
 }
+
+// Case-insensitive find
+static size_t ifind_string(const std::string & haystack, const std::string & needle, size_t pos = 0) {
+    auto it = std::search(
+        haystack.begin() + pos, haystack.end(),
+        needle.begin(), needle.end(),
+        [](char a, char b) { return std::tolower(a) == std::tolower(b); }
+    );
+    return (it == haystack.end()) ? std::string::npos : std::distance(haystack.begin(), it);
+}
+
 static common_chat_params common_chat_params_init_lfm2(const common_chat_template & tmpl, const struct templates_params & inputs) {
     if (inputs.use_new_parsers) {
         return common_chat_params_init_lfm2_peg(tmpl, inputs);
