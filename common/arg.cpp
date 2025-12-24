@@ -2872,7 +2872,7 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
         {"--experimental-new-parsers"},
         "use experimental modular PEG parsers instead of legacy monolithic parsers for chat template output parsing (default: disabled)",
         [](common_params & params) {
-            params.use_new_parsers = true;
+            params.experimental_new_parsers = true;
         }
     ).set_examples({LLAMA_EXAMPLE_SERVER}).set_env("LLAMA_ARG_EXPERIMENTAL_NEW_PARSERS"));
     add_opt(common_arg(

@@ -127,6 +127,7 @@ enum common_chat_format {
     COMMON_CHAT_FORMAT_APRIEL_1_5,
     COMMON_CHAT_FORMAT_XIAOMI_MIMO,
 
+    // TODO(ochafik): remove once --experimental-new-parsers graduates.
     // These are intended to be parsed by the PEG parser
     COMMON_CHAT_FORMAT_PEG_SIMPLE,
     COMMON_CHAT_FORMAT_PEG_NATIVE,
@@ -152,7 +153,7 @@ struct common_chat_templates_inputs {
     bool add_bos = false;
     bool add_eos = false;
     // When true, use new modular PEG parsers from chat-parsers/*.cpp instead of legacy monolithic parsers
-    bool use_new_parsers = false;
+    bool experimental_new_parsers = false;
 };
 
 struct common_chat_params {

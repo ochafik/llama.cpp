@@ -412,7 +412,7 @@ static delta_data init_delta(const struct common_chat_templates * tmpls, const s
         inputs.reasoning_format = reasoning_format;
     }
     // Set parser implementation based on enum (env var can override for backwards compat)
-    inputs.use_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL) || std::getenv("LLAMA_USE_NEW_PARSERS");
+    inputs.experimental_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL) || std::getenv("LLAMA_USE_NEW_PARSERS");
     if (customize_inputs) {
         customize_inputs(inputs);
     }
@@ -1102,7 +1102,7 @@ static void test_peg_parser(common_chat_templates * tmpls, const std::function<v
         tc.expect.role = "assistant";
     }
     // PEG parser tests always use new parsers
-    tc.params.use_new_parsers = true;
+    tc.params.experimental_new_parsers = true;
 
     auto parser = make_peg_parser(tmpls, tc.params);
 
@@ -2378,7 +2378,7 @@ static void test_template_output_parsers(chat_parser_impl impl) {
         inputs_tools_reasoning.messages = {message_user};
         inputs_tools_reasoning.tools = {special_function_tool, process_data_tool};
         inputs_tools_reasoning.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
-        inputs_tools_reasoning.use_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
+        inputs_tools_reasoning.experimental_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
 
         // Get syntax with parser for tool call tests (with reasoning)
         auto params = common_chat_templates_apply(tmpls.get(), inputs_tools_reasoning);
@@ -3008,14 +3008,14 @@ Hey there!<|im_end|>
         inputs_tools_no_reasoning.messages = {message_user};
         inputs_tools_no_reasoning.tools = {special_function_tool, special_function_tool_with_optional_param};
         inputs_tools_no_reasoning.reasoning_format = COMMON_REASONING_FORMAT_NONE;
-        inputs_tools_no_reasoning.use_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
+        inputs_tools_no_reasoning.experimental_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
 
         // Create inputs with reasoning enabled for reasoning tests
         common_chat_templates_inputs inputs_tools_reasoning;
         inputs_tools_reasoning.messages = {message_user};
         inputs_tools_reasoning.tools = {special_function_tool, special_function_tool_with_optional_param};
         inputs_tools_reasoning.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
-        inputs_tools_reasoning.use_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
+        inputs_tools_reasoning.experimental_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
 
         // Get syntax for content-only tests
         auto params_no_reasoning = common_chat_templates_apply(tmpls.get(), inputs_tools_no_reasoning);
@@ -3142,7 +3142,7 @@ Hey there!<|im_end|>
         glm_inputs_no_reasoning.messages = {message_user};
         glm_inputs_no_reasoning.tools = glm_4_5_tools;
         glm_inputs_no_reasoning.enable_thinking = true;
-        glm_inputs_no_reasoning.use_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
+        glm_inputs_no_reasoning.experimental_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
         auto glm_params_no_reasoning = common_chat_templates_apply(tmpls.get(), glm_inputs_no_reasoning);
         auto glm_syntax = get_syntax(glm_params_no_reasoning);
 
@@ -3152,7 +3152,7 @@ Hey there!<|im_end|>
         glm_inputs_reasoning.tools = glm_4_5_tools;
         glm_inputs_reasoning.enable_thinking = true;
         glm_inputs_reasoning.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
-        glm_inputs_reasoning.use_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
+        glm_inputs_reasoning.experimental_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
         auto glm_params_reasoning = common_chat_templates_apply(tmpls.get(), glm_inputs_reasoning);
         auto glm_syntax_reasoning = get_syntax(glm_params_reasoning, COMMON_REASONING_FORMAT_DEEPSEEK);
 
@@ -3274,7 +3274,7 @@ Hey there!<|im_end|>
         kimi_inputs.tools = kimi_k2_tools;
         kimi_inputs.enable_thinking = true;
         kimi_inputs.parallel_tool_calls = true;
-        kimi_inputs.use_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
+        kimi_inputs.experimental_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
         auto kimi_params = common_chat_templates_apply(tmpls.get(), kimi_inputs);
         auto kimi_syntax = get_syntax(kimi_params);
 
@@ -3285,7 +3285,7 @@ Hey there!<|im_end|>
         kimi_inputs_reasoning.enable_thinking = true;
         kimi_inputs_reasoning.parallel_tool_calls = true;
         kimi_inputs_reasoning.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
-        kimi_inputs_reasoning.use_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
+        kimi_inputs_reasoning.experimental_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
         auto kimi_params_reasoning = common_chat_templates_apply(tmpls.get(), kimi_inputs_reasoning);
         auto kimi_syntax_reasoning = get_syntax(kimi_params_reasoning, COMMON_REASONING_FORMAT_DEEPSEEK);
 
@@ -3293,7 +3293,7 @@ Hey there!<|im_end|>
         common_chat_templates_inputs kimi_inputs_content_only;
         kimi_inputs_content_only.messages = {message_user};
         kimi_inputs_content_only.enable_thinking = true;
-        kimi_inputs_content_only.use_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
+        kimi_inputs_content_only.experimental_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
         auto kimi_params_content = common_chat_templates_apply(tmpls.get(), kimi_inputs_content_only);
         auto kimi_syntax_content = get_syntax(kimi_params_content);
 
@@ -3302,7 +3302,7 @@ Hey there!<|im_end|>
         kimi_inputs_content_reasoning.messages = {message_user};
         kimi_inputs_content_reasoning.enable_thinking = true;
         kimi_inputs_content_reasoning.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
-        kimi_inputs_content_reasoning.use_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
+        kimi_inputs_content_reasoning.experimental_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
         auto kimi_params_content_reasoning = common_chat_templates_apply(tmpls.get(), kimi_inputs_content_reasoning);
         auto kimi_syntax_content_reasoning = get_syntax(kimi_params_content_reasoning, COMMON_REASONING_FORMAT_DEEPSEEK);
 
@@ -4788,7 +4788,7 @@ static bool test_systematic_needle_streaming() {
                                        scenario.tool_choice, reasoning_format,
                                        [&](common_chat_templates_inputs & inputs) {
                                            inputs.parallel_tool_calls = scenario.parallel_tool_calls;
-                                           inputs.use_new_parsers = true;  // Needle tests use new PEG parsers
+                                           inputs.experimental_new_parsers = true;  // Needle tests use new PEG parsers
                                            if (scenario.force_disable_thinking) {
                                                inputs.enable_thinking = false;
                                                inputs.reasoning_format = COMMON_REASONING_FORMAT_NONE;

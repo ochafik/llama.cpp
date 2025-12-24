@@ -653,6 +653,7 @@ void common_chat_msg_parser::clear_tools() {
  * All common_chat_parse_* moved from chat.cpp to chat-parser.cpp below
  * to reduce incremental compile time for parser changes.
  */
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_generic(common_chat_msg_parser & builder) {
     if (!builder.syntax().parse_tool_calls) {
         builder.add_content(builder.consume_rest());
@@ -685,6 +686,7 @@ static void common_chat_parse_generic(common_chat_msg_parser & builder) {
     }
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_mistral_nemo(common_chat_msg_parser & builder) {
     if (!builder.syntax().parse_tool_calls) {
         builder.add_content(builder.consume_rest());
@@ -695,6 +697,7 @@ static void common_chat_parse_mistral_nemo(common_chat_msg_parser & builder) {
     parse_prefixed_json_tool_call_array(builder, prefix);
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_magistral(common_chat_msg_parser & builder) {
     builder.try_parse_reasoning("[THINK]", "[/THINK]");
 
@@ -707,6 +710,7 @@ static void common_chat_parse_magistral(common_chat_msg_parser & builder) {
     parse_prefixed_json_tool_call_array(builder, prefix);
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_command_r7b(common_chat_msg_parser & builder) {
     builder.try_parse_reasoning("<|START_THINKING|>", "<|END_THINKING|>");
 
@@ -740,6 +744,7 @@ static void common_chat_parse_command_r7b(common_chat_msg_parser & builder) {
     }
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_llama_3_1(common_chat_msg_parser & builder, bool with_builtin_tools = false) {
     builder.try_parse_reasoning("<think>", "</think>");
 
@@ -798,6 +803,7 @@ static void common_chat_parse_llama_3_1(common_chat_msg_parser & builder, bool w
 
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_deepseek_r1(common_chat_msg_parser & builder) {
     builder.try_parse_reasoning("<think>", "</think>");
     if (!builder.syntax().parse_tool_calls) {
@@ -819,6 +825,8 @@ static void common_chat_parse_deepseek_r1(common_chat_msg_parser & builder) {
         tool_calls_end);
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_deepseek_v3_1_content(common_chat_msg_parser & builder) {
     static const common_regex function_regex("(?:<｜tool▁call▁begin｜>)?([^\\n<]+)(?:<｜tool▁sep｜>)");
 
@@ -843,6 +851,7 @@ static void common_chat_parse_deepseek_v3_1_content(common_chat_msg_parser & bui
         tool_calls_end);
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_deepseek_v3_1(common_chat_msg_parser & builder) {
     // DeepSeek V3.1 outputs reasoning content between "<think>" and "</think>" tags, followed by regular content
     // First try to parse using the standard reasoning parsing method
@@ -879,6 +888,7 @@ static void common_chat_parse_deepseek_v3_1(common_chat_msg_parser & builder) {
     }
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_minimax_m2(common_chat_msg_parser & builder) {
     static const xml_tool_call_format form {
         /* form.scope_start = */ "<minimax:tool_call>",
@@ -893,6 +903,7 @@ static void common_chat_parse_minimax_m2(common_chat_msg_parser & builder) {
     builder.consume_reasoning_with_xml_tool_calls(form, "<think>", "</think>");
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_qwen3_coder_xml(common_chat_msg_parser & builder) {
     static const xml_tool_call_format form = ([]() {
         xml_tool_call_format form {};
@@ -910,6 +921,7 @@ static void common_chat_parse_qwen3_coder_xml(common_chat_msg_parser & builder) 
     builder.consume_reasoning_with_xml_tool_calls(form);
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_kimi_k2(common_chat_msg_parser & builder) {
     static const xml_tool_call_format form = ([]() {
         xml_tool_call_format form {};
@@ -929,6 +941,7 @@ static void common_chat_parse_kimi_k2(common_chat_msg_parser & builder) {
     builder.consume_reasoning_with_xml_tool_calls(form, "<think>", "</think>");
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_apriel_1_5(common_chat_msg_parser & builder) {
     static const xml_tool_call_format form = ([]() {
         xml_tool_call_format form {};
@@ -948,6 +961,7 @@ static void common_chat_parse_apriel_1_5(common_chat_msg_parser & builder) {
     builder.consume_reasoning_with_xml_tool_calls(form, "<thinking>", "</thinking>");
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_xiaomi_mimo(common_chat_msg_parser & builder) {
     static const xml_tool_call_format form = ([]() {
         xml_tool_call_format form {};
@@ -966,6 +980,7 @@ static void common_chat_parse_xiaomi_mimo(common_chat_msg_parser & builder) {
     builder.consume_reasoning_with_xml_tool_calls(form);
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_gpt_oss(common_chat_msg_parser & builder) {
     static const std::string constraint = "(?: (<\\|constrain\\|>)?([a-zA-Z0-9_-]+))";
     static const std::string recipient("(?: to=functions\\.([^<\\s]+))");
@@ -1054,6 +1069,7 @@ static void common_chat_parse_gpt_oss(common_chat_msg_parser & builder) {
     }
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_glm_4_5(common_chat_msg_parser & builder) {
     static const xml_tool_call_format form {
         /* form.scope_start  = */ "",
@@ -1069,6 +1085,7 @@ static void common_chat_parse_glm_4_5(common_chat_msg_parser & builder) {
     builder.consume_reasoning_with_xml_tool_calls(form, "<think>", "</think>");
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_firefunction_v2(common_chat_msg_parser & builder) {
     if (!builder.syntax().parse_tool_calls) {
         builder.add_content(builder.consume_rest());
@@ -1078,6 +1095,7 @@ static void common_chat_parse_firefunction_v2(common_chat_msg_parser & builder) 
     parse_prefixed_json_tool_call_array(builder, prefix, /* rstrip_prefix= */ 1);
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_functionary_v3_2(common_chat_msg_parser & builder) {
     static const common_regex function_regex_start_only(R"((\w+\n\{|python\n|all\n))");
     static const common_regex function_regex(R"(>>>(\w+\n\{|python\n|all\n))");
@@ -1107,6 +1125,7 @@ static void common_chat_parse_functionary_v3_2(common_chat_msg_parser & builder)
         });
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_functionary_v3_1_llama_3_1(common_chat_msg_parser & builder) {
     if (!builder.syntax().parse_tool_calls) {
         builder.add_content(builder.consume_rest());
@@ -1133,6 +1152,7 @@ static void common_chat_parse_functionary_v3_1_llama_3_1(common_chat_msg_parser 
     }
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_hermes_2_pro(common_chat_msg_parser & builder) {
     builder.try_parse_reasoning("<think>", "</think>");
     if (!builder.syntax().parse_tool_calls) {
@@ -1211,6 +1231,7 @@ static void common_chat_parse_hermes_2_pro(common_chat_msg_parser & builder) {
     builder.add_content(builder.consume_rest());
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_granite(common_chat_msg_parser & builder) {
     // Parse thinking tags
     static const common_regex start_think_regex(regex_escape("<think>"));
@@ -1258,6 +1279,7 @@ static void common_chat_parse_granite(common_chat_msg_parser & builder) {
     }
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_nemotron_v2(common_chat_msg_parser & builder) {
     // Parse thinking tags
     builder.try_parse_reasoning("<think>", "</think>");
@@ -1285,6 +1307,7 @@ static void common_chat_parse_nemotron_v2(common_chat_msg_parser & builder) {
     builder.add_content(builder.consume_rest());
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_apertus(common_chat_msg_parser & builder) {
     // Parse thinking tags
     builder.try_parse_reasoning("<|inner_prefix|>", "<|inner_suffix|>");
@@ -1317,6 +1340,7 @@ static void common_chat_parse_apertus(common_chat_msg_parser & builder) {
 }
 
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_lfm2(common_chat_msg_parser & builder) {
     if (!builder.syntax().parse_tool_calls) {
         builder.add_content(builder.consume_rest());
@@ -1381,6 +1405,7 @@ static void common_chat_parse_lfm2(common_chat_msg_parser & builder) {
     }
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_seed_oss(common_chat_msg_parser & builder) {
     static const xml_tool_call_format form {
         /* form.scope_start = */ "<seed:tool_call>",
@@ -1486,6 +1511,7 @@ static void common_chat_parse(common_chat_msg_parser & builder) {
 }
 
 common_chat_msg common_chat_parse(const std::string & input, bool is_partial, const common_chat_syntax & syntax) {
+    // TODO(ochafik): remove once --experimental-new-parsers graduates.
     // Use PEG parser if format explicitly requires it (backward compatibility)
     if (syntax.format == COMMON_CHAT_FORMAT_PEG_SIMPLE ||
         syntax.format == COMMON_CHAT_FORMAT_PEG_NATIVE ||
@@ -1497,6 +1523,7 @@ common_chat_msg common_chat_parse(const std::string & input, bool is_partial, co
         return common_chat_peg_parse(syntax.parser, input, is_partial, syntax);
     }
 
+    // TODO(ochafik): remove once --experimental-new-parsers graduates.
     // Legacy non-PEG parsing path
     common_chat_msg_parser builder(input, is_partial, syntax);
     try {
@@ -1532,6 +1559,7 @@ common_chat_msg common_chat_peg_parse(const common_peg_arena & parser, const std
     common_chat_msg msg;
     msg.role = "assistant";
 
+    // TODO(ochafik): remove once --experimental-new-parsers graduates.
     // Backward-compatible mapper selection: use explicit PEG format types first
     if (syntax.format == COMMON_CHAT_FORMAT_PEG_NATIVE) {
         auto mapper = common_chat_peg_native_mapper(msg);

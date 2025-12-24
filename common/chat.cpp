@@ -709,7 +709,7 @@ static common_chat_params common_chat_params_init_without_tools(const common_cha
     }
 
     // Build a basic content-only parser (use new parsers if flag is set)
-    if (inputs.use_new_parsers) {
+    if (inputs.experimental_new_parsers) {
         auto parser = build_chat_peg_parser([&](auto & p) {
             using Tag = common_chat_peg_tag;
             return p.tag(Tag::CONTENT, p.rest());
@@ -720,8 +720,9 @@ static common_chat_params common_chat_params_init_without_tools(const common_cha
     return data;
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static common_chat_params common_chat_params_init_generic(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    if (inputs.use_new_parsers) {
+    if (inputs.experimental_new_parsers) {
         return common_chat_params_init_generic_peg(tmpl, inputs);
     }
     common_chat_params data;
@@ -809,8 +810,9 @@ static common_chat_params common_chat_params_init_generic(const common_chat_temp
     return data;
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static common_chat_params common_chat_params_init_mistral_nemo(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    if (inputs.use_new_parsers) {
+    if (inputs.experimental_new_parsers) {
         return common_chat_params_init_mistral_nemo_peg(tmpl, inputs);
     }
     common_chat_params data;
@@ -867,8 +869,9 @@ static size_t ifind_string(const std::string & haystack, const std::string & nee
     return (it == haystack.end()) ? std::string::npos : std::distance(haystack.begin(), it);
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static common_chat_params common_chat_params_init_lfm2(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    if (inputs.use_new_parsers) {
+    if (inputs.experimental_new_parsers) {
         return common_chat_params_init_lfm2_peg(tmpl, inputs);
     }
     common_chat_params data;
@@ -979,8 +982,9 @@ static common_chat_params common_chat_params_init_lfm2(const common_chat_templat
     return data;
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static common_chat_params common_chat_params_init_ministral_3(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    if (inputs.use_new_parsers) {
+    if (inputs.experimental_new_parsers) {
         return common_chat_params_init_ministral_3_peg(tmpl, inputs);
     }
     common_chat_params data;
@@ -1094,8 +1098,9 @@ static common_chat_params common_chat_params_init_ministral_3(const common_chat_
     return data;
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static common_chat_params common_chat_params_init_magistral(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    if (inputs.use_new_parsers) {
+    if (inputs.experimental_new_parsers) {
         return common_chat_params_init_magistral_peg(tmpl, inputs);
     }
     common_chat_params data;
@@ -1155,8 +1160,9 @@ static common_chat_params common_chat_params_init_magistral(const common_chat_te
     return data;
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static common_chat_params common_chat_params_init_command_r7b(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    if (inputs.use_new_parsers) {
+    if (inputs.experimental_new_parsers) {
         return common_chat_params_init_command_r7b_peg(tmpl, inputs);
     }
     common_chat_params data;
@@ -1257,8 +1263,9 @@ static void expect_tool_parameters(const std::string & name, const json & parame
     }
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static common_chat_params common_chat_params_init_llama_3_x(const common_chat_template & tmpl, const struct templates_params & inputs, bool allow_python_tag_builtin_tools) {
-    if (inputs.use_new_parsers) {
+    if (inputs.experimental_new_parsers) {
         return common_chat_params_init_llama_3_x_peg(tmpl, inputs, allow_python_tag_builtin_tools);
     }
     auto builtin_tools = json::array();
@@ -1340,8 +1347,9 @@ static common_chat_params common_chat_params_init_llama_3_x(const common_chat_te
     return data;
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static common_chat_params common_chat_params_init_nemotron_v2(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    if (inputs.use_new_parsers) {
+    if (inputs.experimental_new_parsers) {
         return common_chat_params_init_nemotron_v2_peg(tmpl, inputs);
     }
     common_chat_params data;
@@ -1404,8 +1412,9 @@ static common_chat_params common_chat_params_init_nemotron_v2(const common_chat_
     return data;
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static common_chat_params common_chat_params_init_nemotron_v3(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    if (inputs.use_new_parsers) {
+    if (inputs.experimental_new_parsers) {
         return common_chat_params_init_nemotron_v3_peg(tmpl, inputs);
     }
     common_chat_params data;
@@ -1524,8 +1533,9 @@ static common_chat_params common_chat_params_init_nemotron_v3(const common_chat_
 }
 
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static common_chat_params common_chat_params_init_apertus(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    if (inputs.use_new_parsers) {
+    if (inputs.experimental_new_parsers) {
         return common_chat_params_init_apertus_peg(tmpl, inputs);
     }
     common_chat_params data;
@@ -1596,8 +1606,9 @@ static common_chat_params common_chat_params_init_apertus(const common_chat_temp
     return data;
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static common_chat_params common_chat_params_init_deepseek_r1(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    if (inputs.use_new_parsers) {
+    if (inputs.experimental_new_parsers) {
         return common_chat_params_init_deepseek_r1_peg(tmpl, inputs);
     }
     common_chat_params data;
@@ -1673,8 +1684,9 @@ static common_chat_params common_chat_params_init_deepseek_r1(const common_chat_
     return data;
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static common_chat_params common_chat_params_init_deepseek_v3_1(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    if (inputs.use_new_parsers) {
+    if (inputs.experimental_new_parsers) {
         return common_chat_params_init_deepseek_v3_1_peg(tmpl, inputs);
     }
     common_chat_params data;
@@ -1741,7 +1753,7 @@ static common_chat_params common_chat_params_init_deepseek_v3_1(const common_cha
 }
 
 static common_chat_params common_chat_params_init_minimax_m2(const common_chat_template & tmpl, const struct templates_params & params) {
-    if (params.use_new_parsers) {
+    if (params.experimental_new_parsers) {
         return common_chat_params_init_minimax_m2_peg(tmpl, params);
     }
     common_chat_params data;
@@ -1786,7 +1798,7 @@ static common_chat_params common_chat_params_init_minimax_m2(const common_chat_t
 }
 
 static common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_template & tmpl, const struct templates_params & params) {
-    if (params.use_new_parsers) {
+    if (params.experimental_new_parsers) {
         return common_chat_params_init_qwen3_coder_xml_peg(tmpl, params);
     }
     common_chat_params data;
@@ -1821,7 +1833,7 @@ static common_chat_params common_chat_params_init_qwen3_coder_xml(const common_c
 }
 
 static common_chat_params common_chat_params_init_kimi_k2(const common_chat_template & tmpl, const struct templates_params & params) {
-    if (params.use_new_parsers) {
+    if (params.experimental_new_parsers) {
         return common_chat_params_init_kimi_k2_peg(tmpl, params);
     }
     common_chat_params data;
@@ -1868,7 +1880,7 @@ static common_chat_params common_chat_params_init_kimi_k2(const common_chat_temp
 }
 
 static common_chat_params common_chat_params_init_apriel_1_5(const common_chat_template & tmpl, const struct templates_params & params) {
-    if (params.use_new_parsers) {
+    if (params.experimental_new_parsers) {
         return common_chat_params_init_apriel_1_5_peg(tmpl, params);
     }
     common_chat_params data;
@@ -1906,7 +1918,7 @@ static common_chat_params common_chat_params_init_apriel_1_5(const common_chat_t
 }
 
 static common_chat_params common_chat_params_init_xiaomi_mimo(const common_chat_template & tmpl, const struct templates_params & params) {
-    if (params.use_new_parsers) {
+    if (params.experimental_new_parsers) {
         return common_chat_params_init_xiaomi_mimo_peg(tmpl, params);
     }
     common_chat_params data;
@@ -1940,8 +1952,9 @@ static common_chat_params common_chat_params_init_xiaomi_mimo(const common_chat_
     return data;
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static common_chat_params common_chat_params_init_gpt_oss(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    if (inputs.use_new_parsers) {
+    if (inputs.experimental_new_parsers) {
         return common_chat_params_init_gpt_oss_peg(tmpl, inputs);
     }
     common_chat_params data;
@@ -2090,8 +2103,9 @@ static common_chat_params common_chat_params_init_gpt_oss(const common_chat_temp
     return data;
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    if (inputs.use_new_parsers) {
+    if (inputs.experimental_new_parsers) {
         return common_chat_params_init_glm_4_5_peg(tmpl, inputs);
     }
     common_chat_params data;
@@ -2172,8 +2186,9 @@ static common_chat_params common_chat_params_init_glm_4_5(const common_chat_temp
     return data;
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static common_chat_params common_chat_params_init_firefunction_v2(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    if (inputs.use_new_parsers) {
+    if (inputs.experimental_new_parsers) {
         return common_chat_params_init_firefunction_v2_peg(tmpl, inputs);
     }
     LOG_DBG("%s\n", __func__);
@@ -2223,8 +2238,9 @@ static common_chat_params common_chat_params_init_firefunction_v2(const common_c
     return data;
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static common_chat_params common_chat_params_init_functionary_v3_2(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    if (inputs.use_new_parsers) {
+    if (inputs.experimental_new_parsers) {
         return common_chat_params_init_functionary_v3_2_peg(tmpl, inputs);
     }
     // >>>all\nlet's call functions>>>fn1\n{"arg1": 1...}\n>>>fn2\n{"arg1": 1...}...
@@ -2276,8 +2292,9 @@ static common_chat_params common_chat_params_init_functionary_v3_2(const common_
     return data;
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    if (inputs.use_new_parsers) {
+    if (inputs.experimental_new_parsers) {
         return common_chat_params_init_functionary_v3_1_llama_3_1_peg(tmpl, inputs);
     }
     // https://github.com/MeetKai/functionary/blob/main/tests/prompt_test_v3-llama3.1.txt
@@ -2338,8 +2355,9 @@ static common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1(con
     return data;
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static common_chat_params common_chat_params_init_hermes_2_pro(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    if (inputs.use_new_parsers) {
+    if (inputs.experimental_new_parsers) {
         return common_chat_params_init_hermes_2_pro_peg(tmpl, inputs);
     }
     common_chat_params data;
@@ -2457,8 +2475,9 @@ static common_chat_params common_chat_params_init_hermes_2_pro(const common_chat
     return data;
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static common_chat_params common_chat_params_init_granite(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    if (inputs.use_new_parsers) {
+    if (inputs.experimental_new_parsers) {
         return common_chat_params_init_granite_peg(tmpl, inputs);
     }
     common_chat_params data;
@@ -2542,7 +2561,7 @@ static common_chat_params common_chat_params_init_granite(const common_chat_temp
 }
 
 static common_chat_params common_chat_params_init_seed_oss(const common_chat_template & tmpl, const struct templates_params & params) {
-    if (params.use_new_parsers) {
+    if (params.experimental_new_parsers) {
         return common_chat_params_init_seed_oss_peg(tmpl, params);
     }
     common_chat_params data;
@@ -2625,7 +2644,7 @@ static common_chat_params common_chat_templates_apply_jinja(
     params.now = inputs.now;
     params.add_bos = tmpls->add_bos;
     params.add_eos = tmpls->add_eos;
-    params.use_new_parsers = inputs.use_new_parsers;
+    params.experimental_new_parsers = inputs.experimental_new_parsers;
 
     params.extra_context = json::object();
     for (auto el : inputs.chat_template_kwargs) {
