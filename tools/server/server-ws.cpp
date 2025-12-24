@@ -16,7 +16,7 @@ static constexpr size_t WS_MAX_PAYLOAD_SIZE    = 10 * 1024 * 1024;   // 10MB per
 static constexpr size_t WS_MAX_MESSAGE_SIZE    = 100 * 1024 * 1024;  // 100MB assembled message
 static constexpr size_t WS_MAX_RECEIVE_BUFFER  = 16 * 1024 * 1024;   // 16MB receive buffer
 static constexpr size_t WS_MAX_CONNECTIONS_DEFAULT = 10;             // Default max concurrent connections
-static constexpr int    WS_SOCKET_TIMEOUT_SEC  = 5;                  // Socket read timeout
+static constexpr int    WS_SOCKET_TIMEOUT_SEC  = 300;                // 5 minute socket read timeout (MCP tools can be slow)
 
 // Get max connections limit from environment or use default
 static size_t get_ws_max_connections() {
