@@ -567,20 +567,6 @@ class ServerPreset:
         server.seed = 42
         return server
 
-    @staticmethod
-    def nemotron_nano() -> ServerProcess:
-        server = ServerProcess()
-        server.offline = True # will be downloaded by load_all()
-        server.model_hf_repo = "unsloth/Nemotron-3-Nano-30B-A3B-GGUF"
-        server.model_hf_file = None
-        server.model_alias = "nemotron-nano"
-        server.n_ctx = 2048
-        server.n_batch = 32
-        server.n_slots = 1
-        server.seed = 42
-        server.jinja = True
-        return server
-
 
 def parallel_function_calls(function_list: List[Tuple[Callable[..., Any], Tuple[Any, ...]]]) -> List[Any]:
     """
