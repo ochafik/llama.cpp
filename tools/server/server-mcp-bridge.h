@@ -42,7 +42,6 @@ private:
         std::shared_ptr<server_ws_connection> conn;
         std::unique_ptr<mcp_process> process;
         std::string server_name;
-        bool initialized = false;  // true after initialize handshake
     };
 
     mutable std::mutex mutex_;
@@ -74,9 +73,6 @@ private:
 
     // Forward message from MCP process to WebSocket
     void forward_to_ws(connection_state * state, const std::string & message);
-
-    // Handle MCP initialize request
-    void handle_initialize(connection_state * state, const mcp_jsonrpc_request & req);
 
     // Send JSON-RPC response
     void send_response(connection_state * state, const mcp_jsonrpc_response & resp);

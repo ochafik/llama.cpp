@@ -147,6 +147,11 @@ class McpStore {
 					await new Promise((resolve) => setTimeout(resolve, 500));
 				}
 
+				// WebSocket port is always HTTP port + 1
+				const url = new URL(window.location.href);
+				const wsPort = parseInt(url.port) + 1;
+				const wsUrl = `ws://${window.location.hostname}:${wsPort}/mcp?server=${encodeURIComponent(serverName)}`;
+
 				// Increment connection generation for this server
 				const currentGen = (this.connectionGenerations.get(serverName) ?? 0) + 1;
 				this.connectionGenerations.set(serverName, currentGen);
@@ -163,19 +168,6 @@ class McpStore {
 				});
 
 				try {
-					// Fetch the actual WebSocket port from the server
-					let wsPort: number;
-					try {
-						const response = await fetch('/mcp/ws-port');
-						const data = await response.json();
-						wsPort = data.port;
-					} catch {
-						// Fallback: assume WebSocket is on HTTP port + 1
-						const url = new URL(window.location.href);
-						wsPort = parseInt(url.port) + 1;
-					}
-
-					const wsUrl = `ws://${window.location.hostname}:${wsPort}/mcp?server=${encodeURIComponent(serverName)}`;
 					const service = new McpService(serverName, wsUrl);
 					this.services.set(serverName, service);
 
@@ -219,14 +211,8 @@ class McpStore {
 						}
 						console.log(`[MCP] Connection opened for: ${serverName}`);
 
-						// Initialize MCP session
+						// Fetch initial tools (SDK handles initialization automatically)
 						try {
-							await service.initialize({
-								roots: { listChanged: true },
-								sampling: {}
-							});
-
-							// Fetch initial tools
 							const tools = await service.listTools();
 							console.log(`[MCP] Got ${tools.length} tools for ${serverName}`);
 							if (this.connectionGenerations.get(serverName) !== currentGen) {
@@ -292,7 +278,7 @@ class McpStore {
 	/**
 	 * Disconnect from an MCP server
 	 */
-	disconnect(serverName: string): void {
+	async disconnect(serverName: string): Promise<void> {
 		// Clear connection promise to allow reconnect
 		this.connectionPromises.delete(serverName);
 		// Clear connecting state (reactive)
@@ -300,9 +286,7 @@ class McpStore {
 
 		const service = this.services.get(serverName);
 		if (service) {
-			service.disconnect();
-			// DO NOT remove from services map yet - the WebSocket close is async
-			// The service will be removed when a new connection is created or explicitly cleaned up
+			await service.disconnect();
 		}
 		// Create a new SvelteMap to trigger Svelte 5 reactivity
 		const newConnections = new SvelteMap(this.connections);
@@ -314,9 +298,9 @@ class McpStore {
 	/**
 	 * Disconnect from all MCP servers
 	 */
-	disconnectAll(): void {
+	async disconnectAll(): Promise<void> {
 		for (const serverName of this.services.keys()) {
-			this.disconnect(serverName);
+			await this.disconnect(serverName);
 		}
 	}
 

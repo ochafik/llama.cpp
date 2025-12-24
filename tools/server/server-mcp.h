@@ -113,18 +113,6 @@ struct mcp_jsonrpc_notification {
     }
 };
 
-// MCP Tool types
-struct mcp_tool {
-    std::string name;
-    std::string description;
-    json input_schema;  // JSON Schema
-};
-
-// MCP Tool call
-struct mcp_tool_call {
-    std::string name;
-    json arguments;  // Arguments map
-};
 
 // MCP Server configuration (from JSON config file)
 struct mcp_server_config {
@@ -238,20 +226,3 @@ struct mcp_config {
     }
 };
 
-// MCP protocol methods (from MCP spec)
-namespace mcp_methods {
-    constexpr const char * INITIALIZE        = "initialize";
-    constexpr const char * INITIALIZED       = "notifications/initialized";
-    constexpr const char * LIST_TOOLS        = "tools/list";
-    constexpr const char * CALL_TOOL         = "tools/call";
-    constexpr const char * LIST_RESOURCES    = "resources/list";
-    constexpr const char * READ_RESOURCE     = "resources/read";
-    constexpr const char * LIST_PROMPTS      = "prompts/list";
-    constexpr const char * GET_PROMPT        = "prompts/get";
-    constexpr const char * SET_LEVEL         = "logging/set_level";
-    constexpr const char * TOOLS_CHANGED     = "notifications/tools/list_changed";
-    constexpr const char * RESOURCES_CHANGED = "notifications/resources/list_changed";
-    constexpr const char * PROMPTS_CHANGED   = "notifications/prompts/list_changed";
-    constexpr const char * CANCEL_REQUEST    = "requests/cancel";
-    constexpr const char * PING              = "ping";
-}

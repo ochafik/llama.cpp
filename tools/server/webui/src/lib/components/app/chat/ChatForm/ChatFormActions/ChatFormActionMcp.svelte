@@ -44,6 +44,7 @@
 	// Server data
 	let availableServers = $state<string[]>([]);
 	let loadingServers = $state(true);
+	let mcpEnabled = $state(false); // MCP is disabled by default until we confirm it's available
 	let fetchingTools = new SvelteSet<string>();
 
 	// Connection preferences (persisted)
@@ -193,9 +194,17 @@
 		loadingServers = true;
 		try {
 			const response = await fetch('/mcp/servers');
+			if (response.status === 404) {
+				// MCP is not enabled on the server
+				console.log('[MCP] MCP is not enabled on the server (404)');
+				mcpEnabled = false;
+				availableServers = [];
+				return;
+			}
 			if (!response.ok) throw new Error('Failed to fetch MCP servers');
 			const data = await response.json();
 			availableServers = data.servers.map((s: { name: string }) => s.name);
+			mcpEnabled = true;
 
 			// Auto-connect servers if requested and not explicitly disconnected
 			if (autoConnect && availableServers.length > 0) {
@@ -219,6 +228,7 @@
 			}
 		} catch (error) {
 			console.error('Failed to fetch MCP servers:', error);
+			mcpEnabled = false;
 			availableServers = [];
 		} finally {
 			loadingServers = false;
@@ -335,6 +345,7 @@
 	}
 </script>
 
+{#if mcpEnabled}
 <div class={cn('relative inline-flex flex-col items-end gap-1', className)}>
 	<Popover.Root bind:open={isOpen} onOpenChange={handleOpenChange}>
 		<Popover.Trigger
@@ -590,6 +601,7 @@
 		</Popover.Content>
 	</Popover.Root>
 </div>
+{/if}
 
 <style>
 	@keyframes shimmer {

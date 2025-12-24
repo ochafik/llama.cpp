@@ -56,7 +56,6 @@ void server_mcp_bridge::on_connection_opened(std::shared_ptr<server_ws_connectio
     auto state = std::make_unique<connection_state>();
     state->conn = conn;
     state->server_name = server_name;
-    state->initialized = false;
 
     void * conn_ptr = conn.get();
     {
@@ -87,12 +86,6 @@ void server_mcp_bridge::on_connection_message(std::shared_ptr<server_ws_connecti
         // Check if it's a request (has id) or notification (no id)
         if (j.contains("id")) {
             mcp_jsonrpc_request req(j);
-
-            // Handle initialize request
-            if (req.method == mcp_methods::INITIALIZE) {
-                handle_initialize(state, req);
-                return;
-            }
 
             // Forward to MCP process
             forward_to_mcp(state, message);
@@ -231,14 +224,6 @@ void server_mcp_bridge::forward_to_ws(connection_state * state, const std::strin
     state->conn->send(message);
 }
 
-void server_mcp_bridge::handle_initialize(connection_state * state, const mcp_jsonrpc_request & req) {
-    // Process initialize request
-    // We need to forward this to the MCP process
-    forward_to_mcp(state, req.to_json().dump());
-
-    // Mark as initialized (the actual response will come from the MCP process)
-    state->initialized = true;
-}
 
 void server_mcp_bridge::send_response(connection_state * state, const mcp_jsonrpc_response & resp) {
     if (!state->conn) {

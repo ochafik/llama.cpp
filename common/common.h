@@ -487,6 +487,7 @@ struct common_params {
 
     // MCP config
     std::string mcp_config = "";                                                                           // NOLINT
+    bool webui_mcp = false;                                                                               // NOLINT
 
     // webui configs
     bool webui = true;
