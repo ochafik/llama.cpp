@@ -62,7 +62,7 @@ common_chat_params common_chat_params_init_nemotron_v3(const common_chat_templat
 
         // Response format parser
         if (inputs.json_schema.is_object() && !inputs.json_schema.empty()) {
-            return assistant_prefix + reasoning + p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema)) + assistant_suffix;
+            return assistant_prefix + reasoning + after_reasoning_gap + p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema)) + assistant_suffix;
         }
 
         // Tool call parser
@@ -71,23 +71,83 @@ common_chat_params common_chat_params_init_nemotron_v3(const common_chat_templat
             foreach_function(inputs.tools, [&](const json & tool) {
                 const auto & function = tool.at("function");
                 std::string name = function.at("name");
+                auto parameters = function.at("parameters");
+
+                auto schema_info = common_schema_info();
+                schema_info.resolve_refs(parameters);
+
+                // Check if additional properties are allowed
+                bool allow_additional = false;
+                bool additional_has_schema = false;
+                json additional_schema;
+                if (parameters.contains("additionalProperties")) {
+                    const auto & additional = parameters.at("additionalProperties");
+                    if (additional.is_boolean()) {
+                        allow_additional = additional.get<bool>();
+                    } else if (additional.is_object()) {
+                        allow_additional = true;
+                        additional_has_schema = true;
+                        additional_schema = additional;
+                    }
+                }
 
                 auto tool_open = "<function=" + p.literal_tag(Tag::TOOL_NAME, name) + ">\n";
                 auto tool_close = p.literal("</function>\n");
-                auto arg_body = p.rule("nemotron-v3-arg-body", p.until_one_of({
-                    "\n</parameter>",
-                    "\n<parameter=",
-                    "\n</function>"
-                }));
-                auto generic_arg = p.rule("tool-" + name + "-arg-generic",
-                    p.atomic_tag(Tag::TOOL_ARG_OPEN,
-                        p.literal("<parameter=")
-                        + p.tag(Tag::TOOL_ARG_NAME, p.until(">"))
-                        + p.literal(">\n"))
-                    + p.tag(Tag::TOOL_ARG_STRING_VALUE, arg_body)
-                    + p.optional(newline)
-                    + p.optional(p.atomic_tag(Tag::TOOL_ARG_CLOSE, p.literal("</parameter>\n"))));
-                auto args = p.repeat(generic_arg, 0, -1);
+
+                // Build schema-aware parameter rules
+                auto args = p.sequence();
+                foreach_parameter(function, [&](const std::string & param_name, const json & param_schema, bool /* is_required */) {
+                    auto rule_name = "nemotron-v3-" + name + "-arg-" + param_name;
+                    auto arg_body = p.rule(rule_name + "-body", p.until_one_of({
+                        "\n</parameter>",
+                        "\n<parameter=",
+                        "\n</function>"
+                    }));
+
+                    auto arg_value = p.eps();
+                    if (schema_info.resolves_to_string(param_schema)) {
+                        arg_value = p.tag(Tag::TOOL_ARG_STRING_VALUE, arg_body);
+                    } else {
+                        // For non-string types, parse as JSON value
+                        arg_value = p.tag(Tag::TOOL_ARG_JSON_VALUE, arg_body);
+                    }
+
+                    auto arg_rule = p.rule(rule_name,
+                        p.atomic_tag(Tag::TOOL_ARG_OPEN,
+                            p.literal("<parameter=")
+                            + p.literal_tag(Tag::TOOL_ARG_NAME, param_name)
+                            + p.literal(">\n"))
+                        + arg_value
+                        + p.optional(newline)
+                        + p.optional(p.atomic_tag(Tag::TOOL_ARG_CLOSE, p.literal("</parameter>\n"))));
+                    args += p.repeat(arg_rule, /* min = */ 0, /* max = */ 1);
+                });
+
+                // Add generic rule for additional properties
+                if (allow_additional) {
+                    auto generic_arg_body = p.rule("nemotron-v3-" + name + "-arg-generic-body", p.until_one_of({
+                        "\n</parameter>",
+                        "\n<parameter=",
+                        "\n</function>"
+                    }));
+
+                    auto additional_value = p.eps();
+                    if (additional_has_schema && !schema_info.resolves_to_string(additional_schema)) {
+                        additional_value = p.tag(Tag::TOOL_ARG_JSON_VALUE, generic_arg_body);
+                    } else {
+                        additional_value = p.tag(Tag::TOOL_ARG_STRING_VALUE, generic_arg_body);
+                    }
+
+                    auto generic_arg = p.rule("nemotron-v3-" + name + "-arg-generic",
+                        p.atomic_tag(Tag::TOOL_ARG_OPEN,
+                            p.literal("<parameter=")
+                            + p.tag(Tag::TOOL_ARG_NAME, p.until(">"))
+                            + p.literal(">\n"))
+                        + additional_value
+                        + p.optional(newline)
+                        + p.optional(p.atomic_tag(Tag::TOOL_ARG_CLOSE, p.literal("</parameter>\n"))));
+                    args += p.repeat(generic_arg, 0, -1);
+                }
 
                 tool_choice |= p.rule("tool-" + name, p.atomic_tag(Tag::TOOL_OPEN, tool_open) + args + p.atomic_tag(Tag::TOOL_CLOSE, tool_close));
             });

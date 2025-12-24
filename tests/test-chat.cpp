@@ -4301,6 +4301,7 @@ static void test_template_output_peg_parsers() {
               "I need to output the invoice details in JSON\n"
               "</think>\n"
               R"({"amount": 123.45, "date": "2025-12-03"})";
+            t.params.enable_thinking = true;
             t.params.reasoning_format = COMMON_REASONING_FORMAT_AUTO;
             t.params.json_schema = invoice_schema;
 
