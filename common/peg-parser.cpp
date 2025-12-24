@@ -1147,6 +1147,36 @@ common_peg_parser common_peg_parser_builder::json_member(const std::string & key
     });
 }
 
+common_peg_parser common_peg_parser_builder::schema_or_raw_string_until(
+    const std::string & rule_name,
+    const nlohmann::ordered_json & param_schema,
+    const std::string & end_delimiter,
+    common_schema_info & schema_info,
+    int string_tag,
+    int json_tag,
+    bool space_around_json)
+{
+    if (schema_info.resolves_to_string(param_schema)) {
+        // For string types, check if maxLength constraint exists
+        int max_length = -1;
+        if (param_schema.contains("maxLength") && param_schema["maxLength"].is_number_integer()) {
+            max_length = param_schema["maxLength"].get<int>();
+        }
+
+        if (max_length > 0) {
+            return tag(string_tag, until_max(end_delimiter, max_length));
+        }
+        return tag(string_tag, until(end_delimiter));
+    }
+
+    // For non-string types (integers, booleans, objects, etc.)
+    auto value_parser = tag(json_tag, schema(json(), rule_name, param_schema));
+    if (space_around_json) {
+        return space() + value_parser + space();
+    }
+    return value_parser;
+}
+
 
 static std::string gbnf_escape_char_class(char c) {
     switch (c) {
