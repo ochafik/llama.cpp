@@ -21,12 +21,7 @@ sys.path.insert(0, str(path))
 
 from utils import ServerProcess, ServerPreset
 
-# Optional WebSocket support
-try:
-    import websocket
-    HAS_WEBSOCKET = True
-except ImportError:
-    HAS_WEBSOCKET = False
+import websocket
 
 server: ServerProcess
 
@@ -136,7 +131,6 @@ class TestMcpWithConfig:
                 del os.environ['LLAMA_MCP_CONFIG']
 
 
-@pytest.mark.skipif(not HAS_WEBSOCKET, reason="websocket-client not installed")
 class TestMcpWebSocket:
     """Test MCP WebSocket functionality."""
 
@@ -311,7 +305,6 @@ if __name__ == "__main__":
         except:
             pass
 
-    @pytest.mark.skipif(not HAS_WEBSOCKET, reason="websocket-client not installed")
     def test_mcp_initialize_handshake(self, python_mcp_config):
         """Test MCP initialize handshake via WebSocket."""
         config_path, _ = python_mcp_config
@@ -357,7 +350,6 @@ if __name__ == "__main__":
             elif 'LLAMA_MCP_CONFIG' in os.environ:
                 del os.environ['LLAMA_MCP_CONFIG']
 
-    @pytest.mark.skipif(not HAS_WEBSOCKET, reason="websocket-client not installed")
     def test_mcp_tools_list(self, python_mcp_config):
         """Test MCP tools/list method."""
         config_path, _ = python_mcp_config
@@ -421,7 +413,6 @@ if __name__ == "__main__":
             elif 'LLAMA_MCP_CONFIG' in os.environ:
                 del os.environ['LLAMA_MCP_CONFIG']
 
-    @pytest.mark.skipif(not HAS_WEBSOCKET, reason="websocket-client not installed")
     def test_mcp_tool_call(self, python_mcp_config):
         """Test MCP tools/call method."""
         config_path, _ = python_mcp_config

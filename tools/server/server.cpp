@@ -262,7 +262,7 @@ int main(int argc, char ** argv, char ** envp) {
     ctx_http.post("/slots/:id_slot",      ex_wrapper(routes.post_slots));
 
     // MCP servers
-    ctx_http.get ("/mcp/servers", [&mcp_bridge](const server_http_req & req) {
+    ctx_http.get ("/mcp/servers", [&mcp_bridge](const server_http_req &) {
         json servers = json::array();
         for (const auto & server_name : mcp_bridge.get_available_servers()) {
             servers.push_back({
@@ -279,7 +279,7 @@ int main(int argc, char ** argv, char ** envp) {
     });
 
     // MCP WebSocket port (exposes the actual port the WebSocket server is listening on)
-    ctx_http.get ("/mcp/ws-port", [&ctx_ws](const server_http_req & req) {
+    ctx_http.get ("/mcp/ws-port", [&ctx_ws](const server_http_req &) {
         json response = {
             {"port", ctx_ws.get_actual_port()}
         };
