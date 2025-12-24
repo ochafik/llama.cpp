@@ -162,14 +162,10 @@
 			</div>
 		{/if}
 
-		<!-- Status / Result Section -->
+		<!-- Status / Result Section (only show when calling or have results) -->
+		{#if status !== 'streaming'}
 		<div class="border-t">
-			{#if status === 'streaming'}
-				<div class="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
-					<Loader2 class="h-3 w-3 animate-spin" />
-					<span>Streaming...</span>
-				</div>
-			{:else if status === 'calling'}
+			{#if status === 'calling'}
 				<div class="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
 					<Loader2 class="h-3 w-3 animate-spin" />
 					<span>Calling tool...</span>
@@ -212,5 +208,6 @@
 				</div>
 			{/if}
 		</div>
+		{/if}
 	</div>
 </div>
