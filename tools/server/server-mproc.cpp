@@ -358,6 +358,9 @@ bool mcp_process::spawn_process() {
 
     SRV_INF("%s: spawning process for %s: %s\n", __func__, config_.name.c_str(), cmdline.c_str());
 
+    // Set working directory if specified, otherwise use nullptr (inherits from parent)
+    LPCSTR current_directory = config_.cwd.empty() ? nullptr : config_.cwd.c_str();
+
     BOOL success = CreateProcessA(
         nullptr,
         const_cast<char *>(cmdline.c_str()),
@@ -366,7 +369,7 @@ bool mcp_process::spawn_process() {
         TRUE,  // Inherit handles
         CREATE_NO_WINDOW,
         const_cast<char *>(env_block.c_str()),  // Always use env block with unbuffer vars
-        nullptr,
+        current_directory,
         &si,
         &pi
     );
@@ -476,6 +479,14 @@ bool mcp_process::spawn_process() {
         close(stdin_pipe[1]);
         close(stdout_pipe[0]);
         close(stdout_pipe[1]);
+
+        // Change working directory if specified
+        if (!config_.cwd.empty()) {
+            if (chdir(config_.cwd.c_str()) != 0) {
+                fprintf(stderr, "chdir to '%s' failed: %s\n", config_.cwd.c_str(), strerror(errno));
+                _exit(126);
+            }
+        }
 
         // Set unbuffering environment variables FIRST
         // This is CRITICAL - without these, Python and other interpreters

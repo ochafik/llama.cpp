@@ -31,6 +31,15 @@
       "env": {
         "GITHUB_TOKEN": "your-github-token-here"
       }
+    },
+    "_comment_cwd_example": "Example: Run a custom MCP server script from a specific directory",
+    "my-script": {
+      "command": "python",
+      "args": ["server.py"],
+      "cwd": "/path/to/working/directory",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
     }
   }
 }
