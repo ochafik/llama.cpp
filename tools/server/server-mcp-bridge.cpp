@@ -1,7 +1,104 @@
 #include "server-mcp-bridge.h"
 #include "log.h"
 #include <filesystem>
-#include <sys/stat.h>
+
+// Helper to convert string vectors to char* arrays for subprocess
+static std::vector<const char*> to_cstr_array(const std::vector<std::string> & strings) {
+    std::vector<const char*> result;
+    result.reserve(strings.size() + 1);
+    for (const auto & s : strings) {
+        result.push_back(s.c_str());
+    }
+    result.push_back(nullptr);
+    return result;
+}
+
+// mcp_subprocess implementation
+
+server_mcp_bridge::mcp_subprocess::~mcp_subprocess() {
+    should_stop = true;
+
+    if (read_thread.joinable()) {
+        read_thread.join();
+    }
+
+    if (proc) {
+        if (subprocess_alive(proc.get())) {
+            subprocess_terminate(proc.get());
+        }
+        subprocess_destroy(proc.get());
+    }
+}
+
+bool server_mcp_bridge::mcp_subprocess::start(const mcp_server_config & config) {
+    name = config.name;
+
+    // Build command line: command + args
+    std::vector<std::string> cmd_strings;
+    cmd_strings.push_back(config.command);
+    for (const auto & arg : config.args) {
+        cmd_strings.push_back(arg);
+    }
+    auto argv = to_cstr_array(cmd_strings);
+
+    // Build environment: KEY=VALUE format
+    std::vector<std::string> env_strings;
+    for (const auto & [key, value] : config.env) {
+        env_strings.push_back(key + "=" + value);
+    }
+    auto envp = to_cstr_array(env_strings);
+
+    // Create subprocess with combined stdout/stderr and async reading
+    int options = subprocess_option_no_window
+                | subprocess_option_combined_stdout_stderr
+                | subprocess_option_enable_async
+                | subprocess_option_search_user_path;
+
+    int result = subprocess_create_ex(argv.data(), options,
+                                      env_strings.empty() ? nullptr : envp.data(),
+                                      proc.get());
+    if (result != 0) {
+        SRV_ERR("%s: failed to spawn MCP process: %s\n", __func__, name.c_str());
+        return false;
+    }
+
+    stdin_file = subprocess_stdin(proc.get());
+    if (!stdin_file) {
+        SRV_ERR("%s: failed to get stdin for MCP process: %s\n", __func__, name.c_str());
+        subprocess_terminate(proc.get());
+        subprocess_destroy(proc.get());
+        return false;
+    }
+
+    SRV_INF("%s: started MCP process: %s (cmd: %s)\n",
+            __func__, name.c_str(), config.command.c_str());
+
+    return true;
+}
+
+bool server_mcp_bridge::mcp_subprocess::write(const std::string & message) {
+    if (!stdin_file) {
+        return false;
+    }
+
+    std::string line = message + "\n";
+    size_t written = fwrite(line.c_str(), 1, line.size(), stdin_file);
+    fflush(stdin_file);
+
+    if (written != line.size()) {
+        SRV_ERR("%s: partial write to MCP process %s: %zu/%zu\n",
+                __func__, name.c_str(), written, line.size());
+        return false;
+    }
+
+    return true;
+}
+
+bool server_mcp_bridge::mcp_subprocess::is_running() const {
+    return proc && subprocess_alive(proc.get());
+}
+
+// server_mcp_bridge implementation
 
 server_mcp_bridge::server_mcp_bridge() {
     SRV_INF("%s: MCP bridge initialized\n", __func__);
@@ -127,7 +224,7 @@ std::optional<mcp_server_config> server_mcp_bridge::get_server_config(const std:
     return std::nullopt;
 }
 
-mcp_process * server_mcp_bridge::get_or_create_process(connection_state * state) {
+server_mcp_bridge::mcp_subprocess * server_mcp_bridge::get_or_create_process(connection_state * state) {
     if (state->process && state->process->is_running()) {
         SRV_INF("%s: reusing existing MCP process: %s\n",
                 __func__, state->server_name.c_str());
@@ -142,24 +239,83 @@ mcp_process * server_mcp_bridge::get_or_create_process(connection_state * state)
         return nullptr;
     }
 
-    // Create process
-    state->process = mcp_process_factory::create(*config);
+    // Create and start subprocess
+    state->process = std::make_unique<mcp_subprocess>();
 
-    // Set up message callback BEFORE starting
-    state->process->set_on_message([this, state](const std::string & msg) {
-        SRV_INF("%s: received from %s: %s\n", __func__, state->server_name.c_str(), msg.c_str());
-        forward_to_ws(state, msg);
-    });
-
-    // Start process
     SRV_INF("%s: starting MCP process: %s\n",
             __func__, state->server_name.c_str());
-    if (!state->process->start()) {
+
+    if (!state->process->start(*config)) {
         SRV_ERR("%s: failed to start MCP process: %s\n",
                 __func__, state->server_name.c_str());
         state->process.reset();
         return nullptr;
     }
+
+    // Start read thread to forward stdout to WebSocket
+    // Capture weak_ptr to connection to avoid preventing cleanup
+    std::weak_ptr<server_ws_connection> weak_conn = state->conn;
+    mcp_subprocess * proc = state->process.get();
+
+    proc->read_thread = std::thread([proc, weak_conn]() {
+        std::string buffer;
+        buffer.resize(4096);
+        std::string line_buffer;
+
+        SRV_INF("%s: read thread started for %s\n", __func__, proc->name.c_str());
+
+        while (!proc->should_stop) {
+            unsigned bytes_read = subprocess_read_stdout(proc->proc.get(),
+                                                         buffer.data(),
+                                                         static_cast<unsigned>(buffer.size() - 1));
+            if (bytes_read == 0) {
+                if (!subprocess_alive(proc->proc.get())) {
+                    SRV_INF("%s: MCP process %s exited\n", __func__, proc->name.c_str());
+                    break;
+                }
+                // No data yet, brief sleep to avoid busy loop
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                continue;
+            }
+
+            buffer[bytes_read] = '\0';
+            line_buffer += std::string(buffer.data(), bytes_read);
+
+            // Process complete lines
+            size_t pos;
+            while ((pos = line_buffer.find('\n')) != std::string::npos) {
+                std::string line = line_buffer.substr(0, pos);
+                line_buffer.erase(0, pos + 1);
+
+                // Trim \r if present
+                if (!line.empty() && line.back() == '\r') {
+                    line.pop_back();
+                }
+
+                if (line.empty()) continue;
+
+                // Check if this looks like JSON
+                bool is_json = line[0] == '{' || line[0] == '[';
+
+                if (is_json) {
+                    SRV_INF("%s: JSON from %s: %.200s%s\n",
+                            __func__, proc->name.c_str(), line.c_str(),
+                            line.length() > 200 ? "..." : "");
+
+                    // Forward to WebSocket if connection still alive
+                    if (auto conn = weak_conn.lock()) {
+                        conn->send(line);
+                    }
+                } else {
+                    // Log non-JSON output (likely stderr)
+                    SRV_WRN("%s: stderr from %s: %s\n",
+                            __func__, proc->name.c_str(), line.c_str());
+                }
+            }
+        }
+
+        SRV_INF("%s: read thread ended for %s\n", __func__, proc->name.c_str());
+    });
 
     SRV_INF("%s: successfully started MCP process: %s\n",
             __func__, state->server_name.c_str());
@@ -168,7 +324,7 @@ mcp_process * server_mcp_bridge::get_or_create_process(connection_state * state)
 }
 
 void server_mcp_bridge::forward_to_mcp(connection_state * state, const std::string & message) {
-    mcp_process * proc = get_or_create_process(state);
+    mcp_subprocess * proc = get_or_create_process(state);
     if (!proc) {
         SRV_ERR("%s: no MCP process available for: %s\n",
                 __func__, state->server_name.c_str());

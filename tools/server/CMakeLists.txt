@@ -48,8 +48,6 @@ set(TARGET_SRCS
     server-context.h
     server-ws.cpp
     server-ws.h
-    server-mproc.cpp
-    server-mproc.h
     server-mcp-bridge.cpp
     server-mcp-bridge.h
 )

@@ -56,8 +56,7 @@ WebSocket server includes:
 | File | Purpose |
 |------|---------|
 | `server-ws.cpp/h` | WebSocket server (on HTTP port + 1) |
-| `server-mcp-bridge.cpp/h` | Routes WebSocket ↔ MCP subprocesses |
-| `server-mproc.cpp/h` | Cross-platform subprocess management |
+| `server-mcp-bridge.cpp/h` | Routes WebSocket ↔ MCP subprocesses (uses `subprocess.h`) |
 | `server-mcp.h` | MCP config types |
 | `webui/src/lib/services/mcp.ts` | MCP SDK client wrapper |
 | `webui/src/lib/stores/mcp.svelte.ts` | Connection state management |
@@ -80,9 +79,9 @@ WebSocket server includes:
 
 - [x] Security hardening (payload limits, connection limits, timeouts)
 - [x] Remove unused JSON-RPC types (~170 lines)
+- [x] Use `subprocess.h` instead of custom process management (per @ngxson feedback)
 - [ ] Coordinate with @allozaur / #17487 on best approach
 - [ ] Consider SSE/streamable HTTP vs custom WS (per @ngxson feedback)
-- [ ] Evaluate `subprocess.h` for `server-mproc.cpp` (per @ngxson feedback) - current gaps: no cwd support, blocking async reads, no graceful shutdown
 - [ ] Support more tool result types (images, resources)
 
 ## Possible follow-ups

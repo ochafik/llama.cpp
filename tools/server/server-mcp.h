@@ -14,7 +14,6 @@ struct mcp_server_config {
     std::string command;              // Command to spawn
     std::vector<std::string> args;    // Command arguments
     std::map<std::string, std::string> env;  // Environment variables
-    std::string cwd;                  // Working directory (optional)
 
     mcp_server_config() = default;
     mcp_server_config(const std::string & name, const json & j) : name(name) {
@@ -35,7 +34,6 @@ struct mcp_server_config {
                 }
             }
         }
-        if (j.contains("cwd")) cwd = j["cwd"].get<std::string>();
     }
 
     json to_json() const {
@@ -43,7 +41,6 @@ struct mcp_server_config {
         j["command"] = command;
         j["args"] = args;
         if (!env.empty()) j["env"] = env;
-        if (!cwd.empty()) j["cwd"] = cwd;
         return j;
     }
 };

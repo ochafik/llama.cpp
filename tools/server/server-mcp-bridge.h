@@ -2,10 +2,12 @@
 
 #include "server-ws.h"
 #include "server-mcp.h"
-#include "server-mproc.h"
+#include <sheredom/subprocess.h>
 #include <unordered_map>
 #include <mutex>
 #include <memory>
+#include <thread>
+#include <atomic>
 
 // Manages MCP server instances per WebSocket connection
 // Handles message routing between WebSocket clients and MCP processes
@@ -37,10 +39,26 @@ public:
     }
 
 private:
+    // MCP subprocess wrapper
+    struct mcp_subprocess {
+        std::shared_ptr<subprocess_s> proc;
+        FILE * stdin_file = nullptr;
+        std::thread read_thread;
+        std::atomic<bool> should_stop{false};
+        std::string name;
+
+        mcp_subprocess() : proc(std::make_shared<subprocess_s>()) {}
+        ~mcp_subprocess();
+
+        bool start(const mcp_server_config & config);
+        bool write(const std::string & message);
+        bool is_running() const;
+    };
+
     // Per-connection state
     struct connection_state {
         std::shared_ptr<server_ws_connection> conn;
-        std::unique_ptr<mcp_process> process;
+        std::unique_ptr<mcp_subprocess> process;
         std::string server_name;
     };
 
@@ -66,7 +84,7 @@ private:
     std::optional<mcp_server_config> get_server_config(const std::string & name);
 
     // Get or create MCP process for connection
-    mcp_process * get_or_create_process(connection_state * state);
+    mcp_subprocess * get_or_create_process(connection_state * state);
 
     // Forward message from WebSocket to MCP process
     void forward_to_mcp(connection_state * state, const std::string & message);
