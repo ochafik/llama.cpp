@@ -13,7 +13,11 @@
 	} from '@lucide/svelte';
 	import { cn } from '$lib/components/ui/utils';
 	import { copyToClipboard } from '$lib/utils';
-	import { parseMcpToolResult, getContentTypeLabel, type McpContentItem } from '$lib/utils/tool-results';
+	import {
+		parseMcpToolResult,
+		getContentTypeLabel,
+		type McpContentItem
+	} from '$lib/utils/tool-results';
 
 	interface Props {
 		toolCall: ApiChatCompletionToolCall;
@@ -208,9 +212,7 @@
 				{#if isArgsExpanded}
 					<div class="px-3 pb-2">
 						<pre
-							class="max-h-48 overflow-x-auto overflow-y-auto rounded bg-background/50 p-2 text-xs break-words whitespace-pre-wrap"
-							>{formattedArgs}</pre
-						>
+							class="max-h-48 overflow-x-auto overflow-y-auto rounded bg-background/50 p-2 text-xs break-words whitespace-pre-wrap">{formattedArgs}</pre>
 					</div>
 				{/if}
 			</div>
@@ -238,7 +240,8 @@
 						<span>Result</span>
 						{#if hasStructuredContent}
 							<span class="text-muted-foreground">
-								({parsedStructuredResult?.content.length || 0} {parsedStructuredResult?.content.length === 1 ? 'item' : 'items'})
+								({parsedStructuredResult?.content.length || 0}
+								{parsedStructuredResult?.content.length === 1 ? 'item' : 'items'})
 							</span>
 						{/if}
 						{#if durationMs !== null && durationMs > 0}
@@ -262,7 +265,7 @@
 											{#if item.type === 'text'}
 												<pre class="text-xs break-words whitespace-pre-wrap">{item.text}</pre>
 
-											<!-- Image content -->
+												<!-- Image content -->
 											{:else if item.type === 'image'}
 												<img
 													src="data:{item.mimeType || 'image/png'};base64,{item.data}"
@@ -270,31 +273,31 @@
 													class="max-w-full rounded border"
 												/>
 
-											<!-- Audio content -->
+												<!-- Audio content -->
 											{:else if item.type === 'audio'}
 												<audio controls class="w-full">
 													<source src="data:{item.mimeType || 'audio/mp3'};base64,{item.data}" />
 													Your browser does not support audio.
 												</audio>
 
-											<!-- Resource content -->
+												<!-- Resource content -->
 											{:else if item.type === 'resource'}
 												<a
 													href={item.resource.uri}
 													target="_blank"
 													rel="noopener noreferrer"
-													class="text-sm text-blue-500 hover:text-blue-400 underline"
+													class="text-sm text-blue-500 underline hover:text-blue-400"
 												>
 													{item.resource.uri}
 												</a>
 
-											<!-- Resource link content -->
+												<!-- Resource link content -->
 											{:else if item.type === 'resource_link'}
 												<a
 													href={item.uri}
 													target="_blank"
 													rel="noopener noreferrer"
-													class="text-sm text-blue-500 hover:text-blue-400 underline"
+													class="text-sm text-blue-500 underline hover:text-blue-400"
 												>
 													{item.uri}
 												</a>
@@ -305,9 +308,7 @@
 							{:else}
 								<!-- Legacy: render as formatted text/JSON -->
 								<pre
-									class="max-h-64 overflow-x-auto overflow-y-auto rounded bg-background/50 p-2 text-xs break-words whitespace-pre-wrap"
-									>{formattedResult}</pre
-								>
+									class="max-h-64 overflow-x-auto overflow-y-auto rounded bg-background/50 p-2 text-xs break-words whitespace-pre-wrap">{formattedResult}</pre>
 							{/if}
 						</div>
 					{/if}

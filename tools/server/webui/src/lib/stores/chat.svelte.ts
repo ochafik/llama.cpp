@@ -19,7 +19,11 @@ import { SvelteMap } from 'svelte/reactivity';
 import { DEFAULT_CONTEXT } from '$lib/constants/default-context';
 import { conversationMcpStore } from '$lib/stores/conversation-mcp.svelte';
 import type { ApiChatCompletionTool } from '$lib/types/api';
-import type { DatabaseMessageExtra, DatabaseMessageExtraImageFile, DatabaseMessageExtraAudioFile } from '$lib/types/database';
+import type {
+	DatabaseMessageExtra,
+	DatabaseMessageExtraImageFile,
+	DatabaseMessageExtraAudioFile
+} from '$lib/types/database';
 import { AttachmentType } from '$lib/enums';
 
 /**
@@ -1551,12 +1555,9 @@ class ChatStore {
 			} catch (error) {
 				console.error(`Failed to execute tool ${fn.name}:`, error);
 				// Add error as tool result
-				await this.addToolResultMessage(
-					convId,
-					assistantMessageId,
-					fn.name,
-					{ error: error instanceof Error ? error.message : 'Unknown error' }
-				);
+				await this.addToolResultMessage(convId, assistantMessageId, fn.name, {
+					error: error instanceof Error ? error.message : 'Unknown error'
+				});
 			}
 		}
 

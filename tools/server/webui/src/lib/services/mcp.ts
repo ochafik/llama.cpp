@@ -130,7 +130,9 @@ export class McpService {
 	 * Disconnect from the MCP server
 	 */
 	async disconnect() {
-		console.log(`[MCP] disconnect() called for: ${this.serverName}, client exists: ${!!this.client}`);
+		console.log(
+			`[MCP] disconnect() called for: ${this.serverName}, client exists: ${!!this.client}`
+		);
 
 		// Set flag to prevent auto-reconnect when onclose fires
 		this.manualDisconnect = true;

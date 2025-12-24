@@ -2,7 +2,14 @@
  * Utility functions for handling MCP tool result messages
  */
 
-import type { TextContent, ImageContent, AudioContent, EmbeddedResource, ResourceLink, CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import type {
+	TextContent,
+	ImageContent,
+	AudioContent,
+	EmbeddedResource,
+	ResourceLink,
+	CallToolResult
+} from '@modelcontextprotocol/sdk/types.js';
 
 export interface ToolResultInfo {
 	toolName: string;
@@ -11,7 +18,12 @@ export interface ToolResultInfo {
 
 // Re-export CallToolResult as ParsedToolResult for convenience
 export type ParsedToolResult = CallToolResult;
-export type McpContentItem = TextContent | ImageContent | AudioContent | EmbeddedResource | ResourceLink;
+export type McpContentItem =
+	| TextContent
+	| ImageContent
+	| AudioContent
+	| EmbeddedResource
+	| ResourceLink;
 
 /**
  * Check if a message content is a tool result message

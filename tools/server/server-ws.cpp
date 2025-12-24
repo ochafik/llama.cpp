@@ -645,6 +645,7 @@ void server_ws_context::Impl::handle_connection(socket_t sock, const struct sock
 
     // Extract headers (case-insensitive matching)
     std::string websocket_key;
+    std::string websocket_protocol;
     while (std::getline(iss, line)) {
         // Trim trailing \r (common in HTTP headers)
         if (!line.empty() && line.back() == '\r') {
@@ -662,13 +663,30 @@ void server_ws_context::Impl::handle_connection(socket_t sock, const struct sock
                 c = c + 32; // tolower
             }
         }
-        if (line_lower.substr(0, 18) == "sec-websocket-key:") {
-            if (line.length() > 19) {
-                websocket_key = line.substr(19);
+
+        // Use string_starts_with for safe prefix matching
+        if (string_starts_with(line_lower, "sec-websocket-key:")) {
+            const std::string header_name = "sec-websocket-key:";
+            if (line.length() > header_name.length()) {
+                websocket_key = line.substr(header_name.length());
                 // Trim leading spaces
                 while (!websocket_key.empty() && websocket_key[0] == ' ') {
                     websocket_key.erase(0, 1);
                 }
+            }
+        } else if (string_starts_with(line_lower, "sec-websocket-protocol:")) {
+            const std::string header_name = "sec-websocket-protocol:";
+            if (line.length() > header_name.length()) {
+                websocket_protocol = line.substr(header_name.length());
+                // Trim leading spaces
+                while (!websocket_protocol.empty() && websocket_protocol[0] == ' ') {
+                    websocket_protocol.erase(0, 1);
+                }
+                // Trim trailing spaces
+                while (!websocket_protocol.empty() && websocket_protocol.back() == ' ') {
+                    websocket_protocol.pop_back();
+                }
+                SRV_INF("%s: parsed websocket_protocol='%s'\n", __func__, websocket_protocol.c_str());
             }
         }
     }
@@ -714,7 +732,12 @@ void server_ws_context::Impl::handle_connection(socket_t sock, const struct sock
     response << "HTTP/1.1 101 Switching Protocols\r\n";
     response << "Upgrade: websocket\r\n";
     response << "Connection: Upgrade\r\n";
-    response << "Sec-WebSocket-Accept: " << accept_key << "\r\n\r\n";
+    response << "Sec-WebSocket-Accept: " << accept_key << "\r\n";
+    // Echo back the protocol if requested
+    if (!websocket_protocol.empty()) {
+        response << "Sec-WebSocket-Protocol: " << websocket_protocol << "\r\n";
+    }
+    response << "\r\n";
 
     std::string response_str = response.str();
     SRV_DBG("%s: Sending 101 response, %zu bytes\n", __func__, response_str.size());

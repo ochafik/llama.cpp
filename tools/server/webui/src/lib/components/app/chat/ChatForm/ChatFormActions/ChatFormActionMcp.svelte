@@ -346,261 +346,261 @@
 </script>
 
 {#if mcpEnabled}
-<div class={cn('relative inline-flex flex-col items-end gap-1', className)}>
-	<Popover.Root bind:open={isOpen} onOpenChange={handleOpenChange}>
-		<Popover.Trigger
-			class={cn(
-				`inline-flex cursor-pointer items-center gap-1.5 rounded-sm px-1.5 py-1 text-xs transition hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60`,
-				isOpen ? 'text-foreground' : 'text-muted-foreground',
-				loadingServers || anyConnecting()
-					? 'animate-shimmer bg-gradient-to-r from-muted-foreground/10 via-muted-foreground/20 to-muted-foreground/10 bg-[length:200%_100%]'
-					: 'bg-muted-foreground/10'
-			)}
-			{disabled}
-		>
-			{#if loadingServers || anyConnecting()}
-				<Loader2 class="h-3.5 w-3.5 animate-spin" />
-			{:else}
-				<Plug class="h-3.5 w-3.5" />
-			{/if}
-			<span class="truncate font-medium">
-				{availableServers.length > 0 ? `${connectedCount}/${availableServers.length} MCP` : 'MCP'}
-			</span>
-			<ChevronDown class="h-3 w-3.5" />
-		</Popover.Trigger>
+	<div class={cn('relative inline-flex flex-col items-end gap-1', className)}>
+		<Popover.Root bind:open={isOpen} onOpenChange={handleOpenChange}>
+			<Popover.Trigger
+				class={cn(
+					`inline-flex cursor-pointer items-center gap-1.5 rounded-sm px-1.5 py-1 text-xs transition hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60`,
+					isOpen ? 'text-foreground' : 'text-muted-foreground',
+					loadingServers || anyConnecting()
+						? 'animate-shimmer bg-gradient-to-r from-muted-foreground/10 via-muted-foreground/20 to-muted-foreground/10 bg-[length:200%_100%]'
+						: 'bg-muted-foreground/10'
+				)}
+				{disabled}
+			>
+				{#if loadingServers || anyConnecting()}
+					<Loader2 class="h-3.5 w-3.5 animate-spin" />
+				{:else}
+					<Plug class="h-3.5 w-3.5" />
+				{/if}
+				<span class="truncate font-medium">
+					{availableServers.length > 0 ? `${connectedCount}/${availableServers.length} MCP` : 'MCP'}
+				</span>
+				<ChevronDown class="h-3 w-3.5" />
+			</Popover.Trigger>
 
-		<Popover.Content
-			class="group/popover-content w-96 max-w-[calc(100vw-2rem)] p-0"
-			side="top"
-			align="end"
-			sideOffset={8}
-			collisionPadding={16}
-		>
-			<div class="flex max-h-[50dvh] flex-col overflow-hidden">
-				{#if selectedServerName}
-					<!-- Server Details View -->
-					{@const status = getServerStatus(selectedServerName)}
-					{@const statusDisplay = getStatusDisplay(status)}
-					{@const tools = getTools(selectedServerName)}
-					{@const isFetching = fetchingTools.has(selectedServerName)}
+			<Popover.Content
+				class="group/popover-content w-96 max-w-[calc(100vw-2rem)] p-0"
+				side="top"
+				align="end"
+				sideOffset={8}
+				collisionPadding={16}
+			>
+				<div class="flex max-h-[50dvh] flex-col overflow-hidden">
+					{#if selectedServerName}
+						<!-- Server Details View -->
+						{@const status = getServerStatus(selectedServerName)}
+						{@const statusDisplay = getStatusDisplay(status)}
+						{@const tools = getTools(selectedServerName)}
+						{@const isFetching = fetchingTools.has(selectedServerName)}
 
-					<div class="flex items-center gap-2 border-b p-4">
-						<button
-							type="button"
-							onclick={backToServerList}
-							class="shrink-0 rounded-sm p-1 transition hover:bg-muted"
-						>
-							<ChevronDown class="h-4 w-4 rotate-90" />
-						</button>
-						<div class="flex min-w-0 flex-1 items-center gap-2">
-							{#if status.connecting}
-								<Loader2 class="h-4 w-4 shrink-0 animate-spin text-orange-500" />
-							{:else}
-								<span class="h-2 w-2 shrink-0 rounded-full {statusDisplay.dotColor}"></span>
-							{/if}
-							<span class="truncate font-medium">{selectedServerName}</span>
+						<div class="flex items-center gap-2 border-b p-4">
+							<button
+								type="button"
+								onclick={backToServerList}
+								class="shrink-0 rounded-sm p-1 transition hover:bg-muted"
+							>
+								<ChevronDown class="h-4 w-4 rotate-90" />
+							</button>
+							<div class="flex min-w-0 flex-1 items-center gap-2">
+								{#if status.connecting}
+									<Loader2 class="h-4 w-4 shrink-0 animate-spin text-orange-500" />
+								{:else}
+									<span class="h-2 w-2 shrink-0 rounded-full {statusDisplay.dotColor}"></span>
+								{/if}
+								<span class="truncate font-medium">{selectedServerName}</span>
+							</div>
+							<button
+								onclick={() => selectedServerName && forceReconnect(selectedServerName)}
+								class="shrink-0 rounded p-1 transition hover:bg-muted disabled:opacity-50"
+								disabled={status.connecting || !selectedServerName}
+								title="Reconnect"
+							>
+								<RefreshCw class="h-4 w-4 {status.connecting ? 'animate-spin' : ''}" />
+							</button>
 						</div>
-						<button
-							onclick={() => selectedServerName && forceReconnect(selectedServerName)}
-							class="shrink-0 rounded p-1 transition hover:bg-muted disabled:opacity-50"
-							disabled={status.connecting || !selectedServerName}
-							title="Reconnect"
-						>
-							<RefreshCw class="h-4 w-4 {status.connecting ? 'animate-spin' : ''}" />
-						</button>
-					</div>
 
-					<div class="flex-1 overflow-y-auto p-4">
-						{#if isFetching}
-							<div class="flex items-center justify-center py-8 text-muted-foreground">
-								<Loader2 class="mr-2 h-5 w-5 animate-spin" />
-								Loading tools...
-							</div>
-						{:else if !status.connected}
-							<div class="py-8 text-center text-muted-foreground">
-								<p class="mb-4">Server is not connected</p>
-								<button
-									onclick={() => selectedServerName && toggleConnection(selectedServerName)}
-									class="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-									disabled={!selectedServerName}
-								>
-									<Plug class="h-4 w-4" />
-									Connect to Server
-								</button>
-							</div>
-						{:else if tools.length === 0}
-							<div class="py-8 text-center text-muted-foreground">
-								<p>No tools available from this server</p>
-							</div>
-						{:else}
-							<div class="space-y-3">
-								<h4 class="text-sm font-medium text-muted-foreground">
-									{tools.length} Tool{tools.length !== 1 ? 's' : ''} Available
-								</h4>
-								{#each tools as tool (tool.name)}
-									<div class="group rounded-md border p-3 transition hover:bg-muted/50">
-										<div class="flex items-start gap-2">
-											<Wrench class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-											<div class="min-w-0 flex-1">
-												<p class="truncate text-sm font-medium">{tool.name}</p>
-												{#if tool.description}
-													<p class="mt-1 line-clamp-2 text-xs text-muted-foreground">
-														{tool.description}
-													</p>
-												{/if}
-												{#if tool.inputSchema}
-													<div class="mt-2">
-														<button
-															type="button"
-															class="flex items-center gap-1 text-xs text-muted-foreground transition hover:text-foreground"
-															title={JSON.stringify(tool.inputSchema, null, 2)}
-														>
-															<FileJson class="h-3 w-3" />
-															View input schema
-														</button>
-													</div>
-												{/if}
+						<div class="flex-1 overflow-y-auto p-4">
+							{#if isFetching}
+								<div class="flex items-center justify-center py-8 text-muted-foreground">
+									<Loader2 class="mr-2 h-5 w-5 animate-spin" />
+									Loading tools...
+								</div>
+							{:else if !status.connected}
+								<div class="py-8 text-center text-muted-foreground">
+									<p class="mb-4">Server is not connected</p>
+									<button
+										onclick={() => selectedServerName && toggleConnection(selectedServerName)}
+										class="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+										disabled={!selectedServerName}
+									>
+										<Plug class="h-4 w-4" />
+										Connect to Server
+									</button>
+								</div>
+							{:else if tools.length === 0}
+								<div class="py-8 text-center text-muted-foreground">
+									<p>No tools available from this server</p>
+								</div>
+							{:else}
+								<div class="space-y-3">
+									<h4 class="text-sm font-medium text-muted-foreground">
+										{tools.length} Tool{tools.length !== 1 ? 's' : ''} Available
+									</h4>
+									{#each tools as tool (tool.name)}
+										<div class="group rounded-md border p-3 transition hover:bg-muted/50">
+											<div class="flex items-start gap-2">
+												<Wrench class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+												<div class="min-w-0 flex-1">
+													<p class="truncate text-sm font-medium">{tool.name}</p>
+													{#if tool.description}
+														<p class="mt-1 line-clamp-2 text-xs text-muted-foreground">
+															{tool.description}
+														</p>
+													{/if}
+													{#if tool.inputSchema}
+														<div class="mt-2">
+															<button
+																type="button"
+																class="flex items-center gap-1 text-xs text-muted-foreground transition hover:text-foreground"
+																title={JSON.stringify(tool.inputSchema, null, 2)}
+															>
+																<FileJson class="h-3 w-3" />
+																View input schema
+															</button>
+														</div>
+													{/if}
+												</div>
 											</div>
 										</div>
+									{/each}
+								</div>
+							{/if}
+						</div>
+					{:else}
+						<!-- Server List View -->
+						<div
+							class="order-1 shrink-0 border-b p-4 group-data-[side=top]/popover-content:order-2 group-data-[side=top]/popover-content:border-t group-data-[side=top]/popover-content:border-b-0"
+						>
+							<SearchInput
+								id="mcp-search"
+								placeholder="Search servers..."
+								bind:value={searchTerm}
+								bind:ref={searchInputRef}
+								onClose={() => handleOpenChange(false)}
+								onKeyDown={handleSearchKeyDown}
+							/>
+						</div>
+
+						<div
+							class="order-2 min-h-0 flex-1 overflow-y-auto group-data-[side=top]/popover-content:order-1"
+						>
+							{#if loadingServers}
+								<div class="flex items-center justify-center py-8 text-muted-foreground">
+									<Loader2 class="mr-2 h-5 w-5 animate-spin" />
+									Loading servers...
+								</div>
+							{:else if availableServers.length === 0}
+								<div class="p-4 text-center text-sm text-muted-foreground">
+									<p class="mb-2">No MCP servers configured</p>
+									<p class="text-xs">Add servers to ~/.llama.cpp/mcp.json</p>
+								</div>
+							{:else if filteredServers.length === 0}
+								<div class="p-4 text-center text-sm text-muted-foreground">
+									No servers found matching "{searchTerm}"
+								</div>
+							{:else}
+								{#each filteredServers as serverName, index (serverName)}
+									{@const status = getServerStatus(serverName)}
+									{@const isHighlighted = index === highlightedIndex}
+
+									<div
+										class={cn(
+											'group flex w-full cursor-pointer items-center gap-2 px-4 py-2 text-left text-sm transition focus:outline-none',
+											isHighlighted
+												? 'bg-accent text-accent-foreground'
+												: 'hover:bg-accent hover:text-accent-foreground',
+											status.connected ? 'text-popover-foreground' : 'text-muted-foreground'
+										)}
+										onmouseenter={() => (highlightedIndex = index)}
+										role="option"
+										aria-selected={isHighlighted}
+										tabindex="0"
+										onclick={() => showServerDetails(serverName)}
+										onkeydown={(e) => {
+											if (e.key === 'Enter' || e.key === ' ') {
+												e.preventDefault();
+												showServerDetails(serverName);
+											}
+										}}
+									>
+										<span class="min-w-0 flex-1 truncate">{serverName}</span>
+
+										<!-- Status dot with hover action button (like model picker) -->
+										{#if status.connecting}
+											<Tooltip.Root>
+												<Tooltip.Trigger>
+													<Loader2 class="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+												</Tooltip.Trigger>
+												<Tooltip.Content class="z-[9999]">
+													<p>Connecting...</p>
+												</Tooltip.Content>
+											</Tooltip.Root>
+										{:else if status.connected}
+											<!-- Connected: show green dot, Power icon on hover to disconnect -->
+											<Tooltip.Root>
+												<Tooltip.Trigger>
+													<button
+														type="button"
+														class="relative ml-2 flex h-4 w-4 shrink-0 items-center justify-center"
+														onclick={(e) => {
+															e.stopPropagation();
+															toggleConnection(serverName);
+														}}
+														aria-label="Disconnect"
+													>
+														<span
+															class="mr-2 h-2 w-2 rounded-full bg-green-500 transition-opacity group-hover:opacity-0"
+														></span>
+														<Power
+															class="absolute mr-2 h-4 w-4 text-red-500 opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-600"
+														/>
+													</button>
+												</Tooltip.Trigger>
+												<Tooltip.Content class="z-[9999]">
+													<p>Disconnect</p>
+												</Tooltip.Content>
+											</Tooltip.Root>
+										{:else}
+											<!-- Disconnected: show gray dot, Plug icon on hover to connect -->
+											<Tooltip.Root>
+												<Tooltip.Trigger>
+													<button
+														type="button"
+														class="relative ml-2 flex h-4 w-4 shrink-0 items-center justify-center"
+														onclick={(e) => {
+															e.stopPropagation();
+															toggleConnection(serverName);
+														}}
+														aria-label="Connect"
+													>
+														<span
+															class="mr-2 h-2 w-2 rounded-full bg-muted-foreground/50 transition-opacity group-hover:opacity-0"
+														></span>
+														<Plug
+															class="absolute mr-2 h-4 w-4 text-green-500 opacity-0 transition-opacity group-hover:opacity-100 hover:text-green-600"
+														/>
+													</button>
+												</Tooltip.Trigger>
+												<Tooltip.Content class="z-[9999]">
+													<p>Connect</p>
+												</Tooltip.Content>
+											</Tooltip.Root>
+										{/if}
+
+										<!-- Arrow to view server details/tools -->
+										<ChevronRight
+											class="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+										/>
 									</div>
 								{/each}
-							</div>
-						{/if}
-					</div>
-				{:else}
-					<!-- Server List View -->
-					<div
-						class="order-1 shrink-0 border-b p-4 group-data-[side=top]/popover-content:order-2 group-data-[side=top]/popover-content:border-t group-data-[side=top]/popover-content:border-b-0"
-					>
-						<SearchInput
-							id="mcp-search"
-							placeholder="Search servers..."
-							bind:value={searchTerm}
-							bind:ref={searchInputRef}
-							onClose={() => handleOpenChange(false)}
-							onKeyDown={handleSearchKeyDown}
-						/>
-					</div>
-
-					<div
-						class="order-2 min-h-0 flex-1 overflow-y-auto group-data-[side=top]/popover-content:order-1"
-					>
-						{#if loadingServers}
-							<div class="flex items-center justify-center py-8 text-muted-foreground">
-								<Loader2 class="mr-2 h-5 w-5 animate-spin" />
-								Loading servers...
-							</div>
-						{:else if availableServers.length === 0}
-							<div class="p-4 text-center text-sm text-muted-foreground">
-								<p class="mb-2">No MCP servers configured</p>
-								<p class="text-xs">Add servers to ~/.llama.cpp/mcp.json</p>
-							</div>
-						{:else if filteredServers.length === 0}
-							<div class="p-4 text-center text-sm text-muted-foreground">
-								No servers found matching "{searchTerm}"
-							</div>
-						{:else}
-							{#each filteredServers as serverName, index (serverName)}
-								{@const status = getServerStatus(serverName)}
-								{@const isHighlighted = index === highlightedIndex}
-
-								<div
-									class={cn(
-										'group flex w-full cursor-pointer items-center gap-2 px-4 py-2 text-left text-sm transition focus:outline-none',
-										isHighlighted
-											? 'bg-accent text-accent-foreground'
-											: 'hover:bg-accent hover:text-accent-foreground',
-										status.connected ? 'text-popover-foreground' : 'text-muted-foreground'
-									)}
-									onmouseenter={() => (highlightedIndex = index)}
-									role="option"
-									aria-selected={isHighlighted}
-									tabindex="0"
-									onclick={() => showServerDetails(serverName)}
-									onkeydown={(e) => {
-										if (e.key === 'Enter' || e.key === ' ') {
-											e.preventDefault();
-											showServerDetails(serverName);
-										}
-									}}
-								>
-									<span class="min-w-0 flex-1 truncate">{serverName}</span>
-
-									<!-- Status dot with hover action button (like model picker) -->
-									{#if status.connecting}
-										<Tooltip.Root>
-											<Tooltip.Trigger>
-												<Loader2 class="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
-											</Tooltip.Trigger>
-											<Tooltip.Content class="z-[9999]">
-												<p>Connecting...</p>
-											</Tooltip.Content>
-										</Tooltip.Root>
-									{:else if status.connected}
-										<!-- Connected: show green dot, Power icon on hover to disconnect -->
-										<Tooltip.Root>
-											<Tooltip.Trigger>
-												<button
-													type="button"
-													class="relative ml-2 flex h-4 w-4 shrink-0 items-center justify-center"
-													onclick={(e) => {
-														e.stopPropagation();
-														toggleConnection(serverName);
-													}}
-													aria-label="Disconnect"
-												>
-													<span
-														class="mr-2 h-2 w-2 rounded-full bg-green-500 transition-opacity group-hover:opacity-0"
-													></span>
-													<Power
-														class="absolute mr-2 h-4 w-4 text-red-500 opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-600"
-													/>
-												</button>
-											</Tooltip.Trigger>
-											<Tooltip.Content class="z-[9999]">
-												<p>Disconnect</p>
-											</Tooltip.Content>
-										</Tooltip.Root>
-									{:else}
-										<!-- Disconnected: show gray dot, Plug icon on hover to connect -->
-										<Tooltip.Root>
-											<Tooltip.Trigger>
-												<button
-													type="button"
-													class="relative ml-2 flex h-4 w-4 shrink-0 items-center justify-center"
-													onclick={(e) => {
-														e.stopPropagation();
-														toggleConnection(serverName);
-													}}
-													aria-label="Connect"
-												>
-													<span
-														class="mr-2 h-2 w-2 rounded-full bg-muted-foreground/50 transition-opacity group-hover:opacity-0"
-													></span>
-													<Plug
-														class="absolute mr-2 h-4 w-4 text-green-500 opacity-0 transition-opacity group-hover:opacity-100 hover:text-green-600"
-													/>
-												</button>
-											</Tooltip.Trigger>
-											<Tooltip.Content class="z-[9999]">
-												<p>Connect</p>
-											</Tooltip.Content>
-										</Tooltip.Root>
-									{/if}
-
-									<!-- Arrow to view server details/tools -->
-									<ChevronRight
-										class="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
-									/>
-								</div>
-							{/each}
-						{/if}
-					</div>
-				{/if}
-			</div>
-		</Popover.Content>
-	</Popover.Root>
-</div>
+							{/if}
+						</div>
+					{/if}
+				</div>
+			</Popover.Content>
+		</Popover.Root>
+	</div>
 {/if}
 
 <style>
