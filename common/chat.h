@@ -147,6 +147,8 @@ struct common_chat_templates_inputs {
     std::map<std::string, std::string> chat_template_kwargs;
     bool add_bos = false;
     bool add_eos = false;
+    // When true, use legacy monolithic parsers from chat.cpp instead of modular chat-parsers/*.cpp
+    bool use_legacy_parsers = false;
 };
 
 struct common_chat_params {

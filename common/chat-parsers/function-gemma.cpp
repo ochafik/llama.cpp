@@ -4,7 +4,7 @@
 
 #include "chat-parsers-internal.h"
 
-common_chat_params common_chat_params_init_function_gemma(const common_chat_template & tmpl, const struct templates_params & params) {
+common_chat_params common_chat_params_init_function_gemma_peg(const common_chat_template & tmpl, const struct templates_params & params) {
     common_chat_params data;
     data.grammar_lazy = params.tools.is_array() && !params.tools.empty() && params.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
 

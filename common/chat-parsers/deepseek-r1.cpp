@@ -7,7 +7,7 @@
 
 #include "chat-parsers-internal.h"
 
-common_chat_params common_chat_params_init_deepseek_r1(const common_chat_template & tmpl, const struct templates_params & inputs) {
+common_chat_params common_chat_params_init_deepseek_r1_peg(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
     auto prompt = apply(tmpl, inputs);
 

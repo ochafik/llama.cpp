@@ -3,7 +3,7 @@
 
 #include "chat-parsers-internal.h"
 
-common_chat_params common_chat_params_init_command_r7b(const common_chat_template & tmpl, const struct templates_params & inputs) {
+common_chat_params common_chat_params_init_command_r7b_peg(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
 
     auto adjusted_messages = json::array();

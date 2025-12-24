@@ -13,7 +13,7 @@ static size_t ifind_string(const std::string & str, const std::string & pattern)
     return it == str.end() ? std::string::npos : std::distance(str.begin(), it);
 }
 
-common_chat_params common_chat_params_init_lfm2(const common_chat_template & tmpl, const struct templates_params & inputs) {
+common_chat_params common_chat_params_init_lfm2_peg(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
     const auto is_json_schema_provided = !inputs.json_schema.is_null();
     const auto is_grammar_provided = !inputs.grammar.empty();

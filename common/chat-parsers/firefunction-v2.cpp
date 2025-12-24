@@ -2,7 +2,7 @@
 // Format: functools[{"name":"func","arguments":{}}]
 
 #include "chat-parsers-internal.h"
-common_chat_params common_chat_params_init_firefunction_v2(const common_chat_template & tmpl, const struct templates_params & inputs) {
+common_chat_params common_chat_params_init_firefunction_v2_peg(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
 
     const std::optional<json> tools_override = json();

@@ -9,7 +9,7 @@
 
 #include "chat-parsers-internal.h"
 
-common_chat_params common_chat_params_init_gpt_oss(const common_chat_template & tmpl, const struct templates_params & inputs) {
+common_chat_params common_chat_params_init_gpt_oss_peg(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
 
     // Copy reasoning to the "thinking" field as expected by the gpt-oss template

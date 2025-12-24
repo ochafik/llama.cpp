@@ -4,7 +4,7 @@
 
 #include "chat-parsers-internal.h"
 
-common_chat_params common_chat_params_init_granite(const common_chat_template & tmpl, const struct templates_params & inputs) {
+common_chat_params common_chat_params_init_granite_peg(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
 
     // Pass thinking context for Granite template
