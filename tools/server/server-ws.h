@@ -40,7 +40,7 @@ class ws_connection_impl;
 // WebSocket context - manages the WebSocket server
 // Runs on a separate thread and handles WebSocket connections
 struct server_ws_context {
-    class Impl;
+    struct Impl;
     std::unique_ptr<Impl> pimpl;
 
     std::thread thread;

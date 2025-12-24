@@ -73,10 +73,4 @@ private:
 
     // Forward message from MCP process to WebSocket
     void forward_to_ws(connection_state * state, const std::string & message);
-
-    // Send JSON-RPC response
-    void send_response(connection_state * state, const mcp_jsonrpc_response & resp);
-
-    // Send JSON-RPC notification
-    void send_notification(connection_state * state, const mcp_jsonrpc_notification & notif);
 };

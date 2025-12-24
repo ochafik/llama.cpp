@@ -9,7 +9,6 @@
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { WebSocketClientTransport } from '@modelcontextprotocol/sdk/client/websocket.js';
-import type { McpTool } from '$lib/types/mcp';
 import type { Tool, Notification } from '@modelcontextprotocol/sdk/types.js';
 
 // Timeout constants - increased for Docker containers that may take time to start
@@ -27,7 +26,7 @@ export class McpService {
 	private connectionGeneration = 0;
 
 	// Event callbacks
-	onToolsChanged?: (tools: McpTool[]) => void;
+	onToolsChanged?: (tools: Tool[]) => void;
 	onNotification?: (notification: Notification) => void;
 	onClose?: () => void;
 	onError?: (error: Error) => void;
@@ -98,8 +97,7 @@ export class McpService {
 								}
 								if (tools) {
 									console.log(`[MCP] Tools changed for ${this.serverName}:`, tools);
-									const mcpTools = tools.map(this.convertToolToMcpTool);
-									this.onToolsChanged?.(mcpTools);
+									this.onToolsChanged?.(tools);
 								}
 							}
 						}
@@ -191,7 +189,7 @@ export class McpService {
 	/**
 	 * List available tools from the MCP server
 	 */
-	async listTools(): Promise<McpTool[]> {
+	async listTools(): Promise<Tool[]> {
 		if (!this.client) {
 			throw new Error(`MCP client not initialized for: ${this.serverName}`);
 		}
@@ -200,8 +198,7 @@ export class McpService {
 			timeout: REQUEST_TIMEOUT_MS
 		});
 
-		// Convert SDK Tool format to our McpTool format
-		return response.tools.map(this.convertToolToMcpTool);
+		return response.tools;
 	}
 
 	/**
@@ -234,17 +231,6 @@ export class McpService {
 	isConnected(): boolean {
 		// Check if transport's WebSocket is connected
 		return this.transport !== null;
-	}
-
-	/**
-	 * Convert SDK Tool format to our McpTool format
-	 */
-	private convertToolToMcpTool(tool: Tool): McpTool {
-		return {
-			name: tool.name,
-			description: tool.description,
-			inputSchema: tool.inputSchema
-		};
 	}
 
 	/**

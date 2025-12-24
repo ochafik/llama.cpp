@@ -16,8 +16,6 @@ export interface ToolResultInfo {
 	result: string;
 }
 
-// Re-export CallToolResult as ParsedToolResult for convenience
-export type ParsedToolResult = CallToolResult;
 export type McpContentItem =
 	| TextContent
 	| ImageContent

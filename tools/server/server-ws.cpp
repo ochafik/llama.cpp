@@ -9,6 +9,13 @@
 #include <sstream>
 #include <algorithm>
 
+// Security limits to prevent DoS attacks
+static constexpr size_t WS_MAX_PAYLOAD_SIZE    = 10 * 1024 * 1024;   // 10MB per frame
+static constexpr size_t WS_MAX_MESSAGE_SIZE    = 100 * 1024 * 1024;  // 100MB assembled message
+static constexpr size_t WS_MAX_RECEIVE_BUFFER  = 16 * 1024 * 1024;   // 16MB receive buffer
+static constexpr size_t WS_MAX_CONNECTIONS     = 1000;               // Max concurrent connections
+static constexpr int    WS_SOCKET_TIMEOUT_SEC  = 30;                 // Socket read timeout
+
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -32,7 +39,6 @@ typedef int socket_t;
 // WebSocket frame constants
 namespace ws_frame {
     constexpr uint8_t FIN_BIT = 0x80;
-    constexpr uint8_t MASK_BIT = 0x80;
 
     enum opcode : uint8_t {
         CONTINUATION = 0x0,
@@ -54,11 +60,6 @@ static std::string base64_encode(const unsigned char * data, size_t len);
 
 // Simple SHA-1 implementation
 static std::vector<unsigned char> sha1(const std::string & input) {
-    // SHA-1 constants
-    static const uint32_t k[4] = {
-        0x5a827999, 0x6ed9eba1, 0x8f1bbcdc, 0xca62c1d6
-    };
-
     // Pad the message
     uint64_t bit_len = input.size() * 8;
     std::vector<uint8_t> padded(input.begin(), input.end());
@@ -241,6 +242,12 @@ public:
 
     // Handle incoming data
     void handle_data(const std::vector<uint8_t> & data, std::function<void(const std::string &)> on_message) {
+        // Check receive buffer limit to prevent DoS
+        if (receive_buffer_.size() + data.size() > WS_MAX_RECEIVE_BUFFER) {
+            SRV_ERR("%s: receive buffer overflow, closing connection\n", __func__);
+            close(1009, "Message too big");
+            return;
+        }
         receive_buffer_.insert(receive_buffer_.end(), data.begin(), data.end());
 
         while (true) {
@@ -251,10 +258,25 @@ public:
             uint8_t first_byte = receive_buffer_[0];
             uint8_t second_byte = receive_buffer_[1];
 
+            // Validate RSV bits (must be 0 unless extension negotiated)
+            uint8_t rsv_bits = (first_byte & 0x70);
+            if (rsv_bits != 0) {
+                SRV_ERR("%s: protocol error - RSV bits must be 0\n", __func__);
+                close(1002, "Protocol error");
+                return;
+            }
+
             bool fin = (first_byte & 0x80) != 0;
             ws_frame::opcode opcode = static_cast<ws_frame::opcode>(first_byte & 0x0f);
             bool masked = (second_byte & 0x80) != 0;
             uint64_t payload_len = second_byte & 0x7f;
+
+            // RFC 6455: Client frames MUST be masked
+            if (!masked) {
+                SRV_ERR("%s: protocol error - client frames must be masked\n", __func__);
+                close(1002, "Protocol error");
+                return;
+            }
 
             size_t header_len = 2;
 
@@ -270,6 +292,21 @@ public:
                     payload_len = (payload_len << 8) | receive_buffer_[2 + i];
                 }
                 header_len = 10;
+            }
+
+            // Validate payload size to prevent DoS via huge allocations
+            if (payload_len > WS_MAX_PAYLOAD_SIZE) {
+                SRV_ERR("%s: payload too large: %zu > %zu\n", __func__,
+                        static_cast<size_t>(payload_len), WS_MAX_PAYLOAD_SIZE);
+                close(1009, "Message too big");
+                return;
+            }
+
+            // Check for integer overflow in total_len calculation
+            if (payload_len > SIZE_MAX - header_len - 4) {
+                SRV_ERR("%s: frame size overflow\n", __func__);
+                close(1009, "Message too big");
+                return;
             }
 
             size_t total_len = header_len + payload_len + (masked ? 4 : 0);
@@ -308,6 +345,13 @@ public:
 
             // Handle frame
             if (opcode == ws_frame::TEXT || opcode == ws_frame::CONTINUATION) {
+                // Check message buffer limit to prevent DoS via fragmented messages
+                if (message_buffer_.size() + payload.size() > WS_MAX_MESSAGE_SIZE) {
+                    SRV_ERR("%s: message too large, closing connection\n", __func__);
+                    close(1009, "Message too big");
+                    message_buffer_.clear();
+                    return;
+                }
                 if (fin) {
                     // Complete message
                     message_buffer_.insert(message_buffer_.end(), payload.begin(), payload.end());
@@ -366,6 +410,13 @@ private:
     }
 
     void send_pong(const std::vector<uint8_t> & payload) {
+        // RFC 6455: Control frames must have payload ≤ 125 bytes
+        if (payload.size() > 125) {
+            SRV_WRN("%s: PING payload too large (%zu > 125), ignoring\n",
+                    __func__, payload.size());
+            return;
+        }
+
         std::vector<uint8_t> frame;
         frame.push_back(ws_frame::FIN_BIT | ws_frame::PONG);
         frame.push_back(static_cast<uint8_t>(payload.size()));
@@ -564,6 +615,23 @@ void server_ws_context::Impl::accept_loop() {
             continue;
         }
 
+        // Check connection limit to prevent resource exhaustion
+        {
+            std::lock_guard<std::mutex> lock(connections_mutex);
+            if (connections.size() >= WS_MAX_CONNECTIONS) {
+                SRV_WRN("%s: connection limit reached (%zu), rejecting\n",
+                        __func__, WS_MAX_CONNECTIONS);
+                const char * response = "HTTP/1.1 503 Service Unavailable\r\n\r\n";
+                send(client_sock, response, strlen(response), 0);
+#ifdef _WIN32
+                closesocket(client_sock);
+#else
+                close(client_sock);
+#endif
+                continue;
+            }
+        }
+
         // Handle connection in a thread
         std::thread([this, client_sock, client_addr]() {
             this->handle_connection(client_sock, client_addr);
@@ -576,8 +644,16 @@ void server_ws_context::Impl::handle_connection(socket_t sock, const struct sock
     int flag = 1;
 #ifdef _WIN32
     setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char *>(&flag), sizeof(flag));
+    // Set socket timeout to prevent slow-loris attacks
+    DWORD timeout_ms = WS_SOCKET_TIMEOUT_SEC * 1000;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char *>(&timeout_ms), sizeof(timeout_ms));
 #else
     setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
+    // Set socket timeout to prevent slow-loris attacks
+    struct timeval tv;
+    tv.tv_sec = WS_SOCKET_TIMEOUT_SEC;
+    tv.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 #endif
 
     // Read HTTP request (WebSocket handshake)

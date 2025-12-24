@@ -79,27 +79,18 @@ void server_mcp_bridge::on_connection_message(std::shared_ptr<server_ws_connecti
 
     SRV_DBG("%s: message from %s: %s\n", __func__, state->server_name.c_str(), message.c_str());
 
-    // Parse JSON-RPC message
+    // Validate JSON and forward to MCP process
     try {
-        json j = json::parse(message);
-
-        // Check if it's a request (has id) or notification (no id)
-        if (j.contains("id")) {
-            mcp_jsonrpc_request req(j);
-
-            // Forward to MCP process
-            forward_to_mcp(state, message);
-        } else {
-            // It's a notification - forward to MCP process
-            forward_to_mcp(state, message);
-        }
+        (void)json::parse(message);  // Validate JSON syntax
+        forward_to_mcp(state, message);
     } catch (const std::exception & e) {
         SRV_ERR("%s: failed to parse JSON-RPC message: %s\n",
                 __func__, e.what());
 
-        // Send error response
+        // Send JSON-RPC parse error response
         json error_resp;
         error_resp["jsonrpc"] = "2.0";
+        error_resp["id"] = nullptr;
         error_resp["error"]["code"] = -32700;
         error_resp["error"]["message"] = "Parse error";
         conn->send(error_resp.dump());
@@ -182,19 +173,18 @@ void server_mcp_bridge::forward_to_mcp(connection_state * state, const std::stri
         SRV_ERR("%s: no MCP process available for: %s\n",
                 __func__, state->server_name.c_str());
 
-        // Send error response
+        // Send error response if this was a request (has id)
         try {
             json j = json::parse(message);
             if (j.contains("id")) {
-                mcp_request_id id;
-                if (j["id"].is_string()) {
-                    id.str = j["id"].get<std::string>();
-                } else {
-                    id.num = j["id"].get<int64_t>();
+                json error_resp;
+                error_resp["jsonrpc"] = "2.0";
+                error_resp["id"] = j["id"];
+                error_resp["error"]["code"] = -32000;
+                error_resp["error"]["message"] = "MCP process not available";
+                if (state->conn) {
+                    state->conn->send(error_resp.dump());
                 }
-                auto resp = mcp_jsonrpc_response::make_error(
-                    id, -32000, "MCP process not available");
-                send_response(state, resp);
             }
         } catch (...) {
             // Ignore parse errors here
@@ -224,22 +214,6 @@ void server_mcp_bridge::forward_to_ws(connection_state * state, const std::strin
     state->conn->send(message);
 }
 
-
-void server_mcp_bridge::send_response(connection_state * state, const mcp_jsonrpc_response & resp) {
-    if (!state->conn) {
-        return;
-    }
-
-    state->conn->send(resp.to_json().dump());
-}
-
-void server_mcp_bridge::send_notification(connection_state * state, const mcp_jsonrpc_notification & notif) {
-    if (!state->conn) {
-        return;
-    }
-
-    state->conn->send(notif.to_json().dump());
-}
 
 std::vector<std::string> server_mcp_bridge::get_available_servers() {
     // Check if config file has been modified and reload if needed

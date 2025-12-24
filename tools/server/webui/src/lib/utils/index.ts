@@ -105,5 +105,4 @@ export {
 	createToolResultContent,
 	getContentTypeLabel,
 	type ToolResultInfo,
-	type ParsedToolResult
 } from './tool-results';
