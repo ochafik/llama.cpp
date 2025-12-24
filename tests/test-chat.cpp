@@ -4487,7 +4487,7 @@ static std::string describe_scenario(const needle_scenario & scenario) {
     return oss.str();
 }
 
-static void test_systematic_needle_streaming() {
+static bool test_systematic_needle_streaming() {
     printf("[%s]\n", __func__);
 
     const char * template_filter = std::getenv("NEEDLE_TEMPLATE_FILTER");
@@ -4888,6 +4888,8 @@ static void test_systematic_needle_streaming() {
         printf("    " ANSI_COLOR_RED "Failed" ANSI_COLOR_RESET ": %s\n", string_join(failing_template_summaries, ", ").c_str());
     }
     printf("\n");
+
+    return templates_passing == templates_total;
 }
 
 static void test_msg_diffs_compute() {
@@ -5030,7 +5032,9 @@ int main(int argc, char ** argv) {
                 test_template_output_peg_parsers();
             }
             if (chat_test == "" || chat_test == "systematic_needle_streaming") {
-                test_systematic_needle_streaming();
+                if (!test_systematic_needle_streaming()) {
+                    return 1;
+                }
             }
             std::cout << "\n[chat] All tests passed!" << '\n';
         }
