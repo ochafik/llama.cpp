@@ -70,6 +70,10 @@ common_chat_params common_chat_params_init_lfm2_peg(const common_chat_template &
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
             auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, min_calls, max_calls));
 
+            bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+            if (require_tools) {
+                return tool_calls;
+            }
             return p.tag(Tag::CONTENT, p.until("<|tool_call_start|>")) << tool_calls;
         });
 

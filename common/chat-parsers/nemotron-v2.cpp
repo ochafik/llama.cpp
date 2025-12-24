@@ -79,10 +79,11 @@ common_chat_params common_chat_params_init_nemotron_v2_peg(const common_chat_tem
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
             auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, min_calls, max_calls));
 
-            auto specials = skip_special_markers();
             if (require_tools) {
-                return reasoning << specials << tool_calls << specials;
+                return reasoning << tool_calls;
             }
+
+            auto specials = skip_special_markers();
             auto stop_before = std::vector<std::string> {
                 "\n<TOOLCALL>", "<TOOLCALL>",
                 "\n<SPECIAL_12>", "<SPECIAL_12>",
