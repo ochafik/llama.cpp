@@ -37,6 +37,20 @@ static int get_verbosity() {
 }
 static const int g_verbose = get_verbosity();
 
+// Parser implementation selector for tests
+enum class chat_parser_impl {
+    LEGACY,      // Use legacy monolithic parsers
+    EXPERIMENTAL // Use new modular PEG parsers
+};
+
+static const char * chat_parser_impl_name(chat_parser_impl impl) {
+    switch (impl) {
+        case chat_parser_impl::LEGACY:      return "legacy";
+        case chat_parser_impl::EXPERIMENTAL: return "experimental";
+    }
+    return "unknown";
+}
+
 static std::ostream & operator<<(std::ostream & os, const common_chat_msg_diff & diff) {
     os << "{ content_delta: " << diff.content_delta << "; ";
     os << "reasoning_content_delta: " << diff.reasoning_content_delta << "; ";
@@ -385,7 +399,8 @@ static delta_data init_delta(const struct common_chat_templates * tmpls, const s
                              const std::vector<common_chat_tool> & tools,
                              const common_chat_tool_choice & tool_choice,
                              common_reasoning_format reasoning_format = COMMON_REASONING_FORMAT_NONE,
-                             const std::function<void(common_chat_templates_inputs &)> & customize_inputs = {}) {
+                             const std::function<void(common_chat_templates_inputs &)> & customize_inputs = {},
+                             chat_parser_impl impl = chat_parser_impl::LEGACY) {
     common_chat_templates_inputs inputs;
     inputs.parallel_tool_calls = true;
     inputs.messages.push_back(user_message);
@@ -396,10 +411,8 @@ static delta_data init_delta(const struct common_chat_templates * tmpls, const s
         inputs.enable_thinking = true;
         inputs.reasoning_format = reasoning_format;
     }
-    // Check for environment variable to enable new parsers (default: false for no regression)
-    if (std::getenv("LLAMA_USE_NEW_PARSERS")) {
-        inputs.use_new_parsers = true;
-    }
+    // Set parser implementation based on enum (env var can override for backwards compat)
+    inputs.use_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL) || std::getenv("LLAMA_USE_NEW_PARSERS");
     if (customize_inputs) {
         customize_inputs(inputs);
     }
@@ -459,13 +472,14 @@ static void test_templates(const struct common_chat_templates * tmpls, const std
                           common_reasoning_format reasoning_format = COMMON_REASONING_FORMAT_NONE,
                           bool ignore_whitespace_differences = false,
                           bool expect_parse_failure = false,
-                          const std::function<void(std::string &)> & mutate_delta = {}) {
+                          const std::function<void(std::string &)> & mutate_delta = {},
+                          chat_parser_impl impl = chat_parser_impl::LEGACY) {
     common_chat_msg user_message;
     user_message.role = "user";
     user_message.content = "Hello, world!";
 
     for (const auto & tool_choice : std::vector<common_chat_tool_choice> {COMMON_CHAT_TOOL_CHOICE_AUTO, COMMON_CHAT_TOOL_CHOICE_REQUIRED}) {
-        auto data = init_delta(tmpls, end_tokens, user_message, test_message, tools, tool_choice, reasoning_format);
+        auto data = init_delta(tmpls, end_tokens, user_message, test_message, tools, tool_choice, reasoning_format, {}, impl);
         if (!expected_delta.empty()) {
             if (ignore_whitespace_differences) {
                 assert_equals(string_strip(expected_delta), string_strip(data.delta));
@@ -1087,6 +1101,8 @@ static void test_peg_parser(common_chat_templates * tmpls, const std::function<v
     if (tc.expect.role.empty()) {
         tc.expect.role = "assistant";
     }
+    // PEG parser tests always use new parsers
+    tc.params.use_new_parsers = true;
 
     auto parser = make_peg_parser(tmpls, tc.params);
 
@@ -1244,8 +1260,26 @@ static void test_tools_oaicompat_json_conversion() {
         common_chat_tools_to_json_oaicompat<json>({special_function_tool}).dump(2));
 }
 
-static void test_template_output_parsers() {
-    printf("[%s]\n", __func__);
+static void test_template_output_parsers(chat_parser_impl impl) {
+    printf("[%s:%s]\n", __func__, chat_parser_impl_name(impl));
+
+    // Wrapper to pass impl to test_templates without changing all call sites
+    // Note: direct common_chat_parse() calls still use legacy format-based parsing
+    // (they don't go through template application and don't have a PEG parser)
+    auto test = [impl](const struct common_chat_templates * tmpls, const std::vector<std::string> & end_tokens,
+                       const common_chat_msg & test_message,
+                       const std::vector<common_chat_tool> & tools = {},
+                       const std::string & expected_delta = "",
+                       bool expect_grammar_triggered = true,
+                       bool test_grammar_if_triggered = true,
+                       common_reasoning_format reasoning_format = COMMON_REASONING_FORMAT_NONE,
+                       bool ignore_whitespace_differences = false,
+                       bool expect_parse_failure = false,
+                       const std::function<void(std::string &)> & mutate_delta = {}) {
+        test_templates(tmpls, end_tokens, test_message, tools, expected_delta, expect_grammar_triggered,
+                       test_grammar_if_triggered, reasoning_format, ignore_whitespace_differences,
+                       expect_parse_failure, mutate_delta, impl);
+    };
 
     common_chat_templates_inputs inputs_no_tools;
     inputs_no_tools.messages                = {message_user};
@@ -1341,7 +1375,7 @@ static void test_template_output_parsers() {
                     /* .reasoning_format = */ COMMON_REASONING_FORMAT_DEEPSEEK,
                 }));
 
-        test_templates(tmpls.get(), end_tokens, message_assist_call_idx, tools,
+        test(tmpls.get(), end_tokens, message_assist_call_idx, tools,
                       "<|START_THINKING|><|END_THINKING|>"
                       "<|START_ACTION|>[\n"
                       "    {\"tool_call_id\": \"0\", \"tool_name\": \"special_function\", \"parameters\": {\"arg1\": 1}}\n"
@@ -1349,7 +1383,7 @@ static void test_template_output_parsers() {
                       /* expect_grammar_triggered= */ true,
                       /* test_grammar_if_triggered= */ true,
                       COMMON_REASONING_FORMAT_DEEPSEEK);
-        test_templates(tmpls.get(), end_tokens, message_assist, tools,
+        test(tmpls.get(), end_tokens, message_assist, tools,
                       "<|START_RESPONSE|>Hello, world!\n"
                       "What's up?<|END_RESPONSE|>",
                       /* expect_grammar_triggered= */ false);
@@ -1414,7 +1448,7 @@ static void test_template_output_parsers() {
                 "}",
                 /* is_partial= */ false,
                 {COMMON_CHAT_FORMAT_GENERIC}));
-        test_templates(tmpls.get(), end_tokens, message_assist_call_id, tools,
+        test(tmpls.get(), end_tokens, message_assist_call_id, tools,
                       "{\n"
                       "  \"tool_calls\": [\n"
                       "    {\n"
@@ -1433,8 +1467,8 @@ static void test_template_output_parsers() {
 
         assert_equals(COMMON_CHAT_FORMAT_MISTRAL_NEMO, common_chat_templates_apply(tmpls.get(), inputs_tools).format);
 
-        test_templates(tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
-        test_templates(
+        test(tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
+        test(
             tmpls.get(), end_tokens, message_assist_call_id, tools,
             "[TOOL_CALLS][{\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}, \"id\": \"123456789\"}]");
     }
@@ -1767,8 +1801,8 @@ static void test_template_output_parsers() {
                     /* .thinking_forced_open = */ true,
                 }));
 
-        test_templates(tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
-        test_templates(tmpls.get(), end_tokens, message_assist_call, tools,
+        test(tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
+        test(tmpls.get(), end_tokens, message_assist_call, tools,
                       "<tool_call>\n"
                       "{\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
                       "</tool_call>");
@@ -1780,7 +1814,7 @@ static void test_template_output_parsers() {
         message_assist_multiple_calls_template.tool_calls.push_back({"special_function", "{\"arg1\": 1}", ""});
         message_assist_multiple_calls_template.tool_calls.push_back({"python", "{\"code\":\"print('test')\"}", ""});
 
-        test_templates(tmpls.get(), end_tokens, message_assist_multiple_calls_template, tools,
+        test(tmpls.get(), end_tokens, message_assist_multiple_calls_template, tools,
                       "<tool_call>\n"
                       "{\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
                       "</tool_call>\n"
@@ -1789,7 +1823,7 @@ static void test_template_output_parsers() {
                       "</tool_call>");
 
         // TODO(ochafik): Fix this test - the template produces a format that doesn't match expected
-        // test_templates(tmpls.get(), end_tokens, message_assist_call_python_lines, tools,
+        // test(tmpls.get(), end_tokens, message_assist_call_python_lines, tools,
         //               "<tool_call>\n"
         //               "{\"name\": \"python\", \"arguments\": {\"code\":\"# This is a program:\\nprint('hey')\"}}\n"
         //               "</tool_call>");
@@ -1824,12 +1858,12 @@ static void test_template_output_parsers() {
                 /* is_partial= */ false,
                 {COMMON_CHAT_FORMAT_LLAMA_3_X}));
 
-        // test_templates(tmpls.get(), end_tokens, message_assist, tools, R"(?)", /* expect_grammar_triggered= */ false);
-        test_templates(tmpls.get(), end_tokens, message_assist_call_code_interpreter, llama_3_1_tools,
+        // test(tmpls.get(), end_tokens, message_assist, tools, R"(?)", /* expect_grammar_triggered= */ false);
+        test(tmpls.get(), end_tokens, message_assist_call_code_interpreter, llama_3_1_tools,
                       "<|python_tag|>code_interpreter.call(code=\"print('hey')\")");
-        test_templates(tmpls.get(), end_tokens, message_assist_call_python, tools,
+        test(tmpls.get(), end_tokens, message_assist_call_python, tools,
                       "<|python_tag|>python.call(code=\"print('hey')\")");
-        test_templates(tmpls.get(), end_tokens, message_assist_call, tools,
+        test(tmpls.get(), end_tokens, message_assist_call, tools,
                       "{\"name\": \"special_function\", \"parameters\": {\"arg1\": 1}}");
     }
     {
@@ -1839,8 +1873,8 @@ static void test_template_output_parsers() {
         assert_equals(COMMON_CHAT_FORMAT_LLAMA_3_X, common_chat_templates_apply(tmpls.get(), inputs_tools).format);
         assert_equals(COMMON_CHAT_FORMAT_CONTENT_ONLY, common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);
 
-        test_templates(tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
-        test_templates(tmpls.get(), end_tokens, message_assist_call, tools,
+        test(tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
+        test(tmpls.get(), end_tokens, message_assist_call, tools,
                       "{\"name\": \"special_function\", \"parameters\": {\"arg1\": 1}}");
     }
     {
@@ -1870,8 +1904,8 @@ static void test_template_output_parsers() {
                 /* is_partial= */ true,
                 {COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1}));
 
-        test_templates(tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
-        test_templates(tmpls.get(), end_tokens, message_assist_call, tools,
+        test(tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
+        test(tmpls.get(), end_tokens, message_assist_call, tools,
                       "<function=special_function>{\"arg1\": 1}</function>");
     }
     {
@@ -1922,12 +1956,12 @@ static void test_template_output_parsers() {
                 /* is_partial= */ false,
                 {COMMON_CHAT_FORMAT_FUNCTIONARY_V3_2}));
 
-        test_templates(tmpls.get(), end_tokens, message_assist, {},
+        test(tmpls.get(), end_tokens, message_assist, {},
                       "all\n"
                       "Hello, world!\n"
                       "What's up?",
                       /* expect_grammar_triggered= */ false);
-        test_templates(tmpls.get(), end_tokens, message_assist_call, tools,
+        test(tmpls.get(), end_tokens, message_assist_call, tools,
                       "special_function\n"
                       "{\"arg1\": 1}");
     }
@@ -1938,8 +1972,8 @@ static void test_template_output_parsers() {
         assert_equals(COMMON_CHAT_FORMAT_CONTENT_ONLY, common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);
         assert_equals(COMMON_CHAT_FORMAT_FIREFUNCTION_V2, common_chat_templates_apply(tmpls.get(), inputs_tools).format);
 
-        test_templates(tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
-        test_templates(tmpls.get(), end_tokens, message_assist_call, tools,
+        test(tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
+        test(tmpls.get(), end_tokens, message_assist_call, tools,
                       " functools[{\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}]");
     }
     {
@@ -1950,8 +1984,8 @@ static void test_template_output_parsers() {
         assert_equals(COMMON_CHAT_FORMAT_DEEPSEEK_R1,                   common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);
         assert_equals(COMMON_CHAT_FORMAT_DEEPSEEK_R1,                   common_chat_templates_apply(tmpls.get(), inputs_tools).format);
 
-        test_templates(tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
-        test_templates(tmpls.get(), end_tokens, message_assist_thoughts, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
+        test(tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
+        test(tmpls.get(), end_tokens, message_assist_thoughts, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
         assert_msg_equals(message_assist_thoughts_unparsed_deepseek,
             common_chat_parse(
                 "<think>I'm\nthinking</think>Hello, world!\nWhat's up?",
@@ -2006,7 +2040,7 @@ static void test_template_output_parsers() {
                     /* .format = */ COMMON_CHAT_FORMAT_DEEPSEEK_R1,
                     /* .reasoning_format = */ COMMON_REASONING_FORMAT_DEEPSEEK,
                 }));
-        test_templates(tmpls.get(), end_tokens, message_assist_call, tools,
+        test(tmpls.get(), end_tokens, message_assist_call, tools,
                 "<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>function<｜tool▁sep｜>special_function\n"
                 "```json\n"
                 "{\"arg1\": 1}\n"
@@ -2136,13 +2170,13 @@ static void test_template_output_parsers() {
                 }));
 
         // Test template generation for regular content
-        test_templates(tmpls.get(), end_tokens, message_assist, tools,
+        test(tmpls.get(), end_tokens, message_assist, tools,
                       "Hello, world!\nWhat's up?",
                       /* expect_grammar_triggered= */ false);
 
         // Test template generation for tool calls
         // Skip the full template test for now - parser loops over AUTO/REQUIRED and only REQUIRED works without content
-        // test_templates(tmpls.get(), end_tokens, message_assist_call, tools,
+        // test(tmpls.get(), end_tokens, message_assist_call, tools,
         //               "<|tool_call|>[{\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}]",
         //               /* expect_grammar_triggered= */ true
         // );
@@ -2337,34 +2371,42 @@ static void test_template_output_parsers() {
         assert_equals(COMMON_CHAT_FORMAT_SEED_OSS, common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);
         assert_equals(COMMON_CHAT_FORMAT_SEED_OSS, common_chat_templates_apply(tmpls.get(), inputs_tools).format);
 
-        test_templates(tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
+        test(tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
 
         // Create inputs with reasoning enabled (includes process_data for multi-param tests)
         common_chat_templates_inputs inputs_tools_reasoning;
         inputs_tools_reasoning.messages = {message_user};
         inputs_tools_reasoning.tools = {special_function_tool, process_data_tool};
         inputs_tools_reasoning.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
+        inputs_tools_reasoning.use_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
 
         // Get syntax with parser for tool call tests (with reasoning)
         auto params = common_chat_templates_apply(tmpls.get(), inputs_tools_reasoning);
         common_chat_syntax syntax;
         syntax.format = params.format;
         syntax.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
-        syntax.parser.load(params.parser);
+        if (!params.parser.empty()) {
+            syntax.parser.load(params.parser);
+        }
 
         // Syntax with reasoning for content-only tests
         common_chat_syntax syntax_reasoning;
         syntax_reasoning.format = params.format;
         syntax_reasoning.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
-        syntax_reasoning.parser.load(params.parser);
+        if (!params.parser.empty()) {
+            syntax_reasoning.parser.load(params.parser);
+        }
 
-        // Test simple reasoning content
-        assert_msg_equals(
-            simple_assist_msg("Hello, world!", "I'm thinking about the answer"),
-            common_chat_parse(
-                "<seed:think>I'm thinking about the answer</seed:think>Hello, world!",
-                /* is_partial= */ false,
-                syntax_reasoning));
+        // PEG parser-specific tests (only run with experimental parser)
+        // Legacy format-based parser has different whitespace handling for these cases
+        if (impl == chat_parser_impl::EXPERIMENTAL) {
+            // Test simple reasoning content
+            assert_msg_equals(
+                simple_assist_msg("Hello, world!", "I'm thinking about the answer"),
+                common_chat_parse(
+                    "<seed:think>I'm thinking about the answer</seed:think>Hello, world!",
+                    /* is_partial= */ false,
+                    syntax_reasoning));
 
         // Test budget reflection tags
         common_chat_msg msg_budget_reflect;
@@ -2455,7 +2497,7 @@ static void test_template_output_parsers() {
                 syntax));
 
         auto make_invalid_delta = [&](const std::function<void(std::string &)> & mutate) {
-            test_templates(
+            test(
                 tmpls.get(), end_tokens, message_assist_call, tools,
                 /* expected_delta = */ "", /* expect_grammar_triggered = */ true,
                 /* test_grammar_if_triggered = */ true,
@@ -2501,6 +2543,7 @@ static void test_template_output_parsers() {
                 "This is a simple response without reasoning.",
                 /* is_partial= */ false,
                 syntax));
+        } // end PEG parser-specific tests
     }
     {
         auto tmpls = read_templates("models/templates/NVIDIA-Nemotron-Nano-v2.jinja");
@@ -2562,12 +2605,12 @@ static void test_template_output_parsers() {
                 }));
 
         // Test template generation for regular content
-        test_templates(tmpls.get(), end_tokens, message_assist, tools,
+        test(tmpls.get(), end_tokens, message_assist, tools,
                       "Hello, world!\nWhat's up?\n",
                       /* expect_grammar_triggered= */ false);
 
         // Test template generation for tool calls
-        test_templates(tmpls.get(), end_tokens, message_assist_call, tools,
+        test(tmpls.get(), end_tokens, message_assist_call, tools,
                       "<TOOLCALL>[{\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}]</TOOLCALL>",
                       /* expect_grammar_triggered= */ true
         );
@@ -2582,8 +2625,8 @@ static void test_template_output_parsers() {
             assert_equals(true, params.thinking_forced_open);
         }
 
-        test_templates(tmpls.get(), end_tokens, message_assist, tools, "</think>Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
-        test_templates(tmpls.get(), end_tokens, message_assist_thoughts, tools, "</think>Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
+        test(tmpls.get(), end_tokens, message_assist, tools, "</think>Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
+        test(tmpls.get(), end_tokens, message_assist_thoughts, tools, "</think>Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
         assert_msg_equals(
             simple_assist_msg("Hello, world!\nWhat's up?", "I'm\nthinking"),
             common_chat_parse(
@@ -2792,12 +2835,12 @@ static void test_template_output_parsers() {
 // srv  log_server_r: request:  {"max_tokens": 512, "messages": [{"role": "system", "content": "You are a coding assistant."}, {"role": "user", "content": "Write an example"}], "tool_choice": "required", "tools": [{"type": "function", "function": {"name": "test", "description": "", "parameters": {"type": "object", "properties": {"success": {"type": "boolean", "const": true}}, "required": ["success"]}}}], "parallel_tool_calls": false, "stream": false}
 
         // Test template generation for regular content
-        test_templates(tmpls.get(), end_tokens, message_assist, tools,
+        test(tmpls.get(), end_tokens, message_assist, tools,
                       "Hello, world!\nWhat's up?",
                       /* expect_grammar_triggered= */ false);
 
         // Test template generation for tool calls
-        test_templates(tmpls.get(), end_tokens, message_assist_call, tools,
+        test(tmpls.get(), end_tokens, message_assist_call, tools,
                       "<|tools_prefix|>[{\"special_function\": {\"arg1\": 1}}]<|tools_suffix|>",
                       /* expect_grammar_triggered= */ true
         );
@@ -2949,7 +2992,7 @@ Hey there!<|im_end|>
 
         // Note: LFM2 uses JSON format for tool calls: [{"name": "...", "arguments": {...}}]
         // Unlike other formats, LFM2 template does not render tool calls in conversation history,
-        // so we don't use test_templates() for tool call generation. Instead, the parsing tests
+        // so we don't use test() for tool call generation. Instead, the parsing tests
         // above verify edge cases and format variations for the tool call output format.
     }
 
@@ -2965,39 +3008,48 @@ Hey there!<|im_end|>
         inputs_tools_no_reasoning.messages = {message_user};
         inputs_tools_no_reasoning.tools = {special_function_tool, special_function_tool_with_optional_param};
         inputs_tools_no_reasoning.reasoning_format = COMMON_REASONING_FORMAT_NONE;
+        inputs_tools_no_reasoning.use_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
 
         // Create inputs with reasoning enabled for reasoning tests
         common_chat_templates_inputs inputs_tools_reasoning;
         inputs_tools_reasoning.messages = {message_user};
         inputs_tools_reasoning.tools = {special_function_tool, special_function_tool_with_optional_param};
         inputs_tools_reasoning.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
+        inputs_tools_reasoning.use_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
 
         // Get syntax for content-only tests
         auto params_no_reasoning = common_chat_templates_apply(tmpls.get(), inputs_tools_no_reasoning);
         common_chat_syntax syntax;
         syntax.format = params_no_reasoning.format;
-        syntax.parser.load(params_no_reasoning.parser);
+        if (!params_no_reasoning.parser.empty()) {
+            syntax.parser.load(params_no_reasoning.parser);
+        }
 
         // Get syntax with reasoning for reasoning tests
         auto params_reasoning = common_chat_templates_apply(tmpls.get(), inputs_tools_reasoning);
         common_chat_syntax syntax_reasoning;
         syntax_reasoning.format = params_reasoning.format;
         syntax_reasoning.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
-        syntax_reasoning.parser.load(params_reasoning.parser);
+        if (!params_reasoning.parser.empty()) {
+            syntax_reasoning.parser.load(params_reasoning.parser);
+        }
 
-        // Test parsing regular content
-        assert_msg_equals(message_assist,
-            common_chat_parse(
-                "Hello, world!\nWhat's up?",
-                /* is_partial= */ false,
-                syntax));
+        // PEG parser-specific tests (only run with experimental parser)
+        // Legacy format-based parser has different whitespace handling for these cases
+        if (impl == chat_parser_impl::EXPERIMENTAL) {
+            // Test parsing regular content
+            assert_msg_equals(message_assist,
+                common_chat_parse(
+                    "Hello, world!\nWhat's up?",
+                    /* is_partial= */ false,
+                    syntax));
 
-        // Test parsing content with thinking (thinking_forced_open: model output starts with reasoning directly)
-        assert_msg_equals(message_assist_thoughts,
-            common_chat_parse(
-                "I'm\nthinking</think>Hello, world!\nWhat's up?",
-                /* is_partial= */ false,
-                syntax_reasoning));
+            // Test parsing content with thinking (thinking_forced_open: model output starts with reasoning directly)
+            assert_msg_equals(message_assist_thoughts,
+                common_chat_parse(
+                    "I'm\nthinking</think>Hello, world!\nWhat's up?",
+                    /* is_partial= */ false,
+                    syntax_reasoning));
 
         // Test parsing tool calls (with proper newlines expected by parser)
         assert_msg_equals(message_assist_call,
@@ -3044,14 +3096,15 @@ Hey there!<|im_end|>
                 "<minimax:tool_call><invoke name=\"special_function\"><parameter name=\"arg1\">1</parameter></invoke></minimax:tool_call>",
                 /* is_partial= */ false,
                 syntax));
+        } // end PEG parser-specific tests
 
         // Test template generation for regular content
-        test_templates(tmpls.get(), end_tokens, message_assist, tools,
+        test(tmpls.get(), end_tokens, message_assist, tools,
                       "Hello, world!\nWhat's up?",
                       /* expect_grammar_triggered= */ false);
 
         // Test template generation for tool calls
-        test_templates(tmpls.get(), end_tokens, message_assist_call, tools,
+        test(tmpls.get(), end_tokens, message_assist_call, tools,
                       "<minimax:tool_call>\n<invoke name=\"special_function\">\n<parameter name=\"arg1\">1</parameter>\n</invoke>\n</minimax:tool_call>",
                       /* expect_grammar_triggered= */ true,
                       /* test_grammar_if_triggered= */ true,
@@ -3060,14 +3113,14 @@ Hey there!<|im_end|>
         );
 
         // Test template generation for tools with optional parameters
-        test_templates(tmpls.get(), end_tokens, message_assist_call_noopt, tools,
+        test(tmpls.get(), end_tokens, message_assist_call_noopt, tools,
                       "<minimax:tool_call>\n<invoke name=\"special_function_with_opt\">\n<parameter name=\"arg1\">1</parameter>\n</invoke>\n</minimax:tool_call>",
                       /* expect_grammar_triggered= */ true,
                       /* test_grammar_if_triggered= */ true,
                       /* common_reasoning_format= */ COMMON_REASONING_FORMAT_NONE,
                       /* ignore_whitespace_differences= */ true
         );
-        test_templates(tmpls.get(), end_tokens, message_assist_call_withopt, tools,
+        test(tmpls.get(), end_tokens, message_assist_call_withopt, tools,
                       "<minimax:tool_call>\n<invoke name=\"special_function_with_opt\">\n<parameter name=\"arg1\">1</parameter>\n<parameter name=\"arg2\">2</parameter>\n</invoke>\n</minimax:tool_call>",
                       /* expect_grammar_triggered= */ true,
                       /* test_grammar_if_triggered= */ true,
@@ -3089,6 +3142,7 @@ Hey there!<|im_end|>
         glm_inputs_no_reasoning.messages = {message_user};
         glm_inputs_no_reasoning.tools = glm_4_5_tools;
         glm_inputs_no_reasoning.enable_thinking = true;
+        glm_inputs_no_reasoning.use_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
         auto glm_params_no_reasoning = common_chat_templates_apply(tmpls.get(), glm_inputs_no_reasoning);
         auto glm_syntax = get_syntax(glm_params_no_reasoning);
 
@@ -3098,6 +3152,7 @@ Hey there!<|im_end|>
         glm_inputs_reasoning.tools = glm_4_5_tools;
         glm_inputs_reasoning.enable_thinking = true;
         glm_inputs_reasoning.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
+        glm_inputs_reasoning.use_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
         auto glm_params_reasoning = common_chat_templates_apply(tmpls.get(), glm_inputs_reasoning);
         auto glm_syntax_reasoning = get_syntax(glm_params_reasoning, COMMON_REASONING_FORMAT_DEEPSEEK);
 
@@ -3143,52 +3198,54 @@ Hey there!<|im_end|>
                 /* is_partial= */ false,
                 glm_syntax_reasoning), true);
 
-        // Test streaming
-        test_parser_with_streaming(message_assist_call_thoughts_content,
-            "\n<think>I'm\nthinking</think>Hello, world!\nWhat's up?\n<tool_call>special_function\n<arg_key>arg1</arg_key>\n<arg_value>1</arg_value>\n</tool_call>",
-            [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, glm_syntax_reasoning); });
-        test_parser_with_streaming(message_assist_call_thoughts_unparsed,
-            "\n<think>I'm\nthinking</think>\n\n<tool_call>special_function\n<arg_key>arg1</arg_key>\n<arg_value>1</arg_value>\n</tool_call>",
-            [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, glm_syntax); });
-        test_parser_with_streaming(message_assist_call_withopt,
-            "\n<think></think>\n<tool_call>special_function_with_opt\n<arg_key>arg1</arg_key>\n<arg_value>1</arg_value>\n<arg_key>arg2</arg_key>\n<arg_value>2</arg_value>\n</tool_call>\n",
-            [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, glm_syntax_reasoning); });
-        test_parser_with_streaming(
-            simple_assist_msg("", "", "complex_function", "{\"name\":\"John Doe\",\"age\":30,\"active\":true,\"score\":95.5}"),
-            "<tool_call>complex_function\n"
-            "<arg_key>name</arg_key>\n"
-            "<arg_value>John Doe</arg_value>\n"
-            "<arg_key>age</arg_key>\n"
-            "<arg_value>30</arg_value>\n"
-            "<arg_key>active</arg_key>\n"
-            "<arg_value>true</arg_value>\n"
-            "<arg_key>score</arg_key>\n"
-            "<arg_value>95.5</arg_value>\n"
-            "</tool_call>",
-            [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, glm_syntax); });
-        test_parser_with_streaming(
-            simple_assist_msg("", "", "web_search", "{\"query\":\"\\\"From Zero\\\" Linkin Park album tracklist complete songs\",\"limit\":3,\"type\":\"text\"}"),
-            "<tool_call>web_search\n"
-            "<arg_key>query</arg_key>\n"
-            "<arg_value>\"From Zero\" Linkin Park album tracklist complete songs</arg_value>\n"
-            "<arg_key>limit</arg_key>\n"
-            "<arg_value>3</arg_value>\n"
-            "<arg_key>type</arg_key>\n"
-            "<arg_value>text</arg_value>\n"
-            "</tool_call>",
-            [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, glm_syntax); });
+        // Streaming tests only run with experimental PEG parsers
+        if (impl == chat_parser_impl::EXPERIMENTAL) {
+            test_parser_with_streaming(message_assist_call_thoughts_content,
+                "\n<think>I'm\nthinking</think>Hello, world!\nWhat's up?\n<tool_call>special_function\n<arg_key>arg1</arg_key>\n<arg_value>1</arg_value>\n</tool_call>",
+                [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, glm_syntax_reasoning); });
+            test_parser_with_streaming(message_assist_call_thoughts_unparsed,
+                "\n<think>I'm\nthinking</think>\n\n<tool_call>special_function\n<arg_key>arg1</arg_key>\n<arg_value>1</arg_value>\n</tool_call>",
+                [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, glm_syntax); });
+            test_parser_with_streaming(message_assist_call_withopt,
+                "\n<think></think>\n<tool_call>special_function_with_opt\n<arg_key>arg1</arg_key>\n<arg_value>1</arg_value>\n<arg_key>arg2</arg_key>\n<arg_value>2</arg_value>\n</tool_call>\n",
+                [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, glm_syntax_reasoning); });
+            test_parser_with_streaming(
+                simple_assist_msg("", "", "complex_function", "{\"name\":\"John Doe\",\"age\":30,\"active\":true,\"score\":95.5}"),
+                "<tool_call>complex_function\n"
+                "<arg_key>name</arg_key>\n"
+                "<arg_value>John Doe</arg_value>\n"
+                "<arg_key>age</arg_key>\n"
+                "<arg_value>30</arg_value>\n"
+                "<arg_key>active</arg_key>\n"
+                "<arg_value>true</arg_value>\n"
+                "<arg_key>score</arg_key>\n"
+                "<arg_value>95.5</arg_value>\n"
+                "</tool_call>",
+                [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, glm_syntax); });
+            test_parser_with_streaming(
+                simple_assist_msg("", "", "web_search", "{\"query\":\"\\\"From Zero\\\" Linkin Park album tracklist complete songs\",\"limit\":3,\"type\":\"text\"}"),
+                "<tool_call>web_search\n"
+                "<arg_key>query</arg_key>\n"
+                "<arg_value>\"From Zero\" Linkin Park album tracklist complete songs</arg_value>\n"
+                "<arg_key>limit</arg_key>\n"
+                "<arg_value>3</arg_value>\n"
+                "<arg_key>type</arg_key>\n"
+                "<arg_value>text</arg_value>\n"
+                "</tool_call>",
+                [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, glm_syntax); });
 
-        // Test interleaved thinking
-        // Content chunks: "Hello, world!\n" (until <think>) + "What's up?" (until \n<tool_call>) = "Hello, world!\nWhat's up?"
-        test_parser_with_streaming(simple_assist_msg("Hello, world!\nWhat's up?", "I'm\nthinkingThinking2", "special_function", "{\"arg1\": 1}"),
-            "\n<think>I'm\nthinking</think>Hello, world!\n<think>Thinking2</think>What's up?\n<tool_call>special_function\n<arg_key>arg1</arg_key>\n<arg_value>1</arg_value>\n</tool_call>",
-            [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, glm_syntax_reasoning); });
-        test_parser_with_streaming(simple_assist_msg("\n<think>I'm\nthinking</think>Hello, world!\n<think>Thinking2</think>What's up?", "", "special_function", "{\"arg1\": 1}"),
-            "\n<think>I'm\nthinking</think>Hello, world!\n<think>Thinking2</think>What's up?\n<tool_call>special_function\n<arg_key>arg1</arg_key>\n<arg_value>1</arg_value>\n</tool_call>",
-            [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, glm_syntax); });
+            // Test interleaved thinking
+            // Content chunks: "Hello, world!\n" (until <think>) + "What's up?" (until \n<tool_call>) = "Hello, world!\nWhat's up?"
+            test_parser_with_streaming(simple_assist_msg("Hello, world!\nWhat's up?", "I'm\nthinkingThinking2", "special_function", "{\"arg1\": 1}"),
+                "\n<think>I'm\nthinking</think>Hello, world!\n<think>Thinking2</think>What's up?\n<tool_call>special_function\n<arg_key>arg1</arg_key>\n<arg_value>1</arg_value>\n</tool_call>",
+                [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, glm_syntax_reasoning); });
+            test_parser_with_streaming(simple_assist_msg("\n<think>I'm\nthinking</think>Hello, world!\n<think>Thinking2</think>What's up?", "", "special_function", "{\"arg1\": 1}"),
+                "\n<think>I'm\nthinking</think>Hello, world!\n<think>Thinking2</think>What's up?\n<tool_call>special_function\n<arg_key>arg1</arg_key>\n<arg_value>1</arg_value>\n</tool_call>",
+                [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, glm_syntax); });
+        }
 
         // Test template generation for regular content
-        test_templates(tmpls.get(), end_tokens, message_assist, tools,
+        test(tmpls.get(), end_tokens, message_assist, tools,
                       "\n<think></think>\nHello, world!\nWhat's up?",
                       /* expect_grammar_triggered= */ false);
 
@@ -3196,7 +3253,7 @@ Hey there!<|im_end|>
         // These tests are temporarily disabled because building params with reasoning_format=DEEPSEEK
         // causes grammar stack overflow during llama_grammar_advance_stack (recursive grammar structure).
         // This is a pre-existing issue that needs to be fixed separately.
-        // test_templates(tmpls.get(), end_tokens, message_assist_call, tools,
+        // test(tmpls.get(), end_tokens, message_assist_call, tools,
         //               "\n<think></think>\n<tool_call>special_function\n<arg_key>arg1</arg_key>\n<arg_value>1</arg_value>\n</tool_call>\n",
         //               /* expect_grammar_triggered= */ true,
         //               /* test_grammar_if_triggered= */ false,
@@ -3217,6 +3274,7 @@ Hey there!<|im_end|>
         kimi_inputs.tools = kimi_k2_tools;
         kimi_inputs.enable_thinking = true;
         kimi_inputs.parallel_tool_calls = true;
+        kimi_inputs.use_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
         auto kimi_params = common_chat_templates_apply(tmpls.get(), kimi_inputs);
         auto kimi_syntax = get_syntax(kimi_params);
 
@@ -3227,6 +3285,7 @@ Hey there!<|im_end|>
         kimi_inputs_reasoning.enable_thinking = true;
         kimi_inputs_reasoning.parallel_tool_calls = true;
         kimi_inputs_reasoning.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
+        kimi_inputs_reasoning.use_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
         auto kimi_params_reasoning = common_chat_templates_apply(tmpls.get(), kimi_inputs_reasoning);
         auto kimi_syntax_reasoning = get_syntax(kimi_params_reasoning, COMMON_REASONING_FORMAT_DEEPSEEK);
 
@@ -3234,6 +3293,7 @@ Hey there!<|im_end|>
         common_chat_templates_inputs kimi_inputs_content_only;
         kimi_inputs_content_only.messages = {message_user};
         kimi_inputs_content_only.enable_thinking = true;
+        kimi_inputs_content_only.use_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
         auto kimi_params_content = common_chat_templates_apply(tmpls.get(), kimi_inputs_content_only);
         auto kimi_syntax_content = get_syntax(kimi_params_content);
 
@@ -3242,6 +3302,7 @@ Hey there!<|im_end|>
         kimi_inputs_content_reasoning.messages = {message_user};
         kimi_inputs_content_reasoning.enable_thinking = true;
         kimi_inputs_content_reasoning.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
+        kimi_inputs_content_reasoning.use_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
         auto kimi_params_content_reasoning = common_chat_templates_apply(tmpls.get(), kimi_inputs_content_reasoning);
         auto kimi_syntax_content_reasoning = get_syntax(kimi_params_content_reasoning, COMMON_REASONING_FORMAT_DEEPSEEK);
 
@@ -3259,36 +3320,39 @@ Hey there!<|im_end|>
                 /* is_partial= */ false,
                 kimi_syntax_content_reasoning));
 
-        // Test parsing tool calls (Kimi format includes tool ID after the colon)
-        assert_msg_equals(message_assist_call_idx,
-            common_chat_parse(
-                "<|tool_calls_section_begin|><|tool_call_begin|>functions.special_function:0<|tool_call_argument_begin|>{\"arg1\": 1}<|tool_call_end|><|tool_calls_section_end|>",
-                /* is_partial= */ false,
-                kimi_syntax));
+        // Tool call and streaming tests only run with experimental PEG parsers
+        // (legacy parser doesn't extract tool IDs correctly for Kimi format)
+        if (impl == chat_parser_impl::EXPERIMENTAL) {
+            // Test parsing tool calls (Kimi format includes tool ID after the colon)
+            assert_msg_equals(message_assist_call_idx,
+                common_chat_parse(
+                    "<|tool_calls_section_begin|><|tool_call_begin|>functions.special_function:0<|tool_call_argument_begin|>{\"arg1\": 1}<|tool_call_end|><|tool_calls_section_end|>",
+                    /* is_partial= */ false,
+                    kimi_syntax));
 
-        // Test parsing tool calls with thinking
-        assert_msg_equals(message_assist_thoughts_call_idx,
-            common_chat_parse(
-                "<think>I'm\nthinking</think><|tool_calls_section_begin|><|tool_call_begin|>functions.special_function:0<|tool_call_argument_begin|>{\"arg1\": 1}<|tool_call_end|><|tool_calls_section_end|>",
-                /* is_partial= */ false,
-                kimi_syntax_reasoning));
+            // Test parsing tool calls with thinking
+            assert_msg_equals(message_assist_thoughts_call_idx,
+                common_chat_parse(
+                    "<think>I'm\nthinking</think><|tool_calls_section_begin|><|tool_call_begin|>functions.special_function:0<|tool_call_argument_begin|>{\"arg1\": 1}<|tool_call_end|><|tool_calls_section_end|>",
+                    /* is_partial= */ false,
+                    kimi_syntax_reasoning));
 
-        // Test tool calls with extra content
-        assert_msg_equals(message_assist_call_content_idx,
-            common_chat_parse(
-                "<|tool_calls_section_begin|><|tool_call_begin|>functions.special_function:0<|tool_call_argument_begin|>{\"arg1\": 1}<|tool_call_end|><|tool_calls_section_end|>Hello, world!\nWhat's up?",
-                /* is_partial= */ false,
-                kimi_syntax));
+            // Test tool calls with extra content
+            assert_msg_equals(message_assist_call_content_idx,
+                common_chat_parse(
+                    "<|tool_calls_section_begin|><|tool_call_begin|>functions.special_function:0<|tool_call_argument_begin|>{\"arg1\": 1}<|tool_call_end|><|tool_calls_section_end|>Hello, world!\nWhat's up?",
+                    /* is_partial= */ false,
+                    kimi_syntax));
 
-        // Test tool calls with extra content AND thinking
-        assert_msg_equals(message_assist_call_thoughts_content_idx,
-            common_chat_parse(
-                "<think>I'm\nthinking</think><|tool_calls_section_begin|><|tool_call_begin|>functions.special_function:0<|tool_call_argument_begin|>{\"arg1\": 1}<|tool_call_end|><|tool_calls_section_end|>Hello, world!\nWhat's up?",
-                /* is_partial= */ false,
-                kimi_syntax_reasoning));
+            // Test tool calls with extra content AND thinking
+            assert_msg_equals(message_assist_call_thoughts_content_idx,
+                common_chat_parse(
+                    "<think>I'm\nthinking</think><|tool_calls_section_begin|><|tool_call_begin|>functions.special_function:0<|tool_call_argument_begin|>{\"arg1\": 1}<|tool_call_end|><|tool_calls_section_end|>Hello, world!\nWhat's up?",
+                    /* is_partial= */ false,
+                    kimi_syntax_reasoning));
 
-        // Test streaming
-        test_parser_with_streaming(message_assist_call_thoughts_content_idx,
+            // Test streaming
+            test_parser_with_streaming(message_assist_call_thoughts_content_idx,
             "<think>I'm\nthinking\n</think>Hello, world!\nWhat's up?\n<|tool_calls_section_begin|><|tool_call_begin|>functions.special_function:0<|tool_call_argument_begin|>{\"arg1\": 1}<|tool_call_end|><|tool_calls_section_end|>",
             [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, kimi_syntax_reasoning); });
         test_parser_with_streaming(simple_assist_msg("<think>I'm\nthinking</think>\n\n", "", "special_function", "{\"arg1\": 1}", "0"),
@@ -3359,6 +3423,8 @@ Hey there!<|im_end|>
                 "<|tool_call_end|>"
                 "<|tool_calls_section_end|>",
             [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, kimi_syntax_reasoning); });
+        } // end experimental parser tests
+
         // TODO: These tests are for tool calls embedded in <think> blocks, which is an edge case
         // that requires special parser handling not yet implemented. The parser currently
         // treats all content inside <think>...</think> as reasoning_content.
@@ -3410,35 +3476,38 @@ Hey there!<|im_end|>
         assert_equals(common_chat_templates_apply(tmpls.get(), conversation_with_tools).prompt, std::string("<|im_system|>tool_declare<|im_middle|>[{\"type\": \"function\", \"function\": {\"name\": \"special_function\", \"description\": \"I'm special\", \"parameters\": {\"type\": \"object\", \"properties\": {\"arg1\": {\"type\": \"integer\", \"description\": \"The arg.\"}}, \"required\": [\"arg1\"]}}}]<|im_end|><|im_system|>system<|im_middle|>You are Kimi, an AI assistant created by Moonshot AI.<|im_end|><|im_user|>user<|im_middle|>Hey there!<|im_end|><|im_assistant|>assistant<|im_middle|><think>Think first</think>Let's do it<|tool_calls_section_begin|><|tool_call_begin|>functions.complex_function:0<|tool_call_argument_begin|>{\"name\":\"John Doe\",\"age\":30,\"active\":true,\"score\":95.5}<|tool_call_end|><|tool_calls_section_end|><|im_end|><|im_system|>complex_function<|im_middle|>## Return of functions.complex_function:0\nTool response 1<|im_end|><|im_assistant|>assistant<|im_middle|><think>Think next</think>Continue<|tool_calls_section_begin|><|tool_call_begin|>functions.web_search:1<|tool_call_argument_begin|>{\"query\":\"\\\"From Zero\\\" Linkin Park album tracklist complete songs\",\"limit\":3,\"type\":\"text\"}<|tool_call_end|><|tool_calls_section_end|><|im_end|><|im_system|>web_search<|im_middle|>## Return of functions.web_search:1\nTool response 2<|im_end|><|im_assistant|>assistant<|im_middle|><think>Think last</think>CC<|tool_calls_section_begin|><|tool_call_begin|>functions.read_file:2<|tool_call_argument_begin|>{\"args\": [{\"path\": \"src/providers/ThemeProvider.tsx\"}, {\"path\": \"src/components/Header.tsx\"}, {\"path\": \"src/components/ThemeToggle.tsx\"}, {\"path\": \"src/app/globals.css\"}, {\"path\": \"src/app/layout.tsx\"}]}<|tool_call_end|><|tool_calls_section_end|><|im_end|><|im_system|>read_file<|im_middle|>## Return of functions.read_file:2\nTool response 3<|im_end|><|im_assistant|>assistant<|im_middle|>"));
 
         // Test template generation for regular content
-        test_templates(tmpls.get(), end_tokens, message_assist, tools,
+        test(tmpls.get(), end_tokens, message_assist, tools,
                       "<think></think>Hello, world!\nWhat's up?",
                       /* expect_grammar_triggered= */ false);
 
-        // Test template generation for tool calls (Kimi format includes ID after colon)
-        // Note: JSON formatting may vary, so we skip delta comparison and just test parsing
-        test_templates(tmpls.get(), end_tokens, message_assist_call_idx, tools,
-                      /* expected_delta= */ "",
-                      /* expect_grammar_triggered= */ true,
-                      /* test_grammar_if_triggered= */ true,
-                      /* common_reasoning_format= */ COMMON_REASONING_FORMAT_DEEPSEEK,
-                      /* ignore_whitespace_differences= */ true
-        );
+        // Tool call tests require PEG parser for correct ID extraction
+        if (impl == chat_parser_impl::EXPERIMENTAL) {
+            // Test template generation for tool calls (Kimi format includes ID after colon)
+            // Note: JSON formatting may vary, so we skip delta comparison and just test parsing
+            test(tmpls.get(), end_tokens, message_assist_call_idx, tools,
+                          /* expected_delta= */ "",
+                          /* expect_grammar_triggered= */ true,
+                          /* test_grammar_if_triggered= */ true,
+                          /* common_reasoning_format= */ COMMON_REASONING_FORMAT_DEEPSEEK,
+                          /* ignore_whitespace_differences= */ true
+            );
 
-        // Test template generation for tools with optional parameters
-        test_templates(tmpls.get(), end_tokens, simple_assist_msg("", "", "special_function_with_opt", "{\"arg1\": 1}", "0"), tools,
-                      /* expected_delta= */ "",
-                      /* expect_grammar_triggered= */ true,
-                      /* test_grammar_if_triggered= */ true,
-                      /* common_reasoning_format= */ COMMON_REASONING_FORMAT_DEEPSEEK,
-                      /* ignore_whitespace_differences= */ true
-        );
-        test_templates(tmpls.get(), end_tokens, simple_assist_msg("", "", "special_function_with_opt", "{\"arg1\": 1, \"arg2\": 2}", "0"), tools,
-                      /* expected_delta= */ "",
-                      /* expect_grammar_triggered= */ true,
-                      /* test_grammar_if_triggered= */ true,
-                      /* common_reasoning_format= */ COMMON_REASONING_FORMAT_DEEPSEEK,
-                      /* ignore_whitespace_differences= */ true
-        );
+            // Test template generation for tools with optional parameters
+            test(tmpls.get(), end_tokens, simple_assist_msg("", "", "special_function_with_opt", "{\"arg1\": 1}", "0"), tools,
+                          /* expected_delta= */ "",
+                          /* expect_grammar_triggered= */ true,
+                          /* test_grammar_if_triggered= */ true,
+                          /* common_reasoning_format= */ COMMON_REASONING_FORMAT_DEEPSEEK,
+                          /* ignore_whitespace_differences= */ true
+            );
+            test(tmpls.get(), end_tokens, simple_assist_msg("", "", "special_function_with_opt", "{\"arg1\": 1, \"arg2\": 2}", "0"), tools,
+                          /* expected_delta= */ "",
+                          /* expect_grammar_triggered= */ true,
+                          /* test_grammar_if_triggered= */ true,
+                          /* common_reasoning_format= */ COMMON_REASONING_FORMAT_DEEPSEEK,
+                          /* ignore_whitespace_differences= */ true
+            );
+        }
     }
 
     // Test Qwen3-Coder XML format
@@ -4981,7 +5050,8 @@ int main(int argc, char ** argv) {
                 test_tools_oaicompat_json_conversion();
             }
             if (chat_test == "" || chat_test == "template_output_parsers") {
-                test_template_output_parsers();
+                test_template_output_parsers(chat_parser_impl::LEGACY);
+                test_template_output_parsers(chat_parser_impl::EXPERIMENTAL);
             }
             if (chat_test == "" || chat_test == "template_output_peg_parsers") {
                 test_template_output_peg_parsers();
