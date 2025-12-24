@@ -58,6 +58,7 @@ using Tag = common_chat_peg_tag;
 
 // ============================================================================
 // Original class-based builders/mappers (used by legacy implementations in chat.cpp)
+// TODO(ochafik): Remove once --experimental-new-parsers graduates.
 // ============================================================================
 
 class common_chat_peg_builder : public common_peg_parser_builder {
