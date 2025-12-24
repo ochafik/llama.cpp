@@ -58,6 +58,64 @@ json format_error_response(const std::string & message, const enum error_type ty
 }
 
 //
+// API key validation helpers
+//
+
+std::string extract_api_key_from_auth_header(const std::string & auth_header) {
+    std::string req_api_key = auth_header;
+
+    // Remove the "Bearer " prefix if needed
+    std::string prefix = "Bearer ";
+    if (req_api_key.length() >= prefix.length() && req_api_key.substr(0, prefix.length()) == prefix) {
+        req_api_key = req_api_key.substr(prefix.length());
+    }
+
+    // Trim leading whitespace
+    while (!req_api_key.empty() && req_api_key[0] == ' ') {
+        req_api_key.erase(0, 1);
+    }
+
+    return req_api_key;
+}
+
+// Constant-time string comparison to prevent timing attacks
+// Returns true if strings are equal, false otherwise
+static bool constant_time_compare(const std::string & a, const std::string & b) {
+    if (a.size() != b.size()) {
+        return false;
+    }
+
+    // Use XOR to compare all bytes without early exit
+    volatile unsigned char result = 0;
+    for (size_t i = 0; i < a.size(); i++) {
+        result |= (a[i] ^ b[i]);
+    }
+
+    return result == 0;
+}
+
+bool validate_auth_header(const std::string & auth_header, const std::vector<std::string> & api_keys) {
+    // If API key is not set, skip validation
+    if (api_keys.empty()) {
+        return true;
+    }
+
+    // Extract the API key from the Authorization header
+    std::string req_api_key = extract_api_key_from_auth_header(auth_header);
+
+    // Validate the API key using constant-time comparison
+    // This prevents timing attacks where an attacker could measure
+    // response times to guess valid API key characters
+    for (const auto & key : api_keys) {
+        if (constant_time_compare(req_api_key, key)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+//
 // random string / id
 //
 

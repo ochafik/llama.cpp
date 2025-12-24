@@ -87,6 +87,21 @@ struct server_grammar_trigger {
 json format_error_response(const std::string & message, const enum error_type type);
 
 //
+// API key validation helpers
+//
+
+// Validates an Authorization header value against a list of configured API keys.
+// Handles "Bearer " prefix and X-Api-Key header format.
+// Returns true if:
+//   - api_keys is empty (no authentication configured)
+//   - the provided auth_header matches one of the configured keys
+// Uses constant-time comparison to prevent timing attacks.
+bool validate_auth_header(const std::string & auth_header, const std::vector<std::string> & api_keys);
+
+// Extracts the API key from an Authorization header value (removes "Bearer " prefix if present)
+std::string extract_api_key_from_auth_header(const std::string & auth_header);
+
+//
 // random string / id
 //
 

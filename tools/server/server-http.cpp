@@ -137,20 +137,14 @@ bool server_http_context::init(const common_params & params) {
         }
 
         // Check for API key in the Authorization header
-        std::string req_api_key = req.get_header_value("Authorization");
-        if (req_api_key.empty()) {
+        std::string auth_header = req.get_header_value("Authorization");
+        if (auth_header.empty()) {
             // retry with anthropic header
-            req_api_key = req.get_header_value("X-Api-Key");
+            auth_header = req.get_header_value("X-Api-Key");
         }
 
-        // remove the "Bearer " prefix if needed
-        std::string prefix = "Bearer ";
-        if (req_api_key.substr(0, prefix.size()) == prefix) {
-            req_api_key = req_api_key.substr(prefix.size());
-        }
-
-        // validate the API key
-        if (std::find(api_keys.begin(), api_keys.end(), req_api_key) != api_keys.end()) {
+        // validate the API key using shared helper
+        if (::validate_auth_header(auth_header, api_keys)) {
             return true; // API key is valid
         }
 

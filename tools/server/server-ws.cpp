@@ -380,10 +380,12 @@ struct server_ws_context::Impl {
 
     int port = 0;
     std::string path_prefix = "/mcp";
+    std::vector<std::string> api_keys;
 
     // Methods
     void accept_loop();
     void handle_connection(socket_t sock, const struct sockaddr_in & addr);
+    bool validate_api_key(const std::string & auth_header) const;
 };
 
 server_ws_context::server_ws_context()
@@ -399,6 +401,15 @@ bool server_ws_context::init(const common_params & params) {
     // This provides a predictable port for the frontend
     pimpl->port = params.port + 1;
     pimpl->path_prefix = "/mcp";
+    pimpl->api_keys = params.api_keys;
+
+    if (pimpl->api_keys.size() == 1) {
+        auto key = pimpl->api_keys[0];
+        std::string substr = key.substr(std::max((int)(key.length() - 4), 0));
+        SRV_INF("%s: api_keys: ****%s\n", __func__, substr.c_str());
+    } else if (pimpl->api_keys.size() > 1) {
+        SRV_INF("%s: api_keys: %zu keys loaded\n", __func__, pimpl->api_keys.size());
+    }
 
     SRV_INF("%s: WebSocket context initialized\n", __func__);
     return true;
@@ -536,6 +547,11 @@ void server_ws_context::on_close(on_close_t handler) {
     pimpl->on_close_cb = std::move(handler);
 }
 
+bool server_ws_context::Impl::validate_api_key(const std::string & auth_header) const {
+    // Use shared authentication helper from server-common
+    return ::validate_auth_header(auth_header, api_keys);
+}
+
 void server_ws_context::Impl::accept_loop() {
     while (running) {
         struct sockaddr_in client_addr = {};
@@ -660,6 +676,7 @@ void server_ws_context::Impl::handle_connection(socket_t sock, const struct sock
     // Extract headers (case-insensitive matching)
     std::string websocket_key;
     std::string websocket_protocol;
+    std::string authorization_header;
     while (std::getline(iss, line)) {
         // Trim trailing \r (common in HTTP headers)
         if (!line.empty() && line.back() == '\r') {
@@ -702,7 +719,32 @@ void server_ws_context::Impl::handle_connection(socket_t sock, const struct sock
                 }
                 SRV_INF("%s: parsed websocket_protocol='%s'\n", __func__, websocket_protocol.c_str());
             }
+        } else if (string_starts_with(line_lower, "authorization:")) {
+            const std::string header_name = "authorization:";
+            if (line.length() > header_name.length()) {
+                authorization_header = line.substr(header_name.length());
+                // Trim leading spaces
+                while (!authorization_header.empty() && authorization_header[0] == ' ') {
+                    authorization_header.erase(0, 1);
+                }
+                SRV_INF("%s: parsed authorization_header='%s'\n", __func__, authorization_header.c_str());
+            }
         }
+    }
+
+    // Validate API key if configured
+    if (!validate_api_key(authorization_header)) {
+        const char * response = "HTTP/1.1 401 Unauthorized\r\n"
+                                "Content-Type: application/json\r\n\r\n"
+                                "{\"error\":{\"message\":\"Invalid API Key\",\"type\":\"authentication_error\",\"code\":401}}";
+        send(sock, response, strlen(response), 0);
+        SRV_WRN("%s", "Unauthorized: Invalid API Key\n");
+#ifdef _WIN32
+        closesocket(sock);
+#else
+        close(sock);
+#endif
+        return;
     }
 
     if (websocket_key.empty()) {
