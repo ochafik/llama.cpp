@@ -204,16 +204,23 @@ void server_mcp_bridge::on_connection_message(std::shared_ptr<server_ws_connecti
                                               const std::string & message) {
     void * conn_ptr = conn.get();
 
-    std::unique_lock lock(mutex_);
-    auto it = connections_.find(conn_ptr);
-    if (it == connections_.end()) {
-        SRV_WRN("%s: message from unknown connection\n", __func__);
-        return;
+    connection_state * state = nullptr;
+    std::string server_name;
+
+    // Look up connection state (brief lock)
+    {
+        std::unique_lock lock(mutex_);
+        auto it = connections_.find(conn_ptr);
+        if (it == connections_.end()) {
+            SRV_WRN("%s: message from unknown connection\n", __func__);
+            return;
+        }
+        state = it->second.get();
+        server_name = state->server_name;
     }
+    // Lock released - forward_to_mcp can take a long time (starting process)
 
-    connection_state * state = it->second.get();
-
-    SRV_DBG("%s: message from %s: %s\n", __func__, state->server_name.c_str(), message.c_str());
+    SRV_DBG("%s: message from %s: %s\n", __func__, server_name.c_str(), message.c_str());
 
     // Validate JSON and forward to MCP process
     try {
@@ -236,14 +243,25 @@ void server_mcp_bridge::on_connection_message(std::shared_ptr<server_ws_connecti
 void server_mcp_bridge::on_connection_closed(std::shared_ptr<server_ws_connection> conn) {
     void * conn_ptr = conn.get();
 
-    std::unique_lock lock(mutex_);
-    auto it = connections_.find(conn_ptr);
-    if (it != connections_.end()) {
-        SRV_INF("%s: WebSocket connection closed for MCP server: %s\n",
-                __func__, it->second->server_name.c_str());
+    std::unique_ptr<connection_state> state_to_destroy;
+    std::string server_name;
 
-        // Process will be automatically stopped when connection_state is destroyed
-        connections_.erase(it);
+    // Extract connection from map (brief lock)
+    {
+        std::unique_lock lock(mutex_);
+        auto it = connections_.find(conn_ptr);
+        if (it != connections_.end()) {
+            server_name = it->second->server_name;
+            state_to_destroy = std::move(it->second);
+            connections_.erase(it);
+        }
+    }
+    // Lock released - subprocess destruction can take time (thread join)
+
+    if (state_to_destroy) {
+        SRV_INF("%s: WebSocket connection closed for MCP server: %s\n",
+                __func__, server_name.c_str());
+        // state_to_destroy goes out of scope here, destroying subprocess
     }
 }
 
