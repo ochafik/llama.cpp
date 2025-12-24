@@ -964,7 +964,11 @@ std::string common_peg_arena::dump(common_peg_parser_id id) const {
         } else if constexpr (std::is_same_v<T, common_peg_json_string_parser>) {
             return "JsonString()";
         } else if constexpr (std::is_same_v<T, common_peg_until_parser>) {
-            return "Until(" + string_join(p.delimiters, " | ") + ")";
+            std::string result = "Until(" + string_join(p.delimiters, " | ");
+            if (p.max_length > 0) {
+                result += ", max=" + std::to_string(p.max_length);
+            }
+            return result + ")";
         } else if constexpr (std::is_same_v<T, common_peg_until_token_parser>) {
             return "UntilToken(" + string_join(p.delimiters, " | ") + ")";
         } else if constexpr (std::is_same_v<T, common_peg_schema_parser>) {
@@ -1302,6 +1306,83 @@ static std::string gbnf_excluding_pattern(const std::vector<std::string> & strin
     return "(" + pattern + ")*";
 }
 
+// Generates length-limited exclusion grammar rules.
+// For delimiter "</p>" and max_length=3, generates:
+//   until-0 ::= ""
+//   until-1 ::= [^<] until-0 | ""
+//   until-2 ::= [^<] until-1 | "<" [^/] until-0 | ""
+//   until-3 ::= [^<] until-2 | "<" [^/] until-1 | "</" [^p] until-0 | ""
+// Returns the name of the starting rule (e.g., "until-3").
+static std::string gbnf_length_limited_excluding_pattern(
+    const common_grammar_builder & builder,
+    const std::vector<std::string> & delimiters,
+    int max_length,
+    const std::string & rule_prefix = "until"
+) {
+    if (delimiters.empty() || max_length <= 0) {
+        // Fallback: just limit any character
+        return "[^\\x00]{0," + std::to_string(max_length) + "}";
+    }
+
+    // Build trie and get pieces (prefix + excluded chars)
+    trie matcher(delimiters);
+    auto pieces = matcher.collect_prefix_and_next();
+
+    // Sort pieces by prefix length for consistent ordering
+    std::sort(pieces.begin(), pieces.end(), [](const auto & a, const auto & b) {
+        return a.prefix.length() < b.prefix.length();
+    });
+
+    // Generate rules from 0 to max_length
+    for (int remaining = 0; remaining <= max_length; remaining++) {
+        std::string rule_name = rule_prefix + "-" + std::to_string(remaining);
+
+        if (remaining == 0) {
+            builder.add_rule(rule_name, "\"\"");
+            continue;
+        }
+
+        std::vector<std::string> alternatives;
+
+        // For each piece (prefix + excluded chars), generate an alternative
+        for (const auto & piece : pieces) {
+            int chars_consumed = static_cast<int>(piece.prefix.length()) + 1;
+            int next_remaining = remaining - chars_consumed;
+
+            if (next_remaining < 0) {
+                continue;  // Can't use this piece, would exceed remaining chars
+            }
+
+            // Build the alternative: prefix + [^excluded_chars] + next_rule
+            std::string alt;
+
+            if (!piece.prefix.empty()) {
+                alt += gbnf_format_literal(piece.prefix) + " ";
+            }
+
+            // Build character class for excluded chars
+            std::string cls;
+            for (const auto & ch : piece.next_chars) {
+                cls += gbnf_escape_char_class(ch);
+            }
+            alt += "[^" + cls + "]";
+
+            if (next_remaining > 0) {
+                alt += " " + rule_prefix + "-" + std::to_string(next_remaining);
+            }
+
+            alternatives.push_back(alt);
+        }
+
+        // Always allow ending early (empty match for remaining chars)
+        alternatives.push_back("\"\"");
+
+        builder.add_rule(rule_name, string_join(alternatives, " | "));
+    }
+
+    return rule_prefix + "-" + std::to_string(max_length);
+}
+
 static std::unordered_set<std::string> collect_reachable_rules(
     const common_peg_arena & arena,
     const common_peg_parser_id & rule
@@ -1490,7 +1571,22 @@ void common_peg_arena::build_grammar(const common_grammar_builder & builder, boo
                 return R"(( [^"\\] | "\\" ( ["\\/ bfnrt] | "u" [0-9a-fA-F]{4} ) )*)";
             } else if constexpr (std::is_same_v<T, common_peg_until_parser>) {
                 if (p.delimiters.empty()) {
+                    if (p.max_length > 0) {
+                        return "[^\\x00]{0," + std::to_string(p.max_length) + "}";
+                    }
                     return ".*";
+                }
+                if (p.max_length > 0) {
+                    // Generate length-limited exclusion grammar
+                    // Use a unique prefix based on delimiter hash and max_length to avoid rule conflicts
+                    size_t hash = 0;
+                    for (const auto & d : p.delimiters) {
+                        for (char c : d) {
+                            hash = hash * 31 + static_cast<size_t>(c);
+                        }
+                    }
+                    std::string prefix = "until-" + std::to_string(hash % 10000) + "-" + std::to_string(p.max_length);
+                    return gbnf_length_limited_excluding_pattern(builder, p.delimiters, p.max_length, prefix);
                 }
                 return gbnf_excluding_pattern(p.delimiters);
             } else if constexpr (std::is_same_v<T, common_peg_until_token_parser>) {
@@ -1634,7 +1730,7 @@ static nlohmann::json serialize_parser_variant(const common_peg_parser_variant &
         } else if constexpr (std::is_same_v<T, common_peg_json_string_parser>) {
             return json{{"type", "json_string"}};
         } else if constexpr (std::is_same_v<T, common_peg_until_parser>) {
-            return json{{"type", "until"}, {"delimiters", p.delimiters}};
+            return json{{"type", "until"}, {"delimiters", p.delimiters}, {"max_length", p.max_length}};
         } else if constexpr (std::is_same_v<T, common_peg_until_token_parser>) {
             return json{{"type", "until_token"}, {"delimiters", p.delimiters}};
         } else if constexpr (std::is_same_v<T, common_peg_schema_parser>) {
@@ -1774,7 +1870,8 @@ static common_peg_parser_variant deserialize_parser_variant(const nlohmann::json
         if (!j.contains("delimiters") || !j["delimiters"].is_array()) {
             throw std::runtime_error("until parser missing or invalid 'delimiters' field");
         }
-        return common_peg_until_parser{j["delimiters"].get<std::vector<std::string>>()};
+        int max_length = j.contains("max_length") ? j["max_length"].get<int>() : -1;
+        return common_peg_until_parser{j["delimiters"].get<std::vector<std::string>>(), max_length};
     }
     if (type == "until_token") {
         if (!j.contains("delimiters") || !j["delimiters"].is_array()) {

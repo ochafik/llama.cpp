@@ -269,6 +269,7 @@ struct common_peg_json_string_parser {};
 
 struct common_peg_until_parser {
     std::vector<std::string> delimiters;
+    int max_length = -1;  // -1 for unbounded, otherwise max characters to match
 };
 
 // Token-aware until: matches until a token delimiter is found.
@@ -468,11 +469,20 @@ class common_peg_parser_builder {
 
     // Matches all characters until a delimiter is found (delimiter not consumed).
     //   S -> (!delim .)*
-    common_peg_parser until(const std::string & delimiter) { return add(common_peg_until_parser{{delimiter}}); }
+    common_peg_parser until(const std::string & delimiter) { return add(common_peg_until_parser{{delimiter}, -1}); }
 
     // Matches all characters until one of the delimiters in the list is found (delimiter not consumed).
     //   S -> (!delim .)*
-    common_peg_parser until_one_of(const std::vector<std::string> & delimiters) { return add(common_peg_until_parser{delimiters}); }
+    common_peg_parser until_one_of(const std::vector<std::string> & delimiters) { return add(common_peg_until_parser{delimiters, -1}); }
+
+    // Matches up to max_length characters until a delimiter is found (delimiter not consumed).
+    // Grammar enforces both the delimiter exclusion and the length limit.
+    //   S -> (!delim .){0,max_length}
+    common_peg_parser until_max(const std::string & delimiter, int max_length) { return add(common_peg_until_parser{{delimiter}, max_length}); }
+
+    // Matches up to max_length characters until one of the delimiters is found (delimiter not consumed).
+    //   S -> (!delim .){0,max_length}
+    common_peg_parser until_max_one_of(const std::vector<std::string> & delimiters, int max_length) { return add(common_peg_until_parser{delimiters, max_length}); }
 
     // Token-aware until: matches until a token delimiter is found.
     // Token ID is resolved at parse time from context's token_ids map.

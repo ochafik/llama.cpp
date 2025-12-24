@@ -99,9 +99,18 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
                     auto arg_close = p.literal("</parameter>");
                     auto arg_value = p.eps();
 
+                    // Check if string has maxLength constraint for length-limited parsing
+                    bool has_max_length = param_schema.contains("maxLength") && param_schema["maxLength"].is_number_integer();
+                    int max_length = has_max_length ? param_schema["maxLength"].get<int>() : -1;
+
                     if (schema_info.resolves_to_string(param_schema)) {
-                        // For string types, capture everything and strip whitespace during processing
-                        arg_value = p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));
+                        // For string types with maxLength, use length-limited until
+                        // For strings without maxLength, capture everything until closing tag
+                        if (max_length > 0) {
+                            arg_value = p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until_max("</parameter>", max_length));
+                        } else {
+                            arg_value = p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));
+                        }
                     } else {
                         // For non-string types (integers, booleans, etc.), consume surrounding whitespace
                         arg_value = p.space() + p.tag(Tag::TOOL_ARG_JSON_VALUE, p.schema(p.json(), rule_name + "-schema", param_schema)) + p.space();
@@ -112,9 +121,12 @@ common_chat_params common_chat_params_init_seed_oss(const common_chat_template &
                         + arg_value
                         + p.atomic_tag(Tag::TOOL_ARG_CLOSE, arg_close)
                         + p.space());
-                    // Use is_required to enforce required non-string parameters in the grammar
-                    // String parameters are not enforced because the p.until() pattern doesn't play well with is_required
-                    bool enforce_required = is_required && !schema_info.resolves_to_string(param_schema);
+                    // Enforce required parameters:
+                    // - Non-string types: always enforced via schema
+                    // - String types with maxLength: enforced via length-limited grammar
+                    // - String types without maxLength: not enforced (unlimited p.until doesn't constrain model)
+                    bool can_enforce = !schema_info.resolves_to_string(param_schema) || max_length > 0;
+                    bool enforce_required = is_required && can_enforce;
                     args += p.repeat(arg_rule, /* min = */ enforce_required ? 1 : 0, /* max = */ 1);
                 });
 
