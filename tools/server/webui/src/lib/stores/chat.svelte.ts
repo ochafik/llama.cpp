@@ -12,12 +12,15 @@ import {
 	filterByLeafNodeId,
 	findDescendantMessages,
 	findLeafNode,
-	createToolResultContent
+	createToolResultContent,
+	parseMcpToolResult
 } from '$lib/utils';
 import { SvelteMap } from 'svelte/reactivity';
 import { DEFAULT_CONTEXT } from '$lib/constants/default-context';
 import { conversationMcpStore } from '$lib/stores/conversation-mcp.svelte';
 import type { ApiChatCompletionTool } from '$lib/types/api';
+import type { DatabaseMessageExtra, DatabaseMessageExtraImageFile, DatabaseMessageExtraAudioFile } from '$lib/types/database';
+import { AttachmentType } from '$lib/enums';
 
 /**
  * chatStore - Active AI interaction and streaming state management
@@ -1543,12 +1546,8 @@ class ChatStore {
 				const result = await conversationMcpStore.executeToolCall(fn.name, args);
 
 				// Add tool result as a new message with "tool" role
-				await this.addToolResultMessage(
-					convId,
-					assistantMessageId,
-					fn.name,
-					JSON.stringify(result)
-				);
+				// Pass raw result - addToolResultMessage will parse MCP structured content
+				await this.addToolResultMessage(convId, assistantMessageId, fn.name, result);
 			} catch (error) {
 				console.error(`Failed to execute tool ${fn.name}:`, error);
 				// Add error as tool result
@@ -1556,7 +1555,7 @@ class ChatStore {
 					convId,
 					assistantMessageId,
 					fn.name,
-					JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' })
+					{ error: error instanceof Error ? error.message : 'Unknown error' }
 				);
 			}
 		}
@@ -1567,12 +1566,13 @@ class ChatStore {
 
 	/**
 	 * Add a tool result message to the conversation
+	 * Parses MCP structured results and stores images/audio in the extra field
 	 */
 	private async addToolResultMessage(
 		convId: string,
 		parentId: string,
 		toolName: string,
-		result: string
+		result: unknown
 	): Promise<void> {
 		const activeConv = conversationsStore.activeConversation;
 		if (!activeConv || activeConv.id !== convId) {
@@ -1584,18 +1584,63 @@ class ChatStore {
 			}
 		}
 
+		// Parse MCP structured result
+		const parsedResult = parseMcpToolResult(result);
+
+		// Extract images/audio for extra field
+		const extra: DatabaseMessageExtra[] = [];
+
+		// Collect text content for the message body
+		const textContentItems: string[] = [];
+
+		for (const item of parsedResult.content) {
+			if (item.type === 'text') {
+				textContentItems.push(item.text);
+			} else if (item.type === 'image') {
+				// Store image in extra field for LLM consumption
+				const base64Url = `data:${item.mimeType || 'image/png'};base64,${item.data}`;
+				extra.push({
+					type: AttachmentType.IMAGE,
+					name: `${toolName}_image`,
+					base64Url
+				} satisfies DatabaseMessageExtraImageFile);
+				textContentItems.push(`[Image: ${item.mimeType || 'image/png'}]`);
+			} else if (item.type === 'audio') {
+				// Store audio in extra field for LLM consumption
+				extra.push({
+					type: AttachmentType.AUDIO,
+					name: `${toolName}_audio`,
+					base64Data: item.data,
+					mimeType: item.mimeType || 'audio/mp3'
+				} satisfies DatabaseMessageExtraAudioFile);
+				textContentItems.push(`[Audio: ${item.mimeType || 'audio'}]`);
+			} else if (item.type === 'resource') {
+				// For resources, just include the URI in text
+				textContentItems.push(`[Resource: ${item.resource.uri}]`);
+			} else if (item.type === 'resource_link') {
+				// For resource links, just include the URI in text
+				textContentItems.push(`[Resource: ${item.uri}]`);
+			}
+		}
+
+		// Create content: tool result header + text summary
+		const content = createToolResultContent(
+			toolName,
+			textContentItems.length > 0 ? textContentItems.join('\n') : JSON.stringify(result)
+		);
+
 		// Create a tool message (using user role for now, could be a new "tool" role)
 		const toolMessage = await DatabaseService.createMessageBranch(
 			{
 				convId,
 				type: 'text',
 				role: 'user', // Using user role for tool results (LLM understands this pattern)
-				content: createToolResultContent(toolName, result),
+				content,
 				timestamp: Date.now(),
 				thinking: '',
 				toolCalls: '',
 				children: [],
-				extra: undefined
+				extra: extra.length > 0 ? extra : undefined
 			},
 			parentId
 		);

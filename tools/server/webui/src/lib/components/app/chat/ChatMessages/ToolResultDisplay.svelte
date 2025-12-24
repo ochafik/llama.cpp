@@ -1,7 +1,21 @@
 <script lang="ts">
-	import { ChevronDown, ChevronRight, FileJson } from '@lucide/svelte';
+	import {
+		ChevronDown,
+		ChevronRight,
+		FileJson,
+		FileText,
+		Image as ImageIcon,
+		Music,
+		Link
+	} from '@lucide/svelte';
 	import { cn } from '$lib/components/ui/utils';
 	import { copyToClipboard } from '$lib/utils';
+	import {
+		formatMcpToolName,
+		parseMcpToolResult,
+		getContentTypeLabel,
+		type McpContentItem
+	} from '$lib/utils/tool-results';
 
 	interface Props {
 		toolName: string;
@@ -12,39 +26,57 @@
 	let { toolName, result, class: className = '' }: Props = $props();
 
 	let isExpanded = $state(false);
+	let imageExpanded = $state(false);
 
 	// Parse MCP tool names: mcp__serverName__toolName -> serverName:toolName
-	let displayToolName = $derived(() => {
-		if (toolName.startsWith('mcp__')) {
-			const parts = toolName.split('__');
-			if (parts.length >= 3) {
-				const serverName = parts[1];
-				const actualToolName = parts.slice(2).join('__');
-				return `${serverName}:${actualToolName}`;
-			}
-		}
-		return toolName;
-	});
+	let displayToolName = $derived(formatMcpToolName(toolName));
 
-	// Try to parse the result as JSON for pretty printing
-	let parsedResult = $derived(() => {
+	// Parse the result using MCP SDK types
+	let parsedResult = $derived.by(() => {
 		try {
-			return JSON.parse(result);
+			const parsed = JSON.parse(result);
+			return parseMcpToolResult(parsed);
 		} catch {
-			return null;
+			// Not JSON, treat as plain text
+			return {
+				content: [{ type: 'text', text: result } as const],
+				isError: false
+			};
 		}
 	});
 
-	let formattedResult = $derived(() => {
-		const parsed = parsedResult();
-		if (parsed) {
-			return JSON.stringify(parsed, null, 2);
-		}
-		return result;
+	// Check if result has structured content (more than just plain text)
+	let hasStructuredContent = $derived.by(
+		() =>
+			parsedResult.content.length > 1 ||
+			(parsedResult.content.length === 1 && parsedResult.content[0].type !== 'text')
+	);
+
+	// Get content type badge for structured results
+	let contentTypeBadge = $derived.by(() => {
+		const content = parsedResult.content;
+		if (content.length === 0) return '';
+		if (content.length === 1) return getContentTypeLabel(content[0]);
+		return `${content.length} items`;
 	});
 
 	function handleCopy() {
-		void copyToClipboard(formattedResult(), 'Tool result copied to clipboard');
+		void copyToClipboard(result, 'Tool result copied to clipboard');
+	}
+
+	// Get icon component for a content item
+	function getIconComponent(item: McpContentItem) {
+		switch (item.type) {
+			case 'text':
+				return FileText;
+			case 'image':
+				return ImageIcon;
+			case 'audio':
+				return Music;
+			case 'resource':
+			case 'resource_link':
+				return Link;
+		}
 	}
 </script>
 
@@ -58,7 +90,13 @@
 				class="flex items-center gap-2 rounded px-2 py-1 text-left transition hover:bg-muted-foreground/5"
 			>
 				<FileJson class="h-4 w-4 text-muted-foreground" />
-				<span class="text-sm font-medium">Tool Result: {displayToolName()}</span>
+				<span class="text-sm font-medium">Tool Result: {displayToolName}</span>
+				{#if hasStructuredContent && contentTypeBadge}
+					<span class="text-xs text-muted-foreground">({contentTypeBadge})</span>
+				{/if}
+				{#if parsedResult.isError}
+					<span class="text-xs text-destructive">(error)</span>
+				{/if}
 				{#if isExpanded}
 					<ChevronDown class="ml-1 h-4 w-4 text-muted-foreground" />
 				{:else}
@@ -93,8 +131,92 @@
 		<!-- Content - collapsed by default -->
 		{#if isExpanded}
 			<div class="border-t bg-background/50">
-				<pre
-					class="max-h-96 overflow-x-auto overflow-y-auto p-3 text-xs break-words whitespace-pre-wrap">{formattedResult()}</pre>
+				<div class="max-h-96 overflow-y-auto p-3">
+					{#each parsedResult.content as item (item.type + (item.type === 'text' ? item.text : item.type === 'image' ? item.data : item.type === 'audio' ? item.data : item.type === 'resource' ? item.resource.uri : item.type === 'resource_link' ? item.uri : ''))}
+						{@const Icon = getIconComponent(item)}
+						<div class="mb-3 last:mb-0">
+							<!-- Content item header -->
+							<div class="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
+								<Icon class="h-3 w-3" />
+								<span>{getContentTypeLabel(item)}</span>
+							</div>
+
+							<!-- Text content -->
+							{#if item.type === 'text'}
+								<pre class="text-xs break-words whitespace-pre-wrap">{item.text}</pre>
+
+								<!-- Image content -->
+							{:else if item.type === 'image'}
+								<div>
+									<button
+										type="button"
+										onclick={() => (imageExpanded = !imageExpanded)}
+										class="block"
+									>
+										<img
+											src="data:{item.mimeType || 'image/png'};base64,{item.data}"
+											alt=""
+											class={cn(
+												'rounded border transition',
+												imageExpanded ? 'max-w-full' : 'max-w-[200px] hover:opacity-80'
+											)}
+										/>
+									</button>
+									<button
+										type="button"
+										onclick={() => (imageExpanded = !imageExpanded)}
+										class="mt-1 text-xs text-muted-foreground hover:text-foreground"
+									>
+										{imageExpanded ? 'Click to shrink' : 'Click to expand'}
+									</button>
+								</div>
+
+								<!-- Audio content -->
+							{:else if item.type === 'audio'}
+								<audio controls class="w-full">
+									<source src="data:{item.mimeType || 'audio/mp3'};base64,{item.data}" />
+									Your browser does not support audio.
+								</audio>
+
+								<!-- Resource content -->
+							{:else if item.type === 'resource'}
+								<a
+									href={item.resource.uri}
+									target="_blank"
+									rel="noopener noreferrer"
+									class="flex items-center gap-1 text-sm text-blue-500 underline hover:text-blue-400"
+								>
+									{item.resource.uri}
+								</a>
+								<button
+									type="button"
+									onclick={() => void copyToClipboard(item.resource.uri, 'URI copied to clipboard')}
+									class="ml-2 rounded px-1 py-0.5 text-xs text-muted-foreground hover:bg-muted-foreground/10"
+								>
+									Copy
+								</button>
+
+								<!-- Resource link content -->
+							{:else if item.type === 'resource_link'}
+								<a
+									href={item.uri}
+									target="_blank"
+									rel="noopener noreferrer"
+									class="flex items-center gap-1 text-sm text-blue-500 underline hover:text-blue-400"
+								>
+									{item.uri}
+								</a>
+								<button
+									type="button"
+									onclick={() => void copyToClipboard(item.uri, 'URI copied to clipboard')}
+									class="ml-2 rounded px-1 py-0.5 text-xs text-muted-foreground hover:bg-muted-foreground/10"
+								>
+									Copy
+								</button>
+							{/if}
+						</div>
+					{/each}
+				</div>
 			</div>
 		{/if}
 	</div>

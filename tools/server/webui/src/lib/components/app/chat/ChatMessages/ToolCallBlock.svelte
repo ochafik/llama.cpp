@@ -5,10 +5,15 @@
 		Wrench,
 		Loader2,
 		CheckCircle2,
-		XCircle
+		XCircle,
+		FileText,
+		Image as ImageIcon,
+		Music,
+		Link
 	} from '@lucide/svelte';
 	import { cn } from '$lib/components/ui/utils';
 	import { copyToClipboard } from '$lib/utils';
+	import { parseMcpToolResult, getContentTypeLabel, type McpContentItem } from '$lib/utils/tool-results';
 
 	interface Props {
 		toolCall: ApiChatCompletionToolCall;
@@ -43,7 +48,7 @@
 	let isResultExpanded = $state(false);
 
 	// Parse MCP tool names: mcp__serverName__toolName -> serverName:toolName
-	let displayToolName = $derived(() => {
+	let displayToolName = $derived.by(() => {
 		const name = toolCall.function?.name || 'Unknown tool';
 		if (name.startsWith('mcp__')) {
 			const parts = name.split('__');
@@ -57,7 +62,7 @@
 	});
 
 	// Parse and format arguments
-	let formattedArgs = $derived(() => {
+	let formattedArgs = $derived.by(() => {
 		const rawArgs = toolCall.function?.arguments?.trim();
 		if (!rawArgs) return null;
 		try {
@@ -68,7 +73,7 @@
 	});
 
 	// Parse and format result
-	let formattedResult = $derived(() => {
+	let formattedResult = $derived.by(() => {
 		if (!result) return null;
 		try {
 			return JSON.stringify(JSON.parse(result), null, 2);
@@ -77,22 +82,69 @@
 		}
 	});
 
+	// Parse structured result using SDK types
+	let parsedStructuredResult = $derived.by(() => {
+		if (!result) return null;
+		try {
+			const parsed = JSON.parse(result);
+			return parseMcpToolResult(parsed);
+		} catch {
+			return null;
+		}
+	});
+
+	// Check if result has structured content (more than just plain text)
+	let hasStructuredContent = $derived.by(
+		() =>
+			parsedStructuredResult !== null &&
+			(parsedStructuredResult.content.length > 1 ||
+				(parsedStructuredResult.content.length === 1 &&
+					parsedStructuredResult.content[0].type !== 'text'))
+	);
+
+	// Get icon component for a content item
+	function getIconComponent(item: McpContentItem) {
+		switch (item.type) {
+			case 'text':
+				return FileText;
+			case 'image':
+				return ImageIcon;
+			case 'audio':
+				return Music;
+			case 'resource':
+			case 'resource_link':
+				return Link;
+		}
+	}
+
 	function handleCopyAll() {
+		const args = formattedArgs
+			? (() => {
+					try {
+						return JSON.parse(formattedArgs);
+					} catch {
+						return formattedArgs;
+					}
+				})()
+			: null;
+
+		const resultData = formattedResult
+			? (() => {
+					try {
+						return JSON.parse(formattedResult);
+					} catch {
+						return formattedResult;
+					}
+				})()
+			: null;
+
 		const payload = {
 			toolCall: {
 				id: toolCall.id,
 				name: toolCall.function?.name,
-				arguments: formattedArgs() ? JSON.parse(formattedArgs()!) : null
+				arguments: args
 			},
-			result: formattedResult()
-				? (() => {
-						try {
-							return JSON.parse(formattedResult()!);
-						} catch {
-							return formattedResult();
-						}
-					})()
-				: null
+			result: resultData
 		};
 		void copyToClipboard(JSON.stringify(payload, null, 2), 'Tool call copied to clipboard');
 	}
@@ -104,7 +156,7 @@
 		<div class="flex items-center justify-between bg-muted/50 px-3 py-2">
 			<div class="flex items-center gap-2">
 				<Wrench class="h-4 w-4 text-muted-foreground" />
-				<span class="text-sm font-medium">{displayToolName()}</span>
+				<span class="text-sm font-medium">{displayToolName}</span>
 				{#if status === 'streaming' || status === 'calling'}
 					<Loader2 class="h-3.5 w-3.5 animate-spin text-muted-foreground" />
 				{:else if status === 'complete'}
@@ -139,7 +191,7 @@
 		</div>
 
 		<!-- Arguments Section (collapsible) -->
-		{#if formattedArgs()}
+		{#if formattedArgs}
 			<div class="border-t">
 				<button
 					type="button"
@@ -156,7 +208,9 @@
 				{#if isArgsExpanded}
 					<div class="px-3 pb-2">
 						<pre
-							class="max-h-48 overflow-x-auto overflow-y-auto rounded bg-background/50 p-2 text-xs break-words whitespace-pre-wrap">{formattedArgs()}</pre>
+							class="max-h-48 overflow-x-auto overflow-y-auto rounded bg-background/50 p-2 text-xs break-words whitespace-pre-wrap"
+							>{formattedArgs}</pre
+						>
 					</div>
 				{/if}
 			</div>
@@ -170,7 +224,7 @@
 						<Loader2 class="h-3 w-3 animate-spin" />
 						<span>Calling tool...</span>
 					</div>
-				{:else if status === 'complete' && formattedResult()}
+				{:else if status === 'complete' && (formattedResult || hasStructuredContent)}
 					<button
 						type="button"
 						onclick={() => (isResultExpanded = !isResultExpanded)}
@@ -182,23 +236,86 @@
 							<ChevronRight class="h-3 w-3 text-muted-foreground" />
 						{/if}
 						<span>Result</span>
+						{#if hasStructuredContent}
+							<span class="text-muted-foreground">
+								({parsedStructuredResult?.content.length || 0} {parsedStructuredResult?.content.length === 1 ? 'item' : 'items'})
+							</span>
+						{/if}
 						{#if durationMs !== null && durationMs > 0}
 							<span class="text-muted-foreground">({formatDuration(durationMs)})</span>
 						{/if}
 					</button>
 					{#if isResultExpanded}
 						<div class="px-3 pb-2">
-							<pre
-								class="max-h-64 overflow-x-auto overflow-y-auto rounded bg-background/50 p-2 text-xs break-words whitespace-pre-wrap">{formattedResult()}</pre>
+							{#if hasStructuredContent && parsedStructuredResult}
+								<!-- Render structured content items -->
+								<div class="space-y-2">
+									{#each parsedStructuredResult.content as item (item.type + (item.type === 'text' ? item.text : item.type === 'image' ? item.data : item.type === 'audio' ? item.data : item.type === 'resource' ? item.resource.uri : item.type === 'resource_link' ? item.uri : ''))}
+										{@const Icon = getIconComponent(item)}
+										<div class="rounded bg-background/50 p-2">
+											<div class="mb-1 flex items-center gap-1 text-xs text-muted-foreground">
+												<Icon class="h-3 w-3" />
+												<span>{getContentTypeLabel(item)}</span>
+											</div>
+
+											<!-- Text content -->
+											{#if item.type === 'text'}
+												<pre class="text-xs break-words whitespace-pre-wrap">{item.text}</pre>
+
+											<!-- Image content -->
+											{:else if item.type === 'image'}
+												<img
+													src="data:{item.mimeType || 'image/png'};base64,{item.data}"
+													alt=""
+													class="max-w-full rounded border"
+												/>
+
+											<!-- Audio content -->
+											{:else if item.type === 'audio'}
+												<audio controls class="w-full">
+													<source src="data:{item.mimeType || 'audio/mp3'};base64,{item.data}" />
+													Your browser does not support audio.
+												</audio>
+
+											<!-- Resource content -->
+											{:else if item.type === 'resource'}
+												<a
+													href={item.resource.uri}
+													target="_blank"
+													rel="noopener noreferrer"
+													class="text-sm text-blue-500 hover:text-blue-400 underline"
+												>
+													{item.resource.uri}
+												</a>
+
+											<!-- Resource link content -->
+											{:else if item.type === 'resource_link'}
+												<a
+													href={item.uri}
+													target="_blank"
+													rel="noopener noreferrer"
+													class="text-sm text-blue-500 hover:text-blue-400 underline"
+												>
+													{item.uri}
+												</a>
+											{/if}
+										</div>
+									{/each}
+								</div>
+							{:else}
+								<!-- Legacy: render as formatted text/JSON -->
+								<pre
+									class="max-h-64 overflow-x-auto overflow-y-auto rounded bg-background/50 p-2 text-xs break-words whitespace-pre-wrap"
+									>{formattedResult}</pre
+								>
+							{/if}
 						</div>
 					{/if}
 				{:else if status === 'error'}
 					<div class="px-3 py-2">
-						<div class="text-xs text-destructive">
-							{result || 'Tool call failed'}
-						</div>
+						<div class="text-xs text-destructive">{result || 'Tool call failed'}</div>
 					</div>
-				{:else if status === 'complete' && !formattedResult()}
+				{:else if status === 'complete' && !formattedResult}
 					<div class="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
 						<CheckCircle2 class="h-3 w-3" />
 						<span>Completed (no result)</span>

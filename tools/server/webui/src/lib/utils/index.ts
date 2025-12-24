@@ -100,7 +100,10 @@ export {
 	isToolResultContent,
 	isToolResultMessage,
 	parseToolResult,
+	parseMcpToolResult,
 	formatMcpToolName,
 	createToolResultContent,
-	type ToolResultInfo
+	getContentTypeLabel,
+	type ToolResultInfo,
+	type ParsedToolResult
 } from './tool-results';
