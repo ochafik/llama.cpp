@@ -1,5 +1,6 @@
 #include "chat.h"
 #include "chat-parser.h"
+#include "chat-parser-xml-toolcall.h"
 #include "chat-peg-parser.h"
 #include "chat-parsers-internal.h"
 #include "common.h"
@@ -975,9 +976,119 @@ static common_chat_params common_chat_params_init_lfm2(const common_chat_templat
     return data;
 }
 
-// NOTE: ministral_3 was already using PEG in master, so no legacy fallback exists
 static common_chat_params common_chat_params_init_ministral_3(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    return common_chat_params_init_ministral_3_peg(tmpl, inputs);
+    if (!inputs.use_legacy_parsers) {
+        return common_chat_params_init_ministral_3_peg(tmpl, inputs);
+    }
+    common_chat_params data;
+
+    // Build up messages to follow the format: https://huggingface.co/mistralai/Ministral-3-14B-Reasoning-2512/blob/main/chat_template.jinja
+    auto adjusted_messages = json::array();
+    for (const auto & msg : inputs.messages) {
+        auto role = msg.value("role", "");
+        if (role != "system" && role != "assistant") {
+            // Only adjust system and assistant messages. Interestingly, the system message may contain thinking.
+            adjusted_messages.push_back(msg);
+            continue;
+        }
+
+        auto content = json::array();
+
+        // If message contains `reasoning_content`, add it as a block of type `thinking`
+        if (msg.contains("reasoning_content") && msg.at("reasoning_content").is_string()) {
+            content.push_back({
+                {"type", "thinking"},
+                {"thinking", msg.at("reasoning_content").get<std::string>()},
+            });
+        }
+
+        // If message contains `content`, add it as a block of type `text`
+        if (msg.contains("content")) {
+            if (msg.at("content").is_string()) {
+                content.push_back({
+                    {"type", "text"},
+                    {"text", msg.at("content").get<std::string>()},
+                });
+            } else if (msg.at("content").is_array()) {
+                auto blocks = msg.at("content");
+                content.insert(content.end(), blocks.begin(), blocks.end());
+            }
+        }
+
+        auto adjusted = msg;
+        adjusted["content"] = content;
+        adjusted.erase("reasoning_content");
+        adjusted_messages.push_back(adjusted);
+    }
+
+    auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
+    auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
+    auto include_grammar = true;
+
+    data.prompt = apply(tmpl, inputs, /* messages_override = */ adjusted_messages);
+    data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
+    data.preserved_tokens = {
+        "[THINK]",
+        "[/THINK]",
+        "[TOOL_CALLS]",
+        "[ARGS]",
+    };
+
+    auto parser = build_chat_peg_native_parser([&](common_chat_peg_native_builder & p) {
+        auto reasoning = extract_reasoning ? p.optional("[THINK]" + p.reasoning(p.until("[/THINK]")) + "[/THINK]") : p.eps();
+
+        // Response format parser
+        if (inputs.json_schema.is_object() && !inputs.json_schema.empty()) {
+            // Ministral wants to emit json surrounded by code fences
+            return reasoning << "```json" << p.content(p.schema(p.json(), "response-format", inputs.json_schema)) << "```";
+        }
+
+        // Tool call parser
+        if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+            auto tool_choice = p.choice();
+            foreach_function(inputs.tools, [&](const json & tool) {
+                const auto & function = tool.at("function");
+                std::string name = function.at("name");
+                const auto & schema = function.at("parameters");
+
+                tool_choice |= p.rule("tool-" + name,
+                    p.tool_open(p.tool_name(p.literal(name)) + "[ARGS]")
+                    + p.tool_args(p.schema(p.json(), "tool-" + name + "-schema", schema))
+                );
+            });
+
+            auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
+            auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
+            auto tool_calls = p.trigger_rule("tool-call", p.repeat("[TOOL_CALLS]" + tool_choice, min_calls, max_calls));
+
+            return reasoning << p.content(p.until("[TOOL_CALLS]")) << tool_calls;
+        }
+
+        // Content only parser
+        include_grammar = false;
+        return reasoning << p.content(p.rest());
+    });
+
+    data.parser = parser.save();
+
+    if (include_grammar) {
+        data.grammar_lazy = has_tools && inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
+
+        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
+            foreach_function(inputs.tools, [&](const json & tool) {
+                const auto & function = tool.at("function");
+                auto schema = function.at("parameters");
+                builder.resolve_refs(schema);
+            });
+            parser.build_grammar(builder, data.grammar_lazy);
+        });
+
+        data.grammar_triggers = {
+            {COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "[TOOL_CALLS]"}
+        };
+    }
+
+    return data;
 }
 
 static common_chat_params common_chat_params_init_magistral(const common_chat_template & tmpl, const struct templates_params & inputs) {
@@ -1290,9 +1401,123 @@ static common_chat_params common_chat_params_init_nemotron_v2(const common_chat_
     return data;
 }
 
-// NOTE: nemotron_v3 was already using PEG in master, so no legacy fallback exists
 static common_chat_params common_chat_params_init_nemotron_v3(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    return common_chat_params_init_nemotron_v3_peg(tmpl, inputs);
+    if (!inputs.use_legacy_parsers) {
+        return common_chat_params_init_nemotron_v3_peg(tmpl, inputs);
+    }
+    common_chat_params data;
+
+    data.prompt = apply(tmpl, inputs);
+    data.format = COMMON_CHAT_FORMAT_PEG_CONSTRUCTED;
+
+    // Handle thinking tags appropriately based on inputs.enable_thinking
+    if (string_ends_with(data.prompt, "<think>\n")) {
+        if (!inputs.enable_thinking) {
+            data.prompt += "</think>";
+        } else {
+            data.thinking_forced_open = true;
+        }
+    }
+
+    data.preserved_tokens = {
+        "<think>",
+        "</think>",
+        "<tool_call>",
+        "</tool_call>",
+    };
+
+    auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
+    auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
+    auto include_grammar = true;
+
+    auto parser = build_chat_peg_constructed_parser([&](auto & p) {
+        auto reasoning = p.eps();
+        if (inputs.enable_thinking && extract_reasoning) {
+            auto reasoning_content = p.reasoning(p.until("</think>")) + ("</think>" | p.end());
+            if (data.thinking_forced_open) {
+                reasoning = reasoning_content;
+            }
+        }
+
+        // Response format parser
+        if (inputs.json_schema.is_object() && !inputs.json_schema.empty()) {
+            return reasoning << p.content(p.schema(p.json(), "response-format", inputs.json_schema));
+        }
+
+        // Tool call parser
+        if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+            auto tool_choice = p.choice();
+            foreach_function(inputs.tools, [&](const json & tool) {
+                const auto & function = tool.at("function");
+                std::string name = function.at("name");
+                auto parameters = function.at("parameters");
+
+                auto schema_info = common_schema_info();
+                schema_info.resolve_refs(parameters);
+
+                auto tool_open = "<function=" + p.tool_name(p.literal(name)) + ">\n";
+                auto tool_close = p.literal("</function>\n");
+                auto args = p.sequence();
+                auto arg_string = p.rule("xml-arg-string", p.until_one_of({
+                    "\n</parameter>",
+                    "\n<parameter=",
+                    "\n</function>"
+                }));
+
+                foreach_parameter(function, [&](const auto & param_name, const json & param_schema, bool is_required) {
+                    auto rule_name = "tool-" + name + "-arg-" + param_name;
+
+                    auto arg_open = "<parameter=" + p.tool_arg_name(p.literal(param_name)) + ">\n";
+                    auto arg_close = p.literal("</parameter>\n");
+                    auto arg_value = p.eps();
+
+                    if (schema_info.resolves_to_string(param_schema)) {
+                        arg_value = p.tool_arg_string_value(arg_string) + "\n";
+                    } else {
+                        arg_value = p.tool_arg_json_value(p.schema(p.json(), rule_name + "-schema", param_schema));
+                    }
+
+                    // Model may or my not close with </parameter>
+                    auto arg_rule = p.rule(rule_name, p.tool_arg_open(arg_open) + arg_value + p.optional(p.tool_arg_close(arg_close)));
+                    args += p.repeat(arg_rule, /* min = */ is_required ? 1 : 0, /* max = */ 1);
+                });
+
+                tool_choice |= p.rule("tool-" + name, p.tool_open(tool_open) + args + p.tool_close(tool_close));
+            });
+
+            auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
+            auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
+            auto tool_call = p.rule("tool-call", "<tool_call>\n" + tool_choice + "</tool_call>" + p.space());
+            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, /* min = */ min_calls, /* max = */ max_calls));
+
+            return reasoning << p.content(p.until("<tool_call>")) << tool_calls;
+        }
+
+        // Content only parser
+        include_grammar = false;
+        return reasoning << p.content(p.rest());
+    });
+
+    data.parser = parser.save();
+
+    if (include_grammar) {
+        data.grammar_lazy = has_tools && inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
+
+        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
+            foreach_function(inputs.tools, [&](const json & tool) {
+                const auto & function = tool.at("function");
+                auto schema = function.at("parameters");
+                builder.resolve_refs(schema);
+            });
+            parser.build_grammar(builder, data.grammar_lazy);
+        });
+
+        data.grammar_triggers = {
+            {COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_call>"}
+        };
+    }
+
+    return data;
 }
 
 
@@ -1512,29 +1737,204 @@ static common_chat_params common_chat_params_init_deepseek_v3_1(const common_cha
     return data;
 }
 
-// NOTE: minimax_m2 was already using xml_tool_call_format in master, so no legacy fallback exists
 static common_chat_params common_chat_params_init_minimax_m2(const common_chat_template & tmpl, const struct templates_params & params) {
-    return common_chat_params_init_minimax_m2_peg(tmpl, params);
+    if (!params.use_legacy_parsers) {
+        return common_chat_params_init_minimax_m2_peg(tmpl, params);
+    }
+    common_chat_params data;
+    data.grammar_lazy = params.tools.is_array() && !params.tools.empty() && params.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+
+    data.prompt = apply(tmpl, params);
+    data.format = COMMON_CHAT_FORMAT_MINIMAX_M2;
+
+    // Handle thinking tags based on prompt ending
+    if (string_ends_with(data.prompt, "<think>\n")) {
+        if (!params.enable_thinking) {
+            // Close the thinking tag immediately if thinking is disabled
+            data.prompt += "</think>\n\n";
+        } else {
+            // Mark thinking as forced open (template started with <think>)
+            data.thinking_forced_open = true;
+        }
+    }
+
+    // Preserve MiniMax-M2 special tokens
+    data.preserved_tokens = {
+        "<think>",
+        "</think>",
+        "<minimax:tool_call>",
+        "</minimax:tool_call>",
+    };
+
+    // build grammar for tool call
+    static const xml_tool_call_format form {
+        /* form.scope_start = */ "<minimax:tool_call>\n",
+        /* form.tool_start  = */ "<invoke name=\"",
+        /* form.tool_sep    = */ "\">\n",
+        /* form.key_start   = */ "<parameter name=\"",
+        /* form.key_val_sep = */ "\">",
+        /* form.val_end     = */ "</parameter>\n",
+        /* form.tool_end    = */ "</invoke>\n",
+        /* form.scope_end   = */ "</minimax:tool_call>",
+    };
+    build_grammar_xml_tool_call(data, params.tools, form);
+
+    return data;
 }
 
-// NOTE: qwen3_coder_xml was already using xml_tool_call_format in master, so no legacy fallback exists
 static common_chat_params common_chat_params_init_qwen3_coder_xml(const common_chat_template & tmpl, const struct templates_params & params) {
-    return common_chat_params_init_qwen3_coder_xml_peg(tmpl, params);
+    if (!params.use_legacy_parsers) {
+        return common_chat_params_init_qwen3_coder_xml_peg(tmpl, params);
+    }
+    common_chat_params data;
+    data.grammar_lazy = params.tools.is_array() && !params.tools.empty() && params.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+
+    data.prompt = apply(tmpl, params);
+    data.format = COMMON_CHAT_FORMAT_QWEN3_CODER_XML;
+
+    data.preserved_tokens = {
+        "<tool_call>",
+        "</tool_call>",
+        "<function=",
+        "</function>",
+        "<parameter=",
+        "</parameter>",
+    };
+
+    // build grammar for tool call
+    static const xml_tool_call_format form {
+        /* form.scope_start = */ "<tool_call>\n",
+        /* form.tool_start  = */ "<function=",
+        /* form.tool_sep    = */ ">\n",
+        /* form.key_start   = */ "<parameter=",
+        /* form.key_val_sep = */ ">\n",
+        /* form.val_end     = */ "\n</parameter>\n",
+        /* form.tool_end    = */ "</function>\n",
+        /* form.scope_end   = */ "</tool_call>",
+    };
+    build_grammar_xml_tool_call(data, params.tools, form);
+
+    return data;
 }
 
-// NOTE: kimi_k2 was already using xml_tool_call_format in master, so no legacy fallback exists
 static common_chat_params common_chat_params_init_kimi_k2(const common_chat_template & tmpl, const struct templates_params & params) {
-    return common_chat_params_init_kimi_k2_peg(tmpl, params);
+    if (!params.use_legacy_parsers) {
+        return common_chat_params_init_kimi_k2_peg(tmpl, params);
+    }
+    common_chat_params data;
+    data.grammar_lazy = params.tools.is_array() && !params.tools.empty() && params.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+
+    data.prompt = apply(tmpl, params);
+    data.format = COMMON_CHAT_FORMAT_KIMI_K2;
+
+    data.preserved_tokens = {
+        "<think>",
+        "</think>",
+        "<|tool_calls_section_begin|>",
+        "<|tool_call_begin|>",
+        "<|tool_call_argument_begin|>",
+        "<|tool_call_end|>",
+        "<|tool_calls_section_end|>",
+        "<|im_end|>",
+        "<|im_system|>",
+        "<|im_middle|>",
+    };
+
+    data.additional_stops.insert(data.additional_stops.end(), {
+        "<|im_end|>",
+        "<|im_middle|>"
+    });
+    // build grammar for tool call
+    static const xml_tool_call_format form = ([]() {
+        xml_tool_call_format form {};
+        form.scope_start = "<|tool_calls_section_begin|>";
+        form.tool_start  = "<|tool_call_begin|>";
+        form.tool_sep    = "<|tool_call_argument_begin|>{";
+        form.key_start   = "\"";
+        form.key_val_sep = "\": ";
+        form.val_end     = ", ";
+        form.tool_end    = "}<|tool_call_end|>";
+        form.scope_end   = "<|tool_calls_section_end|>";
+        form.raw_argval  = false;
+        form.last_val_end = "";
+        return form;
+    })();
+    build_grammar_xml_tool_call(data, params.tools, form);
+
+    return data;
 }
 
-// NOTE: apriel_1_5 was already using xml_tool_call_format in master, so no legacy fallback exists
 static common_chat_params common_chat_params_init_apriel_1_5(const common_chat_template & tmpl, const struct templates_params & params) {
-    return common_chat_params_init_apriel_1_5_peg(tmpl, params);
+    if (!params.use_legacy_parsers) {
+        return common_chat_params_init_apriel_1_5_peg(tmpl, params);
+    }
+    common_chat_params data;
+    data.grammar_lazy = params.tools.is_array() && !params.tools.empty() && params.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+
+    data.prompt = apply(tmpl, params);
+    data.format = COMMON_CHAT_FORMAT_APRIEL_1_5;
+
+    data.preserved_tokens = {
+        "<thinking>",
+        "</thinking>",
+        "<tool_calls>",
+        "</tool_calls>",
+    };
+
+    // build grammar for tool call
+    static const xml_tool_call_format form = ([]() {
+        xml_tool_call_format form {};
+        form.scope_start = "<tool_calls>[";
+        form.tool_start  = "{\"name\": \"";
+        form.tool_sep    = "\", \"arguments\": {";
+        form.key_start   = "\"";
+        form.key_val_sep = "\": ";
+        form.val_end     = ", ";
+        form.tool_end    = "}, ";
+        form.scope_end   = "]</tool_calls>";
+        form.raw_argval  = false;
+        form.last_val_end = "";
+        form.last_tool_end = "}";
+        return form;
+    })();
+    build_grammar_xml_tool_call(data, params.tools, form);
+
+    return data;
 }
 
-// NOTE: xiaomi_mimo was already using xml_tool_call_format in master, so no legacy fallback exists
 static common_chat_params common_chat_params_init_xiaomi_mimo(const common_chat_template & tmpl, const struct templates_params & params) {
-    return common_chat_params_init_xiaomi_mimo_peg(tmpl, params);
+    if (!params.use_legacy_parsers) {
+        return common_chat_params_init_xiaomi_mimo_peg(tmpl, params);
+    }
+    common_chat_params data;
+    data.grammar_lazy = params.tools.is_array() && !params.tools.empty() && params.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+
+    data.prompt = apply(tmpl, params);
+    data.format = COMMON_CHAT_FORMAT_XIAOMI_MIMO;
+
+    data.preserved_tokens = {
+        "<tool_call>",
+        "</tool_call>",
+    };
+
+    // build grammar for tool call
+    static const xml_tool_call_format form = ([]() {
+        xml_tool_call_format form {};
+        form.scope_start = "\n";
+        form.tool_start  = "<tool_call>\n{\"name\": \"";
+        form.tool_sep    = "\", \"arguments\": {";
+        form.key_start   = "\"";
+        form.key_val_sep = "\": ";
+        form.val_end     = ", ";
+        form.tool_end    = "}\n</tool_call>";
+        form.scope_end   = "";
+        form.raw_argval  = false;
+        form.last_val_end = "";
+        return form;
+    })();
+    build_grammar_xml_tool_call(data, params.tools, form);
+
+    return data;
 }
 
 static common_chat_params common_chat_params_init_gpt_oss(const common_chat_template & tmpl, const struct templates_params & inputs) {
@@ -1687,9 +2087,86 @@ static common_chat_params common_chat_params_init_gpt_oss(const common_chat_temp
     return data;
 }
 
-// NOTE: glm_4_5 was already using xml_tool_call_format in master, so no legacy fallback exists
 static common_chat_params common_chat_params_init_glm_4_5(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    return common_chat_params_init_glm_4_5_peg(tmpl, inputs);
+    if (!inputs.use_legacy_parsers) {
+        return common_chat_params_init_glm_4_5_peg(tmpl, inputs);
+    }
+    common_chat_params data;
+    data.grammar_lazy = inputs.tools.is_array() && !inputs.tools.empty() && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+
+    std::string prompt = apply(tmpl, inputs);
+
+    // match the existing trimming behavior
+    if (inputs.add_bos && string_starts_with(prompt, tmpl.bos_token())) {
+        prompt.erase(0, tmpl.bos_token().size());
+    }
+    if (inputs.add_eos && string_ends_with(prompt, tmpl.eos_token())) {
+        prompt.erase(prompt.size() - tmpl.eos_token().size());
+    }
+    if (string_ends_with(prompt, "<think>")) {
+        if (!inputs.enable_thinking) {
+            prompt += "</think>";
+        } else {
+            data.thinking_forced_open = true;
+        }
+    }
+
+    // add GLM preserved tokens
+    data.preserved_tokens = {
+        "<|endoftext|>",
+        "[MASK]",
+        "[gMASK]",
+        "[sMASK]",
+        "<sop>",
+        "<eop>",
+        "<|system|>",
+        "<|user|>",
+        "<|assistant|>",
+        "<|observation|>",
+        "<|begin_of_image|>",
+        "<|end_of_image|>",
+        "<|begin_of_video|>",
+        "<|end_of_video|>",
+        "<|begin_of_audio|>",
+        "<|end_of_audio|>",
+        "<|begin_of_transcription|>",
+        "<|end_of_transcription|>",
+        "<|code_prefix|>",
+        "<|code_middle|>",
+        "<|code_suffix|>",
+        "/nothink",
+        "<think>",
+        "</think>",
+        "<tool_call>",
+        "</tool_call>",
+        "<arg_key>",
+        "</arg_key>",
+        "<arg_value>",
+        "</arg_value>"
+    };
+
+    // extra GLM 4.5 stop word
+    data.additional_stops.insert(data.additional_stops.end(), {
+        "<|user|>",
+        "<|observation|>"
+    });
+
+    // build grammar for tool call
+    static const xml_tool_call_format form {
+        /* form.scope_start = */ "",
+        /* form.tool_start  = */ "\n<tool_call>",
+        /* form.tool_sep    = */ "\n",
+        /* form.key_start   = */ "<arg_key>",
+        /* form.key_val_sep = */ "</arg_key>\n<arg_value>",
+        /* form.val_end     = */ "</arg_value>\n",
+        /* form.tool_end    = */ "</tool_call>\n",
+        /* form.scope_end   = */ "",
+    };
+    build_grammar_xml_tool_call(data, inputs.tools, form);
+
+    data.prompt = prompt;
+    data.format = COMMON_CHAT_FORMAT_GLM_4_5;
+    return data;
 }
 
 static common_chat_params common_chat_params_init_firefunction_v2(const common_chat_template & tmpl, const struct templates_params & inputs) {
@@ -2061,9 +2538,57 @@ static common_chat_params common_chat_params_init_granite(const common_chat_temp
     return data;
 }
 
-// NOTE: seed_oss is a new format that was added in the branch - always use PEG
 static common_chat_params common_chat_params_init_seed_oss(const common_chat_template & tmpl, const struct templates_params & params) {
-    return common_chat_params_init_seed_oss_peg(tmpl, params);
+    if (!params.use_legacy_parsers) {
+        return common_chat_params_init_seed_oss_peg(tmpl, params);
+    }
+    common_chat_params data;
+    data.prompt = apply(tmpl, params);
+    data.format = COMMON_CHAT_FORMAT_SEED_OSS;
+    if (string_ends_with(data.prompt, "<seed:think>")) {
+        if (!params.enable_thinking) {
+            data.prompt += "</seed:think>";
+        } else {
+            data.thinking_forced_open = true;
+        }
+    }
+
+    if (params.tools.is_array() && !params.tools.empty()) {
+        data.grammar_lazy = params.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+        data.grammar      = build_grammar([&](const common_grammar_builder & builder) {
+            std::vector<std::string> tool_rules;
+            foreach_function(params.tools, [&](const json & tool) {
+                const auto & function   = tool.at("function");
+                std::string  name       = function.at("name");
+                auto         parameters = function.at("parameters");
+                builder.resolve_refs(parameters);
+
+                // Create rule for Seed-OSS function call format
+                std::string param_rules;
+                if (parameters.contains("properties")) {
+                    for (const auto & [key, value] : parameters.at("properties").items()) {
+                        param_rules += "\"<parameter=" + key + ">\"" + builder.add_schema(name + "-arg-" + key, value) +
+                                       "\"</parameter>\"";
+                    }
+                }
+
+                tool_rules.push_back(builder.add_rule(name + "-call",
+                                                      "\"<seed:tool_call>\" space \"<function=" + name + ">\" space " +
+                                                          param_rules +
+                                                          " \"</function>\" space \"</seed:tool_call>\""));
+            });
+
+            data.grammar_triggers.push_back({ COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<seed:tool_call>" });
+
+            data.preserved_tokens = {
+                "<seed:think>", "</seed:think>", "<seed:tool_call>", "</seed:tool_call>",
+                "<function=",   "</function>",   "<parameter=",      "</parameter>",
+            };
+
+            builder.add_rule("root", string_join(tool_rules, " | "));
+        });
+    }
+    return data;
 }
 
 static common_chat_params common_chat_templates_apply_jinja(
