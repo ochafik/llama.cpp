@@ -2,6 +2,9 @@ import os
 import pytest
 from utils import *
 
+# Configure pytest-asyncio to use auto mode
+pytest_plugins = ('pytest_asyncio',)
+
 
 # ref: https://stackoverflow.com/questions/22627659/run-code-before-and-after-each-test-in-py-test
 @pytest.fixture(autouse=True)

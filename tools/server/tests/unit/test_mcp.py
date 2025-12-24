@@ -5,11 +5,13 @@ Tests for MCP (Model Context Protocol) server functionality.
 Tests cover:
 - HTTP endpoint: /mcp/servers
 - WebSocket connection lifecycle (on HTTP port + 1)
-- MCP JSON-RPC protocol
+- MCP JSON-RPC protocol (using official MCP SDK)
 - Environment variable filtering (security)
 """
 
 import pytest
+import pytest_asyncio
+import asyncio
 import json
 import os
 import tempfile
@@ -22,7 +24,12 @@ sys.path.insert(0, str(path))
 
 from utils import ServerProcess
 
+# Raw websocket for low-level protocol tests
 import websocket
+
+# Official MCP SDK for protocol-level tests
+from mcp.client.websocket import websocket_client
+from mcp.client.session import ClientSession
 
 server: ServerProcess
 
@@ -218,43 +225,105 @@ def get_mcp_echo_script_path():
     return str(Path(__file__).parent.parent / "fixtures" / "mcp_echo_server.py")
 
 
-class TestMcpJsonRpcProtocol:
-    """Test MCP JSON-RPC protocol handling."""
+@pytest.fixture
+def python_mcp_config():
+    """Create config with a Python-based echo MCP server for testing."""
+    script_path = get_mcp_echo_script_path()
 
-    @pytest.fixture
-    def python_mcp_config(self):
-        """Create config with a Python-based echo MCP server for testing."""
-        script_path = get_mcp_echo_script_path()
-
-        # Create config pointing to the script
-        config = {
-            "mcpServers": {
-                "test-echo": {
-                    "command": sys.executable,
-                    "args": [script_path],
-                    "env": {"PYTHONUNBUFFERED": "1"}
-                }
+    # Create config pointing to the script
+    config = {
+        "mcpServers": {
+            "test-echo": {
+                "command": sys.executable,
+                "args": [script_path],
+                "env": {"PYTHONUNBUFFERED": "1"}
             }
         }
+    }
 
-        with tempfile.NamedTemporaryFile(
-            mode='w',
-            suffix='.json',
-            delete=False
-        ) as config_file:
-            json.dump(config, config_file)
-            config_path = config_file.name
+    with tempfile.NamedTemporaryFile(
+        mode='w',
+        suffix='.json',
+        delete=False
+    ) as config_file:
+        json.dump(config, config_file)
+        config_path = config_file.name
 
-        yield config_path
+    yield config_path
 
-        # Cleanup config file (script is a fixture, not temp)
-        try:
-            os.unlink(config_path)
-        except:
-            pass
+    # Cleanup config file (script is a fixture, not temp)
+    try:
+        os.unlink(config_path)
+    except:
+        pass
 
-    def test_mcp_initialize_handshake(self, python_mcp_config):
-        """Test MCP initialize handshake via WebSocket."""
+
+class TestMcpJsonRpcProtocol:
+    """Test MCP JSON-RPC protocol handling using the official MCP SDK."""
+
+    @pytest.mark.asyncio
+    async def test_mcp_initialize_and_list_tools(self, python_mcp_config):
+        """Test MCP initialize handshake and tools/list using the MCP SDK."""
+        server.mcp_config = python_mcp_config
+        server.start(timeout_seconds=TIMEOUT_SERVER_START)
+
+        ws_port = server.server_port + 1
+        ws_url = f"ws://{server.server_host}:{ws_port}/mcp?server=test-echo"
+
+        async with websocket_client(ws_url) as streams:
+            read_stream, write_stream = streams
+            async with ClientSession(read_stream, write_stream) as session:
+                # Initialize (handled by ClientSession automatically)
+                result = await session.initialize()
+
+                # Verify initialization result
+                assert result.protocolVersion is not None, \
+                    f"Expected protocolVersion in result: {result}"
+
+                # List tools
+                tools_result = await session.list_tools()
+                tools = tools_result.tools
+
+                assert len(tools) >= 2, \
+                    f"Expected at least two tools (echo, get_env_vars): {tools}"
+                tool_names = [t.name for t in tools]
+                assert "echo" in tool_names, f"Expected echo tool: {tools}"
+                assert "get_env_vars" in tool_names, f"Expected get_env_vars tool: {tools}"
+
+    @pytest.mark.asyncio
+    async def test_mcp_tool_call(self, python_mcp_config):
+        """Test MCP tools/call method using the MCP SDK."""
+        server.mcp_config = python_mcp_config
+        server.start(timeout_seconds=TIMEOUT_SERVER_START)
+
+        ws_port = server.server_port + 1
+        ws_url = f"ws://{server.server_host}:{ws_port}/mcp?server=test-echo"
+
+        async with websocket_client(ws_url) as streams:
+            read_stream, write_stream = streams
+            async with ClientSession(read_stream, write_stream) as session:
+                # Initialize
+                await session.initialize()
+
+                # Call the echo tool
+                result = await session.call_tool("echo", {"message": "Hello, MCP!"})
+
+                # Verify result
+                assert result.content is not None, f"Expected content: {result}"
+                assert len(result.content) > 0, f"Expected content items: {result}"
+
+                # Extract text from first content item
+                first_content = result.content[0]
+                assert hasattr(first_content, 'text'), f"Expected text content: {first_content}"
+                assert first_content.text == "Hello, MCP!", \
+                    f"Expected echoed message: {first_content.text}"
+
+
+class TestMcpJsonRpcProtocolRaw:
+    """Test MCP JSON-RPC protocol handling using raw WebSocket (for edge cases)."""
+
+    def test_mcp_initialize_handshake_raw(self, python_mcp_config):
+        """Test MCP initialize handshake via raw WebSocket."""
         server.mcp_config = python_mcp_config
         server.start(timeout_seconds=TIMEOUT_SERVER_START)
 
@@ -288,8 +357,8 @@ class TestMcpJsonRpcProtocol:
         finally:
             ws.close()
 
-    def test_mcp_tools_list(self, python_mcp_config):
-        """Test MCP tools/list method."""
+    def test_mcp_tools_list_raw(self, python_mcp_config):
+        """Test MCP tools/list method via raw WebSocket."""
         server.mcp_config = python_mcp_config
         server.start(timeout_seconds=TIMEOUT_SERVER_START)
 
@@ -343,97 +412,49 @@ class TestMcpJsonRpcProtocol:
         finally:
             ws.close()
 
-    def test_mcp_tool_call(self, python_mcp_config):
-        """Test MCP tools/call method."""
-        server.mcp_config = python_mcp_config
-        server.start(timeout_seconds=TIMEOUT_SERVER_START)
 
-        ws_port = server.server_port + 1
-        ws_url = f"ws://{server.server_host}:{ws_port}/mcp?server=test-echo"
+@pytest.fixture
+def python_mcp_config_with_secret():
+    """Create config with a Python-based MCP server and config-specified env var."""
+    script_path = get_mcp_echo_script_path()
 
-        ws = websocket.create_connection(ws_url, timeout=TIMEOUT_WS)
-        try:
-            # Initialize
-            ws.send(json.dumps({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {},
-                    "clientInfo": {"name": "test-client", "version": "1.0.0"}
-                }
-            }))
-            ws.recv()
-
-            # Call echo tool
-            call_request = {
-                "jsonrpc": "2.0",
-                "id": 3,
-                "method": "tools/call",
-                "params": {
-                    "name": "echo",
-                    "arguments": {"message": "Hello, MCP!"}
+    # Create config pointing to the script
+    config = {
+        "mcpServers": {
+            "test-echo": {
+                "command": sys.executable,
+                "args": [script_path],
+                "env": {
+                    "PYTHONUNBUFFERED": "1",
+                    "MCP_CONFIG_VAR": "config_value"  # This should be passed
                 }
             }
-            ws.send(json.dumps(call_request))
+        }
+    }
 
-            result = ws.recv()
-            response = json.loads(result)
+    with tempfile.NamedTemporaryFile(
+        mode='w',
+        suffix='.json',
+        delete=False
+    ) as config_file:
+        json.dump(config, config_file)
+        config_path = config_file.name
 
-            assert response.get("id") == 3, f"Expected id=3: {response}"
-            assert "result" in response, f"Expected result: {response}"
-            assert "content" in response["result"], f"Expected content: {response}"
+    yield config_path
 
-            content = response["result"]["content"]
-            assert len(content) > 0, f"Expected content items: {content}"
-            assert content[0]["text"] == "Hello, MCP!", \
-                f"Expected echoed message: {content}"
-
-        finally:
-            ws.close()
+    # Cleanup config file (script is a fixture, not temp)
+    try:
+        os.unlink(config_path)
+    except:
+        pass
 
 
 class TestMcpEnvVarFiltering:
     """Test that MCP subprocess only receives vetted environment variables."""
 
-    @pytest.fixture
-    def python_mcp_config_with_secret(self):
-        """Create config with a Python-based MCP server and config-specified env var."""
-        script_path = get_mcp_echo_script_path()
-
-        # Create config pointing to the script
-        config = {
-            "mcpServers": {
-                "test-echo": {
-                    "command": sys.executable,
-                    "args": [script_path],
-                    "env": {
-                        "PYTHONUNBUFFERED": "1",
-                        "MCP_CONFIG_VAR": "config_value"  # This should be passed
-                    }
-                }
-            }
-        }
-
-        with tempfile.NamedTemporaryFile(
-            mode='w',
-            suffix='.json',
-            delete=False
-        ) as config_file:
-            json.dump(config, config_file)
-            config_path = config_file.name
-
-        yield config_path
-
-        # Cleanup config file (script is a fixture, not temp)
-        try:
-            os.unlink(config_path)
-        except:
-            pass
-
-    def test_env_vars_filtering(self, python_mcp_config_with_secret):
-        """Test that MCP subprocess only receives allowed env vars."""
+    @pytest.mark.asyncio
+    async def test_env_vars_filtering(self, python_mcp_config_with_secret):
+        """Test that MCP subprocess only receives allowed env vars using MCP SDK."""
         config_path = python_mcp_config_with_secret
 
         # Set some secret env vars that should NOT be passed to subprocess
@@ -454,78 +475,49 @@ class TestMcpEnvVarFiltering:
             ws_port = server.server_port + 1
             ws_url = f"ws://{server.server_host}:{ws_port}/mcp?server=test-echo"
 
-            ws = websocket.create_connection(ws_url, timeout=TIMEOUT_WS)
-            try:
-                # Initialize
-                ws.send(json.dumps({
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "initialize",
-                    "params": {
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {},
-                        "clientInfo": {"name": "test-client", "version": "1.0.0"}
-                    }
-                }))
-                ws.recv()
+            async with websocket_client(ws_url) as streams:
+                read_stream, write_stream = streams
+                async with ClientSession(read_stream, write_stream) as session:
+                    # Initialize
+                    await session.initialize()
 
-                # Call get_env_vars tool to see what env vars the subprocess received
-                call_request = {
-                    "jsonrpc": "2.0",
-                    "id": 2,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "get_env_vars",
-                        "arguments": {}
-                    }
-                }
-                ws.send(json.dumps(call_request))
+                    # Call get_env_vars tool to see what env vars the subprocess received
+                    result = await session.call_tool("get_env_vars", {})
 
-                result = ws.recv()
-                response = json.loads(result)
+                    # Extract env vars from the result
+                    subprocess_env = {}
+                    if result.content:
+                        first_content = result.content[0]
+                        if hasattr(first_content, 'text'):
+                            text_data = json.loads(first_content.text)
+                            subprocess_env = text_data.get("env_vars", {})
 
-                assert response.get("id") == 2, f"Expected id=2: {response}"
-                assert "result" in response, f"Expected result: {response}"
+                    assert subprocess_env, f"Could not extract env vars from response: {result}"
 
-                # Get the env vars from structuredContent
-                structured = response["result"].get("structuredContent", {})
-                subprocess_env = structured.get("env_vars", {})
+                    # Verify secret vars are NOT present
+                    for secret_key in secret_vars:
+                        assert secret_key not in subprocess_env, \
+                            f"Secret env var '{secret_key}' was leaked to MCP subprocess! " \
+                            f"Subprocess env: {list(subprocess_env.keys())}"
 
-                # If structuredContent not available, parse from text content
-                if not subprocess_env:
-                    content = response["result"].get("content", [])
-                    if content and content[0].get("type") == "text":
-                        text_data = json.loads(content[0]["text"])
-                        subprocess_env = text_data.get("env_vars", {})
-
-                assert subprocess_env, f"Could not extract env vars from response: {response}"
-
-                # Verify secret vars are NOT present
-                for secret_key in secret_vars:
-                    assert secret_key not in subprocess_env, \
-                        f"Secret env var '{secret_key}' was leaked to MCP subprocess! " \
+                    # Verify allowed vars are present (at least some of them)
+                    present_allowed = [v for v in MCP_ALLOWED_ENV_VARS if v in subprocess_env]
+                    assert len(present_allowed) > 0, \
+                        f"None of the allowed env vars {MCP_ALLOWED_ENV_VARS} are present. " \
                         f"Subprocess env: {list(subprocess_env.keys())}"
 
-                # Verify allowed vars are present (at least some of them)
-                present_allowed = [v for v in MCP_ALLOWED_ENV_VARS if v in subprocess_env]
-                assert len(present_allowed) > 0, \
-                    f"None of the allowed env vars {MCP_ALLOWED_ENV_VARS} are present. " \
-                    f"Subprocess env: {list(subprocess_env.keys())}"
+                    # Verify config-specified env vars ARE present
+                    assert "PYTHONUNBUFFERED" in subprocess_env, \
+                        f"Config-specified PYTHONUNBUFFERED not in env: {list(subprocess_env.keys())}"
+                    assert "MCP_CONFIG_VAR" in subprocess_env, \
+                        f"Config-specified MCP_CONFIG_VAR not in env: {list(subprocess_env.keys())}"
+                    assert subprocess_env["MCP_CONFIG_VAR"] == "config_value", \
+                        f"MCP_CONFIG_VAR has wrong value: {subprocess_env['MCP_CONFIG_VAR']}"
 
-                # Verify config-specified env vars ARE present
-                assert "PYTHONUNBUFFERED" in subprocess_env, \
-                    f"Config-specified PYTHONUNBUFFERED not in env: {list(subprocess_env.keys())}"
-                assert "MCP_CONFIG_VAR" in subprocess_env, \
-                    f"Config-specified MCP_CONFIG_VAR not in env: {list(subprocess_env.keys())}"
-                assert subprocess_env["MCP_CONFIG_VAR"] == "config_value", \
-                    f"MCP_CONFIG_VAR has wrong value: {subprocess_env['MCP_CONFIG_VAR']}"
+                    # Verify PATH is present (essential for finding executables)
+                    assert "PATH" in subprocess_env, \
+                        f"PATH should be inherited: {list(subprocess_env.keys())}"
 
-                # Verify PATH is present (essential for finding executables)
-                assert "PATH" in subprocess_env, \
-                    f"PATH should be inherited: {list(subprocess_env.keys())}"
-
-            finally:
-                ws.close()
         finally:
             # Restore environment
             for key, value in old_env.items():
