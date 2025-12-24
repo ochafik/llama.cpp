@@ -119,5 +119,10 @@ class common_chat_msg_parser {
         const std::vector<std::vector<std::string>> & content_paths = {}
     );
 
+    bool try_consume_xml_tool_calls(const struct xml_tool_call_format & form);
+
+    // Parse content uses reasoning and XML-Style tool call
+    void consume_reasoning_with_xml_tool_calls(const struct xml_tool_call_format & form, const std::string & start_think = "<think>", const std::string & end_think = "</think>");
+
     void clear_tools();
 };

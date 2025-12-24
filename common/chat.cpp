@@ -661,7 +661,6 @@ const char * common_chat_format_name(common_chat_format format) {
         case COMMON_CHAT_FORMAT_QWEN3_CODER_XML: return "Qwen3 Coder";
         case COMMON_CHAT_FORMAT_APRIEL_1_5: return "Apriel 1.5";
         case COMMON_CHAT_FORMAT_XIAOMI_MIMO: return "Xiaomi MiMo";
-        case COMMON_CHAT_FORMAT_FUNCTION_GEMMA: return "FunctionGemma";
         default:
             throw std::runtime_error("Unknown chat format");
     }
@@ -2180,14 +2179,6 @@ static common_chat_params common_chat_templates_apply_jinja(
         src.find("</tool_calls>") != std::string::npos &&
         src.find("<tool_response>") != std::string::npos) {
         return common_chat_params_init_xiaomi_mimo(tmpl, params);
-    }
-
-    // FunctionGemma format detection
-    // Uses <start_function_call>call:name{...}<end_function_call> format
-    if (src.find("<start_function_call>") != std::string::npos &&
-        src.find("<end_function_call>") != std::string::npos &&
-        src.find("<escape>") != std::string::npos) {
-        return common_chat_params_init_function_gemma_peg(tmpl, params);
     }
 
     // Apriel 1.5 format detection (must come before Hermes since template contains <tool_call> instructional text)

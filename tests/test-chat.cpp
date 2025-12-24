@@ -1424,53 +1424,6 @@ static void test_template_output_parsers() {
                       "}");
     }
     {
-        // FunctionGemma format test
-        auto tmpls = read_templates("models/templates/google-functiongemma.jinja");
-        std::vector<std::string> end_tokens{ "<end_of_turn>" };
-
-        auto params = common_chat_templates_apply(tmpls.get(), inputs_tools);
-        assert_equals(COMMON_CHAT_FORMAT_FUNCTION_GEMMA, params.format);
-
-        // Get the syntax with PEG parser for parsing tests
-        common_chat_syntax syntax;
-        syntax.format = params.format;
-        syntax.parser.load(params.parser);
-
-        // Test parsing FunctionGemma tool call format
-        common_chat_msg expected_call;
-        expected_call.role = "assistant";
-        expected_call.tool_calls = {{ "get_weather", "{\"location\":\"Tokyo\"}", "" }};
-
-        assert_msg_equals(expected_call,
-            common_chat_parse(
-                "<start_function_call>call:get_weather{location:<escape>Tokyo<escape>}<end_function_call>",
-                /* is_partial= */ false,
-                syntax));
-
-        // Test parsing with numeric argument
-        common_chat_msg expected_call_numeric;
-        expected_call_numeric.role = "assistant";
-        expected_call_numeric.tool_calls = {{ "set_temperature", "{\"value\":25}", "" }};
-
-        assert_msg_equals(expected_call_numeric,
-            common_chat_parse(
-                "<start_function_call>call:set_temperature{value:25}<end_function_call>",
-                /* is_partial= */ false,
-                syntax));
-
-        // Test parsing with content before tool call
-        common_chat_msg expected_with_content;
-        expected_with_content.role = "assistant";
-        expected_with_content.content = "Let me check that for you.";
-        expected_with_content.tool_calls = {{ "get_weather", "{\"location\":\"London\"}", "" }};
-
-        assert_msg_equals(expected_with_content,
-            common_chat_parse(
-                "Let me check that for you.<start_function_call>call:get_weather{location:<escape>London<escape>}<end_function_call>",
-                /* is_partial= */ false,
-                syntax));
-    }
-    {
         auto tmpls = read_templates("models/templates/mistralai-Mistral-Nemo-Instruct-2407.jinja");
         std::vector<std::string>   end_tokens{ "</s>" };
 
@@ -4589,9 +4542,6 @@ static bool test_systematic_needle_streaming() {
         // Templates without thinking support
         {"Firefunction V2", "models/templates/fireworks-ai-llama-3-firefunction-v2.jinja",
             COMMON_CHAT_FORMAT_FIREFUNCTION_V2, ThinkingSupport::No, ToolSupport::No,
-            nullptr, nullptr},
-        {"FunctionGemma",   "models/templates/google-functiongemma.jinja",
-            COMMON_CHAT_FORMAT_FUNCTION_GEMMA, ThinkingSupport::No, ToolSupport::No,
             nullptr, nullptr},
         {"Functionary V3.1","models/templates/meetkai-functionary-medium-v3.1.jinja",
             COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1, ThinkingSupport::No, ToolSupport::Yes,

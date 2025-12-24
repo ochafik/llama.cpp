@@ -126,7 +126,11 @@ enum common_chat_format {
     COMMON_CHAT_FORMAT_QWEN3_CODER_XML,
     COMMON_CHAT_FORMAT_APRIEL_1_5,
     COMMON_CHAT_FORMAT_XIAOMI_MIMO,
-    COMMON_CHAT_FORMAT_FUNCTION_GEMMA,
+
+    // These are intended to be parsed by the PEG parser
+    COMMON_CHAT_FORMAT_PEG_SIMPLE,
+    COMMON_CHAT_FORMAT_PEG_NATIVE,
+    COMMON_CHAT_FORMAT_PEG_CONSTRUCTED,
 
     COMMON_CHAT_FORMAT_COUNT, // Not a format, just the # formats
 };

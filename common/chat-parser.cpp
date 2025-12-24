@@ -1279,147 +1279,6 @@ static void common_chat_parse_lfm2(common_chat_msg_parser & builder) {
     }
 }
 
-// FunctionGemma format: <start_function_call>call:name{key:<escape>value<escape>,key2:123}<end_function_call>
-// Helper to find the closing brace of a FunctionGemma call, accounting for <escape> delimiters
-static size_t find_function_gemma_args_end(const std::string & input, size_t start) {
-    bool in_escape = false;
-    for (size_t i = start; i < input.size(); ++i) {
-        if (!in_escape && input.substr(i, 8) == "<escape>") {
-            in_escape = true;
-            i += 7; // Skip to end of "<escape>" (loop will add 1)
-        } else if (in_escape && input.substr(i, 8) == "<escape>") {
-            in_escape = false;
-            i += 7; // Skip to end of "</escape>"
-        } else if (!in_escape && input[i] == '}') {
-            return i;
-        }
-    }
-    return std::string::npos;
-}
-
-static void common_chat_parse_function_gemma(common_chat_msg_parser & builder) {
-    if (!builder.syntax().parse_tool_calls) {
-        builder.add_content(builder.consume_rest());
-        return;
-    }
-
-    // Match the start of a function call: <start_function_call>call:name{
-    static const common_regex tool_call_start_regex(
-        "<start_function_call>call:([a-zA-Z_][a-zA-Z0-9_]*)\\{");
-
-    while (true) {
-        auto res = builder.try_find_regex(tool_call_start_regex);
-        if (!res) {
-            // No more tool calls found, consume rest as content
-            auto remaining = builder.consume_rest();
-            if (!remaining.empty()) {
-                builder.add_content(remaining);
-            }
-            break;
-        }
-
-        // Extract function name
-        std::string function_name = builder.str(res->groups[1]);
-
-        // Find the closing brace, accounting for <escape> delimiters
-        const std::string & input = builder.input();
-        size_t args_start = builder.pos();
-        size_t args_end = find_function_gemma_args_end(input, args_start);
-
-        if (args_end == std::string::npos) {
-            // Incomplete - no closing brace found
-            throw common_chat_msg_partial_exception("Incomplete FunctionGemma tool call - no closing brace");
-        }
-
-        std::string args_str = input.substr(args_start, args_end - args_start);
-        builder.move_to(args_end + 1); // Move past the closing brace
-
-        // Consume the end tag
-        static const std::string end_tag = "<end_function_call>";
-        if (input.substr(builder.pos(), end_tag.size()) == end_tag) {
-            builder.move_to(builder.pos() + end_tag.size());
-        }
-
-        // Parse the arguments: key:<escape>value<escape> or key:value
-        json arguments = json::object();
-
-        size_t pos = 0;
-        while (pos < args_str.size()) {
-            // Skip leading whitespace and commas
-            while (pos < args_str.size() && (std::isspace(args_str[pos]) || args_str[pos] == ',')) {
-                ++pos;
-            }
-            if (pos >= args_str.size()) break;
-
-            // Find the key (ends at ':')
-            size_t key_end = args_str.find(':', pos);
-            if (key_end == std::string::npos) break;
-
-            std::string key = args_str.substr(pos, key_end - pos);
-            // Trim key
-            while (!key.empty() && std::isspace(key.front())) key.erase(0, 1);
-            while (!key.empty() && std::isspace(key.back())) key.pop_back();
-
-            pos = key_end + 1;
-
-            // Check if value is escaped (string) or raw
-            std::string value;
-            bool is_string = false;
-
-            // Skip whitespace after colon
-            while (pos < args_str.size() && std::isspace(args_str[pos])) {
-                ++pos;
-            }
-
-            if (pos < args_str.size() && args_str.substr(pos, 8) == "<escape>") {
-                // String value wrapped in <escape>...</escape>
-                is_string = true;
-                pos += 8; // Skip "<escape>"
-                size_t val_end = args_str.find("<escape>", pos);
-                if (val_end == std::string::npos) {
-                    // Partial value - take rest
-                    value = args_str.substr(pos);
-                    pos = args_str.size();
-                } else {
-                    value = args_str.substr(pos, val_end - pos);
-                    pos = val_end + 8; // Skip closing "<escape>"
-                }
-            } else {
-                // Raw value (number, boolean, etc.) - ends at comma or end
-                size_t val_end = args_str.find(',', pos);
-                if (val_end == std::string::npos) {
-                    value = args_str.substr(pos);
-                    pos = args_str.size();
-                } else {
-                    value = args_str.substr(pos, val_end - pos);
-                    pos = val_end;
-                }
-                // Trim value
-                while (!value.empty() && std::isspace(value.back())) value.pop_back();
-            }
-
-            // Add to arguments JSON
-            if (!key.empty()) {
-                if (is_string) {
-                    arguments[key] = value;
-                } else {
-                    // Try to parse as JSON value (number, boolean, null)
-                    try {
-                        arguments[key] = json::parse(value);
-                    } catch (...) {
-                        // If parsing fails, treat as string
-                        arguments[key] = value;
-                    }
-                }
-            }
-        }
-
-        if (!builder.add_tool_call(function_name, "", arguments.dump())) {
-            throw common_chat_msg_partial_exception("Incomplete FunctionGemma tool call");
-        }
-    }
-}
-
 static void common_chat_parse_content_only(common_chat_msg_parser & builder) {
     builder.try_parse_reasoning("<think>", "</think>");
     builder.add_content(builder.consume_rest());
@@ -1483,9 +1342,6 @@ static void common_chat_parse(common_chat_msg_parser & builder) {
         case COMMON_CHAT_FORMAT_LFM2_WITH_JSON_TOOLS:
             common_chat_parse_lfm2(builder);
             break;
-        case COMMON_CHAT_FORMAT_FUNCTION_GEMMA:
-            common_chat_parse_function_gemma(builder);
-            break;
         // Formats with on-demand PEG parsers: when called without parser, fall back to content-only
         case COMMON_CHAT_FORMAT_SEED_OSS:
         case COMMON_CHAT_FORMAT_MINIMAX_M2:
@@ -1545,7 +1401,6 @@ common_chat_msg common_chat_peg_parse(const common_peg_arena & parser, const std
 
     // Select mapper based on format
     // - constructed_mapper: XML-style formats with arg key/value pairs
-    // - function_gemma_mapper: FunctionGemma's custom format
     // - short_form_mapper: Apertus short-form tool calls
     // - native_mapper: JSON-based formats (default)
     if (syntax.format == COMMON_CHAT_FORMAT_NEMOTRON_V3 ||
@@ -1554,9 +1409,7 @@ common_chat_msg common_chat_peg_parse(const common_peg_arena & parser, const std
         syntax.format == COMMON_CHAT_FORMAT_QWEN3_CODER_XML ||
         syntax.format == COMMON_CHAT_FORMAT_GLM_4_5 ||
         syntax.format == COMMON_CHAT_FORMAT_LLAMA_3_X_WITH_BUILTIN_TOOLS) {
-        apply_chat_peg_mapper(common_chat_peg_constructed_mapper(), ctx.ast, result, msg);
-    } else if (syntax.format == COMMON_CHAT_FORMAT_FUNCTION_GEMMA) {
-        apply_chat_peg_mapper(common_chat_peg_function_gemma_mapper(), ctx.ast, result, msg);
+        apply_chat_peg_mapper(common_chat_peg_constructed_mapper_func(), ctx.ast, result, msg);
     } else if (syntax.format == COMMON_CHAT_FORMAT_APERTUS ||
                syntax.format == COMMON_CHAT_FORMAT_APRIEL_1_5) {
         apply_chat_peg_mapper(common_chat_peg_short_form_mapper(), ctx.ast, result, msg);
@@ -1572,7 +1425,7 @@ common_chat_msg common_chat_peg_parse(const common_peg_arena & parser, const std
         apply_chat_peg_mapper(common_chat_peg_oai_array_mapper(), ctx.ast, result, msg);
     } else {
         // Default to native mapper for JSON-based formats (including KIMI_K2, XIAOMI_MIMO)
-        apply_chat_peg_mapper(common_chat_peg_native_mapper(), ctx.ast, result, msg);
+        apply_chat_peg_mapper(common_chat_peg_native_mapper_func(), ctx.ast, result, msg);
     }
     if (!is_partial) {
         LOG_DBG("Parsed message: %s\n", common_chat_msgs_to_json_oaicompat<json>({msg}).at(0).dump().c_str());

@@ -145,7 +145,6 @@ def do_test_completion_with_required_tool_tiny(server: ServerProcess, tool: dict
     "models/templates/deepseek-ai-DeepSeek-V3.1.jinja",
     "models/templates/fireworks-ai-llama-3-firefunction-v2.jinja",
     "models/templates/GLM-4.6.jinja",
-    "models/templates/google-functiongemma.jinja",
     "models/templates/google-gemma-2-2b-it.jinja",
     "models/templates/ibm-granite-granite-3.3-2B-Instruct.jinja",
     "models/templates/Kimi-K2-Instruct.jinja",

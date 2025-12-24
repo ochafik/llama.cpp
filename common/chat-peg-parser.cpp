@@ -17,6 +17,119 @@ static std::string_view trim_trailing_space(std::string_view sv, int max = -1) {
     return sv;
 }
 
+// ============================================================================
+// Original class-based mapper implementations (used by legacy code in chat.cpp)
+// ============================================================================
+
+void common_chat_peg_mapper::from_ast(const common_peg_ast_arena & arena, const common_peg_parse_result & result) {
+    arena.visit(result, [this](const common_peg_ast_node & node) {
+        map(node);
+    });
+}
+
+void common_chat_peg_mapper::map(const common_peg_ast_node & node) {
+    auto tag = static_cast<Tag>(node.tag_id);
+    if (tag == Tag::REASONING) {
+        result.reasoning_content = std::string(trim_trailing_space(node.text));
+    } else if (tag == Tag::CONTENT) {
+        result.content = std::string(trim_trailing_space(node.text));
+    }
+}
+
+void common_chat_peg_native_mapper::map(const common_peg_ast_node & node) {
+    common_chat_peg_mapper::map(node);
+
+    auto tag = static_cast<Tag>(node.tag_id);
+    switch (tag) {
+        case Tag::TOOL_OPEN:
+            result.tool_calls.emplace_back();
+            current_tool = &result.tool_calls.back();
+            break;
+        case Tag::TOOL_ID:
+            if (current_tool) {
+                current_tool->id = std::string(trim_trailing_space(node.text));
+            }
+            break;
+        case Tag::TOOL_NAME:
+            if (current_tool) {
+                current_tool->name = std::string(trim_trailing_space(node.text));
+            }
+            break;
+        case Tag::TOOL_ARGS:
+            if (current_tool) {
+                current_tool->arguments = std::string(trim_trailing_space(node.text));
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+void common_chat_peg_constructed_mapper::map(const common_peg_ast_node & node) {
+    common_chat_peg_mapper::map(node);
+
+    auto tag = static_cast<Tag>(node.tag_id);
+    switch (tag) {
+        case Tag::TOOL_OPEN:
+            result.tool_calls.emplace_back();
+            current_tool = &result.tool_calls.back();
+            arg_count = 0;
+            break;
+        case Tag::TOOL_NAME:
+            if (current_tool) {
+                current_tool->name = std::string(node.text);
+                current_tool->arguments = "{";
+            }
+            break;
+        case Tag::TOOL_ARG_OPEN:
+            needs_closing_quote = false;
+            break;
+        case Tag::TOOL_ARG_NAME:
+            if (current_tool) {
+                if (arg_count > 0) {
+                    current_tool->arguments += ",";
+                }
+                current_tool->arguments += json(trim_trailing_space(node.text)).dump() + ":";
+                ++arg_count;
+            }
+            break;
+        case Tag::TOOL_ARG_STRING_VALUE:
+            if (current_tool) {
+                // Serialize to JSON, but exclude the end quote
+                std::string dumped = json(trim_trailing_space(node.text)).dump();
+                current_tool->arguments += dumped.substr(0, dumped.size() - 1);
+                needs_closing_quote = true;
+            }
+            break;
+        case Tag::TOOL_ARG_CLOSE:
+            if (current_tool && needs_closing_quote) {
+                current_tool->arguments += "\"";
+                needs_closing_quote = false;
+            }
+            break;
+        case Tag::TOOL_ARG_JSON_VALUE:
+            if (current_tool) {
+                current_tool->arguments += std::string(trim_trailing_space(node.text));
+            }
+            break;
+        case Tag::TOOL_CLOSE:
+            if (current_tool) {
+                if (needs_closing_quote) {
+                    current_tool->arguments += "\"";
+                    needs_closing_quote = false;
+                }
+                current_tool->arguments += "}";
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+// ============================================================================
+// New functional mapper implementations (used by modular code in chat-parsers/)
+// ============================================================================
+
 // Helper: Convert JSON value to arguments string (handles object, string, null cases)
 static std::string json_to_arguments(const json & j) {
     if (j.is_object()) {
@@ -68,7 +181,7 @@ static void handle_base_tags(common_chat_msg & result, const common_peg_ast_node
     }
 }
 
-common_chat_peg_mapper common_chat_peg_base_mapper() {
+common_chat_peg_mapper_func common_chat_peg_base_mapper() {
     return [](common_chat_msg & result) -> common_chat_peg_map_func {
         return [&result](const common_peg_ast_node & node) {
             handle_base_tags(result, node);
@@ -76,7 +189,7 @@ common_chat_peg_mapper common_chat_peg_base_mapper() {
     };
 }
 
-common_chat_peg_mapper common_chat_peg_native_mapper() {
+common_chat_peg_mapper_func common_chat_peg_native_mapper_func() {
     return [](common_chat_msg & result) -> common_chat_peg_map_func {
         common_chat_tool_call * current_tool = nullptr;
 
@@ -110,7 +223,7 @@ common_chat_peg_mapper common_chat_peg_native_mapper() {
     };
 }
 
-common_chat_peg_mapper common_chat_peg_constructed_mapper() {
+common_chat_peg_mapper_func common_chat_peg_constructed_mapper_func() {
     return [](common_chat_msg & result) -> common_chat_peg_map_func {
         common_chat_tool_call * current_tool = nullptr;
         int arg_count = 0;
@@ -189,65 +302,9 @@ common_chat_peg_mapper common_chat_peg_constructed_mapper() {
     };
 }
 
-// FunctionGemma mapper: similar to constructed but with different string handling
-// Format: <start_function_call>call:name{key:<escape>value<escape>,key2:123}<end_function_call>
-common_chat_peg_mapper common_chat_peg_function_gemma_mapper() {
-    return [](common_chat_msg & result) -> common_chat_peg_map_func {
-        common_chat_tool_call * current_tool = nullptr;
-        int arg_count = 0;
-
-        return [&result, current_tool, arg_count](const common_peg_ast_node & node) mutable {
-            handle_base_tags(result, node);
-
-            switch (static_cast<Tag>(node.tag_id)) {
-                case Tag::TOOL_OPEN:
-                    result.tool_calls.emplace_back();
-                    current_tool = &result.tool_calls.back();
-                    arg_count = 0;
-                    break;
-                case Tag::TOOL_NAME:
-                    if (current_tool) {
-                        current_tool->name = std::string(trim_trailing_space(node.text));
-                        current_tool->arguments = "{";
-                    }
-                    break;
-                case Tag::TOOL_ARG_NAME:
-                    if (current_tool) {
-                        if (arg_count > 0) {
-                            current_tool->arguments += ",";
-                        }
-                        current_tool->arguments += json(trim_trailing_space(node.text)).dump() + ":";
-                        ++arg_count;
-                    }
-                    break;
-                case Tag::TOOL_ARG_STRING_VALUE:
-                    if (current_tool) {
-                        // FunctionGemma values are always strings (wrapped in <escape> tags)
-                        std::string value = std::string(trim_trailing_space(node.text));
-                        current_tool->arguments += json(value).dump();
-                    }
-                    break;
-                case Tag::TOOL_ARG_JSON_VALUE:
-                    if (current_tool) {
-                        // Raw JSON value (number, boolean, null, etc.)
-                        current_tool->arguments += std::string(trim_trailing_space(node.text));
-                    }
-                    break;
-                case Tag::TOOL_CLOSE:
-                    if (current_tool) {
-                        current_tool->arguments += "}";
-                    }
-                    break;
-                default:
-                    break;
-            }
-        };
-    };
-}
-
 // Short form mapper: handles {"function_name": {"arg1": value1}} format (used by Apertus)
 // The entire JSON array is captured in TOOL_ARGS, and we parse it to extract individual tool calls
-common_chat_peg_mapper common_chat_peg_short_form_mapper() {
+common_chat_peg_mapper_func common_chat_peg_short_form_mapper() {
     return [](common_chat_msg & result) -> common_chat_peg_map_func {
         return [&result](const common_peg_ast_node & node) mutable {
             handle_base_tags(result, node);
@@ -285,7 +342,7 @@ common_chat_peg_mapper common_chat_peg_short_form_mapper() {
 
 // Generic mapper: handles {"tool_call": {...}}, {"tool_calls": [...]}, or {"response": "..."} format
 // The entire JSON is captured in TOOL_ARGS or CONTENT
-common_chat_peg_mapper common_chat_peg_generic_mapper() {
+common_chat_peg_mapper_func common_chat_peg_generic_mapper() {
     return [](common_chat_msg & result) -> common_chat_peg_map_func {
         return [&result](const common_peg_ast_node & node) mutable {
             switch (static_cast<Tag>(node.tag_id)) {
@@ -330,7 +387,7 @@ common_chat_peg_mapper common_chat_peg_generic_mapper() {
 
 // OpenAI-style array mapper: handles [{"name": "func", "arguments": {...}, "id": "..."}] format
 // Used by Mistral Nemo, Magistral, FireFunction, and similar formats
-common_chat_peg_mapper common_chat_peg_oai_array_mapper() {
+common_chat_peg_mapper_func common_chat_peg_oai_array_mapper() {
     return [](common_chat_msg & result) -> common_chat_peg_map_func {
         return [&result](const common_peg_ast_node & node) mutable {
             handle_base_tags(result, node);
@@ -363,7 +420,7 @@ common_chat_peg_mapper common_chat_peg_oai_array_mapper() {
 
 // Command R7B mapper: handles [{"tool_call_id": "0", "tool_name": "func", "parameters": {...}}] format
 // The entire JSON array is captured in TOOL_ARGS, and we parse it to extract individual tool calls
-common_chat_peg_mapper common_chat_peg_command_r7b_mapper() {
+common_chat_peg_mapper_func common_chat_peg_command_r7b_mapper() {
     return [](common_chat_msg & result) -> common_chat_peg_map_func {
         return [&result](const common_peg_ast_node & node) mutable {
             handle_base_tags(result, node);
