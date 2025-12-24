@@ -248,37 +248,6 @@ void test_gbnf_generation(testing &t) {
         )""", gbnf_lazy);
     });
 
-    t.test("token parser emits @\"...\" syntax", [](testing &t) {
-        auto parser = build_peg_parser([](common_peg_parser_builder & p) {
-            return p.token("<escape>") + p.literal("content") + p.token("<escape>");
-        });
-
-        auto gbnf = build_grammar([&](const common_grammar_builder & builder) {
-            parser.build_grammar(builder);
-        });
-
-        assert_gbnf_equal(t, R"""(
-            root ::= @"<escape>" "content" @"<escape>"
-            space ::= ( " " | "\n"{1,2} [ \t]{0,20} )?
-        )""", gbnf);
-    });
-
-    t.test("until_token parser in sequence", [](testing &t) {
-        auto parser = build_peg_parser([](common_peg_parser_builder & p) {
-            return p.until_token("<escape>") + p.token("<escape>") + p.literal("done");
-        });
-
-        auto gbnf = build_grammar([&](const common_grammar_builder & builder) {
-            parser.build_grammar(builder);
-        });
-
-        // until_token generates exclusion pattern, token generates @"..."
-        assert_gbnf_equal(t, R"""(
-            root ::= ([^<] | "<" [^e] | "<e" [^s] | "<es" [^c] | "<esc" [^a] | "<esca" [^p] | "<escap" [^e] | "<escape" [^>])* @"<escape>" "done"
-            space ::= ( " " | "\n"{1,2} [ \t]{0,20} )?
-        )""", gbnf);
-    });
-
     t.test("until_max grammar with length limit", [](testing &t) {
         auto parser = build_peg_parser([](common_peg_parser_builder & p) {
             return p.until_max("</p>", 3);

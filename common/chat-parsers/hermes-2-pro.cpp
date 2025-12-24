@@ -81,7 +81,7 @@ common_chat_params common_chat_params_init_hermes_2_pro(const common_chat_templa
 
                 // <tool_call>{"name":"func","arguments":{}}</tool_call>
                 tool_choice |= p.rule("tool-call-" + name, p.tag(Tag::TOOL,
-                    p.token_tag(Tag::TOOL_OPEN, "<tool_call>")
+                    p.atomic_tag(Tag::TOOL_OPEN, p.literal("<tool_call>"))
                     + p.space()
                     + "{" + p.space()
                     + "\"name\"" + p.space() + ":" + p.space()
@@ -90,7 +90,7 @@ common_chat_params common_chat_params_init_hermes_2_pro(const common_chat_templa
                     + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters))
                     + p.space() + "}"
                     + p.space()
-                    + p.token_tag(Tag::TOOL_CLOSE, "</tool_call>")
+                    + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("</tool_call>"))
                 ) + p.space());
 
                 // <function=name>{...}</function>
@@ -99,7 +99,7 @@ common_chat_params common_chat_params_init_hermes_2_pro(const common_chat_templa
                     + p.space()
                     + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "func-" + name + "-args", parameters))
                     + p.space()
-                    + p.token_tag(Tag::TOOL_CLOSE, "</function>")
+                    + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("</function>"))
                 ) + p.space());
 
                 // <function name="name">{...}</function>
@@ -108,7 +108,7 @@ common_chat_params common_chat_params_init_hermes_2_pro(const common_chat_templa
                     + p.space()
                     + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "funcn-" + name + "-args", parameters))
                     + p.space()
-                    + p.token_tag(Tag::TOOL_CLOSE, "</function>")
+                    + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("</function>"))
                 ) + p.space());
             });
 

@@ -70,9 +70,9 @@ common_chat_params common_chat_params_init_nemotron_v2(const common_chat_templat
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
             // Tool call: <TOOLCALL> + JSON array + </TOOLCALL>
             auto tool_call = p.tag(Tag::TOOL,
-                p.token_tag(Tag::TOOL_OPEN, "<TOOLCALL>")
+                p.atomic_tag(Tag::TOOL_OPEN, p.literal("<TOOLCALL>"))
                 + p.tag(Tag::TOOL_ARGS, p.json())
-                + p.token_tag(Tag::TOOL_CLOSE, "</TOOLCALL>")
+                + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("</TOOLCALL>"))
             );
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;

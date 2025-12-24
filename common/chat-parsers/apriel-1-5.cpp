@@ -40,7 +40,7 @@ common_chat_params common_chat_params_init_apriel_1_5(const common_chat_template
             auto reasoning_content = p.tag(Tag::REASONING, p.until("</thinking>")) + ("</thinking>" | p.end());
             reasoning_block = data.thinking_forced_open
                 ? reasoning_content
-                : p.token("<thinking>") + reasoning_content;
+                : p.literal("<thinking>") + reasoning_content;
         }
 
         auto build_content_expr = [&](const std::string & delimiter) {
@@ -77,9 +77,9 @@ common_chat_params common_chat_params_init_apriel_1_5(const common_chat_template
         // Format: <tool_calls>[{"name": "func", "arguments": {...}}]</tool_calls>
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
             auto tool_call = p.tag(Tag::TOOL,
-                p.token_tag(Tag::TOOL_OPEN, "<tool_calls>")
+                p.atomic_tag(Tag::TOOL_OPEN, p.literal("<tool_calls>"))
                 + p.tag(Tag::TOOL_ARGS, p.until("</tool_calls>"))
-                + p.token_tag(Tag::TOOL_CLOSE, "</tool_calls>")
+                + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("</tool_calls>"))
             );
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;

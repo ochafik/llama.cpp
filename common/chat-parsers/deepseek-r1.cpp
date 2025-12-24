@@ -83,10 +83,10 @@ common_chat_params common_chat_params_init_deepseek_r1(const common_chat_templat
 
                 // Format: function<｜tool▁sep｜>name\n```json\n{...}\n```<｜tool▁call▁end｜>
                 tool_choice |= p.rule("tool-" + name, p.tag(Tag::TOOL,
-                    p.optional(p.token_tag(Tag::TOOL_OPEN, "<｜tool▁call▁begin｜>"))
-                    + "function" + p.token("<｜tool▁sep｜>") + p.literal_tag(Tag::TOOL_NAME, name) + "\n```json\n"
+                    p.optional(p.atomic_tag(Tag::TOOL_OPEN, p.literal("<｜tool▁call▁begin｜>")))
+                    + "function" + p.literal("<｜tool▁sep｜>") + p.literal_tag(Tag::TOOL_NAME, name) + "\n```json\n"
                     + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters))
-                    + "\n```" + p.token_tag(Tag::TOOL_CLOSE, "<｜tool▁call▁end｜>")
+                    + "\n```" + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("<｜tool▁call▁end｜>"))
                 ));
             });
 

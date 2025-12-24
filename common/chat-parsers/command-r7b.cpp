@@ -80,9 +80,9 @@ common_chat_params common_chat_params_init_command_r7b(const common_chat_templat
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
             // Tool call: <|START_ACTION|>[...json array...]<|END_ACTION|>
             auto tool_call = p.tag(Tag::TOOL,
-                p.token_tag(Tag::TOOL_OPEN, "<|START_ACTION|>")
+                p.atomic_tag(Tag::TOOL_OPEN, p.literal("<|START_ACTION|>"))
                 + p.tag(Tag::TOOL_ARGS, p.json())  // JSON array with tool calls
-                + p.token_tag(Tag::TOOL_CLOSE, "<|END_ACTION|>")
+                + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("<|END_ACTION|>"))
             );
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;

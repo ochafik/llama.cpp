@@ -30,9 +30,9 @@ common_chat_params common_chat_params_init_xiaomi_mimo(const common_chat_templat
         // Format: <tool_call>{"name": "func", "arguments": {...}}</tool_call>
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
             auto tool_call = p.tag(Tag::TOOL,
-                p.token_tag(Tag::TOOL_OPEN, "<tool_call>\n")
+                p.atomic_tag(Tag::TOOL_OPEN, p.literal("<tool_call>\n"))
                 + p.tag(Tag::TOOL_ARGS, p.json())
-                + p.token_tag(Tag::TOOL_CLOSE, "\n</tool_call>")
+                + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("\n</tool_call>"))
             );
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;

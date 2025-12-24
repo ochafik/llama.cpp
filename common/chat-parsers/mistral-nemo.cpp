@@ -25,7 +25,7 @@ common_chat_params common_chat_params_init_mistral_nemo(const common_chat_templa
             // The template generates: [TOOL_CALLS][{"name": "fn1", ...}, {"name": "fn2", ...}]
             // So we capture [TOOL_CALLS] once, then the entire JSON array
             auto tool_call = p.tag(Tag::TOOL,
-                p.token_tag(Tag::TOOL_OPEN, "[TOOL_CALLS]")
+                p.atomic_tag(Tag::TOOL_OPEN, p.literal("[TOOL_CALLS]"))
                 + p.tag(Tag::TOOL_ARGS, p.json())
             );
 

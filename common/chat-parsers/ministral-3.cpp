@@ -82,8 +82,8 @@ common_chat_params common_chat_params_init_ministral_3(const common_chat_templat
 
                 // Each tool call starts with [TOOL_CALLS] prefix
                 tool_choice |= p.rule("tool-" + name, p.tag(Tag::TOOL,
-                    p.token("[TOOL_CALLS]")
-                    + p.atomic_tag(Tag::TOOL_OPEN, p.literal_tag(Tag::TOOL_NAME, name) + p.token("[ARGS]"))
+                    p.literal("[TOOL_CALLS]")
+                    + p.atomic_tag(Tag::TOOL_OPEN, p.literal_tag(Tag::TOOL_NAME, name) + p.literal("[ARGS]"))
                     + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-schema", schema))
                 ));
             });

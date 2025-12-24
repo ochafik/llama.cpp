@@ -50,11 +50,11 @@ common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1(const comm
 
                 // Format: <function=name>{...}</function>
                 tool_choice |= p.rule("tool-" + name, p.tag(Tag::TOOL,
-                    p.token_tag(Tag::TOOL_OPEN, "<function=")
+                    p.atomic_tag(Tag::TOOL_OPEN, p.literal("<function="))
                     + p.literal_tag(Tag::TOOL_NAME, name)
                     + ">"
                     + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-params", parameters))
-                    + p.token_tag(Tag::TOOL_CLOSE, "</function>")
+                    + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("</function>"))
                 ));
             });
 
@@ -62,7 +62,7 @@ common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1(const comm
             if (has_raw_python) {
                 // <|python_tag|>code... (raw python code wrapped in arguments)
                 tool_choice |= p.rule("python-raw", p.tag(Tag::TOOL,
-                    p.atomic_tag(Tag::TOOL_OPEN, p.token("<|python_tag|>") + p.literal_tag(Tag::TOOL_NAME, "python"))
+                    p.atomic_tag(Tag::TOOL_OPEN, p.literal("<|python_tag|>") + p.literal_tag(Tag::TOOL_NAME, "python"))
                     + p.tag(Tag::TOOL_ARGS, p.rest())
                 ));
             }

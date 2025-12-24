@@ -31,9 +31,9 @@ common_chat_params common_chat_params_init_function_gemma(const common_chat_temp
         using Tag = common_chat_peg_tag;
 
         // Token-aware parsers for FunctionGemma special tokens
-        auto escape = p.token("<escape>");
-        auto start_function_call = p.token("<start_function_call>");
-        auto end_function_call = p.token("<end_function_call>");
+        auto escape = p.literal("<escape>");
+        auto start_function_call = p.literal("<start_function_call>");
+        auto end_function_call = p.literal("<end_function_call>");
 
         // Identifier pattern: [a-zA-Z_][a-zA-Z0-9_]*
         auto identifier = p.chars("a-zA-Z_", 1, 1) + p.chars("a-zA-Z0-9_", 0, -1);
@@ -43,7 +43,7 @@ common_chat_params common_chat_params_init_function_gemma(const common_chat_temp
 
         // String value: <escape>...<escape> with content captured
         // Token-aware matching ensures we don't match partial token sequences
-        auto string_value = escape + p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until_token("<escape>")) + escape;
+        auto string_value = escape + p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("<escape>")) + escape;
 
         // JSON value: raw number, boolean, null, array, or object (without escape delimiters)
         auto json_value = p.tag(Tag::TOOL_ARG_JSON_VALUE, p.json());
@@ -68,7 +68,7 @@ common_chat_params common_chat_params_init_function_gemma(const common_chat_temp
         );
 
         // Content before tool calls (token-aware matching)
-        auto content = p.tag(Tag::CONTENT, p.until_token("<start_function_call>"));
+        auto content = p.tag(Tag::CONTENT, p.until("<start_function_call>"));
 
         if (has_tools && params.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
             int min_calls = params.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
@@ -82,7 +82,7 @@ common_chat_params common_chat_params_init_function_gemma(const common_chat_temp
 
         // Content only
         auto content_only = p.choice({
-            p.tag(Tag::CONTENT, p.until_token("<end_of_turn>")) + end_of_turn,
+            p.tag(Tag::CONTENT, p.until("<end_of_turn>")) + end_of_turn,
             p.tag(Tag::CONTENT, p.rest())
         });
         return content_only;

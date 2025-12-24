@@ -39,7 +39,7 @@ common_chat_params common_chat_params_init_granite(const common_chat_template & 
         using Tag = common_chat_peg_tag;
 
         auto consume_eot = [&]() {
-            return p.optional(p.token("<|end_of_text|>")) + p.optional(p.space());
+            return p.optional(p.literal("<|end_of_text|>")) + p.optional(p.space());
         };
 
         auto reasoning = p.eps();
@@ -60,7 +60,7 @@ common_chat_params common_chat_params_init_granite(const common_chat_template & 
         // Tool call parser: Granite emits <|tool_call|>[{"name": "func", "arguments": {...}}]
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
             auto tool_call = p.tag(Tag::TOOL,
-                p.token_tag(Tag::TOOL_OPEN, "<|tool_call|>")
+                p.atomic_tag(Tag::TOOL_OPEN, p.literal("<|tool_call|>"))
                 + p.tag(Tag::TOOL_ARGS, p.json())
             );
 

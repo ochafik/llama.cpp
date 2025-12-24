@@ -20,9 +20,6 @@ constexpr common_peg_parser_id COMMON_PEG_INVALID_PARSER_ID = static_cast<common
 using common_peg_ast_id = size_t;
 constexpr common_peg_ast_id COMMON_PEG_INVALID_AST_ID = static_cast<common_peg_ast_id>(-1);
 
-// Sentinel value for token ID (no token match)
-constexpr int32_t COMMON_PEG_TOKEN_NULL = -1;
-
 // Lightweight wrapper around common_peg_parser_id for convenience
 class common_peg_parser {
     common_peg_parser_id id_;
@@ -141,25 +138,12 @@ struct common_peg_parse_result {
     bool success() const { return type == COMMON_PEG_PARSE_RESULT_SUCCESS; }
 };
 
-// Token span for token-aware parsing
-struct common_peg_token_span {
-    int32_t token;  // Token ID (use int32_t for llama_token compatibility)
-    size_t start;   // Byte offset in text
-    size_t end;     // Byte offset in text (exclusive)
-};
-
 struct common_peg_parse_context {
     std::string input;
     bool is_partial;
     common_peg_ast_arena ast;
 
     int parse_depth;
-
-    // Optional token information for token-aware parsing
-    std::vector<common_peg_token_span> tokens;
-
-    // Token ID resolution map: literal text -> token ID (resolved from vocabulary at runtime)
-    std::unordered_map<std::string, int32_t> token_ids;
 
     common_peg_parse_context()
         : is_partial(false), parse_depth(0) {}
@@ -169,40 +153,6 @@ struct common_peg_parse_context {
 
     common_peg_parse_context(const std::string & input, bool is_partial)
         : input(input), is_partial(is_partial), parse_depth(0) {}
-
-    common_peg_parse_context(const std::string & input, bool is_partial, std::vector<common_peg_token_span> tokens)
-        : input(input), is_partial(is_partial), parse_depth(0), tokens(std::move(tokens)) {}
-
-    common_peg_parse_context(const std::string & input, bool is_partial, std::vector<common_peg_token_span> tokens, std::unordered_map<std::string, int32_t> token_ids)
-        : input(input), is_partial(is_partial), parse_depth(0), tokens(std::move(tokens)), token_ids(std::move(token_ids)) {}
-
-    bool has_token_info() const { return !tokens.empty(); }
-
-    // Resolve token ID for a literal (returns COMMON_PEG_TOKEN_NULL if not found)
-    int32_t resolve_token_id(const std::string & literal) const {
-        auto it = token_ids.find(literal);
-        return it != token_ids.end() ? it->second : COMMON_PEG_TOKEN_NULL;
-    }
-
-    // Check if a specific token is at position
-    bool is_token_at(size_t pos, int32_t token_id) const {
-        for (const auto & span : tokens) {
-            if (span.start == pos && span.token == token_id) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    // Get end of token at position (or pos if no token there)
-    size_t token_end_at(size_t pos) const {
-        for (const auto & span : tokens) {
-            if (span.start == pos) {
-                return span.end;
-            }
-        }
-        return pos;
-    }
 };
 
 class common_peg_arena;
@@ -216,13 +166,6 @@ struct common_peg_end_parser {};
 
 struct common_peg_literal_parser {
     std::string literal;
-};
-
-// Token-aware literal: matches as token if available, falls back to text.
-// Token ID is resolved at parse time from the context's token_ids map.
-// Use this for special delimiters like <tool_call>, <escape>, etc.
-struct common_peg_token_parser {
-    std::string literal;  // Text representation (token ID resolved at parse time)
 };
 
 struct common_peg_sequence_parser {
@@ -272,13 +215,6 @@ struct common_peg_until_parser {
     int max_length = -1;  // -1 for unbounded, otherwise max characters to match
 };
 
-// Token-aware until: matches until a token delimiter is found.
-// Token IDs are resolved at parse time from context's token_ids map.
-// Falls back to text matching if token info not available.
-struct common_peg_until_token_parser {
-    std::vector<std::string> delimiters;  // Text form of tokens to match
-};
-
 struct common_peg_schema_parser {
     common_peg_parser_id child;
     std::string name;
@@ -313,7 +249,6 @@ using common_peg_parser_variant = std::variant<
     common_peg_start_parser,
     common_peg_end_parser,
     common_peg_literal_parser,
-    common_peg_token_parser,
     common_peg_sequence_parser,
     common_peg_choice_parser,
     common_peg_repetition_parser,
@@ -324,7 +259,6 @@ using common_peg_parser_variant = std::variant<
     common_peg_chars_parser,
     common_peg_json_string_parser,
     common_peg_until_parser,
-    common_peg_until_token_parser,
     common_peg_schema_parser,
     common_peg_rule_parser,
     common_peg_ref_parser,
@@ -399,21 +333,6 @@ class common_peg_parser_builder {
     //   S -> "hello"
     common_peg_parser literal(const std::string & literal) { return add(common_peg_literal_parser{literal}); }
 
-    // Matches a token by text, with token-aware matching when available.
-    // Token ID is resolved at parse time from context's token_ids map (populated from vocabulary).
-    // Falls back to text matching if token info not available.
-    // Use for special delimiters like <tool_call>, <escape>, etc.
-    common_peg_parser token(const std::string & literal) {
-        return add(common_peg_token_parser{literal});
-    }
-
-    // Matches a token by text with a semantic tag.
-    // Combines atomic(), tag(), and token() - tokens are inherently atomic.
-    template<typename E, typename = std::enable_if_t<std::is_enum_v<E>>>
-    common_peg_parser token(const std::string & s, E tag_id) {
-        return atomic(tag(tag_id, token(s)));
-    }
-
     // Matches a sequence of parsers in order, all must succeed.
     //   S -> A B C
     common_peg_parser sequence() { return add(common_peg_sequence_parser{}); }
@@ -483,16 +402,6 @@ class common_peg_parser_builder {
     // Matches up to max_length characters until one of the delimiters is found (delimiter not consumed).
     //   S -> (!delim .){0,max_length}
     common_peg_parser until_max_one_of(const std::vector<std::string> & delimiters, int max_length) { return add(common_peg_until_parser{delimiters, max_length}); }
-
-    // Token-aware until: matches until a token delimiter is found.
-    // Token ID is resolved at parse time from context's token_ids map.
-    // Falls back to text matching if token info not available.
-    //   S -> (!delim .)*
-    common_peg_parser until_token(const std::string & delimiter) { return add(common_peg_until_token_parser{{delimiter}}); }
-
-    // Token-aware until: matches until one of the token delimiters is found.
-    //   S -> (!delim .)*
-    common_peg_parser until_token_one_of(const std::vector<std::string> & delimiters) { return add(common_peg_until_token_parser{delimiters}); }
 
     // Matches everything
     //   S -> .*
@@ -565,11 +474,6 @@ class common_peg_parser_builder {
     // Literal tag: combines atomic(), tag(), and literal() - for tagging string literals
     template<typename E, typename = std::enable_if_t<std::is_enum_v<E>>>
     common_peg_parser literal_tag(E tag_id, const std::string & s) { return atomic(tag(tag_id, literal(s))); }
-
-    // Token tag: combines atomic(), tag(), and token() - for tagging token literals
-    // Tokens are inherently atomic (single token match or atomic text fallback)
-    template<typename E, typename = std::enable_if_t<std::is_enum_v<E>>>
-    common_peg_parser token_tag(E tag_id, const std::string & s) { return atomic(tag(tag_id, token(s))); }
 
     void set_root(const common_peg_parser & p);
 

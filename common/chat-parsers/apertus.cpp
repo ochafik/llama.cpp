@@ -99,9 +99,9 @@ common_chat_params common_chat_params_init_apertus(const common_chat_template & 
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
             // Tool call: <|tools_prefix|> + JSON array + <|tools_suffix|>
             auto tool_call = p.tag(Tag::TOOL,
-                p.token_tag(Tag::TOOL_OPEN, "<|tools_prefix|>")
+                p.atomic_tag(Tag::TOOL_OPEN, p.literal("<|tools_prefix|>"))
                 << p.tag(Tag::TOOL_ARGS, p.until("<|tools_suffix|>"))
-                << p.token_tag(Tag::TOOL_CLOSE, "<|tools_suffix|>")
+                << p.atomic_tag(Tag::TOOL_CLOSE, p.literal("<|tools_suffix|>"))
             );
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;

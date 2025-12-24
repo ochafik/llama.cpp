@@ -61,9 +61,9 @@ common_chat_params common_chat_params_init_lfm2(const common_chat_template & tmp
 
             // Tool call: <|tool_call_start|> + JSON array + <|tool_call_end|>
             auto tool_call = p.tag(Tag::TOOL,
-                p.token_tag(Tag::TOOL_OPEN, "<|tool_call_start|>")
+                p.atomic_tag(Tag::TOOL_OPEN, p.literal("<|tool_call_start|>"))
                 + p.tag(Tag::TOOL_ARGS, p.json())
-                + p.token_tag(Tag::TOOL_CLOSE, "<|tool_call_end|>")
+                + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("<|tool_call_end|>"))
             );
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;

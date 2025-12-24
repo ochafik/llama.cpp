@@ -61,30 +61,30 @@ common_chat_params common_chat_params_init_gpt_oss(const common_chat_template & 
         using Tag = common_chat_peg_tag;
 
         auto assistant_prefix = [&]() {
-            return p.optional(p.token("<|start|>") + "assistant");
+            return p.optional(p.literal("<|start|>") + "assistant");
         };
 
         auto commentary_content = p.rule("gpt-oss-commentary",
             assistant_prefix()
-            + p.token("<|channel|>") + "commentary"
-            + p.token("<|message|>")
+            + p.literal("<|channel|>") + "commentary"
+            + p.literal("<|message|>")
             + p.tag(Tag::CONTENT, p.until("<|end|>"))
-            + p.token("<|end|>")
+            + p.literal("<|end|>")
         );
 
         auto final_content = p.rule("gpt-oss-final",
             assistant_prefix()
-            + p.token("<|channel|>") + "final"
-            + p.optional(p.literal(" ") + p.token("<|constrain|>") + p.until("<|message|>"))
-            + p.token("<|message|>")
+            + p.literal("<|channel|>") + "final"
+            + p.optional(p.literal(" ") + p.literal("<|constrain|>") + p.until("<|message|>"))
+            + p.literal("<|message|>")
             + p.tag(Tag::CONTENT, p.until("<|end|>"))
-            + p.token("<|end|>")
+            + p.literal("<|end|>")
         );
 
         auto reasoning_block = p.eps();
         if (extract_reasoning) {
             reasoning_block = p.optional(p.tag(Tag::REASONING,
-                p.token("<|channel|>") + "analysis" + p.token("<|message|>") + p.until("<|end|>")) + p.token("<|end|>")
+                p.literal("<|channel|>") + "analysis" + p.literal("<|message|>") + p.until("<|end|>")) + p.literal("<|end|>")
                 + assistant_prefix()
             );
         }
@@ -92,9 +92,9 @@ common_chat_params common_chat_params_init_gpt_oss(const common_chat_template & 
         // Response format parser (with JSON schema constraint)
         if (inputs.json_schema.is_object() && !inputs.json_schema.empty()) {
             // Final channel with JSON content
-            return reasoning_block << p.optional(p.token("<|channel|>") + "final") << p.optional(p.space())
-                << p.optional(p.token("<|constrain|>") + p.until("<|message|>"))
-                << p.token("<|message|>")
+            return reasoning_block << p.optional(p.literal("<|channel|>") + "final") << p.optional(p.space())
+                << p.optional(p.literal("<|constrain|>") + p.until("<|message|>"))
+                << p.literal("<|message|>")
                 << p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema));
         }
 
@@ -110,11 +110,11 @@ common_chat_params common_chat_params_init_gpt_oss(const common_chat_template & 
                 // Tool call in channel: <|channel|>analysis|commentary to=functions.name<|message|>{...}
                 tool_choice |= p.rule("tool-channel-" + name, p.tag(Tag::TOOL,
                     assistant_prefix()
-                    + p.token_tag(Tag::TOOL_OPEN, "<|channel|>")
+                    + p.atomic_tag(Tag::TOOL_OPEN, p.literal("<|channel|>"))
                     + (p.literal("analysis") | "commentary")
                     + " to=functions." + p.literal_tag(Tag::TOOL_NAME, name)
-                    + p.optional(" " + p.token("<|constrain|>") + "json")
-                    + p.token("<|message|>")
+                    + p.optional(" " + p.literal("<|constrain|>") + "json")
+                    + p.literal("<|message|>")
                     + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-params", parameters))
                 ));
 
@@ -123,10 +123,10 @@ common_chat_params common_chat_params_init_gpt_oss(const common_chat_template & 
                     assistant_prefix()
                     + p.literal_tag(Tag::TOOL_OPEN, " to=functions.")
                     + p.literal_tag(Tag::TOOL_NAME, name)
-                    + p.token("<|channel|>")
+                    + p.literal("<|channel|>")
                     + (p.literal("analysis") | "commentary")
-                    + p.optional(" " + p.token("<|constrain|>") + "json")
-                    + p.token("<|message|>")
+                    + p.optional(" " + p.literal("<|constrain|>") + "json")
+                    + p.literal("<|message|>")
                     + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-params", parameters))
                 ));
             });

@@ -30,7 +30,7 @@ common_chat_params common_chat_params_init_magistral(const common_chat_template 
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
             // Tool call parser: content followed by [TOOL_CALLS] and JSON array
             auto tool_call = p.tag(Tag::TOOL,
-                p.token_tag(Tag::TOOL_OPEN, "[TOOL_CALLS]")
+                p.atomic_tag(Tag::TOOL_OPEN, p.literal("[TOOL_CALLS]"))
                 + p.tag(Tag::TOOL_ARGS, p.json())
             );
 

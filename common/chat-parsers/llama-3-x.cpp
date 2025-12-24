@@ -77,7 +77,7 @@ common_chat_params common_chat_params_init_llama_3_x(const common_chat_template 
                     }
 
                     tool_choice |= p.rule("builtin-" + name, p.tag(Tag::TOOL,
-                        p.atomic_tag(Tag::TOOL_OPEN, p.token("<|python_tag|>") + p.literal_tag(Tag::TOOL_NAME, name) + ".call(")
+                        p.atomic_tag(Tag::TOOL_OPEN, p.literal("<|python_tag|>") + p.literal_tag(Tag::TOOL_NAME, name) + ".call(")
                         + args
                         + p.literal_tag(Tag::TOOL_CLOSE, ")")
                     ));
