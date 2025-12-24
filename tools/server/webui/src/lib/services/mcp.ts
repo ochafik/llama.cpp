@@ -55,15 +55,12 @@ export class McpService {
 	 * Connect to the MCP server via WebSocket using the SDK
 	 */
 	async connect(): Promise<void> {
-		console.log(`[MCP] connect() called for: ${this.serverName}`);
-
 		try {
 			// Create a new transport instance for each connection attempt
 			this.transport = new WebSocketClientTransport(new URL(this.wsUrl));
 
 			// Set up transport event handlers
 			this.transport.onclose = () => {
-				console.log(`[MCP] Transport closed for: ${this.serverName}`);
 				// Clear transport and client references so isConnected() returns false
 				this.transport = null;
 				this.client = null;
@@ -76,7 +73,7 @@ export class McpService {
 			};
 
 			this.transport.onerror = (error: Error) => {
-				console.error(`[MCP] Transport error for: ${this.serverName}`, error);
+				console.error(`[MCP] Transport error for ${this.serverName}:`, error);
 				this.onError?.(error);
 			};
 
@@ -99,7 +96,6 @@ export class McpService {
 									return;
 								}
 								if (tools) {
-									console.log(`[MCP] Tools changed for ${this.serverName}:`, tools);
 									this.onToolsChanged?.(tools);
 								}
 							}
@@ -110,8 +106,6 @@ export class McpService {
 
 			// Connect using the transport
 			await this.client.connect(this.transport);
-
-			console.log(`[MCP] Connected to server: ${this.serverName}`);
 			this.reconnectAttempts = 0;
 
 			// Call onOpen callback
@@ -122,7 +116,7 @@ export class McpService {
 				this.onError?.(err instanceof Error ? err : new Error(String(err)));
 			}
 		} catch (error) {
-			console.error(`[MCP] Exception in connect() for ${this.serverName}:`, error);
+			console.error(`[MCP] Failed to connect to ${this.serverName}:`, error);
 			throw error;
 		}
 	}
@@ -131,10 +125,6 @@ export class McpService {
 	 * Disconnect from the MCP server
 	 */
 	async disconnect() {
-		console.log(
-			`[MCP] disconnect() called for: ${this.serverName}, client exists: ${!!this.client}`
-		);
-
 		// Set flag to prevent auto-reconnect when onclose fires
 		this.manualDisconnect = true;
 
@@ -149,16 +139,16 @@ export class McpService {
 			if (this.client) {
 				await this.client.close();
 			}
-		} catch (e) {
-			console.error(`[MCP] Error closing client for ${this.serverName}:`, e);
+		} catch {
+			// Ignore close errors
 		}
 
 		try {
 			if (this.transport) {
 				await this.transport.close();
 			}
-		} catch (e) {
-			console.error(`[MCP] Error closing transport for ${this.serverName}:`, e);
+		} catch {
+			// Ignore close errors
 		}
 
 		this.client = null;
@@ -169,14 +159,10 @@ export class McpService {
 	 * Call a tool on the MCP server
 	 */
 	async callTool(name: string, args?: Record<string, unknown>): Promise<unknown> {
-		console.log(`[MCP] McpService.callTool: ${this.serverName}/${name}`, args);
-
 		if (!this.client) {
-			console.error(`[MCP] McpService.callTool: client not initialized for ${this.serverName}`);
 			throw new Error(`MCP client not initialized for: ${this.serverName}`);
 		}
 
-		console.log(`[MCP] McpService.callTool: calling client.callTool for ${name}...`);
 		const startTime = Date.now();
 
 		try {
@@ -190,20 +176,17 @@ export class McpService {
 			);
 
 			const duration = Date.now() - startTime;
-			console.log(`[MCP] McpService.callTool: got response for ${name} in ${duration}ms`, response);
+			console.log(`[MCP] ${this.serverName}/${name} completed in ${duration}ms`);
 
 			if (response.isError) {
-				console.error(
-					`[MCP] McpService.callTool: tool returned error for ${name}`,
-					response.content
-				);
+				console.error(`[MCP] Tool error ${this.serverName}/${name}:`, response.content);
 				throw new Error(`Tool call failed: ${JSON.stringify(response.content)}`);
 			}
 
 			return response.content;
 		} catch (error) {
 			const duration = Date.now() - startTime;
-			console.error(`[MCP] McpService.callTool: exception for ${name} after ${duration}ms`, error);
+			console.error(`[MCP] Tool failed ${this.serverName}/${name} after ${duration}ms:`, error);
 			throw error;
 		}
 	}

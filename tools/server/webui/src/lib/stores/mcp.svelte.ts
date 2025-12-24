@@ -112,7 +112,7 @@ class McpStore {
 		if (this.connections.has(serverName)) {
 			const state = this.connections.get(serverName);
 			if (state?.connected) {
-				console.log(`[MCP] Already connected to: ${serverName}`);
+				// Already connected - silent no-op
 				return;
 			}
 		}
@@ -120,30 +120,21 @@ class McpStore {
 		// Create connection promise
 		const connectionPromise = (async () => {
 			try {
-				console.log(`[MCP] connect() starting for: ${serverName}`);
-
 				// Check if there's an existing service
 				const existingService = this.services.get(serverName);
-				console.log(`[MCP] Existing service found: ${!!existingService}`);
 
 				if (existingService) {
 					// If the service exists and is already connected, we're done
 					if (existingService.isConnected()) {
 						const existingState = this.connections.get(serverName);
-						console.log(
-							`[MCP] Existing service connected: ${existingService.isConnected()}, state connected: ${existingState?.connected}`
-						);
 						if (existingState?.connected) {
-							console.log(`[MCP] Service already connected for: ${serverName}, reusing connection`);
 							this.removeConnecting(serverName);
 							return;
 						}
 					}
 					// Service exists but is disconnected - clean it up first
-					console.log(`[MCP] Cleaning up existing disconnected service for: ${serverName}`);
 					existingService.disconnect();
 					// Wait for the WebSocket to finish closing before creating a new one
-					console.log(`[MCP] Waiting for WebSocket to close before reconnecting to: ${serverName}`);
 					await new Promise((resolve) => setTimeout(resolve, 500));
 				}
 
@@ -173,21 +164,12 @@ class McpStore {
 
 					// Set up event handlers with generation checking
 					service.onToolsChanged = (tools) => {
-						if (this.connectionGenerations.get(serverName) !== currentGen) {
-							console.log(
-								`[MCP] Ignoring tools changed callback from old connection for ${serverName}`
-							);
-							return;
-						}
-						console.log(`[MCP] Tools changed for ${serverName}:`, tools);
+						if (this.connectionGenerations.get(serverName) !== currentGen) return;
 						this.updateConnectionState(serverName, { tools });
 					};
 
 					service.onError = (error) => {
-						if (this.connectionGenerations.get(serverName) !== currentGen) {
-							console.log(`[MCP] Ignoring error callback from old connection for ${serverName}`);
-							return;
-						}
+						if (this.connectionGenerations.get(serverName) !== currentGen) return;
 						console.error(`[MCP] Error for ${serverName}:`, error);
 						this.updateConnectionState(serverName, {
 							error: error.message,
@@ -196,31 +178,18 @@ class McpStore {
 					};
 
 					service.onClose = () => {
-						if (this.connectionGenerations.get(serverName) !== currentGen) {
-							console.log(`[MCP] Ignoring close callback from old connection for ${serverName}`);
-							return;
-						}
-						console.log(`[MCP] Connection closed for: ${serverName}`);
+						if (this.connectionGenerations.get(serverName) !== currentGen) return;
 						this.updateConnectionState(serverName, { connected: false });
 					};
 
 					service.onOpen = async () => {
-						if (this.connectionGenerations.get(serverName) !== currentGen) {
-							console.log(`[MCP] Ignoring open callback from old connection for ${serverName}`);
-							return;
-						}
-						console.log(`[MCP] Connection opened for: ${serverName}`);
+						if (this.connectionGenerations.get(serverName) !== currentGen) return;
 
 						// Fetch initial tools (SDK handles initialization automatically)
 						try {
 							const tools = await service.listTools();
-							console.log(`[MCP] Got ${tools.length} tools for ${serverName}`);
-							if (this.connectionGenerations.get(serverName) !== currentGen) {
-								console.log(
-									`[MCP] Connection generation changed during init for ${serverName}, ignoring result`
-								);
-								return;
-							}
+							if (this.connectionGenerations.get(serverName) !== currentGen) return;
+							console.log(`[MCP] Connected to ${serverName} (${tools.length} tools)`);
 							this.updateConnectionState(serverName, {
 								connected: true,
 								tools,
@@ -228,20 +197,7 @@ class McpStore {
 							});
 						} catch (error) {
 							console.error(`[MCP] Failed to initialize ${serverName}:`, error);
-							console.error(`[MCP] Error details:`, {
-								type: typeof error,
-								name: error instanceof Error ? error.name : 'N/A',
-								message: error instanceof Error ? error.message : String(error),
-								stack: error instanceof Error ? error.stack : 'N/A',
-								keys: error instanceof Error ? Object.keys(error) : Object.keys(error || {}),
-								full: error
-							});
-							if (this.connectionGenerations.get(serverName) !== currentGen) {
-								console.log(
-									`[MCP] Connection generation changed during init error for ${serverName}, ignoring error`
-								);
-								return;
-							}
+							if (this.connectionGenerations.get(serverName) !== currentGen) return;
 							this.updateConnectionState(serverName, {
 								error: error instanceof Error ? error.message : String(error),
 								connected: false

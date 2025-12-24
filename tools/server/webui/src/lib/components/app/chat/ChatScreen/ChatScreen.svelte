@@ -183,10 +183,9 @@
 		// Get disabled servers for this conversation
 		const disabledServers = conversationMcpStore.getDisabledServers(convId);
 
-		// Connect to servers that are not disabled
+		// Connect to servers that are not disabled and not already connected (silent - only log errors)
 		for (const serverName of availableServers) {
-			if (!disabledServers.has(serverName)) {
-				console.log(`[MCP] Auto-connecting to: ${serverName}`);
+			if (!disabledServers.has(serverName) && !mcpStore.isConnected(serverName)) {
 				// Don't await - let connections happen in parallel
 				mcpStore.connect(serverName).catch((err) => {
 					console.error(`[MCP] Failed to auto-connect to ${serverName}:`, err);
@@ -197,7 +196,6 @@
 
 	// Disconnect all MCP servers when leaving a conversation
 	function disconnectAllMcpServers(): void {
-		console.log('[MCP] Auto-disconnecting all servers');
 		mcpStore.disconnectAll();
 	}
 

@@ -210,19 +210,16 @@
 			if (autoConnect && availableServers.length > 0) {
 				// If user previously disconnected all, don't auto-connect
 				if (connectionPrefs.allDisconnectedByUser) {
-					console.log('[MCP] Skipping auto-connect: user previously disconnected all');
+					// User disconnected all - don't auto-connect
 					return;
 				}
 
-				// Connect servers that weren't explicitly disconnected
+				// Connect servers that weren't explicitly disconnected (silent - only log errors)
 				for (const serverName of availableServers) {
-					if (!wasExplicitlyDisconnected(serverName)) {
-						console.log(`[MCP] Auto-connecting to: ${serverName}`);
+					if (!wasExplicitlyDisconnected(serverName) && !mcpStore.isConnected(serverName)) {
 						mcpStore.connect(serverName).catch((err) => {
 							console.error(`[MCP] Auto-connect failed for ${serverName}:`, err);
 						});
-					} else {
-						console.log(`[MCP] Skipping auto-connect for ${serverName}: explicitly disconnected`);
 					}
 				}
 			}

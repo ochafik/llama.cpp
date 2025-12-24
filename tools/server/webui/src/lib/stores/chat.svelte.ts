@@ -1541,26 +1541,19 @@ class ChatStore {
 		}
 
 		// Execute each tool call and add result as a tool message
-		console.log(`[MCP] executeToolCalls: processing ${toolCalls.length} tool calls`);
 		for (const toolCall of toolCalls) {
 			const { function: fn } = toolCall;
 			if (!fn?.name || !fn?.arguments) continue;
 
-			console.log(`[MCP] executeToolCalls: executing ${fn.name}`, fn.arguments);
 			try {
 				const args = JSON.parse(fn.arguments);
-				console.log(
-					`[MCP] executeToolCalls: calling conversationMcpStore.executeToolCall for ${fn.name}`
-				);
 				const result = await conversationMcpStore.executeToolCall(fn.name, args);
-				console.log(`[MCP] executeToolCalls: got result for ${fn.name}`, result);
 
 				// Add tool result as a new message with "tool" role
 				// Pass raw result - addToolResultMessage will parse MCP structured content
 				await this.addToolResultMessage(convId, assistantMessageId, fn.name, result);
-				console.log(`[MCP] executeToolCalls: added result message for ${fn.name}`);
 			} catch (error) {
-				console.error(`[MCP] executeToolCalls: failed to execute tool ${fn.name}:`, error);
+				console.error(`[MCP] Tool execution failed for ${fn.name}:`, error);
 				// Add error as tool result
 				await this.addToolResultMessage(convId, assistantMessageId, fn.name, {
 					error: error instanceof Error ? error.message : 'Unknown error'
