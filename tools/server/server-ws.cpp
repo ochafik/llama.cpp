@@ -2,6 +2,8 @@
 #include "common.h"
 #include "log.h"
 #include "arg.h"
+#include "base64.hpp"
+#include "sha1/sha1.h"
 
 #include <cstring>
 #include <random>
@@ -67,90 +69,6 @@ namespace ws_frame {
         PING = 0x9,
         PONG = 0xa
     };
-}
-
-// Rotate left helper (must be defined before sha1)
-static inline uint32_t rotl(uint32_t x, int n) {
-    return (x << n) | (x >> (32 - n));
-}
-
-// Forward declarations
-static std::string base64_encode(const unsigned char * data, size_t len);
-
-// Simple SHA-1 implementation
-static std::vector<unsigned char> sha1(const std::string & input) {
-    // Pad the message
-    uint64_t bit_len = input.size() * 8;
-    std::vector<uint8_t> padded(input.begin(), input.end());
-    padded.push_back(0x80);
-
-    while ((padded.size() % 64) != 56) {
-        padded.push_back(0x00);
-    }
-
-    // Add length as 64-bit big-endian
-    for (int i = 7; i >= 0; i--) {
-        padded.push_back((bit_len >> (i * 8)) & 0xff);
-    }
-
-    // Process in 64-byte chunks
-    std::vector<uint32_t> h = {0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0};
-
-    for (size_t chunk = 0; chunk < padded.size(); chunk += 64) {
-        uint32_t w[80] = {};
-
-        // Break chunk into 16 words
-        for (int i = 0; i < 16; i++) {
-            w[i] = (padded[chunk + i * 4] << 24) |
-                   (padded[chunk + i * 4 + 1] << 16) |
-                   (padded[chunk + i * 4 + 2] << 8) |
-                   (padded[chunk + i * 4 + 3]);
-        }
-
-        // Extend to 80 words
-        for (int i = 16; i < 80; i++) {
-            w[i] = rotl(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
-        }
-
-        uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4];
-
-        for (int i = 0; i < 80; i++) {
-            uint32_t f, k;
-            if (i < 20) {
-                f = (b & c) | ((~b) & d);
-                k = 0x5a827999;
-            } else if (i < 40) {
-                f = b ^ c ^ d;
-                k = 0x6ed9eba1;
-            } else if (i < 60) {
-                f = (b & c) | (b & d) | (c & d);
-                k = 0x8f1bbcdc;
-            } else {
-                f = b ^ c ^ d;
-                k = 0xca62c1d6;
-            }
-
-            uint32_t temp = rotl(a, 5) + f + e + k + w[i];
-            e = d;
-            d = c;
-            c = rotl(b, 30);
-            b = a;
-            a = temp;
-        }
-
-        h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e;
-    }
-
-    // Convert to big-endian bytes
-    std::vector<unsigned char> result(20);
-    for (int i = 0; i < 5; i++) {
-        result[i * 4] = (h[i] >> 24) & 0xff;
-        result[i * 4 + 1] = (h[i] >> 16) & 0xff;
-        result[i * 4 + 2] = (h[i] >> 8) & 0xff;
-        result[i * 4 + 3] = h[i] & 0xff;
-    }
-
-    return result;
 }
 
 // Simple WebSocket implementation using raw sockets
@@ -798,15 +716,12 @@ void server_ws_context::Impl::handle_connection(socket_t sock, const struct sock
         return;
     }
 
-    // Compute accept key
+    // Compute accept key: SHA1(key + magic) -> base64
     std::string magic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     std::string combined = websocket_key + magic;
-
-    // SHA-1 hash
-    std::vector<unsigned char> hash = sha1(combined);
-
-    // Base64 encode
-    std::string accept_key = base64_encode(hash.data(), hash.size());
+    char hash[20];
+    SHA1(hash, combined.c_str(), static_cast<uint32_t>(combined.size()));
+    std::string accept_key = base64::encode(hash, sizeof(hash));
 
     std::ostringstream full_response_debug;
     full_response_debug << "HTTP/1.1 101 Switching Protocols\r\n";
@@ -816,7 +731,7 @@ void server_ws_context::Impl::handle_connection(socket_t sock, const struct sock
     std::string full_response_str = full_response_debug.str();
 
     SRV_INF("%s: hash_size=%zu, accept_key_len=%zu, last_4_chars=",
-            __func__, hash.size(), accept_key.length());
+            __func__, sizeof(hash), accept_key.length());
     if (accept_key.length() >= 4) {
         for (size_t i = accept_key.length() - 4; i < accept_key.length(); i++) {
             SRV_INF("    [%zu]='%c' (0x%02x)\n", i, accept_key[i], (unsigned char)accept_key[i]);
@@ -919,36 +834,4 @@ void server_ws_context::Impl::handle_connection(socket_t sock, const struct sock
 
     // Close socket
     conn->close(1000, "");
-}
-
-// Base64 encoding helper function (static, not part of any class)
-static std::string base64_encode(const unsigned char * data, size_t len) {
-    static const char * table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string result;
-    result.reserve(((len + 2) / 3) * 4);
-
-    for (size_t i = 0; i < len; i += 3) {
-        uint32_t triple = (data[i] << 16) |
-                         (i + 1 < len ? data[i + 1] << 8 : 0) |
-                         (i + 2 < len ? data[i + 2] : 0);
-
-        result.push_back(table[(triple >> 18) & 0x3f]);
-        result.push_back(table[(triple >> 12) & 0x3f]);
-
-        // For the third character, check if we have at least 2 bytes
-        if (i + 1 < len) {
-            result.push_back(table[(triple >> 6) & 0x3f]);
-        } else {
-            result.push_back('=');
-        }
-
-        // For the fourth character, check if we have at least 3 bytes
-        if (i + 2 < len) {
-            result.push_back(table[triple & 0x3f]);
-        } else {
-            result.push_back('=');
-        }
-    }
-
-    return result;
 }

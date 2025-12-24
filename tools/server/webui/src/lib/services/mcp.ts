@@ -64,6 +64,9 @@ export class McpService {
 			// Set up transport event handlers
 			this.transport.onclose = () => {
 				console.log(`[MCP] Transport closed for: ${this.serverName}`);
+				// Clear transport and client references so isConnected() returns false
+				this.transport = null;
+				this.client = null;
 				this.onClose?.();
 				// Only auto-reconnect if not manually disconnected
 				if (!this.manualDisconnect) {
