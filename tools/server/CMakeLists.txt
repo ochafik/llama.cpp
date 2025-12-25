@@ -67,17 +67,9 @@ endforeach()
 add_executable(${TARGET} ${TARGET_SRCS})
 install(TARGETS ${TARGET} RUNTIME)
 
-# SHA1 library for WebSocket handshake (reuse from gguf-hash)
-add_library(sha1-ws OBJECT ${CMAKE_SOURCE_DIR}/examples/gguf-hash/deps/sha1/sha1.c)
-if (NOT MSVC)
-    # disable warnings in 3rd party code
-    target_compile_options(sha1-ws PRIVATE -w)
-endif()
-
 target_include_directories(${TARGET} PRIVATE ../mtmd)
 target_include_directories(${TARGET} PRIVATE ${CMAKE_SOURCE_DIR})
-target_include_directories(${TARGET} PRIVATE ${CMAKE_SOURCE_DIR}/examples/gguf-hash/deps)
-target_link_libraries(${TARGET} PRIVATE server-context sha1-ws PUBLIC common cpp-httplib ${CMAKE_THREAD_LIBS_INIT})
+target_link_libraries(${TARGET} PRIVATE server-context PUBLIC common cpp-httplib ${CMAKE_THREAD_LIBS_INIT})
 
 if (WIN32)
     TARGET_LINK_LIBRARIES(${TARGET} PRIVATE ws2_32)
