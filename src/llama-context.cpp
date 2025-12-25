@@ -1725,6 +1725,95 @@ private:
     std::vector<uint8_t> temp_buffer;
 };
 
+// Memory-mapped I/O classes for session caches
+
+class llama_io_read_mmap : public llama_io_read_i {
+public:
+    llama_io_read_mmap(const uint8_t * data, size_t len) : ptr(data), start_ptr(data), buf_size(len) {}
+
+    const uint8_t * read(size_t size) override {
+        if (size > buf_size) {
+            throw std::runtime_error("unexpectedly reached end of mmap buffer");
+        }
+        const uint8_t * base_ptr = ptr;
+        ptr += size;
+        buf_size -= size;
+        return base_ptr;
+    }
+
+    void read_to(void * dst, size_t size) override {
+        memcpy(dst, read(size), size);
+    }
+
+    size_t n_bytes() override {
+        return ptr - start_ptr;
+    }
+
+private:
+    const uint8_t * ptr;
+    const uint8_t * start_ptr;
+    size_t buf_size;
+};
+
+class llama_io_write_mmap : public llama_io_write_i {
+public:
+    llama_io_write_mmap(uint8_t * data, size_t len) : ptr(data), start_ptr(data), buf_size(len) {}
+
+    void write(const void * src, size_t size) override {
+        if (size > buf_size) {
+            throw std::runtime_error("unexpectedly reached end of mmap buffer");
+        }
+        memcpy(ptr, src, size);
+        ptr += size;
+        buf_size -= size;
+    }
+
+    void write_tensor(const ggml_tensor * tensor, size_t offset, size_t size) override {
+        if (size > buf_size) {
+            throw std::runtime_error("unexpectedly reached end of mmap buffer");
+        }
+        ggml_backend_tensor_get(tensor, ptr, offset, size);
+        ptr += size;
+        buf_size -= size;
+    }
+
+    size_t n_bytes() override {
+        return ptr - start_ptr;
+    }
+
+private:
+    uint8_t * ptr;
+    uint8_t * start_ptr;
+    size_t buf_size;
+};
+
+//
+// Memory-mapped session cache handle
+//
+
+struct llama_state_mmap {
+    std::unique_ptr<llama_mmap_rw> mmap;
+    std::unique_ptr<llama_file> file;  // for read-only mode
+    bool is_readwrite;
+
+    // Read-only constructor
+    llama_state_mmap(llama_file * f) : file(nullptr), is_readwrite(false) {
+        // We take ownership of the file for read-only mmap
+        // But actually, we'll create our own file for simplicity
+        mmap = std::make_unique<llama_mmap_rw>(f);
+    }
+
+    // Read-write constructor
+    llama_state_mmap(const char * path, size_t size) : file(nullptr), is_readwrite(true) {
+        mmap = std::make_unique<llama_mmap_rw>(path, size);
+    }
+
+    void * addr() const { return mmap->addr(); }
+    size_t size() const { return mmap->size(); }
+    void sync() { if (is_readwrite) mmap->sync(); }
+    void resize(size_t new_size) { if (is_readwrite) mmap->resize(new_size); }
+};
+
 size_t llama_context::state_get_size() {
     llama_io_write_dummy io;
     try {
@@ -2827,6 +2916,203 @@ size_t llama_state_seq_load_file(llama_context * ctx, const char * filepath, lla
         return ctx->state_seq_load_file(dest_seq_id, filepath, tokens_out, n_token_capacity, n_token_count_out);
     } catch (const std::exception & err) {
         LLAMA_LOG_ERROR("%s: error loading sequence state file: %s\n", __func__, err.what());
+        return 0;
+    }
+}
+
+//
+// Memory-mapped session cache
+//
+
+bool llama_state_mmap_supported(void) {
+    return llama_mmap_rw::SUPPORTED;
+}
+
+llama_state_mmap * llama_state_mmap_open(llama_context * ctx, const char * path_session) {
+    GGML_UNUSED(ctx);
+
+    if (!llama_mmap_rw::SUPPORTED) {
+        LLAMA_LOG_ERROR("%s: mmap not supported on this platform\n", __func__);
+        return nullptr;
+    }
+
+    try {
+        // Open file to verify it exists and is valid
+        auto file = std::make_unique<llama_file>(path_session, "rb");
+
+        // Verify session file magic and version
+        const uint32_t magic   = file->read_u32();
+        const uint32_t version = file->read_u32();
+
+        if (magic != LLAMA_SESSION_MAGIC || version != LLAMA_SESSION_VERSION) {
+            LLAMA_LOG_ERROR("%s: invalid session file (magic=%08x, version=%d, expected magic=%08x, version=%d)\n",
+                __func__, magic, version, LLAMA_SESSION_MAGIC, LLAMA_SESSION_VERSION);
+            return nullptr;
+        }
+
+        // Seek back to beginning for mmap
+        file->seek(0, SEEK_SET);
+
+        // Create mmap handle
+        auto * mmap = new llama_state_mmap(file.get());
+        return mmap;
+    } catch (const std::exception & err) {
+        LLAMA_LOG_ERROR("%s: failed to open session file: %s\n", __func__, err.what());
+        return nullptr;
+    }
+}
+
+llama_state_mmap * llama_state_mmap_open_rw(llama_context * ctx, const char * path_session) {
+    if (!llama_mmap_rw::SUPPORTED) {
+        LLAMA_LOG_ERROR("%s: mmap not supported on this platform\n", __func__);
+        return nullptr;
+    }
+
+    try {
+        // Get the required size for the session
+        const size_t header_size = sizeof(uint32_t) * 3; // magic + version + token_count
+        const size_t state_size = ctx->state_get_size();
+
+        // We need enough space for header + max possible tokens + state
+        // For simplicity, reserve space for up to n_ctx tokens
+        const size_t max_tokens = ctx->n_ctx();
+        const size_t min_size = header_size + max_tokens * sizeof(llama_token) + state_size;
+
+        // Create or open file with read-write mmap
+        auto * mmap = new llama_state_mmap(path_session, min_size);
+        return mmap;
+    } catch (const std::exception & err) {
+        LLAMA_LOG_ERROR("%s: failed to create/open session file for mmap: %s\n", __func__, err.what());
+        return nullptr;
+    }
+}
+
+void llama_state_mmap_free(llama_state_mmap * mmap) {
+    if (mmap != nullptr) {
+        mmap->sync();
+        delete mmap;
+    }
+}
+
+void * llama_state_mmap_addr(const llama_state_mmap * mmap) {
+    return mmap != nullptr ? mmap->addr() : nullptr;
+}
+
+size_t llama_state_mmap_size(const llama_state_mmap * mmap) {
+    return mmap != nullptr ? mmap->size() : 0;
+}
+
+void llama_state_mmap_sync(llama_state_mmap * mmap) {
+    if (mmap != nullptr) {
+        mmap->sync();
+    }
+}
+
+bool llama_state_mmap_load(llama_context * ctx, llama_state_mmap * mmap, llama_token * tokens_out, size_t n_token_capacity, size_t * n_token_count_out) {
+    if (mmap == nullptr || mmap->addr() == nullptr) {
+        LLAMA_LOG_ERROR("%s: invalid mmap handle\n", __func__);
+        return false;
+    }
+
+    ctx->synchronize();
+
+    try {
+        const uint8_t * data = (const uint8_t *)mmap->addr();
+        const size_t data_size = mmap->size();
+
+        // Read and verify header
+        if (data_size < sizeof(uint32_t) * 3) {
+            LLAMA_LOG_ERROR("%s: mmap too small to contain header\n", __func__);
+            return false;
+        }
+
+        const uint32_t magic   = *(const uint32_t *)(data);
+        const uint32_t version = *(const uint32_t *)(data + 4);
+
+        if (magic != LLAMA_SESSION_MAGIC || version != LLAMA_SESSION_VERSION) {
+            LLAMA_LOG_ERROR("%s: invalid session (magic=%08x, version=%d)\n", __func__, magic, version);
+            return false;
+        }
+
+        const uint32_t n_token_count = *(const uint32_t *)(data + 8);
+
+        // Read tokens if requested
+        if (tokens_out != nullptr && n_token_count_out != nullptr) {
+            if (n_token_count > n_token_capacity) {
+                LLAMA_LOG_ERROR("%s: token count (%u) exceeds capacity (%zu)\n", __func__, n_token_count, n_token_capacity);
+                return false;
+            }
+
+            memcpy(tokens_out, data + 12, n_token_count * sizeof(llama_token));
+            *n_token_count_out = n_token_count;
+        }
+
+        // Read state data using the public API
+        const size_t state_offset = 12 + n_token_count * sizeof(llama_token);
+        const size_t state_size = data_size - state_offset;
+
+        const size_t n_read = ctx->state_set_data(data + state_offset, state_size);
+        if (n_read == 0) {
+            LLAMA_LOG_ERROR("%s: failed to load state data\n", __func__);
+            return false;
+        }
+
+        return true;
+    } catch (const std::exception & err) {
+        LLAMA_LOG_ERROR("%s: error loading state from mmap: %s\n", __func__, err.what());
+        return false;
+    }
+}
+
+size_t llama_state_mmap_save(llama_context * ctx, llama_state_mmap * mmap, const llama_token * tokens, size_t n_token_count) {
+    if (mmap == nullptr || mmap->addr() == nullptr) {
+        LLAMA_LOG_ERROR("%s: invalid mmap handle\n", __func__);
+        return 0;
+    }
+
+    if (!mmap->is_readwrite) {
+        LLAMA_LOG_ERROR("%s: cannot save to read-only mmap\n", __func__);
+        return 0;
+    }
+
+    ctx->synchronize();
+
+    try {
+        // Calculate required size
+        const size_t header_size = sizeof(uint32_t) * 3; // magic + version + token_count
+        const size_t tokens_size = n_token_count * sizeof(llama_token);
+        const size_t state_size = ctx->state_get_size();
+        const size_t total_size = header_size + tokens_size + state_size;
+
+        // Resize mmap if needed
+        if (mmap->size() < total_size) {
+            mmap->resize(total_size);
+        }
+
+        uint8_t * data = (uint8_t *)mmap->addr();
+        const size_t data_size = mmap->size();
+
+        // Write header
+        *(uint32_t *)(data)     = LLAMA_SESSION_MAGIC;
+        *(uint32_t *)(data + 4) = LLAMA_SESSION_VERSION;
+        *(uint32_t *)(data + 8) = (uint32_t)n_token_count;
+
+        // Write tokens
+        memcpy(data + 12, tokens, tokens_size);
+
+        // Write state data using the public API
+        const size_t state_offset = header_size + tokens_size;
+        const size_t n_written = ctx->state_get_data(data + state_offset, data_size - state_offset);
+        if (n_written == 0) {
+            LLAMA_LOG_ERROR("%s: failed to write state data\n", __func__);
+            return 0;
+        }
+
+        mmap->sync();
+
+        return header_size + tokens_size + n_written;
+    } catch (const std::exception & err) {
+        LLAMA_LOG_ERROR("%s: error saving state to mmap: %s\n", __func__, err.what());
         return 0;
     }
 }

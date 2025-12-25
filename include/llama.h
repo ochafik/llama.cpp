@@ -842,6 +842,67 @@ extern "C" {
 
     typedef uint32_t llama_state_seq_flags;
 
+    //
+    // Memory-mapped session cache
+    //
+    // Provides memory-mapped access to session cache files for efficient
+    // read-only access or read-write access with automatic persistence.
+    //
+
+    // Opaque handle for memory-mapped session cache
+    struct llama_state_mmap;
+
+    // Open a session file for read-only memory-mapped access
+    // Returns NULL on failure
+    // The returned handle must be freed with llama_state_mmap_free
+    LLAMA_API struct llama_state_mmap * llama_state_mmap_open(
+            struct llama_context * ctx,
+                      const char * path_session);
+
+    // Open a session file for read-write memory-mapped access
+    // If the file doesn't exist, it will be created
+    // Returns NULL on failure
+    // The returned handle must be freed with llama_state_mmap_free
+    LLAMA_API struct llama_state_mmap * llama_state_mmap_open_rw(
+            struct llama_context * ctx,
+                      const char * path_session);
+
+    // Free a memory-mapped session cache handle
+    // For read-write maps, this will sync changes to disk before closing
+    LLAMA_API void llama_state_mmap_free(struct llama_state_mmap * mmap);
+
+    // Get the address of the mapped memory (for debugging/advanced use)
+    LLAMA_API void * llama_state_mmap_addr(const struct llama_state_mmap * mmap);
+
+    // Get the size of the mapped memory
+    LLAMA_API size_t llama_state_mmap_size(const struct llama_state_mmap * mmap);
+
+    // Load state from the memory-mapped session cache into the context
+    // Also loads tokens if tokens_out and n_token_count_out are provided
+    // Returns true on success
+    LLAMA_API bool llama_state_mmap_load(
+            struct llama_context * ctx,
+      struct llama_state_mmap * mmap,
+                   llama_token * tokens_out,
+                        size_t   n_token_capacity,
+                        size_t * n_token_count_out);
+
+    // Save state from the context to the memory-mapped session cache
+    // This only works with read-write maps
+    // Returns the number of bytes written, or 0 on failure
+    LLAMA_API size_t llama_state_mmap_save(
+            struct llama_context * ctx,
+      struct llama_state_mmap * mmap,
+               const llama_token * tokens,
+                          size_t   n_token_count);
+
+    // Sync changes to disk for read-write maps
+    // This is also called automatically when the handle is freed
+    LLAMA_API void llama_state_mmap_sync(struct llama_state_mmap * mmap);
+
+    // Check if memory-mapped session caches are supported on this platform
+    LLAMA_API bool llama_state_mmap_supported(void);
+
     LLAMA_API size_t llama_state_seq_get_size_ext(
             struct llama_context * ctx,
                     llama_seq_id   seq_id,

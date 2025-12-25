@@ -547,6 +547,303 @@ const bool llama_mmap::SUPPORTED  = true;
 const bool llama_mmap::SUPPORTED  = false;
 #endif
 
+// llama_mmap_rw - read-write memory mapping for session caches
+
+struct llama_mmap_rw::impl {
+#ifdef _POSIX_MAPPED_FILES
+    void * addr = nullptr;
+    size_t size = 0;
+    int fd = -1;
+    bool is_readwrite = false;
+
+    // Read-write constructor - creates or opens file
+    impl(const char * filepath, size_t min_size) : is_readwrite(true) {
+        // Open or create file for read-write
+        fd = open(filepath, O_RDWR | O_CREAT, 0644);
+        if (fd == -1) {
+            throw std::runtime_error(format("failed to open %s for mmap: %s", filepath, strerror(errno)));
+        }
+
+        // Get current file size
+        struct stat file_stat;
+        if (fstat(fd, &file_stat) == -1) {
+            close(fd);
+            throw std::runtime_error(format("failed to stat %s: %s", filepath, strerror(errno)));
+        }
+
+        size = file_stat.st_size;
+
+        // Extend file if needed
+        if (size < min_size) {
+            if (ftruncate(fd, min_size) == -1) {
+                close(fd);
+                throw std::runtime_error(format("failed to extend %s to %zu bytes: %s", filepath, min_size, strerror(errno)));
+            }
+            size = min_size;
+        }
+
+        // Map file for read-write access
+        addr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        if (addr == MAP_FAILED) {
+            close(fd);
+            throw std::runtime_error(format("mmap rw failed: %s", strerror(errno)));
+        }
+    }
+
+    // Read-only constructor - maps existing file
+    impl(struct llama_file * file) : is_readwrite(false) {
+        size = file->size();
+        int file_fd = file->file_id();
+
+        addr = mmap(NULL, size, PROT_READ, MAP_SHARED, file_fd, 0);
+        if (addr == MAP_FAILED) {
+            throw std::runtime_error(format("mmap failed: %s", strerror(errno)));
+        }
+
+        // Hint that we'll read sequentially
+        if (posix_madvise(addr, size, POSIX_MADV_SEQUENTIAL)) {
+            LLAMA_LOG_WARN("warning: posix_madvise(.., POSIX_MADV_SEQUENTIAL) failed: %s\n", strerror(errno));
+        }
+    }
+
+    void sync() {
+        if (addr && is_readwrite) {
+            if (msync(addr, size, MS_SYNC) == -1) {
+                LLAMA_LOG_WARN("warning: msync failed: %s\n", strerror(errno));
+            }
+        }
+    }
+
+    void resize(size_t new_size) {
+        if (!is_readwrite) {
+            throw std::runtime_error("cannot resize read-only mmap");
+        }
+
+        if (new_size == size) {
+            return;
+        }
+
+        // Unmap current mapping
+        if (addr) {
+            munmap(addr, size);
+        }
+
+        // Resize the file
+        if (ftruncate(fd, new_size) == -1) {
+            throw std::runtime_error(format("failed to resize file to %zu bytes: %s", new_size, strerror(errno)));
+        }
+
+        // Remap at new size
+        addr = mmap(NULL, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        if (addr == MAP_FAILED) {
+            throw std::runtime_error(format("mmap rw failed after resize: %s", strerror(errno)));
+        }
+
+        size = new_size;
+    }
+
+    ~impl() {
+        if (addr) {
+            if (is_readwrite) {
+                msync(addr, size, MS_SYNC);
+            }
+            munmap(addr, size);
+        }
+        if (fd != -1) {
+            close(fd);
+        }
+    }
+#elif defined(_WIN32)
+    void * addr = nullptr;
+    size_t size = 0;
+    HANDLE hFile = INVALID_HANDLE_VALUE;
+    HANDLE hMapping = NULL;
+    bool is_readwrite = false;
+
+    // Read-write constructor - creates or opens file
+    impl(const char * filepath, size_t min_size) : is_readwrite(true) {
+        // Open or create file for read-write
+        hFile = CreateFileA(filepath, GENERIC_READ | GENERIC_WRITE,
+                           FILE_SHARE_READ, NULL, OPEN_ALWAYS,
+                           FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hFile == INVALID_HANDLE_VALUE) {
+            throw std::runtime_error(format("failed to open %s for mmap: %s",
+                filepath, llama_format_win_err(GetLastError()).c_str()));
+        }
+
+        // Get current file size
+        LARGE_INTEGER file_size;
+        if (!GetFileSizeEx(hFile, &file_size)) {
+            CloseHandle(hFile);
+            throw std::runtime_error(format("failed to get file size: %s",
+                llama_format_win_err(GetLastError()).c_str()));
+        }
+
+        size = (size_t)file_size.QuadPart;
+
+        // Extend file if needed
+        if (size < min_size) {
+            LARGE_INTEGER li;
+            li.QuadPart = min_size;
+            if (!SetFilePointerEx(hFile, li, NULL, FILE_BEGIN) || !SetEndOfFile(hFile)) {
+                CloseHandle(hFile);
+                throw std::runtime_error(format("failed to extend file: %s",
+                    llama_format_win_err(GetLastError()).c_str()));
+            }
+            size = min_size;
+        }
+
+        // Create file mapping
+        hMapping = CreateFileMappingA(hFile, NULL, PAGE_READWRITE, 0, 0, NULL);
+        if (hMapping == NULL) {
+            CloseHandle(hFile);
+            throw std::runtime_error(format("CreateFileMappingA failed: %s",
+                llama_format_win_err(GetLastError()).c_str()));
+        }
+
+        // Map view
+        addr = MapViewOfFile(hMapping, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, 0);
+        if (addr == NULL) {
+            DWORD error = GetLastError();
+            CloseHandle(hMapping);
+            CloseHandle(hFile);
+            throw std::runtime_error(format("MapViewOfFile failed: %s",
+                llama_format_win_err(error).c_str()));
+        }
+    }
+
+    // Read-only constructor - maps existing file
+    impl(struct llama_file * file) : is_readwrite(false) {
+        size = file->size();
+        HANDLE hFileOrig = (HANDLE)_get_osfhandle(file->file_id());
+
+        hMapping = CreateFileMappingA(hFileOrig, NULL, PAGE_READONLY, 0, 0, NULL);
+        if (hMapping == NULL) {
+            throw std::runtime_error(format("CreateFileMappingA failed: %s",
+                llama_format_win_err(GetLastError()).c_str()));
+        }
+
+        addr = MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, 0);
+        DWORD error = GetLastError();
+        if (addr == NULL) {
+            CloseHandle(hMapping);
+            throw std::runtime_error(format("MapViewOfFile failed: %s",
+                llama_format_win_err(error).c_str()));
+        }
+    }
+
+    void sync() {
+        if (addr && is_readwrite) {
+            if (!FlushViewOfFile(addr, 0)) {
+                LLAMA_LOG_WARN("warning: FlushViewOfFile failed: %s\n",
+                    llama_format_win_err(GetLastError()).c_str());
+            }
+        }
+    }
+
+    void resize(size_t new_size) {
+        if (!is_readwrite) {
+            throw std::runtime_error("cannot resize read-only mmap");
+        }
+
+        if (new_size == size) {
+            return;
+        }
+
+        // Unmap and close mapping
+        if (addr) {
+            FlushViewOfFile(addr, 0);
+            UnmapViewOfFile(addr);
+            addr = nullptr;
+        }
+        if (hMapping) {
+            CloseHandle(hMapping);
+            hMapping = NULL;
+        }
+
+        // Resize the file
+        LARGE_INTEGER li;
+        li.QuadPart = new_size;
+        if (!SetFilePointerEx(hFile, li, NULL, FILE_BEGIN) || !SetEndOfFile(hFile)) {
+            throw std::runtime_error(format("failed to resize file: %s",
+                llama_format_win_err(GetLastError()).c_str()));
+        }
+
+        // Recreate mapping
+        hMapping = CreateFileMappingA(hFile, NULL, PAGE_READWRITE, 0, 0, NULL);
+        if (hMapping == NULL) {
+            throw std::runtime_error(format("CreateFileMappingA failed after resize: %s",
+                llama_format_win_err(GetLastError()).c_str()));
+        }
+
+        addr = MapViewOfFile(hMapping, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, 0);
+        if (addr == NULL) {
+            DWORD error = GetLastError();
+            CloseHandle(hMapping);
+            throw std::runtime_error(format("MapViewOfFile failed after resize: %s",
+                llama_format_win_err(error).c_str()));
+        }
+
+        size = new_size;
+    }
+
+    ~impl() {
+        if (addr) {
+            if (is_readwrite) {
+                FlushViewOfFile(addr, 0);
+            }
+            UnmapViewOfFile(addr);
+        }
+        if (hMapping) {
+            CloseHandle(hMapping);
+        }
+        if (hFile != INVALID_HANDLE_VALUE) {
+            CloseHandle(hFile);
+        }
+    }
+#else
+    impl(const char * filepath, size_t min_size) {
+        GGML_UNUSED(filepath);
+        GGML_UNUSED(min_size);
+        throw std::runtime_error("mmap not supported");
+    }
+
+    impl(struct llama_file * file) {
+        GGML_UNUSED(file);
+        throw std::runtime_error("mmap not supported");
+    }
+
+    void sync() {
+        throw std::runtime_error("mmap not supported");
+    }
+
+    void resize(size_t new_size) {
+        GGML_UNUSED(new_size);
+        throw std::runtime_error("mmap not supported");
+    }
+
+    void * addr = nullptr;
+    size_t size = 0;
+#endif
+};
+
+llama_mmap_rw::llama_mmap_rw(const char * filepath, size_t min_size)
+    : pimpl(std::make_unique<impl>(filepath, min_size)) {}
+llama_mmap_rw::llama_mmap_rw(struct llama_file * file)
+    : pimpl(std::make_unique<impl>(file)) {}
+llama_mmap_rw::~llama_mmap_rw() = default;
+
+size_t llama_mmap_rw::size() const { return pimpl->size; }
+void * llama_mmap_rw::addr() const { return pimpl->addr; }
+void llama_mmap_rw::sync() { pimpl->sync(); }
+void llama_mmap_rw::resize(size_t new_size) { pimpl->resize(new_size); }
+
+#if defined(_POSIX_MAPPED_FILES) || defined(_WIN32)
+const bool llama_mmap_rw::SUPPORTED = true;
+#else
+const bool llama_mmap_rw::SUPPORTED = false;
+#endif
+
 // llama_mlock
 
 struct llama_mlock::impl {

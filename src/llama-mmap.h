@@ -55,6 +55,36 @@ private:
     std::unique_ptr<impl> pimpl;
 };
 
+// Read-write memory mapping for session caches
+struct llama_mmap_rw {
+    llama_mmap_rw(const llama_mmap_rw &) = delete;
+
+    // Create a new file or open existing for read-write mmap
+    // If the file exists and is smaller than min_size, it will be extended
+    // If the file doesn't exist, it will be created with min_size
+    llama_mmap_rw(const char * filepath, size_t min_size);
+
+    // Map an existing file for read-only access
+    llama_mmap_rw(struct llama_file * file);
+
+    ~llama_mmap_rw();
+
+    size_t size() const;
+    void * addr() const;
+
+    // Sync changes to disk (for read-write maps)
+    void sync();
+
+    // Resize the mapping (only for read-write maps created with filepath)
+    void resize(size_t new_size);
+
+    static const bool SUPPORTED;
+
+private:
+    struct impl;
+    std::unique_ptr<impl> pimpl;
+};
+
 struct llama_mlock {
     llama_mlock();
     ~llama_mlock();
