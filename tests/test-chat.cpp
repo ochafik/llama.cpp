@@ -2810,7 +2810,7 @@ static void test_template_output_parsers(chat_parser_impl impl) {
                     /* .reasoning_format = */ COMMON_REASONING_FORMAT_DEEPSEEK
                 }));
 
-        
+
 //         assert_msg_equals(
 //             simple_assist_msg("", "I'm\nthinking", "", ""),
 //             common_chat_parse(
@@ -2820,7 +2820,7 @@ static void test_template_output_parsers(chat_parser_impl impl) {
 //                     /* .format = */ COMMON_CHAT_FORMAT_APERTUS,
 //                     /* .reasoning_format = */ COMMON_REASONING_FORMAT_DEEPSEEK,
 //                 }));
-        
+
 // res  remove_waiti: remove task 0 from waiting list. current waiting = 1 (before remove)
 // srv          stop: cancel task, id_task = 0
 // res  remove_waiti: remove task 0 from waiting list. current waiting = 0 (before remove)
@@ -5111,7 +5111,7 @@ int main(int argc, char ** argv) {
 #endif
         {
             const std::string chat_test = std::getenv("CHAT_TEST") ? std::getenv("CHAT_TEST") : "";
-            
+
             if (chat_test == "" || chat_test == "msg_diffs_compute") {
                 test_msg_diffs_compute();
             }
