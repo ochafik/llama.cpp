@@ -859,6 +859,19 @@ extern "C" {
             struct llama_context * ctx,
                       const char * path_session);
 
+    // Open a session file with copy-on-write semantics
+    // - Initial data is read from file (zero-copy)
+    // - Writes modify memory only, NOT the file
+    // - The writable_size parameter specifies how much writable memory to allocate
+    //   (must be >= file size; if 0, uses file size)
+    // This is useful for loading a base session and making temporary modifications
+    // Returns NULL on failure
+    // The returned handle must be freed with llama_state_mmap_free
+    LLAMA_API struct llama_state_mmap * llama_state_mmap_open_cow(
+            struct llama_context * ctx,
+                      const char * path_session,
+                          size_t   writable_size);
+
     // Open a session file for read-write memory-mapped access
     // If the file doesn't exist, it will be created
     // Returns NULL on failure
@@ -866,6 +879,16 @@ extern "C" {
     LLAMA_API struct llama_state_mmap * llama_state_mmap_open_rw(
             struct llama_context * ctx,
                       const char * path_session);
+
+    // Open a session file for read-write memory-mapped access with explicit size
+    // If size is 0, it will be calculated based on current state
+    // If size > 0, the file will be pre-allocated to exactly that size
+    // Returns NULL on failure
+    // The returned handle must be freed with llama_state_mmap_free
+    LLAMA_API struct llama_state_mmap * llama_state_mmap_open_rw_sized(
+            struct llama_context * ctx,
+                      const char * path_session,
+                          size_t   size);
 
     // Free a memory-mapped session cache handle
     // For read-write maps, this will sync changes to disk before closing

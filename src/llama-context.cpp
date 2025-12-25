@@ -1793,25 +1793,38 @@ private:
 
 struct llama_state_mmap {
     std::unique_ptr<llama_mmap_rw> mmap;
-    std::unique_ptr<llama_file> file;  // for read-only mode
-    bool is_readwrite;
+    std::unique_ptr<llama_file> file;  // kept alive for read-only and COW modes
 
     // Read-only constructor
-    llama_state_mmap(llama_file * f) : file(nullptr), is_readwrite(false) {
-        // We take ownership of the file for read-only mmap
-        // But actually, we'll create our own file for simplicity
+    llama_state_mmap(llama_file * f) : file(nullptr) {
         mmap = std::make_unique<llama_mmap_rw>(f);
     }
 
-    // Read-write constructor
-    llama_state_mmap(const char * path, size_t size) : file(nullptr), is_readwrite(true) {
+    // Read-write constructor (persists to disk)
+    llama_state_mmap(const char * path, size_t size) : file(nullptr) {
         mmap = std::make_unique<llama_mmap_rw>(path, size);
+    }
+
+    // Copy-on-write constructor (writable but not persisted)
+    llama_state_mmap(llama_file * f, size_t writable_size) : file(nullptr) {
+        mmap = std::make_unique<llama_mmap_rw>(f, writable_size);
     }
 
     void * addr() const { return mmap->addr(); }
     size_t size() const { return mmap->size(); }
-    void sync() { if (is_readwrite) mmap->sync(); }
-    void resize(size_t new_size) { if (is_readwrite) mmap->resize(new_size); }
+    llama_mmap_mode mode() const { return mmap->mode(); }
+
+    void sync() {
+        if (mmap->mode() == llama_mmap_mode::READ_WRITE) {
+            mmap->sync();
+        }
+    }
+
+    void resize(size_t new_size) {
+        if (mmap->mode() == llama_mmap_mode::READ_WRITE) {
+            mmap->resize(new_size);
+        }
+    }
 };
 
 size_t llama_context::state_get_size() {
@@ -2962,27 +2975,81 @@ llama_state_mmap * llama_state_mmap_open(llama_context * ctx, const char * path_
     }
 }
 
-llama_state_mmap * llama_state_mmap_open_rw(llama_context * ctx, const char * path_session) {
+llama_state_mmap * llama_state_mmap_open_rw_sized(llama_context * ctx, const char * path_session, size_t size) {
     if (!llama_mmap_rw::SUPPORTED) {
         LLAMA_LOG_ERROR("%s: mmap not supported on this platform\n", __func__);
         return nullptr;
     }
 
     try {
-        // Get the required size for the session
-        const size_t header_size = sizeof(uint32_t) * 3; // magic + version + token_count
-        const size_t state_size = ctx->state_get_size();
+        size_t min_size = size;
 
-        // We need enough space for header + max possible tokens + state
-        // For simplicity, reserve space for up to n_ctx tokens
-        const size_t max_tokens = ctx->n_ctx();
-        const size_t min_size = header_size + max_tokens * sizeof(llama_token) + state_size;
+        if (min_size == 0) {
+            // Auto-calculate size based on current state
+            const size_t header_size = sizeof(uint32_t) * 3; // magic + version + token_count
+            const size_t state_size = ctx->state_get_size();
+
+            // Reserve space for header + max possible tokens + current state
+            const size_t max_tokens = ctx->n_ctx();
+            min_size = header_size + max_tokens * sizeof(llama_token) + state_size;
+        }
 
         // Create or open file with read-write mmap
         auto * mmap = new llama_state_mmap(path_session, min_size);
         return mmap;
     } catch (const std::exception & err) {
         LLAMA_LOG_ERROR("%s: failed to create/open session file for mmap: %s\n", __func__, err.what());
+        return nullptr;
+    }
+}
+
+llama_state_mmap * llama_state_mmap_open_rw(llama_context * ctx, const char * path_session) {
+    return llama_state_mmap_open_rw_sized(ctx, path_session, 0);
+}
+
+llama_state_mmap * llama_state_mmap_open_cow(llama_context * ctx, const char * path_session, size_t writable_size) {
+    if (!llama_mmap_rw::SUPPORTED) {
+        LLAMA_LOG_ERROR("%s: mmap not supported on this platform\n", __func__);
+        return nullptr;
+    }
+
+    try {
+        // Open file for reading
+        auto file = std::make_unique<llama_file>(path_session, "rb");
+
+        // Validate session header
+        const uint32_t magic   = file->read_u32();
+        const uint32_t version = file->read_u32();
+
+        if (magic != LLAMA_SESSION_MAGIC || version != LLAMA_SESSION_VERSION) {
+            LLAMA_LOG_ERROR("%s: invalid session (magic=%08x, version=%d)\n", __func__, magic, version);
+            return nullptr;
+        }
+
+        file->seek(0, SEEK_SET);
+
+        const size_t file_size = file->size();
+
+        // If writable_size is 0, calculate a reasonable default
+        size_t buffer_size = writable_size;
+        if (buffer_size == 0) {
+            // Use max capacity: header + max tokens + max state
+            const size_t header_size = 3 * sizeof(uint32_t);
+            const size_t max_tokens = ctx->n_ctx();
+            const size_t state_size = ctx->state_get_size();
+            buffer_size = header_size + max_tokens * sizeof(llama_token) + state_size;
+        }
+
+        // Ensure buffer is at least as large as file
+        if (buffer_size < file_size) {
+            buffer_size = file_size;
+        }
+
+        // Create COW mmap (reads file, writes go to anonymous memory)
+        auto * mmap = new llama_state_mmap(file.get(), buffer_size);
+        return mmap;
+    } catch (const std::exception & err) {
+        LLAMA_LOG_ERROR("%s: failed to open session file for COW mmap: %s\n", __func__, err.what());
         return nullptr;
     }
 }
@@ -3070,7 +3137,7 @@ size_t llama_state_mmap_save(llama_context * ctx, llama_state_mmap * mmap, const
         return 0;
     }
 
-    if (!mmap->is_readwrite) {
+    if (mmap->mode() == llama_mmap_mode::READ_ONLY) {
         LLAMA_LOG_ERROR("%s: cannot save to read-only mmap\n", __func__);
         return 0;
     }

@@ -55,6 +55,13 @@ private:
     std::unique_ptr<impl> pimpl;
 };
 
+// Memory mapping modes for session caches
+enum class llama_mmap_mode {
+    READ_ONLY,      // Read-only mapping (PROT_READ, MAP_SHARED)
+    READ_WRITE,     // Read-write persistent mapping (PROT_READ|PROT_WRITE, MAP_SHARED)
+    COPY_ON_WRITE,  // Copy-on-write (PROT_READ|PROT_WRITE, MAP_PRIVATE or anonymous)
+};
+
 // Read-write memory mapping for session caches
 struct llama_mmap_rw {
     llama_mmap_rw(const llama_mmap_rw &) = delete;
@@ -67,16 +74,24 @@ struct llama_mmap_rw {
     // Map an existing file for read-only access
     llama_mmap_rw(struct llama_file * file);
 
+    // Copy-on-write: read file into anonymous writable memory
+    // - writable_size: total size of writable buffer (must be >= file size, or 0 for file size)
+    // - file_size: actual file size (bytes to read from file)
+    // Writes do NOT persist to disk
+    llama_mmap_rw(struct llama_file * file, size_t writable_size);
+
     ~llama_mmap_rw();
 
     size_t size() const;
     void * addr() const;
 
-    // Sync changes to disk (for read-write maps)
+    // Sync changes to disk (for read-write maps only, no-op for COW)
     void sync();
 
     // Resize the mapping (only for read-write maps created with filepath)
     void resize(size_t new_size);
+
+    llama_mmap_mode mode() const;
 
     static const bool SUPPORTED;
 
