@@ -200,7 +200,7 @@ class TestMcpHttpProxyErrors:
         assert "error" in str(body).lower(), f"Expected error in response: {body}"
         # Verify response is valid JSON
         try:
-            data = json.loads(body) if isinstance(body, str) else json.loads(body.decode())
+            data = json.loads(body if isinstance(body, str) else body.decode() if isinstance(body, bytes) else str(body))
             assert "error" in data, f"Expected 'error' key in JSON: {data}"
         except json.JSONDecodeError:
             pytest.fail(f"Response is not valid JSON: {body}")
@@ -219,7 +219,7 @@ class TestMcpHttpProxyErrors:
         body = res.body
         # Verify response is valid JSON (tests JSON injection fix)
         try:
-            data = json.loads(body) if isinstance(body, str) else json.loads(body.decode())
+            data = json.loads(body if isinstance(body, str) else body.decode() if isinstance(body, bytes) else str(body))
             assert "error" in data, f"Expected 'error' key in JSON: {data}"
         except json.JSONDecodeError:
             pytest.fail(f"Response is not valid JSON: {body}")
@@ -239,7 +239,7 @@ class TestMcpHttpProxyErrors:
         body = res.body
         # Verify response is valid JSON (no injection)
         try:
-            data = json.loads(body) if isinstance(body, str) else json.loads(body.decode())
+            data = json.loads(body if isinstance(body, str) else body.decode() if isinstance(body, bytes) else str(body))
             assert "error" in data, f"Expected 'error' key in JSON: {data}"
             # Should only have 'error' key, no injected keys
             assert len(data) == 1, f"Expected only 'error' key, got: {data.keys()}"
