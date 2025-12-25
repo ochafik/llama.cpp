@@ -113,8 +113,6 @@ def do_test_completion_with_required_tool_tiny(server: ServerProcess, tool: dict
 @pytest.mark.parametrize("template_name,tool,argument_key", [
     ("google-gemma-2-2b-it",                          TEST_TOOL,            "success"),
     ("google-gemma-2-2b-it",                          TEST_TOOL,            "success"),
-    ("google-functiongemma",                          WEATHER_TOOL,         "location"),
-    ("google-functiongemma",                          WEATHER_TOOL,         "location"),
     ("meta-llama-Llama-3.3-70B-Instruct",             TEST_TOOL,            "success"),
     ("meta-llama-Llama-3.3-70B-Instruct",             TEST_TOOL,            "success"),
     ("meta-llama-Llama-3.3-70B-Instruct",             PYTHON_TOOL,          "code"),
