@@ -941,6 +941,62 @@ std::string fs_get_cache_file(const std::string & filename) {
     return cache_directory + filename;
 }
 
+std::string fs_get_config_directory() {
+    std::string config_directory = "";
+    auto ensure_trailing_slash = [](std::string p) {
+        if (p.back() != DIRECTORY_SEPARATOR) {
+            p += DIRECTORY_SEPARATOR;
+        }
+        return p;
+    };
+    if (getenv("LLAMA_CONFIG")) {
+        config_directory = std::getenv("LLAMA_CONFIG");
+    } else {
+#if defined(__linux__) || defined(__FreeBSD__) || defined(_AIX) || defined(__OpenBSD__)
+        if (std::getenv("XDG_CONFIG_HOME")) {
+            config_directory = std::getenv("XDG_CONFIG_HOME");
+        } else if (std::getenv("HOME")) {
+            config_directory = std::getenv("HOME") + std::string("/.config/");
+        } else {
+#if defined(__linux__)
+            struct passwd *pw = getpwuid(getuid());
+            if ((!pw) || (!pw->pw_dir)) {
+                throw std::runtime_error("Failed to find $HOME directory");
+            }
+            config_directory = std::string(pw->pw_dir) + std::string("/.config/");
+#else
+            throw std::runtime_error("Failed to find $HOME directory");
+#endif
+        }
+#elif defined(__APPLE__)
+        // Use ~/.llama.cpp/ for simplicity on macOS
+        config_directory = std::getenv("HOME") + std::string("/.llama.cpp");
+#elif defined(_WIN32)
+        config_directory = std::getenv("APPDATA");
+#elif defined(__EMSCRIPTEN__)
+        GGML_ABORT("not implemented on this platform");
+#else
+#  error Unknown architecture
+#endif
+        config_directory = ensure_trailing_slash(config_directory);
+#if !defined(__APPLE__)
+        // On macOS, we use ~/.llama.cpp/ directly (already includes llama.cpp)
+        config_directory += "llama.cpp";
+#endif
+    }
+    return ensure_trailing_slash(config_directory);
+}
+
+std::string fs_get_config_file(const std::string & filename) {
+    GGML_ASSERT(filename.find(DIRECTORY_SEPARATOR) == std::string::npos);
+    std::string config_directory = fs_get_config_directory();
+    const bool success = fs_create_directory_with_parents(config_directory);
+    if (!success) {
+        throw std::runtime_error("failed to create config directory: " + config_directory);
+    }
+    return config_directory + filename;
+}
+
 std::vector<common_file_info> fs_list(const std::string & path, bool include_directories) {
     std::vector<common_file_info> files;
     if (path.empty()) return files;
