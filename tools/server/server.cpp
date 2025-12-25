@@ -1,6 +1,8 @@
 #include "server-context.h"
 #include "server-http.h"
 #include "server-models.h"
+#include "server-ws.h"
+#include "server-mcp-stdio.h"
 
 #include "arg.h"
 #include "common.h"
@@ -117,6 +119,16 @@ int main(int argc, char ** argv, char ** envp) {
         return 1;
     }
 
+    //
+    // WebSocket Server (for MCP stdio support) - only if --webui-mcp is enabled
+    //
+
+    server_ws_context * ctx_ws = nullptr;
+
+    if (params.webui_mcp) {
+        ctx_ws = new server_ws_context(params);
+    }
+
     // Helper function to get MCP config path
     auto get_mcp_config_paths = [&params]() -> std::vector<std::string> {
         std::vector<std::string> paths;
@@ -164,9 +176,7 @@ int main(int argc, char ** argv, char ** envp) {
                 break;
             }
         }
-
-        // WebSocket server will be started after HTTP server to get the actual port
-        LOG_INF("%s: MCP WebSocket support enabled\n", __func__);
+        LOG_INF("%s: MCP support enabled (HTTP proxy + WebSocket stdio)\n", __func__);
     }
 
     //
@@ -254,6 +264,7 @@ int main(int argc, char ** argv, char ** envp) {
     // MCP servers (only if --webui-mcp is enabled)
     if (params.webui_mcp) {
         // HTTP proxy for remote MCP servers with CORS support
+        // Note: stdio servers use WebSocket (port + 1), not this HTTP endpoint
         auto proxy_mcp_handler = [&ctx_http](const server_http_req & req, const std::string & method) -> server_http_res_ptr {
             std::string server_name = req.get_param("server");
             if (server_name.empty()) {
@@ -264,10 +275,26 @@ int main(int argc, char ** argv, char ** envp) {
             }
 
             auto server_config = ctx_http.get_mcp_server(server_name);
-            if (!server_config || server_config->url.empty()) {
+            if (!server_config) {
                 auto res = std::make_unique<server_http_res>();
                 res->status = 404;
                 res->data = json{{"error", "Server not found: " + server_name}}.dump();
+                return res;
+            }
+
+            // Check if this is a stdio server (should use WebSocket instead)
+            if (server_config->is_stdio()) {
+                auto res = std::make_unique<server_http_res>();
+                res->status = 400;
+                res->data = json{{"error", "Server '" + server_name + "' is a stdio server. Use WebSocket (port + 1) instead."}}.dump();
+                return res;
+            }
+
+            // Must be a remote HTTP server
+            if (!server_config->is_remote()) {
+                auto res = std::make_unique<server_http_res>();
+                res->status = 400;
+                res->data = json{{"error", "Server '" + server_name + "' has no url or command configured."}}.dump();
                 return res;
             }
 
@@ -312,13 +339,22 @@ int main(int argc, char ** argv, char ** envp) {
             return proxy_mcp_handler(req, "POST");
         }));
 
-        // List available MCP servers from config
+        // List available MCP servers from config with their types
         ctx_http.get("/mcp/servers", ex_wrapper([&ctx_http](const server_http_req &) -> server_http_res_ptr {
             auto res = std::make_unique<server_http_res>();
             res->status = 200;
             json servers = json::array();
             for (const auto & name : ctx_http.get_mcp_server_names()) {
-                servers.push_back({{"name", name}});
+                auto config = ctx_http.get_mcp_server(name);
+                std::string type = "unknown";
+                if (config) {
+                    if (config->is_stdio()) {
+                        type = "stdio";
+                    } else if (config->is_remote()) {
+                        type = "http";
+                    }
+                }
+                servers.push_back({{"name", name}, {"type", type}});
             }
             res->data = json{{"servers", servers}}.dump();
             return res;
@@ -331,11 +367,47 @@ int main(int argc, char ** argv, char ** envp) {
 
     std::function<void()> clean_up;
 
+    // Register WebSocket handlers for MCP stdio (only if --webui-mcp is enabled)
+    if (params.webui_mcp && ctx_ws) {
+        ctx_ws->on_open([&ctx_http](auto conn) {
+            std::string server_name = conn->get_query_param("server");
+            if (server_name.empty()) {
+                conn->close(1008, "Missing 'server' query parameter");
+                return;
+            }
+            auto config = ctx_http.get_mcp_server(server_name);
+            if (!config || !config->is_stdio()) {
+                conn->close(1008, "Unknown or non-stdio server: " + server_name);
+                return;
+            }
+            // Start subprocess and attach to connection
+            conn->user_data = mcp_stdio_start(*config, conn);
+            if (!conn->user_data) {
+                conn->close(1011, "Failed to start MCP process");
+            }
+        });
+
+        ctx_ws->on_message([](auto conn, const std::string & msg) {
+            auto * proc = static_cast<mcp_stdio_process*>(conn->user_data.get());
+            if (proc) {
+                mcp_stdio_write(proc, msg);
+            }
+        });
+
+        ctx_ws->on_close([](auto conn) {
+            conn->user_data.reset();  // Destructor kills subprocess
+        });
+    }
+
     if (is_router_server) {
         LOG_INF("%s: starting router server, no model will be loaded in this process\n", __func__);
 
-        clean_up = [&models_routes]() {
+        clean_up = [&models_routes, &ctx_ws]() {
             SRV_INF("%s: cleaning up before exit...\n", __func__);
+            if (ctx_ws) {
+                ctx_ws->stop();
+                delete ctx_ws;
+            }
             if (models_routes.has_value()) {
                 models_routes->models.unload_all();
             }
@@ -349,14 +421,31 @@ int main(int argc, char ** argv, char ** envp) {
         }
         ctx_http.is_ready.store(true);
 
+        // Start WebSocket server - only if --webui-mcp is enabled
+        if (params.webui_mcp && ctx_ws) {
+            if (!ctx_ws->start()) {
+                clean_up();
+                LOG_ERR("%s: exiting due to WebSocket server error\n", __func__);
+                return 1;
+            }
+            LOG_INF("%s: WebSocket server started on port %d\n", __func__, ctx_ws->get_actual_port());
+        }
+
         shutdown_handler = [&](int) {
+            if (ctx_ws) {
+                ctx_ws->stop();
+            }
             ctx_http.stop();
         };
 
     } else {
         // setup clean up function, to be called before exit
-        clean_up = [&ctx_http, &ctx_server]() {
+        clean_up = [&ctx_http, &ctx_ws, &ctx_server]() {
             SRV_INF("%s: cleaning up before exit...\n", __func__);
+            if (ctx_ws) {
+                ctx_ws->stop();
+                delete ctx_ws;
+            }
             ctx_http.stop();
             ctx_server.terminate();
             llama_backend_free();
@@ -367,6 +456,16 @@ int main(int argc, char ** argv, char ** envp) {
             clean_up();
             LOG_ERR("%s: exiting due to HTTP server error\n", __func__);
             return 1;
+        }
+
+        // Start WebSocket server - only if --webui-mcp is enabled
+        if (params.webui_mcp && ctx_ws) {
+            if (!ctx_ws->start()) {
+                clean_up();
+                LOG_ERR("%s: exiting due to WebSocket server error\n", __func__);
+                return 1;
+            }
+            LOG_INF("%s: WebSocket server started on port %d\n", __func__, ctx_ws->get_actual_port());
         }
 
         // load the model
@@ -387,6 +486,9 @@ int main(int argc, char ** argv, char ** envp) {
         LOG_INF("%s: model loaded\n", __func__);
 
         shutdown_handler = [&](int) {
+            if (ctx_ws) {
+                ctx_ws->stop();
+            }
             ctx_server.terminate();
         };
     }

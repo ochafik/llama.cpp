@@ -2,6 +2,9 @@ import pytest
 from openai import OpenAI
 from utils import *
 
+# Raw websocket for authentication tests
+import websocket
+
 server = ServerPreset.tinyllama2()
 
 TEST_API_KEY = "sk-this-is-the-secret-key"
@@ -127,3 +130,57 @@ def test_local_media_file(media_path, image_url, success,):
         assert res.status_code == 400
 
 
+class TestWebSocketAuthentication:
+    """Test WebSocket authentication with API keys."""
+
+    @pytest.mark.parametrize("api_key,should_succeed", [
+        (None, False),           # No API key when one is required
+        ("invalid-key", False),  # Wrong API key
+        ("sk-this-is-the-secret-key", True),  # Correct API key
+    ])
+    def test_websocket_api_key(self, api_key, should_succeed):
+        """Test WebSocket connection with various API keys."""
+        server = ServerPreset.tinyllama2()
+        server.api_key = TEST_API_KEY
+        server.webui_mcp = True  # Enable WebSocket/MCP support
+        server.start()
+
+        ws_port = server.server_port + 1
+        # Note: we don't include server parameter since we're testing auth at the
+        # WebSocket handshake level, which happens before MCP routing
+        ws_url = f"ws://{server.server_host}:{ws_port}/mcp"
+
+        # Prepare headers with Authorization if api_key is provided
+        headers = {}
+        if api_key is not None:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        try:
+            ws = websocket.create_connection(ws_url, timeout=5, header=headers)
+            # If we get here, connection succeeded
+            # For valid auth, connection should open but may close due to missing server param
+            # For invalid auth, connection should fail at handshake
+            ws.close()
+            assert should_succeed, "Expected connection to fail but it succeeded"
+        except websocket.WebSocketBadStatusException as e:
+            # Connection failed with HTTP error (401 for invalid auth)
+            assert not should_succeed, f"Expected connection to succeed but got: {e}"
+            assert e.status_code == 401, f"Expected 401, got {e.status_code}"
+        except (websocket.WebSocketException, ConnectionRefusedError) as e:
+            # Other connection failures
+            assert not should_succeed, f"Expected connection to succeed but got: {e}"
+
+    def test_websocket_no_auth_required(self):
+        """Test WebSocket connection when no API key is configured."""
+        server = ServerPreset.tinyllama2()
+        server.api_key = None  # No API key required
+        server.webui_mcp = True  # Enable WebSocket/MCP support
+        server.start()
+
+        ws_port = server.server_port + 1
+        ws_url = f"ws://{server.server_host}:{ws_port}/mcp"
+
+        # Should connect successfully without any auth
+        # The connection may close due to missing server param, but auth should pass
+        ws = websocket.create_connection(ws_url, timeout=5)
+        ws.close()

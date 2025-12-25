@@ -46,11 +46,18 @@ struct mcp_parsed_url {
 };
 
 // MCP Server configuration (from JSON config file)
-// Supports remote HTTP MCP servers (proxied with CORS support)
+// Supports both remote HTTP MCP servers (proxied) and local stdio MCP servers (spawned)
 struct mcp_server_config {
     std::string name;
-    std::string url;                  // URL of remote MCP server
-    std::map<std::string, std::string> headers;  // Custom headers (e.g., Authorization)
+
+    // Remote HTTP server configuration
+    std::string url;                              // URL of remote MCP server (e.g., "http://127.0.0.1:8080/mcp")
+    std::map<std::string, std::string> headers;   // Custom headers (e.g., Authorization)
+
+    // Local stdio server configuration
+    std::string command;                          // Command to spawn (e.g., "npx", "python")
+    std::vector<std::string> args;                // Command arguments
+    std::map<std::string, std::string> env;       // Environment variables
 
     mcp_server_config() = default;
     mcp_server_config(const std::string & name, const json & j) : name(name) {
@@ -64,33 +71,67 @@ struct mcp_server_config {
                 }
             }
         }
+
+        // Parse local stdio server configuration
+        if (j.contains("command")) command = j["command"].get<std::string>();
+        if (j.contains("args")) {
+            const auto & args_arr = j["args"];
+            if (args_arr.is_array()) {
+                for (const auto & arg : args_arr) {
+                    args.push_back(arg.get<std::string>());
+                }
+            }
+        }
+        if (j.contains("env")) {
+            const auto & env_obj = j["env"];
+            if (env_obj.is_object()) {
+                for (auto it = env_obj.begin(); it != env_obj.end(); ++it) {
+                    env[it.key()] = it.value().get<std::string>();
+                }
+            }
+        }
     }
 
-    // Parse URL into components
+    // Check if this is a remote HTTP server
+    bool is_remote() const { return !url.empty(); }
+
+    // Check if this is a local stdio server
+    bool is_stdio() const { return !command.empty(); }
+
+    // Parse URL into components (for remote servers)
     mcp_parsed_url parsed_url() const {
         return mcp_parsed_url::parse(url);
     }
 
     json to_json() const {
         json j;
+        // Remote HTTP fields
         if (!url.empty()) j["url"] = url;
         if (!headers.empty()) j["headers"] = headers;
+        // Local stdio fields
+        if (!command.empty()) j["command"] = command;
+        if (!args.empty()) j["args"] = args;
+        if (!env.empty()) j["env"] = env;
         return j;
     }
 };
 
 // MCP config file structure
-// Expected JSON format:
+// Expected JSON format (supports both remote HTTP and local stdio servers):
 // {
 //   "mcpServers": {
 //     "brave-search": {
-//       "url": "http://127.0.0.1:38180/mcp"
+//       "command": "npx",
+//       "args": ["-y", "@anthropic-ai/claude-code-mcp-brave-search"],
+//       "env": { "BRAVE_API_KEY": "..." }
 //     },
 //     "python": {
-//       "url": "http://127.0.0.1:38181/mcp",
-//       "headers": {
-//         "Authorization": "Bearer YOUR_TOKEN"
-//       }
+//       "command": "uvx",
+//       "args": ["mcp-run-python", "--deps", "numpy,pandas,pydantic,requests,httpx,sympy,aiohttp", "stdio"]
+//     },
+//     "remote-api": {
+//       "url": "http://127.0.0.1:38180/mcp",
+//       "headers": { "Authorization": "Bearer YOUR_TOKEN" }
 //     }
 //   }
 // }

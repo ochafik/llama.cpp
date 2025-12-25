@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 """
-Tests for MCP (Model Context Protocol) HTTP proxy functionality.
+Tests for MCP (Model Context Protocol) functionality.
 
 Tests cover:
 - HTTP endpoint: /mcp?server=... (GET and POST)
 - CORS headers for browser compatibility
+- WebSocket stdio bridge for local MCP servers
 """
 
 import pytest
@@ -13,6 +14,8 @@ import os
 import tempfile
 from pathlib import Path
 import sys
+import time
+import websocket
 
 # Ensure parent path is in sys.path
 path = Path(__file__).resolve().parents[1]
@@ -274,6 +277,404 @@ class TestMcpHttpProxyErrors:
             body = res.body
             assert "error" in str(body).lower() or "not found" in str(body).lower(), \
                 f"Expected error in response: {body}"
+
+        finally:
+            try:
+                os.unlink(config_path)
+            except:
+                pass
+
+
+class TestMcpWebSocketStdioBridge:
+    """Test MCP WebSocket stdio bridge for local MCP servers."""
+
+    def get_echo_server_config(self):
+        """Create a config that uses the echo server fixture."""
+        # Get the path to the echo server fixture
+        fixtures_dir = Path(__file__).resolve().parent.parent / "fixtures"
+        echo_server_path = fixtures_dir / "mcp_echo_server.py"
+
+        if not echo_server_path.exists():
+            pytest.skip(f"Echo server fixture not found at {echo_server_path}")
+
+        config = {
+            "mcpServers": {
+                "echo": {
+                    "command": "python3",
+                    "args": [str(echo_server_path)]
+                }
+            }
+        }
+        return config
+
+    def test_websocket_stdio_basic_connection(self):
+        """Test basic WebSocket connection to stdio MCP server."""
+        config = self.get_echo_server_config()
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(config, f)
+            config_path = f.name
+
+        try:
+            server.mcp_config = config_path
+            server.start(timeout_seconds=TIMEOUT_SERVER_START)
+
+            # Connect via WebSocket
+            ws_port = server.server_port + 1
+            ws_url = f"ws://{server.server_host}:{ws_port}/mcp?server=echo"
+
+            ws = websocket.create_connection(ws_url, timeout=10)
+
+            # Send initialize request
+            init_request = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test-client", "version": "1.0.0"}
+                }
+            }
+            ws.send(json.dumps(init_request))
+
+            # Receive response
+            response = ws.recv()
+            response_data = json.loads(response)
+
+            # Verify response
+            assert "jsonrpc" in response_data
+            assert response_data["id"] == 1
+            assert "result" in response_data
+            assert "protocolVersion" in response_data["result"]
+            assert "serverInfo" in response_data["result"]
+
+            ws.close()
+
+        finally:
+            try:
+                os.unlink(config_path)
+            except:
+                pass
+
+    def test_websocket_stdio_tools_list(self):
+        """Test listing tools from stdio MCP server."""
+        config = self.get_echo_server_config()
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(config, f)
+            config_path = f.name
+
+        try:
+            server.mcp_config = config_path
+            server.start(timeout_seconds=TIMEOUT_SERVER_START)
+
+            # Connect via WebSocket
+            ws_port = server.server_port + 1
+            ws_url = f"ws://{server.server_host}:{ws_port}/mcp?server=echo"
+
+            ws = websocket.create_connection(ws_url, timeout=10)
+
+            # Initialize first
+            init_request = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test-client", "version": "1.0.0"}
+                }
+            }
+            ws.send(json.dumps(init_request))
+            ws.recv()  # Discard initialize response
+
+            # Request tools list
+            tools_request = {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/list"
+            }
+            ws.send(json.dumps(tools_request))
+
+            # Receive response
+            response = ws.recv()
+            response_data = json.loads(response)
+
+            # Verify response
+            assert response_data["id"] == 2
+            assert "result" in response_data
+            assert "tools" in response_data["result"]
+
+            # The echo server provides "echo" and "get_env_vars" tools
+            tools = response_data["result"]["tools"]
+            tool_names = [tool["name"] for tool in tools]
+            assert "echo" in tool_names
+            assert "get_env_vars" in tool_names
+
+            ws.close()
+
+        finally:
+            try:
+                os.unlink(config_path)
+            except:
+                pass
+
+    def test_websocket_stdio_tool_call(self):
+        """Test calling a tool through stdio MCP server."""
+        config = self.get_echo_server_config()
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(config, f)
+            config_path = f.name
+
+        try:
+            server.mcp_config = config_path
+            server.start(timeout_seconds=TIMEOUT_SERVER_START)
+
+            # Connect via WebSocket
+            ws_port = server.server_port + 1
+            ws_url = f"ws://{server.server_host}:{ws_port}/mcp?server=echo"
+
+            ws = websocket.create_connection(ws_url, timeout=10)
+
+            # Initialize
+            init_request = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test-client", "version": "1.0.0"}
+                }
+            }
+            ws.send(json.dumps(init_request))
+            ws.recv()
+
+            # Call echo tool
+            test_message = "Hello from WebSocket test!"
+            tool_call_request = {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "echo",
+                    "arguments": {"message": test_message}
+                }
+            }
+            ws.send(json.dumps(tool_call_request))
+
+            # Receive response
+            response = ws.recv()
+            response_data = json.loads(response)
+
+            # Verify response
+            assert response_data["id"] == 2
+            assert "result" in response_data
+            assert "content" in response_data["result"]
+
+            # The echo tool should return our message
+            content = response_data["result"]["content"]
+            assert len(content) > 0
+            assert content[0]["type"] == "text"
+            assert content[0]["text"] == test_message
+
+            ws.close()
+
+        finally:
+            try:
+                os.unlink(config_path)
+            except:
+                pass
+
+    def test_websocket_stdio_missing_server_param(self):
+        """Test WebSocket connection without server parameter."""
+        config = self.get_echo_server_config()
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(config, f)
+            config_path = f.name
+
+        try:
+            server.mcp_config = config_path
+            server.start(timeout_seconds=TIMEOUT_SERVER_START)
+
+            # Connect via WebSocket without server parameter
+            ws_port = server.server_port + 1
+            ws_url = f"ws://{server.server_host}:{ws_port}/mcp"
+
+            # Should fail to establish connection or close immediately
+            # The server should reject connections without server parameter
+            try:
+                ws = websocket.create_connection(ws_url, timeout=5)
+                # If connection succeeds, it should close quickly with an error
+                # Try to receive - should get close frame or error
+                try:
+                    response = ws.recv()
+                    # If we get a response, it should be an error
+                    if response:
+                        data = json.loads(response)
+                        assert "error" in data or "jsonrpc" not in data
+                except websocket.WebSocketConnectionClosedException:
+                    pass  # Expected - connection closed by server
+                finally:
+                    ws.close()
+            except (websocket.WebSocketException, ConnectionRefusedError):
+                # Also acceptable - connection refused
+                pass
+
+        finally:
+            try:
+                os.unlink(config_path)
+            except:
+                pass
+
+    def test_websocket_stdio_unknown_server(self):
+        """Test WebSocket connection to unknown MCP server."""
+        config = self.get_echo_server_config()
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(config, f)
+            config_path = f.name
+
+        try:
+            server.mcp_config = config_path
+            server.start(timeout_seconds=TIMEOUT_SERVER_START)
+
+            # Connect via WebSocket to non-existent server
+            ws_port = server.server_port + 1
+            ws_url = f"ws://{server.server_host}:{ws_port}/mcp?server=nonexistent"
+
+            # Should fail to establish connection or close with error
+            try:
+                ws = websocket.create_connection(ws_url, timeout=5)
+                # If connection succeeds, should get error message
+                try:
+                    response = ws.recv()
+                    if response:
+                        data = json.loads(response)
+                        # Should contain error about server not found
+                        assert "error" in str(data).lower() or "not found" in str(data).lower()
+                except websocket.WebSocketConnectionClosedException:
+                    pass  # Expected - connection closed
+                finally:
+                    ws.close()
+            except (websocket.WebSocketException, ConnectionRefusedError):
+                # Also acceptable
+                pass
+
+        finally:
+            try:
+                os.unlink(config_path)
+            except:
+                pass
+
+    def test_websocket_stdio_env_var_security(self):
+        """Test that sensitive env vars are filtered from stdio MCP servers."""
+        config = self.get_echo_server_config()
+
+        # Add sensitive env var to the server config
+        config["mcpServers"]["echo"]["env"] = {
+            "SAFE_VAR": "safe_value",
+            "API_KEY": "should_not_be_visible"
+        }
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(config, f)
+            config_path = f.name
+
+        try:
+            server.mcp_config = config_path
+            server.start(timeout_seconds=TIMEOUT_SERVER_START)
+
+            # Connect via WebSocket
+            ws_port = server.server_port + 1
+            ws_url = f"ws://{server.server_host}:{ws_port}/mcp?server=echo"
+
+            ws = websocket.create_connection(ws_url, timeout=10)
+
+            # Initialize
+            init_request = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test-client", "version": "1.0.0"}
+                }
+            }
+            ws.send(json.dumps(init_request))
+            ws.recv()
+
+            # Call get_env_vars tool to check what env vars the MCP server sees
+            tool_call_request = {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "get_env_vars",
+                    "arguments": {}
+                }
+            }
+            ws.send(json.dumps(tool_call_request))
+
+            # Receive response
+            response = ws.recv()
+            response_data = json.loads(response)
+
+            # Verify response
+            assert response_data["id"] == 2
+            assert "result" in response_data
+
+            # Parse the environment variables from the response
+            content = response_data["result"]["content"][0]["text"]
+            env_data = json.loads(content)
+            env_vars = env_data["env_vars"]
+
+            # Verify our custom env vars are present
+            assert "SAFE_VAR" in env_vars
+            assert env_vars["SAFE_VAR"] == "safe_value"
+            assert "API_KEY" in env_vars
+            assert env_vars["API_KEY"] == "should_not_be_visible"
+
+            ws.close()
+
+        finally:
+            try:
+                os.unlink(config_path)
+            except:
+                pass
+
+    def test_websocket_stdio_http_proxy_rejection(self):
+        """Test that HTTP proxy endpoint rejects stdio servers."""
+        config = self.get_echo_server_config()
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(config, f)
+            config_path = f.name
+
+        try:
+            server.mcp_config = config_path
+            server.start(timeout_seconds=TIMEOUT_SERVER_START)
+
+            # Try to access stdio server via HTTP proxy endpoint
+            # This should return an error telling user to use WebSocket
+            res = server.make_request(
+                "GET",
+                "/mcp?server=echo",
+                timeout=TIMEOUT_HTTP_REQUEST
+            )
+
+            # Should return 400 with error message about using WebSocket
+            assert res.status_code == 400, f"Expected 400, got {res.status_code}"
+            body = res.body
+
+            # Parse JSON response
+            data = json.loads(body if isinstance(body, str) else body.decode() if isinstance(body, bytes) else str(body))
+            assert "error" in data
+            assert "stdio" in data["error"].lower() or "websocket" in data["error"].lower()
 
         finally:
             try:

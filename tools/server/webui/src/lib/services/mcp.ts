@@ -1,13 +1,15 @@
 /**
  * MCP Service - Manages connections to MCP servers using the official MCP SDK
  *
- * Handles communication with Model Context Protocol servers via HTTP proxy.
- * Uses @modelcontextprotocol/sdk's Client with StreamableHTTPClientTransport.
+ * Handles communication with Model Context Protocol servers using hybrid transport:
+ * - stdio servers: WebSocketClientTransport (port + 1)
+ * - HTTP servers: StreamableHTTPClientTransport (HTTP proxy)
  * Each MCP server gets its own connection.
  */
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { WebSocketClientTransport } from '@modelcontextprotocol/sdk/client/websocket.js';
 import type { Tool, Notification } from '@modelcontextprotocol/sdk/types.js';
 
 // Timeout constants - increased for Docker containers that may take time to start
@@ -18,7 +20,7 @@ const INITIAL_RECONNECT_DELAY_MS = 1000; // Start with 1s delay
 
 export class McpService {
 	private client: Client | null = null;
-	private transport: StreamableHTTPClientTransport | null = null;
+	private transport: StreamableHTTPClientTransport | WebSocketClientTransport | null = null;
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	private reconnectAttempts = 0;
 	private manualDisconnect = false;
@@ -48,16 +50,49 @@ export class McpService {
 	}
 
 	/**
-	 * Connect to the MCP server using HTTP proxy
+	 * Get server information from the backend
+	 * Returns the server type (stdio or http) which determines the transport to use
+	 */
+	private async getServerInfo(): Promise<{ type: 'stdio' | 'http' }> {
+		const res = await fetch('/mcp/servers');
+		if (!res.ok) {
+			throw new Error(`Failed to fetch MCP servers: ${res.statusText}`);
+		}
+		const data = await res.json();
+		const server = data.servers.find((s: { name: string }) => s.name === this.serverName);
+		if (!server) {
+			throw new Error(`MCP server not found: ${this.serverName}`);
+		}
+		return server;
+	}
+
+	/**
+	 * Connect to the MCP server using appropriate transport based on server type
 	 *
-	 * Uses the C++ backend proxy at /mcp?server={serverName} which handles
-	 * remote HTTP servers with CORS support.
+	 * For stdio servers: Uses WebSocket on port + 1 (e.g., if HTTP is on 8080, WebSocket is on 8081)
+	 * For remote HTTP servers: Uses HTTP proxy at /mcp?server={serverName} with CORS support
 	 */
 	async connect(): Promise<void> {
 		try {
-			// Build proxy URL: /mcp?server={serverName}
-			const proxyUrl = this._buildProxyUrl(this.serverName);
-			this.transport = new StreamableHTTPClientTransport(new URL(proxyUrl));
+			// Get server information to determine transport type
+			const serverInfo = await this.getServerInfo();
+
+			// Select transport based on server type
+			if (serverInfo.type === 'stdio') {
+				// WebSocket for local stdio servers (port + 1)
+				const wsPort = (parseInt(window.location.port) || 80) + 1;
+				const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+				const wsUrl = `${wsProtocol}//${window.location.hostname}:${wsPort}/mcp?server=${encodeURIComponent(this.serverName)}`;
+				console.log(`[MCP] Connecting to stdio server via WebSocket: ${wsUrl}`);
+				this.transport = new WebSocketClientTransport(new URL(wsUrl));
+			} else if (serverInfo.type === 'http') {
+				// HTTP for remote servers (same port)
+				const httpUrl = `${window.location.origin}/mcp?server=${encodeURIComponent(this.serverName)}`;
+				console.log(`[MCP] Connecting to HTTP server via proxy: ${httpUrl}`);
+				this.transport = new StreamableHTTPClientTransport(new URL(httpUrl));
+			} else {
+				throw new Error(`Unknown server type: ${serverInfo.type}`);
+			}
 
 			// Set up transport event handlers
 			this.transport.onclose = () => {

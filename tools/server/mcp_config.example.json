@@ -1,22 +1,41 @@
 {
   "_comment": "Example MCP configuration for llama.cpp",
-  "_comment_windows": "On Windows, place this file in %APPDATA%\\llama.cpp\\mcp.json",
-  "_comment_macos": "On macOS/Linux, place this file in ~/.llama.cpp/mcp.json",
-  "_comment_env": "Or set the LLAMA_MCP_CONFIG environment variable to point to this file",
+  "_comment_location": "Configuration file locations (checked in order):",
+  "_comment_location_env": "  1. Path specified in LLAMA_MCP_CONFIG environment variable",
+  "_comment_location_unix": "  2. ~/.llama.cpp/mcp.json (macOS/Linux)",
+  "_comment_location_windows": "  3. %APPDATA%\\llama.cpp\\mcp.json (Windows)",
+  "_comment_types": "This file supports two types of MCP servers:",
+  "_comment_stdio": "  - Local stdio servers: spawned and managed by llama-server (using command, args, env)",
+  "_comment_remote": "  - Remote HTTP servers: proxied through llama-server with CORS support (using url, headers)",
+
   "mcpServers": {
-    "_comment": "Remote MCP servers (proxied via C++ backend with CORS support)",
+    "_comment_section_stdio": "=== Local stdio servers (spawned by llama-server) ===",
+
     "brave-search": {
-      "_comment": "Run: BRAVE_API_KEY=... npx -y @anthropic-ai/mcp-server-brave-search --transport http --port 38180",
+      "_comment": "Brave Search MCP server - provides web search capabilities",
       "_comment_key": "Get your API key at https://brave.com/search/api/",
-      "url": "http://127.0.0.1:38180/mcp"
+      "command": "npx",
+      "args": ["-y", "@anthropic-ai/claude-code-mcp-brave-search"],
+      "env": {
+        "BRAVE_API_KEY": "..."
+      }
     },
+
     "python": {
-      "_comment": "Run: uvx mcp-run-python --deps numpy,pandas,pydantic,requests,httpx,sympy,aiohttp streamable-http --port 38181",
-      "url": "http://127.0.0.1:38181/mcp"
+      "_comment": "Python execution MCP server - run Python code with common data science libraries",
+      "command": "uvx",
+      "args": ["mcp-run-python", "--deps", "numpy,pandas,pydantic,requests,httpx,sympy,aiohttp", "stdio"]
     },
-    "filesystem": {
-      "_comment": "Run: npx -y @anthropic-ai/mcp-server-filesystem --transport http --port 38182 /path/to/allowed/dir",
-      "url": "http://127.0.0.1:38182/mcp"
+
+    "_comment_section_remote": "=== Remote HTTP servers (proxied by llama-server) ===",
+
+    "remote-api": {
+      "_comment": "Example remote MCP server with authentication",
+      "_comment_usage": "The llama-server proxies requests to this URL and adds CORS headers",
+      "url": "http://127.0.0.1:38180/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_TOKEN"
+      }
     }
   }
 }

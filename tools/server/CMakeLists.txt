@@ -38,6 +38,10 @@ set(TARGET_SRCS
     server-http.h
     server-models.cpp
     server-models.h
+    server-ws.cpp
+    server-ws.h
+    server-mcp-stdio.cpp
+    server-mcp-stdio.h
     server-task.cpp
     server-task.h
     server-queue.cpp
@@ -46,6 +50,8 @@ set(TARGET_SRCS
     server-common.h
     server-context.cpp
     server-context.h
+    # SHA1 for WebSocket handshake
+    ${CMAKE_SOURCE_DIR}/examples/gguf-hash/deps/sha1/sha1.c
 )
 set(PUBLIC_ASSETS
     index.html.gz
@@ -69,6 +75,7 @@ install(TARGETS ${TARGET} RUNTIME)
 
 target_include_directories(${TARGET} PRIVATE ../mtmd)
 target_include_directories(${TARGET} PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(${TARGET} PRIVATE ${CMAKE_SOURCE_DIR}/examples/gguf-hash/deps)
 target_link_libraries(${TARGET} PRIVATE server-context PUBLIC common cpp-httplib ${CMAKE_THREAD_LIBS_INIT})
 
 if (WIN32)
