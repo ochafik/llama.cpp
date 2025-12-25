@@ -2968,6 +2968,7 @@ llama_state_mmap * llama_state_mmap_open(llama_context * ctx, const char * path_
 
         // Create mmap handle
         auto * mmap = new llama_state_mmap(file.get());
+        LLAMA_LOG_DEBUG("%s: opened read-only mmap, size = %zu bytes\n", __func__, mmap->size());
         return mmap;
     } catch (const std::exception & err) {
         LLAMA_LOG_ERROR("%s: failed to open session file: %s\n", __func__, err.what());
@@ -2996,6 +2997,7 @@ llama_state_mmap * llama_state_mmap_open_rw_sized(llama_context * ctx, const cha
 
         // Create or open file with read-write mmap
         auto * mmap = new llama_state_mmap(path_session, min_size);
+        LLAMA_LOG_DEBUG("%s: opened read-write mmap, size = %zu bytes\n", __func__, mmap->size());
         return mmap;
     } catch (const std::exception & err) {
         LLAMA_LOG_ERROR("%s: failed to create/open session file for mmap: %s\n", __func__, err.what());
@@ -3047,6 +3049,8 @@ llama_state_mmap * llama_state_mmap_open_cow(llama_context * ctx, const char * p
 
         // Create COW mmap (reads file, writes go to anonymous memory)
         auto * mmap = new llama_state_mmap(file.get(), buffer_size);
+        LLAMA_LOG_DEBUG("%s: opened copy-on-write mmap, file_size = %zu, buffer_size = %zu bytes\n",
+            __func__, file_size, mmap->size());
         return mmap;
     } catch (const std::exception & err) {
         LLAMA_LOG_ERROR("%s: failed to open session file for COW mmap: %s\n", __func__, err.what());
@@ -3124,6 +3128,7 @@ bool llama_state_mmap_load(llama_context * ctx, llama_state_mmap * mmap, llama_t
             return false;
         }
 
+        LLAMA_LOG_DEBUG("%s: loaded %u tokens and %zu bytes of state data\n", __func__, n_token_count, n_read);
         return true;
     } catch (const std::exception & err) {
         LLAMA_LOG_ERROR("%s: error loading state from mmap: %s\n", __func__, err.what());
@@ -3177,7 +3182,10 @@ size_t llama_state_mmap_save(llama_context * ctx, llama_state_mmap * mmap, const
 
         mmap->sync();
 
-        return header_size + tokens_size + n_written;
+        const size_t bytes_written = header_size + tokens_size + n_written;
+        LLAMA_LOG_DEBUG("%s: saved %zu tokens and %zu bytes of state data (total %zu bytes)\n",
+            __func__, n_token_count, n_written, bytes_written);
+        return bytes_written;
     } catch (const std::exception & err) {
         LLAMA_LOG_ERROR("%s: error saving state to mmap: %s\n", __func__, err.what());
         return 0;
