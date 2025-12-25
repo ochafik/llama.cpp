@@ -285,9 +285,9 @@ int main(int argc, char ** argv, char ** envp) {
             std::map<std::string, std::string> headers(req.headers);
             // Host/Content-Length: set automatically by httplib for target server
             // Connection: hop-by-hop header, not forwarded through proxies
-            for (const auto & h : {"Host", "Connection", "Content-Length"}) {
-                headers.erase(h);
-            }
+            headers.erase("Host");
+            headers.erase("Connection");
+            headers.erase("Content-Length");
             for (const auto & [k, v] : server_config->headers) {
                 headers[k] = v;
             }
