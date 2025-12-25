@@ -16,7 +16,7 @@
  */
 
 import type { McpConnectionState, McpTool } from '$lib/types/mcp';
-import { McpService } from '$lib/services/mcp';
+import { McpService, mcpServiceFactory } from '$lib/services/mcp';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
 class McpStore {
@@ -138,11 +138,6 @@ class McpStore {
 					await new Promise((resolve) => setTimeout(resolve, 500));
 				}
 
-				// WebSocket port is always HTTP port + 1
-				const url = new URL(window.location.href);
-				const wsPort = parseInt(url.port) + 1;
-				const wsUrl = `ws://${window.location.hostname}:${wsPort}/mcp?server=${encodeURIComponent(serverName)}`;
-
 				// Increment connection generation for this server
 				const currentGen = (this.connectionGenerations.get(serverName) ?? 0) + 1;
 				this.connectionGenerations.set(serverName, currentGen);
@@ -159,7 +154,7 @@ class McpStore {
 				});
 
 				try {
-					const service = new McpService(serverName, wsUrl);
+					const service = mcpServiceFactory.create(serverName);
 					this.services.set(serverName, service);
 
 					// Set up event handlers with generation checking
