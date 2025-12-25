@@ -170,8 +170,6 @@ common_chat_params common_chat_params_init_nemotron_v3_peg(const common_chat_tem
             auto stop_after = std::vector<std::string>{
                 "\n<|im_end|>", "\r\n<|im_end|>", "<|im_end|>"
             };
-            auto skip_content_before = p.optional(p.until_one_of(stop_before));
-            auto skip_content_after = p.optional(p.until_one_of(stop_after));
             auto content_before = p.optional(p.tag(Tag::CONTENT, p.until_one_of(stop_before)));
             auto content_after = p.optional(p.tag(Tag::CONTENT, p.until_one_of(stop_after)));
             auto pre_tool_gap = p.repeat(newline, 0, -1);
