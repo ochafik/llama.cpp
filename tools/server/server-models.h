@@ -166,14 +166,14 @@ struct server_models_routes {
 
 /**
  * A simple HTTP proxy that forwards requests to another server
- * and relays the responses back.
+ * and relays the responses back. Supports HTTP and HTTPS (when built with SSL).
  */
 struct server_http_proxy : server_http_res {
     std::function<void()> cleanup = nullptr;
 public:
+    // scheme_host_port: e.g. "http://localhost:8080" or "https://api.example.com"
     server_http_proxy(const std::string & method,
-                      const std::string & host,
-                      int port,
+                      const std::string & scheme_host_port,
                       const std::string & path,
                       const std::map<std::string, std::string> & headers,
                       const std::string & body,

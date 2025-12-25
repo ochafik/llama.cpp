@@ -593,10 +593,10 @@ server_http_res_ptr server_models::proxy_request(const server_http_req & req, co
         mapping[name].meta.last_used = ggml_time_ms();
     }
     SRV_INF("proxying request to model %s on port %d\n", name.c_str(), meta->port);
+    std::string scheme_host_port = "http://" + std::string(CHILD_ADDR) + ":" + std::to_string(meta->port);
     auto proxy = std::make_unique<server_http_proxy>(
             method,
-            CHILD_ADDR,
-            meta->port,
+            scheme_host_port,
             req.path,
             req.headers,
             req.body,
@@ -883,14 +883,14 @@ static bool should_strip_proxy_header(const std::string & header_name) {
 
 server_http_proxy::server_http_proxy(
         const std::string & method,
-        const std::string & host,
-        int port,
+        const std::string & scheme_host_port,
         const std::string & path,
         const std::map<std::string, std::string> & headers,
         const std::string & body,
         const std::function<bool()> should_stop) {
     // shared between reader and writer threads
-    auto cli  = std::make_shared<httplib::Client>(host, port);
+    // httplib::Client parses scheme://host:port and uses SSL for https://
+    auto cli  = std::make_shared<httplib::Client>(scheme_host_port);
     auto pipe = std::make_shared<pipe_t<msg_t>>();
 
     // setup Client

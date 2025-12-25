@@ -292,8 +292,8 @@ int main(int argc, char ** argv, char ** envp) {
                 headers[k] = v;
             }
 
-            // Stream response from remote MCP server
-            auto res = std::make_unique<server_http_proxy>(method, url.host, url.port, url.path, headers, req.body, req.should_stop);
+            // Stream response from remote MCP server (supports HTTP and HTTPS)
+            auto res = std::make_unique<server_http_proxy>(method, url.scheme_host_port, url.path, headers, req.body, req.should_stop);
 
             // Add CORS headers
             res->headers["Access-Control-Expose-Headers"] = "mcp-session-id";

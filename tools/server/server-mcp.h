@@ -12,50 +12,33 @@
 
 // Parsed URL components for MCP proxy
 struct mcp_parsed_url {
-    std::string host;
-    int port = 80;
-    std::string path;
-    bool is_https = false;
-    std::string error;  // Non-empty if parsing failed
+    std::string scheme_host_port;  // e.g. "http://localhost:8080" or "https://api.example.com"
+    std::string path;              // e.g. "/mcp"
+    std::string error;             // Non-empty if parsing failed
 
     bool valid() const { return error.empty(); }
 
+    // Parse URL into scheme_host_port and path
+    // e.g. "http://localhost:8080/mcp" -> scheme_host_port="http://localhost:8080", path="/mcp"
     static mcp_parsed_url parse(const std::string & url) {
         mcp_parsed_url result;
 
         size_t protocol_pos = url.find("://");
         if (protocol_pos == std::string::npos) {
-            result.error = "Invalid URL format";
+            result.error = "Invalid URL format (missing ://)";
             return result;
         }
 
-        result.is_https = url.substr(0, 5) == "https";
-        if (result.is_https) {
-            result.error = "HTTPS MCP servers are not yet supported";
-            return result;
-        }
-
+        // Find path start (first / after ://)
         size_t host_start = protocol_pos + 3;
         size_t path_pos = url.find("/", host_start);
-        std::string host_port = url.substr(host_start, path_pos - host_start);
-        result.path = path_pos != std::string::npos ? url.substr(path_pos) : "/";
 
-        size_t port_pos = host_port.find(":");
-        if (port_pos != std::string::npos) {
-            result.host = host_port.substr(0, port_pos);
-            try {
-                result.port = std::stoi(host_port.substr(port_pos + 1));
-                if (result.port < 1 || result.port > 65535) {
-                    result.error = "Port out of range";
-                    return result;
-                }
-            } catch (...) {
-                result.error = "Invalid port";
-                return result;
-            }
+        if (path_pos != std::string::npos) {
+            result.scheme_host_port = url.substr(0, path_pos);
+            result.path = url.substr(path_pos);
         } else {
-            result.host = host_port;
-            result.port = result.is_https ? 443 : 80;
+            result.scheme_host_port = url;
+            result.path = "/";
         }
 
         return result;
