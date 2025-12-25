@@ -211,13 +211,14 @@ bool server_http_context::init(const common_params & params) {
 
         // If this is OPTIONS request, skip validation because browsers don't include Authorization header
         if (req.method == "OPTIONS") {
-            res.set_header("Access-Control-Allow-Methods",     "GET, POST, OPTIONS");
+            res.set_header("Access-Control-Allow-Credentials", "true");
+            res.set_header("Access-Control-Allow-Methods",     "GET, POST");
             // Include MCP protocol headers for CORS only if MCP is enabled
             if (webui_mcp) {
-                res.set_header("Access-Control-Allow-Headers",     "Content-Type, mcp-session-id, mcp-protocol-version");
-                res.set_header("Access-Control-Expose-Headers",     "mcp-session-id");
+                res.set_header("Access-Control-Allow-Headers",     "*, mcp-session-id, mcp-protocol-version");
+                res.set_header("Access-Control-Expose-Headers",    "mcp-session-id");
             } else {
-                res.set_header("Access-Control-Allow-Headers",     "Content-Type");
+                res.set_header("Access-Control-Allow-Headers",     "*");
             }
             res.set_content("", "text/html"); // blank response, no data
             return httplib::Server::HandlerResponse::Handled; // skip further processing
