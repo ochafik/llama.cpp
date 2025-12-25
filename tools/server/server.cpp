@@ -1,8 +1,6 @@
 #include "server-context.h"
 #include "server-http.h"
 #include "server-models.h"
-#include "server-ws.h"
-#include "server-mcp-bridge.h"
 
 #include "arg.h"
 #include "common.h"
@@ -13,6 +11,9 @@
 #include <exception>
 #include <signal.h>
 #include <thread> // for std::thread::hardware_concurrency
+#include <algorithm>
+
+#include <cpp-httplib/httplib.h>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -116,18 +117,6 @@ int main(int argc, char ** argv, char ** envp) {
         return 1;
     }
 
-    //
-    // WebSocket Server (for MCP support) - only if --webui-mcp is enabled
-    //
-
-    std::unique_ptr<server_ws_context> ctx_ws = nullptr;
-    std::unique_ptr<server_mcp_bridge> mcp_bridge = nullptr;
-
-    if (params.webui_mcp) {
-        ctx_ws = std::make_unique<server_ws_context>();
-        mcp_bridge = std::make_unique<server_mcp_bridge>();
-    }
-
     // Helper function to get MCP config path
     auto get_mcp_config_paths = [&params]() -> std::vector<std::string> {
         std::vector<std::string> paths;
@@ -167,10 +156,10 @@ int main(int argc, char ** argv, char ** envp) {
     };
 
     // Try to load MCP config from default locations (only if MCP is enabled)
-    if (params.webui_mcp && mcp_bridge) {
+    if (params.webui_mcp) {
         std::vector<std::string> config_paths = get_mcp_config_paths();
         for (const auto & path : config_paths) {
-            if (mcp_bridge->load_config(path)) {
+            if (ctx_http.load_mcp_config(path)) {
                 LOG_INF("%s: loaded MCP config from: %s\n", __func__, path.c_str());
                 break;
             }
@@ -264,26 +253,76 @@ int main(int argc, char ** argv, char ** envp) {
 
     // MCP servers (only if --webui-mcp is enabled)
     if (params.webui_mcp) {
-        ctx_http.get ("/mcp/servers", [&mcp_bridge](const server_http_req &) {
-            json servers = json::array();
-            if (mcp_bridge) {
-                for (const auto & server_name : mcp_bridge->get_available_servers()) {
-                    servers.push_back({
-                        {"name", server_name}
-                    });
-                }
+        // HTTP proxy for remote MCP servers with CORS support
+        auto proxy_mcp_handler = [&ctx_http](const server_http_req & req, const std::string & method) -> server_http_res_ptr {
+            std::string server_name = req.get_param("server");
+            if (server_name.empty()) {
+                auto res = std::make_unique<server_http_res>();
+                res->status = 400;
+                res->data = json{{"error", "Missing server parameter"}}.dump();
+                return res;
             }
-            json response = {
-                {"servers", servers}
-            };
+
+            auto server_config = ctx_http.get_mcp_server(server_name);
+            if (!server_config || server_config->url.empty()) {
+                auto res = std::make_unique<server_http_res>();
+                res->status = 404;
+                res->data = json{{"error", "Server not found: " + server_name}}.dump();
+                return res;
+            }
+
+            auto url = server_config->parsed_url();
+            if (!url.valid()) {
+                auto res = std::make_unique<server_http_res>();
+                res->status = 400;
+                res->data = json{{"error", url.error}}.dump();
+                return res;
+            }
+
+            SRV_INF("%s: Proxying to %s (server: %s)\n", __func__, server_config->url.c_str(), server_name.c_str());
+
+            // Copy request headers, apply config headers (which take precedence)
+            std::map<std::string, std::string> headers(req.headers);
+            // Host/Content-Length: set automatically by httplib for target server
+            // Connection: hop-by-hop header, not forwarded through proxies
+            for (const auto & h : {"Host", "Connection", "Content-Length"}) {
+                headers.erase(h);
+            }
+            for (const auto & [k, v] : server_config->headers) {
+                headers[k] = v;
+            }
+
+            // Stream response from remote MCP server
+            auto res = std::make_unique<server_http_proxy>(method, url.host, url.port, url.path, headers, req.body, req.should_stop);
+
+            // Add CORS headers
+            res->headers["Access-Control-Expose-Headers"] = "mcp-session-id";
+            auto origin_it = req.headers.find("Origin");
+            if (origin_it != req.headers.end()) {
+                res->headers["Access-Control-Allow-Origin"] = origin_it->second;
+            }
+
+            return res;
+        };
+
+        ctx_http.get ("/mcp", ex_wrapper([&](const server_http_req & req) -> server_http_res_ptr {
+            return proxy_mcp_handler(req, "GET");
+        }));
+        ctx_http.post("/mcp", ex_wrapper([&](const server_http_req & req) -> server_http_res_ptr {
+            return proxy_mcp_handler(req, "POST");
+        }));
+
+        // List available MCP servers from config
+        ctx_http.get("/mcp/servers", ex_wrapper([&ctx_http](const server_http_req &) -> server_http_res_ptr {
             auto res = std::make_unique<server_http_res>();
             res->status = 200;
-            res->data = response.dump();
+            json servers = json::array();
+            for (const auto & name : ctx_http.get_mcp_server_names()) {
+                servers.push_back({{"name", name}});
+            }
+            res->data = json{{"servers", servers}}.dump();
             return res;
-        });
-
-        ctx_http.get ("/mcp", ex_wrapper(ctx_ws->get_mcp));
-        ctx_http.post("/mcp", ex_wrapper(ctx_ws->post_mcp));
+        }));
     }
 
     //
@@ -291,21 +330,6 @@ int main(int argc, char ** argv, char ** envp) {
     //
 
     std::function<void()> clean_up;
-
-    // Register WebSocket handlers (only if --webui-mcp is enabled)
-    if (params.webui_mcp && ctx_ws) {
-        ctx_ws->on_open([&mcp_bridge](auto conn) {
-            mcp_bridge->on_connection_opened(conn);
-        });
-
-        ctx_ws->on_message([&mcp_bridge](auto conn, const std::string & msg) {
-            mcp_bridge->on_connection_message(conn, msg);
-        });
-
-        ctx_ws->on_close([&mcp_bridge](auto conn) {
-            mcp_bridge->on_connection_closed(conn);
-        });
-    }
 
     if (is_router_server) {
         LOG_INF("%s: starting router server, no model will be loaded in this process\n", __func__);

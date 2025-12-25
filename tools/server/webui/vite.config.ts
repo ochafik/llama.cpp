@@ -157,8 +157,7 @@ export default defineConfig({
 			'/v1': 'http://localhost:8080',
 			'/props': 'http://localhost:8080',
 			'/models': 'http://localhost:8080',
-			// HTTP endpoint for MCP
-			'/mcp/servers': 'http://localhost:8080',
+			// MCP HTTP proxy endpoint
 			'/mcp': 'http://localhost:8080'
 		},
 		headers: {

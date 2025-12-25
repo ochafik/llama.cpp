@@ -5,7 +5,7 @@
  * It provides reactive state for connected MCP servers and their available tools.
  *
  * **Architecture & Relationships:**
- * - **McpService**: Stateless service for WebSocket communication
+ * - **McpService**: Stateless service for HTTP proxy communication
  * - **mcpStore** (this class): Reactive store for MCP connection state
  * - **Chat Components**: Can use MCP tools during generation
  *
@@ -13,10 +13,11 @@
  * - **Connection Management**: Connect/disconnect to MCP servers
  * - **Tool Discovery**: Automatically fetches available tools
  * - **Multiple Servers**: Support for multiple simultaneous MCP server connections
+ * - **HTTP Proxy**: All connections go through C++ backend proxy at /mcp?server={serverName}
  */
 
 import type { McpConnectionState, McpTool } from '$lib/types/mcp';
-import { McpService, mcpServiceFactory } from '$lib/services/mcp';
+import { McpService } from '$lib/services/mcp';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 
 class McpStore {
@@ -99,6 +100,11 @@ class McpStore {
 
 	/**
 	 * Connect to an MCP server by name
+	 *
+	 * @param serverName - Name of the MCP server
+	 *
+	 * @example
+	 * await mcpStore.connect('brave-search')
 	 */
 	async connect(serverName: string): Promise<void> {
 		// Check if there's already a connection in progress
@@ -134,7 +140,7 @@ class McpStore {
 					}
 					// Service exists but is disconnected - clean it up first
 					existingService.disconnect();
-					// Wait for the WebSocket to finish closing before creating a new one
+					// Wait for the transport to finish closing before creating a new one
 					await new Promise((resolve) => setTimeout(resolve, 500));
 				}
 
@@ -154,7 +160,8 @@ class McpStore {
 				});
 
 				try {
-					const service = mcpServiceFactory.create(serverName);
+					// Create service
+					const service = new McpService(serverName);
 					this.services.set(serverName, service);
 
 					// Set up event handlers with generation checking
@@ -232,12 +239,15 @@ class McpStore {
 	async disconnect(serverName: string): Promise<void> {
 		// Clear connection promise to allow reconnect
 		this.connectionPromises.delete(serverName);
+		// Clear connection generation to prevent stale callbacks
+		this.connectionGenerations.delete(serverName);
 		// Clear connecting state (reactive)
 		this.removeConnecting(serverName);
 
 		const service = this.services.get(serverName);
 		if (service) {
 			await service.disconnect();
+			this.services.delete(serverName);
 		}
 		// Create a new SvelteMap to trigger Svelte 5 reactivity
 		const newConnections = new SvelteMap(this.connections);

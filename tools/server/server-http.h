@@ -1,10 +1,15 @@
 #pragma once
 
+#include "server-mcp.h"
+
 #include <atomic>
 #include <functional>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
+#include <optional>
 
 struct common_params;
 
@@ -59,6 +64,17 @@ struct server_http_context {
     std::string path_prefix;
     std::string hostname;
     int port;
+
+    // MCP configuration (for HTTP proxy)
+    std::shared_ptr<llama_mcp_config> mcp_config;
+
+    // Load MCP config from JSON file
+    bool load_mcp_config(const std::string & config_path);
+
+    // Get MCP server config by name
+    std::optional<mcp_server_config> get_mcp_server(const std::string & name);
+    // Get list of available MCP server names
+    std::vector<std::string> get_mcp_server_names();
 
     server_http_context();
     ~server_http_context();

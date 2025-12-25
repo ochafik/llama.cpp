@@ -1,17 +1,13 @@
 #!/usr/bin/env python
 """
-Tests for MCP (Model Context Protocol) server functionality.
+Tests for MCP (Model Context Protocol) HTTP proxy functionality.
 
 Tests cover:
-- HTTP endpoint: /mcp/servers
-- WebSocket connection lifecycle (on HTTP port + 1)
-- MCP JSON-RPC protocol (using official MCP SDK)
-- Environment variable filtering (security)
+- HTTP endpoint: /mcp?server=... (GET and POST)
+- CORS headers for browser compatibility
 """
 
 import pytest
-import pytest_asyncio
-import asyncio
 import json
 import os
 import tempfile
@@ -24,29 +20,10 @@ sys.path.insert(0, str(path))
 
 from utils import ServerProcess
 
-# Raw websocket for low-level protocol tests
-import websocket
-
-# Official MCP SDK for protocol-level tests
-from mcp.client.websocket import websocket_client
-from mcp.client.session import ClientSession
-
 server: ServerProcess
 
 TIMEOUT_SERVER_START = 60
 TIMEOUT_HTTP_REQUEST = 10
-TIMEOUT_WS = 5
-
-# Environment variables that are allowed to be inherited by MCP subprocesses
-# Must match MCP_INHERITED_ENV_VARS in server-mcp-bridge.cpp
-if sys.platform == "win32":
-    MCP_ALLOWED_ENV_VARS = {
-        "APPDATA", "HOMEDRIVE", "HOMEPATH", "LOCALAPPDATA", "PATH",
-        "PROCESSOR_ARCHITECTURE", "SYSTEMDRIVE", "SYSTEMROOT", "TEMP",
-        "USERNAME", "USERPROFILE", "PROGRAMFILES"
-    }
-else:
-    MCP_ALLOWED_ENV_VARS = {"HOME", "LOGNAME", "PATH", "SHELL", "TERM", "USER"}
 
 
 def get_local_model():
@@ -70,7 +47,7 @@ def create_server():
     server.server_port = 8082  # Use different port to avoid conflicts
     server.n_slots = 1
     server.n_ctx = 2048
-    server.webui_mcp = True  # Enable MCP WebSocket support
+    server.webui_mcp = True  # Enable MCP HTTP proxy support
     # Use a local model (MCP tests don't need HF download)
     local_model = get_local_model()
     if local_model:
@@ -84,448 +61,225 @@ def create_server():
     server.stop()
 
 
-class TestMcpHttpEndpoints:
-    """Test MCP HTTP endpoints."""
+class TestMcpHttpProxyCorsHeaders:
+    """Test MCP HTTP proxy CORS headers for browser compatibility."""
 
-    def test_mcp_servers_endpoint_no_config(self):
-        """Test /mcp/servers returns empty list when no config is set."""
-        server.start(timeout_seconds=TIMEOUT_SERVER_START)
+    # Origin header to simulate browser request
+    TEST_ORIGIN = "https://example.com"
 
-        res = server.make_request("GET", "/mcp/servers", timeout=TIMEOUT_HTTP_REQUEST)
-        assert res.status_code == 200, f"Expected 200, got {res.status_code}"
-
-        body = res.body
-        assert "servers" in body, f"Expected 'servers' key in response: {body}"
-        # Without config, should return empty list or available servers
-        assert isinstance(body["servers"], list), f"Expected list, got {type(body['servers'])}"
-
-
-
-class TestMcpWithConfig:
-    """Test MCP with a configuration file."""
-
-    @pytest.fixture
-    def mcp_config_file(self):
-        """Create a temporary MCP config file."""
+    def test_proxy_cors_headers_on_options(self):
+        """Test OPTIONS request returns proper CORS headers."""
+        # Create config with a remote HTTP server
         config = {
             "mcpServers": {
-                "echo-test": {
-                    "command": "echo",
-                    "args": ["test"],
-                    "env": {}
+                "test-remote": {
+                    "url": "http://127.0.0.1:9999/mcp"
                 }
             }
         }
 
-        with tempfile.NamedTemporaryFile(
-            mode='w',
-            suffix='.json',
-            delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
             json.dump(config, f)
             config_path = f.name
-
-        yield config_path
-
-        # Cleanup
-        try:
-            os.unlink(config_path)
-        except:
-            pass
-
-    def test_mcp_servers_with_config(self, mcp_config_file):
-        """Test /mcp/servers returns configured servers."""
-        server.mcp_config = mcp_config_file
-        server.start(timeout_seconds=TIMEOUT_SERVER_START)
-
-        res = server.make_request("GET", "/mcp/servers", timeout=TIMEOUT_HTTP_REQUEST)
-        assert res.status_code == 200, f"Expected 200, got {res.status_code}"
-
-        body = res.body
-        assert "servers" in body, f"Expected 'servers' key in response: {body}"
-        servers = body["servers"]
-
-        # Should have the echo-test server (servers is a list of objects with 'name' key)
-        server_names = [s["name"] if isinstance(s, dict) else s for s in servers]
-        assert "echo-test" in server_names, f"Expected 'echo-test' in servers: {servers}"
-
-
-class TestMcpWebSocket:
-    """Test MCP WebSocket functionality."""
-
-    def test_websocket_connection_without_server_param(self):
-        """Test WebSocket connection fails without server parameter."""
-        server.start(timeout_seconds=TIMEOUT_SERVER_START)
-
-        ws_port = server.server_port + 1
-        ws_url = f"ws://{server.server_host}:{ws_port}/mcp"
-
-        # Server should close connection immediately when no server parameter is provided
-        # This can manifest as connection closed, bad status, timeout, or empty message
-        try:
-            ws = websocket.create_connection(ws_url, timeout=TIMEOUT_WS)
-            try:
-                # Try to receive - should fail since server closes connection
-                result = ws.recv()
-                # Empty result or connection close is expected
-                if result:
-                    data = json.loads(result)
-                    assert "error" in data or data.get("error") is not None, \
-                        f"Expected error response without server param: {data}"
-                # Empty result means connection was closed - this is expected
-            except (websocket.WebSocketConnectionClosedException, websocket.WebSocketTimeoutException):
-                # This is expected - server closes connection without valid server param
-                pass
-            finally:
-                ws.close()
-        except (websocket.WebSocketBadStatusException, websocket.WebSocketException) as e:
-            # Also acceptable - connection may be rejected during handshake
-            pass
-
-    def test_websocket_connection_invalid_server(self):
-        """Test WebSocket connection with invalid server name returns error on message."""
-        server.start(timeout_seconds=TIMEOUT_SERVER_START)
-
-        ws_port = server.server_port + 1
-        ws_url = f"ws://{server.server_host}:{ws_port}/mcp?server=nonexistent"
-
-        ws = websocket.create_connection(ws_url, timeout=TIMEOUT_WS)
-        try:
-            # Connection opens successfully, but sending a message should fail
-            # because the server config doesn't exist
-            init_request = {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {},
-                    "clientInfo": {"name": "test-client", "version": "1.0.0"}
-                }
-            }
-            ws.send(json.dumps(init_request))
-
-            # Should get error response about unknown server
-            result = ws.recv()
-            data = json.loads(result)
-            assert "error" in data, \
-                f"Expected error for invalid server: {data}"
-            # Error should indicate MCP process not available
-            assert data["error"]["code"] == -32000 or "not available" in data["error"]["message"].lower(), \
-                f"Expected 'MCP process not available' error: {data}"
-        except websocket.WebSocketConnectionClosedException:
-            # Also acceptable - server may close connection
-            pass
-        finally:
-            ws.close()
-
-
-def get_mcp_echo_script_path():
-    """Get the path to the MCP echo server fixture script."""
-    return str(Path(__file__).parent.parent / "fixtures" / "mcp_echo_server.py")
-
-
-@pytest.fixture
-def python_mcp_config():
-    """Create config with a Python-based echo MCP server for testing."""
-    script_path = get_mcp_echo_script_path()
-
-    # Create config pointing to the script
-    config = {
-        "mcpServers": {
-            "test-echo": {
-                "command": sys.executable,
-                "args": [script_path],
-                "env": {"PYTHONUNBUFFERED": "1"}
-            }
-        }
-    }
-
-    with tempfile.NamedTemporaryFile(
-        mode='w',
-        suffix='.json',
-        delete=False
-    ) as config_file:
-        json.dump(config, config_file)
-        config_path = config_file.name
-
-    yield config_path
-
-    # Cleanup config file (script is a fixture, not temp)
-    try:
-        os.unlink(config_path)
-    except:
-        pass
-
-
-class TestMcpJsonRpcProtocol:
-    """Test MCP JSON-RPC protocol handling using the official MCP SDK."""
-
-    @pytest.mark.asyncio
-    async def test_mcp_initialize_and_list_tools(self, python_mcp_config):
-        """Test MCP initialize handshake and tools/list using the MCP SDK."""
-        server.mcp_config = python_mcp_config
-        server.start(timeout_seconds=TIMEOUT_SERVER_START)
-
-        ws_port = server.server_port + 1
-        ws_url = f"ws://{server.server_host}:{ws_port}/mcp?server=test-echo"
-
-        async with websocket_client(ws_url) as streams:
-            read_stream, write_stream = streams
-            async with ClientSession(read_stream, write_stream) as session:
-                # Initialize (handled by ClientSession automatically)
-                result = await session.initialize()
-
-                # Verify initialization result
-                assert result.protocolVersion is not None, \
-                    f"Expected protocolVersion in result: {result}"
-
-                # List tools
-                tools_result = await session.list_tools()
-                tools = tools_result.tools
-
-                assert len(tools) >= 2, \
-                    f"Expected at least two tools (echo, get_env_vars): {tools}"
-                tool_names = [t.name for t in tools]
-                assert "echo" in tool_names, f"Expected echo tool: {tools}"
-                assert "get_env_vars" in tool_names, f"Expected get_env_vars tool: {tools}"
-
-    @pytest.mark.asyncio
-    async def test_mcp_tool_call(self, python_mcp_config):
-        """Test MCP tools/call method using the MCP SDK."""
-        server.mcp_config = python_mcp_config
-        server.start(timeout_seconds=TIMEOUT_SERVER_START)
-
-        ws_port = server.server_port + 1
-        ws_url = f"ws://{server.server_host}:{ws_port}/mcp?server=test-echo"
-
-        async with websocket_client(ws_url) as streams:
-            read_stream, write_stream = streams
-            async with ClientSession(read_stream, write_stream) as session:
-                # Initialize
-                await session.initialize()
-
-                # Call the echo tool
-                result = await session.call_tool("echo", {"message": "Hello, MCP!"})
-
-                # Verify result
-                assert result.content is not None, f"Expected content: {result}"
-                assert len(result.content) > 0, f"Expected content items: {result}"
-
-                # Extract text from first content item
-                first_content = result.content[0]
-                assert hasattr(first_content, 'text'), f"Expected text content: {first_content}"
-                assert first_content.text == "Hello, MCP!", \
-                    f"Expected echoed message: {first_content.text}"
-
-
-class TestMcpJsonRpcProtocolRaw:
-    """Test MCP JSON-RPC protocol handling using raw WebSocket (for edge cases)."""
-
-    def test_mcp_initialize_handshake_raw(self, python_mcp_config):
-        """Test MCP initialize handshake via raw WebSocket."""
-        server.mcp_config = python_mcp_config
-        server.start(timeout_seconds=TIMEOUT_SERVER_START)
-
-        ws_port = server.server_port + 1
-        ws_url = f"ws://{server.server_host}:{ws_port}/mcp?server=test-echo"
-
-        ws = websocket.create_connection(ws_url, timeout=TIMEOUT_WS)
-        try:
-            # Send initialize request
-            init_request = {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {},
-                    "clientInfo": {"name": "test-client", "version": "1.0.0"}
-                }
-            }
-            ws.send(json.dumps(init_request))
-
-            # Receive response
-            result = ws.recv()
-            response = json.loads(result)
-
-            assert response.get("id") == 1, f"Expected id=1: {response}"
-            assert "result" in response, f"Expected result in response: {response}"
-            assert "protocolVersion" in response["result"], \
-                f"Expected protocolVersion in result: {response}"
-
-        finally:
-            ws.close()
-
-    def test_mcp_tools_list_raw(self, python_mcp_config):
-        """Test MCP tools/list method via raw WebSocket."""
-        server.mcp_config = python_mcp_config
-        server.start(timeout_seconds=TIMEOUT_SERVER_START)
-
-        ws_port = server.server_port + 1
-        ws_url = f"ws://{server.server_host}:{ws_port}/mcp?server=test-echo"
-
-        ws = websocket.create_connection(ws_url, timeout=TIMEOUT_WS)
-        try:
-            # Initialize first
-            init_request = {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {},
-                    "clientInfo": {"name": "test-client", "version": "1.0.0"}
-                }
-            }
-            ws.send(json.dumps(init_request))
-            ws.recv()  # Consume init response
-
-            # Send initialized notification
-            ws.send(json.dumps({
-                "jsonrpc": "2.0",
-                "method": "notifications/initialized"
-            }))
-
-            # Request tools list
-            tools_request = {
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/list",
-                "params": {}
-            }
-            ws.send(json.dumps(tools_request))
-
-            result = ws.recv()
-            response = json.loads(result)
-
-            assert response.get("id") == 2, f"Expected id=2: {response}"
-            assert "result" in response, f"Expected result: {response}"
-            assert "tools" in response["result"], f"Expected tools: {response}"
-
-            tools = response["result"]["tools"]
-            assert len(tools) >= 2, f"Expected at least two tools (echo, get_env_vars): {tools}"
-            tool_names = [t["name"] for t in tools]
-            assert "echo" in tool_names, f"Expected echo tool: {tools}"
-            assert "get_env_vars" in tool_names, f"Expected get_env_vars tool: {tools}"
-
-        finally:
-            ws.close()
-
-
-@pytest.fixture
-def python_mcp_config_with_secret():
-    """Create config with a Python-based MCP server and config-specified env var."""
-    script_path = get_mcp_echo_script_path()
-
-    # Create config pointing to the script
-    config = {
-        "mcpServers": {
-            "test-echo": {
-                "command": sys.executable,
-                "args": [script_path],
-                "env": {
-                    "PYTHONUNBUFFERED": "1",
-                    "MCP_CONFIG_VAR": "config_value"  # This should be passed
-                }
-            }
-        }
-    }
-
-    with tempfile.NamedTemporaryFile(
-        mode='w',
-        suffix='.json',
-        delete=False
-    ) as config_file:
-        json.dump(config, config_file)
-        config_path = config_file.name
-
-    yield config_path
-
-    # Cleanup config file (script is a fixture, not temp)
-    try:
-        os.unlink(config_path)
-    except:
-        pass
-
-
-class TestMcpEnvVarFiltering:
-    """Test that MCP subprocess only receives vetted environment variables."""
-
-    @pytest.mark.asyncio
-    async def test_env_vars_filtering(self, python_mcp_config_with_secret):
-        """Test that MCP subprocess only receives allowed env vars using MCP SDK."""
-        config_path = python_mcp_config_with_secret
-
-        # Set some secret env vars that should NOT be passed to subprocess
-        secret_vars = {
-            "SECRET_API_KEY": "super_secret_key_12345",
-            "AWS_SECRET_ACCESS_KEY": "aws_secret_12345",
-            "DATABASE_PASSWORD": "db_password_12345",
-        }
-        old_env = {}
-        for key, value in secret_vars.items():
-            old_env[key] = os.environ.get(key)
-            os.environ[key] = value
 
         try:
             server.mcp_config = config_path
             server.start(timeout_seconds=TIMEOUT_SERVER_START)
 
-            ws_port = server.server_port + 1
-            ws_url = f"ws://{server.server_host}:{ws_port}/mcp?server=test-echo"
+            # Send OPTIONS request to proxy endpoint with Origin header (browsers always send this)
+            res = server.make_request(
+                "OPTIONS",
+                "/mcp?server=test-remote",
+                headers={"Origin": self.TEST_ORIGIN},
+                timeout=TIMEOUT_HTTP_REQUEST
+            )
 
-            async with websocket_client(ws_url) as streams:
-                read_stream, write_stream = streams
-                async with ClientSession(read_stream, write_stream) as session:
-                    # Initialize
-                    await session.initialize()
+            # Should return 200 or 204 (CORS preflight)
+            assert res.status_code in (200, 204), f"Expected 200/204, got {res.status_code}"
 
-                    # Call get_env_vars tool to see what env vars the subprocess received
-                    result = await session.call_tool("get_env_vars", {})
+            headers = res.headers
 
-                    # Extract env vars from the result
-                    subprocess_env = {}
-                    if result.content:
-                        first_content = result.content[0]
-                        if hasattr(first_content, 'text'):
-                            text_data = json.loads(first_content.text)
-                            subprocess_env = text_data.get("env_vars", {})
+            # Check required CORS headers are present
+            assert "Access-Control-Allow-Origin" in headers, \
+                f"Missing Access-Control-Allow-Origin header"
+            assert headers["Access-Control-Allow-Origin"] == self.TEST_ORIGIN, \
+                f"Expected origin {self.TEST_ORIGIN}, got {headers.get('Access-Control-Allow-Origin')}"
 
-                    assert subprocess_env, f"Could not extract env vars from response: {result}"
+            assert "Access-Control-Allow-Methods" in headers, \
+                f"Missing Access-Control-Allow-Methods header"
+            methods = headers["Access-Control-Allow-Methods"]
+            assert "GET" in methods and "POST" in methods, \
+                f"Expected GET and POST in methods, got {methods}"
 
-                    # Verify secret vars are NOT present
-                    for secret_key in secret_vars:
-                        assert secret_key not in subprocess_env, \
-                            f"Secret env var '{secret_key}' was leaked to MCP subprocess! " \
-                            f"Subprocess env: {list(subprocess_env.keys())}"
+            assert "Access-Control-Allow-Headers" in headers, \
+                f"Missing Access-Control-Allow-Headers header"
+            allow_headers = headers["Access-Control-Allow-Headers"]
+            # Check for MCP-specific headers
+            assert "content-type" in allow_headers.lower(), \
+                f"Missing content-type in Allow-Headers: {allow_headers}"
+            assert "mcp-session-id" in allow_headers.lower(), \
+                f"Missing mcp-session-id in Allow-Headers: {allow_headers}"
 
-                    # Verify allowed vars are present (at least some of them)
-                    present_allowed = [v for v in MCP_ALLOWED_ENV_VARS if v in subprocess_env]
-                    assert len(present_allowed) > 0, \
-                        f"None of the allowed env vars {MCP_ALLOWED_ENV_VARS} are present. " \
-                        f"Subprocess env: {list(subprocess_env.keys())}"
-
-                    # Verify config-specified env vars ARE present
-                    assert "PYTHONUNBUFFERED" in subprocess_env, \
-                        f"Config-specified PYTHONUNBUFFERED not in env: {list(subprocess_env.keys())}"
-                    assert "MCP_CONFIG_VAR" in subprocess_env, \
-                        f"Config-specified MCP_CONFIG_VAR not in env: {list(subprocess_env.keys())}"
-                    assert subprocess_env["MCP_CONFIG_VAR"] == "config_value", \
-                        f"MCP_CONFIG_VAR has wrong value: {subprocess_env['MCP_CONFIG_VAR']}"
-
-                    # Verify PATH is present (essential for finding executables)
-                    assert "PATH" in subprocess_env, \
-                        f"PATH should be inherited: {list(subprocess_env.keys())}"
+            assert "Access-Control-Expose-Headers" in headers, \
+                f"Missing Access-Control-Expose-Headers header"
+            expose_headers = headers["Access-Control-Expose-Headers"]
+            assert "mcp-session-id" in expose_headers.lower(), \
+                f"Missing mcp-session-id in Expose-Headers: {expose_headers}"
 
         finally:
-            # Restore environment
-            for key, value in old_env.items():
-                if value is None:
-                    if key in os.environ:
-                        del os.environ[key]
-                else:
-                    os.environ[key] = value
+            try:
+                os.unlink(config_path)
+            except:
+                pass
+
+    def test_proxy_cors_headers_on_get(self):
+        """Test GET request also returns CORS headers."""
+        config = {
+            "mcpServers": {
+                "test-remote": {
+                    "url": "http://127.0.0.1:9999/mcp"
+                }
+            }
+        }
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(config, f)
+            config_path = f.name
+
+        try:
+            server.mcp_config = config_path
+            server.start(timeout_seconds=TIMEOUT_SERVER_START)
+
+            # Send GET request to proxy endpoint with Origin header
+            # This will fail to connect to the remote server, but we can check CORS headers
+            res = server.make_request(
+                "GET",
+                "/mcp?server=test-remote",
+                headers={"Origin": self.TEST_ORIGIN},
+                timeout=TIMEOUT_HTTP_REQUEST
+            )
+
+            # Should get 502 Bad Gateway (remote server not available)
+            # But CORS headers should still be present
+            headers = res.headers
+
+            assert "Access-Control-Allow-Origin" in headers, \
+                f"Missing Access-Control-Allow-Origin in GET response"
+            assert headers["Access-Control-Allow-Origin"] == self.TEST_ORIGIN, \
+                f"Expected origin {self.TEST_ORIGIN}, got {headers.get('Access-Control-Allow-Origin')}"
+
+            assert "Access-Control-Expose-Headers" in headers, \
+                f"Missing Access-Control-Expose-Headers in GET response"
+
+            expose_headers = headers["Access-Control-Expose-Headers"]
+            assert "mcp-session-id" in expose_headers.lower(), \
+                f"Missing mcp-session-id in Expose-Headers: {expose_headers}"
+
+        finally:
+            try:
+                os.unlink(config_path)
+            except:
+                pass
+
+
+class TestMcpHttpProxyErrors:
+    """Test MCP HTTP proxy error handling."""
+
+    def test_proxy_missing_server_param(self):
+        """Test proxy returns 400 when server parameter is missing."""
+        server.start(timeout_seconds=TIMEOUT_SERVER_START)
+
+        res = server.make_request(
+            "GET",
+            "/mcp",
+            timeout=TIMEOUT_HTTP_REQUEST
+        )
+
+        assert res.status_code == 400, f"Expected 400, got {res.status_code}"
+        body = res.body
+        assert "error" in str(body).lower(), f"Expected error in response: {body}"
+        # Verify response is valid JSON
+        try:
+            data = json.loads(body) if isinstance(body, str) else json.loads(body.decode())
+            assert "error" in data, f"Expected 'error' key in JSON: {data}"
+        except json.JSONDecodeError:
+            pytest.fail(f"Response is not valid JSON: {body}")
+
+    def test_proxy_server_not_found(self):
+        """Test proxy returns 404 for unknown server."""
+        server.start(timeout_seconds=TIMEOUT_SERVER_START)
+
+        res = server.make_request(
+            "GET",
+            "/mcp?server=nonexistent-server",
+            timeout=TIMEOUT_HTTP_REQUEST
+        )
+
+        assert res.status_code == 404, f"Expected 404, got {res.status_code}"
+        body = res.body
+        # Verify response is valid JSON (tests JSON injection fix)
+        try:
+            data = json.loads(body) if isinstance(body, str) else json.loads(body.decode())
+            assert "error" in data, f"Expected 'error' key in JSON: {data}"
+        except json.JSONDecodeError:
+            pytest.fail(f"Response is not valid JSON: {body}")
+
+    def test_proxy_server_not_found_special_chars(self):
+        """Test proxy handles special characters in server name safely."""
+        server.start(timeout_seconds=TIMEOUT_SERVER_START)
+
+        # Test with characters that could cause JSON injection
+        res = server.make_request(
+            "GET",
+            '/mcp?server=test", "injected": "value',
+            timeout=TIMEOUT_HTTP_REQUEST
+        )
+
+        assert res.status_code == 404, f"Expected 404, got {res.status_code}"
+        body = res.body
+        # Verify response is valid JSON (no injection)
+        try:
+            data = json.loads(body) if isinstance(body, str) else json.loads(body.decode())
+            assert "error" in data, f"Expected 'error' key in JSON: {data}"
+            # Should only have 'error' key, no injected keys
+            assert len(data) == 1, f"Expected only 'error' key, got: {data.keys()}"
+        except json.JSONDecodeError:
+            pytest.fail(f"Response is not valid JSON: {body}")
+
+    def test_proxy_no_url_configured(self):
+        """Test proxy returns 404 when server has no URL."""
+        # Create config with a server that has no URL
+        config = {
+            "mcpServers": {
+                "test-empty": {}
+            }
+        }
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(config, f)
+            config_path = f.name
+
+        try:
+            server.mcp_config = config_path
+            server.start(timeout_seconds=TIMEOUT_SERVER_START)
+
+            res = server.make_request(
+                "GET",
+                "/mcp?server=test-empty",
+                timeout=TIMEOUT_HTTP_REQUEST
+            )
+
+            # Server with no URL returns 404 (not found in config)
+            assert res.status_code == 404, f"Expected 404, got {res.status_code}"
+            body = res.body
+            assert "error" in str(body).lower() or "not found" in str(body).lower(), \
+                f"Expected error in response: {body}"
+
+        finally:
+            try:
+                os.unlink(config_path)
+            except:
+                pass
 
 
 if __name__ == "__main__":

@@ -1681,26 +1681,25 @@ Apart from error types supported by OAI, we also have custom types that are spec
 
 ### MCP (Model Context Protocol) Support
 
-The server supports [MCP](https://modelcontextprotocol.io/) for integrating external tools via WebSocket. MCP enables models to interact with external services like file systems, databases, APIs, and more.
+The server supports [MCP](https://modelcontextprotocol.io/) for integrating external tools. MCP enables models to interact with external services like file systems, databases, APIs, and more.
+
+The server acts as an HTTP proxy for remote MCP servers, handling CORS for browser-based clients.
 
 #### MCP Configuration
 
-Create an MCP configuration file (JSON format):
+Create an MCP configuration file (JSON format) with remote MCP server URLs:
 
 ```json
 {
   "mcpServers": {
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/dir"],
-      "env": {}
-    },
     "brave-search": {
-      "command": "npx",
-      "args": ["-y", "@anthropic/mcp-server-brave-search"],
-      "env": {
-        "BRAVE_API_KEY": "your-api-key"
+      "url": "http://127.0.0.1:38180/mcp",
+      "headers": {
+        "Authorization": "Bearer your-api-key"
       }
+    },
+    "filesystem": {
+      "url": "http://127.0.0.1:38181/mcp"
     }
   }
 }
@@ -1717,37 +1716,55 @@ The server looks for MCP configuration in the following order:
 #### MCP Usage
 
 ```bash
-# Use default config location (~/.llama.cpp/mcp.json)
-./llama-server -m model.gguf
+# Enable MCP with --webui-mcp flag
+./llama-server -m model.gguf --webui-mcp
 
-# Or specify config path
-./llama-server -m model.gguf --mcp-config /path/to/mcp.json
+# Specify config path
+./llama-server -m model.gguf --webui-mcp --mcp-config /path/to/mcp.json
 
 # Or use environment variable
-LLAMA_MCP_CONFIG=/path/to/mcp.json ./llama-server -m model.gguf
+LLAMA_MCP_CONFIG=/path/to/mcp.json ./llama-server -m model.gguf --webui-mcp
 ```
-
-#### MCP WebSocket Port
-
-MCP uses WebSocket on HTTP port + 1 (default: 8081 when HTTP is on 8080).
 
 #### MCP API Endpoints
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /mcp/servers` | List available MCP servers from configuration |
-| `WS /mcp?server=<name>` | WebSocket connection (on HTTP port + 1) |
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/mcp/servers` | GET | List available MCP server names from config |
+| `/mcp?server=<name>` | GET | Proxy GET requests to remote MCP server (SSE streams) |
+| `/mcp?server=<name>` | POST | Proxy POST requests to remote MCP server (JSON-RPC) |
 
 #### MCP Protocol
 
-The MCP bridge implements JSON-RPC 2.0 over WebSocket. Key methods:
-- `initialize` - Establish MCP session
-- `tools/list` - List available tools
-- `tools/call` - Execute a tool
-- `resources/list` - List available resources
-- `resources/read` - Read a resource
+The server proxies requests to remote MCP servers using the [Streamable HTTP transport](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports). The web UI uses the official `@modelcontextprotocol/sdk` client.
 
 For more information about MCP, see the [Model Context Protocol documentation](https://modelcontextprotocol.io/).
+
+#### Example MCP Servers
+
+Here's how to run some example MCP servers that work with the default config:
+
+**Brave Search** (requires `BRAVE_API_KEY` environment variable - get one at https://brave.com/search/api/):
+
+```bash
+BRAVE_API_KEY=your-key-here npx -y @anthropic-ai/mcp-server-brave-search --transport http --port 38180
+```
+
+**Python interpreter** (with common data science packages):
+
+```bash
+uvx mcp-run-python --deps numpy,pandas,pydantic,requests,httpx,sympy,aiohttp streamable-http --port 38181
+```
+
+**Run both together** using `concurrently`:
+
+```bash
+BRAVE_API_KEY=your-key-here npx -y concurrently \
+  "npx -y @anthropic-ai/mcp-server-brave-search --transport http --port 38180" \
+  "uvx mcp-run-python --deps numpy,pandas,pydantic,requests,httpx,sympy,aiohttp streamable-http --port 38181"
+```
+
+Then update `mcp_config.example.json` with your settings and start llama-server with `--webui-mcp`.
 
 ### Legacy completion web UI
 

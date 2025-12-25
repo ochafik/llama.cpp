@@ -1,9 +1,11 @@
 #include "common.h"
 #include "server-http.h"
+#include "server-mcp.h"
 #include "server-common.h"
 
 #include <cpp-httplib/httplib.h>
 
+#include <algorithm>
 #include <functional>
 #include <string>
 #include <thread>
@@ -137,14 +139,20 @@ bool server_http_context::init(const common_params & params) {
         }
 
         // Check for API key in the Authorization header
-        std::string auth_header = req.get_header_value("Authorization");
-        if (auth_header.empty()) {
+        std::string req_api_key = req.get_header_value("Authorization");
+        if (req_api_key.empty()) {
             // retry with anthropic header
-            auth_header = req.get_header_value("X-Api-Key");
+            req_api_key = req.get_header_value("X-Api-Key");
         }
 
-        // validate the API key using shared helper
-        if (::validate_auth_header(auth_header, api_keys)) {
+        // remove the "Bearer " prefix if needed
+        std::string prefix = "Bearer ";
+        if (req_api_key.substr(0, prefix.size()) == prefix) {
+            req_api_key = req_api_key.substr(prefix.size());
+        }
+
+        // validate the API key
+        if (std::find(api_keys.begin(), api_keys.end(), req_api_key) != api_keys.end()) {
             return true; // API key is valid
         }
 
@@ -194,13 +202,23 @@ bool server_http_context::init(const common_params & params) {
     };
 
     // register server middlewares
-    srv->set_pre_routing_handler([middleware_validate_api_key, middleware_server_state](const httplib::Request & req, httplib::Response & res) {
-        res.set_header("Access-Control-Allow-Origin", req.get_header_value("Origin"));
+    srv->set_pre_routing_handler([middleware_validate_api_key, middleware_server_state, webui_mcp = params.webui_mcp](const httplib::Request & req, httplib::Response & res) {
+        // Get Origin header (browsers always send this)
+        std::string origin = req.get_header_value("Origin");
+        if (!origin.empty()) {
+            res.set_header("Access-Control-Allow-Origin", origin);
+        }
+
         // If this is OPTIONS request, skip validation because browsers don't include Authorization header
         if (req.method == "OPTIONS") {
-            res.set_header("Access-Control-Allow-Credentials", "true");
-            res.set_header("Access-Control-Allow-Methods",     "GET, POST");
-            res.set_header("Access-Control-Allow-Headers",     "*");
+            res.set_header("Access-Control-Allow-Methods",     "GET, POST, OPTIONS");
+            // Include MCP protocol headers for CORS only if MCP is enabled
+            if (webui_mcp) {
+                res.set_header("Access-Control-Allow-Headers",     "Content-Type, mcp-session-id, mcp-protocol-version");
+                res.set_header("Access-Control-Expose-Headers",     "mcp-session-id");
+            } else {
+                res.set_header("Access-Control-Allow-Headers",     "Content-Type");
+            }
             res.set_content("", "text/html"); // blank response, no data
             return httplib::Server::HandlerResponse::Handled; // skip further processing
         }
@@ -396,3 +414,20 @@ void server_http_context::post(const std::string & path, const server_http_conte
     });
 }
 
+bool server_http_context::load_mcp_config(const std::string & config_path) {
+    try {
+        mcp_config = std::make_shared<llama_mcp_config>(config_path);
+        return true;
+    } catch (const std::exception & e) {
+        LOG_ERR("%s: failed to load MCP config: %s\n", __func__, e.what());
+        return false;
+    }
+}
+
+std::optional<mcp_server_config> server_http_context::get_mcp_server(const std::string & name) {
+    return mcp_config ? mcp_config->get_server(name) : std::nullopt;
+}
+
+std::vector<std::string> server_http_context::get_mcp_server_names() {
+    return mcp_config ? mcp_config->get_available_servers() : std::vector<std::string>{};
+}

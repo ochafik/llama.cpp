@@ -1,16 +1,14 @@
 /**
- * MCP Service - Manages WebSocket connections to MCP servers using the official MCP SDK
+ * MCP Service - Manages connections to MCP servers using the official MCP SDK
  *
- * Handles communication with Model Context Protocol servers via WebSocket using
- * @modelcontextprotocol/sdk's Client and WebSocketClientTransport.
- *
- * Each MCP server gets its own WebSocket connection.
+ * Handles communication with Model Context Protocol servers via HTTP proxy.
+ * Uses @modelcontextprotocol/sdk's Client with StreamableHTTPClientTransport.
+ * Each MCP server gets its own connection.
  */
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-// import { WebSocketClientTransport } from '@modelcontextprotocol/sdk/client/websocket.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { Tool, Notification } from '@modelcontextprotocol/sdk/types.js';
-import { CustomLlamaCppTransport } from './mcp-transport-custom';
 
 // Timeout constants - increased for Docker containers that may take time to start
 const REQUEST_TIMEOUT_MS = 120_000; // 2 minutes for slow-starting containers
@@ -20,7 +18,7 @@ const INITIAL_RECONNECT_DELAY_MS = 1000; // Start with 1s delay
 
 export class McpService {
 	private client: Client | null = null;
-	private transport: CustomLlamaCppTransport | null = null;
+	private transport: StreamableHTTPClientTransport | null = null;
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	private reconnectAttempts = 0;
 	private manualDisconnect = false;
@@ -33,10 +31,7 @@ export class McpService {
 	onError?: (error: Error) => void;
 	onOpen?: () => void;
 
-	constructor(
-		public readonly serverName: string,
-		private readonly wsUrl: string
-	) {}
+	constructor(public readonly serverName: string) {}
 
 	/**
 	 * Get the current connection generation (for preventing stale callbacks)
@@ -53,12 +48,16 @@ export class McpService {
 	}
 
 	/**
-	 * Connect to the MCP server via WebSocket using the SDK
+	 * Connect to the MCP server using HTTP proxy
+	 *
+	 * Uses the C++ backend proxy at /mcp?server={serverName} which handles
+	 * remote HTTP servers with CORS support.
 	 */
 	async connect(): Promise<void> {
 		try {
-			// Create a new transport instance for each connection attempt
-			this.transport = new CustomLlamaCppTransport(this.wsUrl);
+			// Build proxy URL: /mcp?server={serverName}
+			const proxyUrl = this._buildProxyUrl(this.serverName);
+			this.transport = new StreamableHTTPClientTransport(new URL(proxyUrl));
 
 			// Set up transport event handlers
 			this.transport.onclose = () => {
@@ -120,6 +119,16 @@ export class McpService {
 			console.error(`[MCP] Failed to connect to ${this.serverName}:`, error);
 			throw error;
 		}
+	}
+
+	/**
+	 * Build proxy URL for MCP server connection
+	 * Uses the C++ backend proxy at /mcp?server={serverName}
+	 */
+	private _buildProxyUrl(serverName: string): string {
+		const url = new URL(window.location.href);
+		// Use the same origin with proxy endpoint
+		return `${url.origin}/mcp?server=${encodeURIComponent(serverName)}`;
 	}
 
 	/**
@@ -272,12 +281,14 @@ export class McpService {
 export const mcpServiceFactory = {
 	/**
 	 * Create an MCP service for a given server name.
-	 * WebSocket runs on HTTP port + 1.
+	 *
+	 * @param serverName - Name of the MCP server
+	 * @returns Configured McpService instance
+	 *
+	 * @example
+	 * mcpServiceFactory.create('brave-search')
 	 */
 	create: (serverName: string): McpService => {
-		const url = new URL(window.location.href);
-		url.pathname = '/mcp';
-		url.searchParams.set('server', serverName);
-		return new McpService(serverName, url.toString());
+		return new McpService(serverName);
 	}
 };

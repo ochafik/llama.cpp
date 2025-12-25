@@ -1,46 +1,96 @@
 #pragma once
 
 #include "server-common.h"
+#include <filesystem>
+#include <fstream>
+#include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
-#include <optional>
-#include <functional>
-#include <fstream>
+
+// Parsed URL components for MCP proxy
+struct mcp_parsed_url {
+    std::string host;
+    int port = 80;
+    std::string path;
+    bool is_https = false;
+    std::string error;  // Non-empty if parsing failed
+
+    bool valid() const { return error.empty(); }
+
+    static mcp_parsed_url parse(const std::string & url) {
+        mcp_parsed_url result;
+
+        size_t protocol_pos = url.find("://");
+        if (protocol_pos == std::string::npos) {
+            result.error = "Invalid URL format";
+            return result;
+        }
+
+        result.is_https = url.substr(0, 5) == "https";
+        if (result.is_https) {
+            result.error = "HTTPS MCP servers are not yet supported";
+            return result;
+        }
+
+        size_t host_start = protocol_pos + 3;
+        size_t path_pos = url.find("/", host_start);
+        std::string host_port = url.substr(host_start, path_pos - host_start);
+        result.path = path_pos != std::string::npos ? url.substr(path_pos) : "/";
+
+        size_t port_pos = host_port.find(":");
+        if (port_pos != std::string::npos) {
+            result.host = host_port.substr(0, port_pos);
+            try {
+                result.port = std::stoi(host_port.substr(port_pos + 1));
+                if (result.port < 1 || result.port > 65535) {
+                    result.error = "Port out of range";
+                    return result;
+                }
+            } catch (...) {
+                result.error = "Invalid port";
+                return result;
+            }
+        } else {
+            result.host = host_port;
+            result.port = result.is_https ? 443 : 80;
+        }
+
+        return result;
+    }
+};
 
 // MCP Server configuration (from JSON config file)
+// Supports remote HTTP MCP servers (proxied with CORS support)
 struct mcp_server_config {
     std::string name;
-    std::string command;              // Command to spawn
-    std::vector<std::string> args;    // Command arguments
-    std::map<std::string, std::string> env;  // Environment variables
+    std::string url;                  // URL of remote MCP server
+    std::map<std::string, std::string> headers;  // Custom headers (e.g., Authorization)
 
     mcp_server_config() = default;
     mcp_server_config(const std::string & name, const json & j) : name(name) {
-        if (j.contains("command")) command = j["command"].get<std::string>();
-        if (j.contains("args")) {
-            const auto & args_arr = j["args"];
-            if (args_arr.is_array()) {
-                for (const auto & arg : args_arr) {
-                    args.push_back(arg.get<std::string>());
-                }
-            }
-        }
-        if (j.contains("env")) {
-            const auto & env_obj = j["env"];
-            if (env_obj.is_object()) {
-                for (auto it = env_obj.begin(); it != env_obj.end(); ++it) {
-                    env[it.key()] = it.value().get<std::string>();
+        // Parse remote HTTP server configuration
+        if (j.contains("url")) url = j["url"].get<std::string>();
+        if (j.contains("headers")) {
+            const auto & headers_obj = j["headers"];
+            if (headers_obj.is_object()) {
+                for (auto it = headers_obj.begin(); it != headers_obj.end(); ++it) {
+                    headers[it.key()] = it.value().get<std::string>();
                 }
             }
         }
     }
 
+    // Parse URL into components
+    mcp_parsed_url parsed_url() const {
+        return mcp_parsed_url::parse(url);
+    }
+
     json to_json() const {
         json j;
-        j["command"] = command;
-        j["args"] = args;
-        if (!env.empty()) j["env"] = env;
+        if (!url.empty()) j["url"] = url;
+        if (!headers.empty()) j["headers"] = headers;
         return j;
     }
 };
@@ -49,14 +99,14 @@ struct mcp_server_config {
 // Expected JSON format:
 // {
 //   "mcpServers": {
-//     "filesystem": {
-//       "command": "npx",
-//       "args": ["-y", "@modelcontextprotocol/server-filesystem", "/allowed/path"]
-//     },
 //     "brave-search": {
-//       "command": "npx",
-//       "args": ["-y", "@modelcontextprotocol/server-brave-search"],
-//       "env": { "BRAVE_API_KEY": "..." }
+//       "url": "http://127.0.0.1:38180/mcp"
+//     },
+//     "python": {
+//       "url": "http://127.0.0.1:38181/mcp",
+//       "headers": {
+//         "Authorization": "Bearer YOUR_TOKEN"
+//       }
 //     }
 //   }
 // }
@@ -114,6 +164,69 @@ struct mcp_config {
             j["mcpServers"][name] = config.to_json();
         }
         return j;
+    }
+};
+
+// Thread-safe MCP config with auto-reload on file changes
+// Takes config path as constructor argument and handles loading/reloading
+class llama_mcp_config {
+public:
+    explicit llama_mcp_config(const std::string & config_path)
+        : config_path_(config_path) {
+        load();
+    }
+
+    // Get full MCP server config by name (with auto-reload if file changed)
+    std::optional<mcp_server_config> get_server(const std::string & name) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        check_reload();
+        return mcp_config_.get_server(name);
+    }
+
+    // Get all available server names (with auto-reload if file changed)
+    std::vector<std::string> get_available_servers() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        check_reload();
+        std::vector<std::string> servers;
+        servers.reserve(mcp_config_.mcp_servers.size());
+        for (const auto & [name, _] : mcp_config_.mcp_servers) {
+            servers.push_back(name);
+        }
+        return servers;
+    }
+
+private:
+    mutable std::mutex mutex_;
+    mcp_config mcp_config_;
+    std::string config_path_;
+    std::filesystem::file_time_type last_modified_;
+
+    void load() {
+        auto config = mcp_config::from_file(config_path_);
+        if (config) {
+            mcp_config_ = std::move(*config);
+            last_modified_ = get_file_mtime();
+        } else {
+            mcp_config_ = mcp_config{};
+            last_modified_ = {};
+        }
+    }
+
+    void check_reload() {
+        auto current_mtime = get_file_mtime();
+        if (current_mtime != last_modified_) {
+            SRV_INF("%s: config file changed, reloading from: %s\n",
+                    __func__, config_path_.c_str());
+            load();
+        }
+    }
+
+    std::filesystem::file_time_type get_file_mtime() const {
+        try {
+            return std::filesystem::last_write_time(config_path_);
+        } catch (const std::filesystem::filesystem_error &) {
+            return {};
+        }
     }
 };
 

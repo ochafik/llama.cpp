@@ -46,10 +46,6 @@ set(TARGET_SRCS
     server-common.h
     server-context.cpp
     server-context.h
-    server-ws.cpp
-    server-ws.h
-    server-mcp-bridge.cpp
-    server-mcp-bridge.h
 )
 set(PUBLIC_ASSETS
     index.html.gz
