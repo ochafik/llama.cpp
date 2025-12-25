@@ -8,8 +8,9 @@
  */
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { WebSocketClientTransport } from '@modelcontextprotocol/sdk/client/websocket.js';
+// import { WebSocketClientTransport } from '@modelcontextprotocol/sdk/client/websocket.js';
 import type { Tool, Notification } from '@modelcontextprotocol/sdk/types.js';
+import { CustomLlamaCppTransport } from './mcp-transport-custom';
 
 // Timeout constants - increased for Docker containers that may take time to start
 const REQUEST_TIMEOUT_MS = 120_000; // 2 minutes for slow-starting containers
@@ -19,7 +20,7 @@ const INITIAL_RECONNECT_DELAY_MS = 1000; // Start with 1s delay
 
 export class McpService {
 	private client: Client | null = null;
-	private transport: WebSocketClientTransport | null = null;
+	private transport: CustomLlamaCppTransport | null = null;
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	private reconnectAttempts = 0;
 	private manualDisconnect = false;
@@ -57,7 +58,7 @@ export class McpService {
 	async connect(): Promise<void> {
 		try {
 			// Create a new transport instance for each connection attempt
-			this.transport = new WebSocketClientTransport(new URL(this.wsUrl));
+			this.transport = new CustomLlamaCppTransport(this.wsUrl);
 
 			// Set up transport event handlers
 			this.transport.onclose = () => {
@@ -275,8 +276,8 @@ export const mcpServiceFactory = {
 	 */
 	create: (serverName: string): McpService => {
 		const url = new URL(window.location.href);
-		const wsPort = (parseInt(url.port) || 80) + 1;
-		const wsUrl = `ws://${url.hostname}:${wsPort}/mcp?server=${encodeURIComponent(serverName)}`;
-		return new McpService(serverName, wsUrl);
+		url.pathname = '/mcp';
+		url.searchParams.set('server', serverName);
+		return new McpService(serverName, url.toString());
 	}
 };

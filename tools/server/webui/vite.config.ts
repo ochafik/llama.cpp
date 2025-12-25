@@ -159,13 +159,7 @@ export default defineConfig({
 			'/models': 'http://localhost:8080',
 			// HTTP endpoint for MCP
 			'/mcp/servers': 'http://localhost:8080',
-			// WebSocket endpoint for MCP (on HTTP port + 1)
-			'/mcp': {
-				target: 'http://localhost:8081',
-				ws: true,
-				// Don't rewrite the path - keep /mcp as-is
-				rewrite: (path) => path
-			}
+			'/mcp': 'http://localhost:8080'
 		},
 		headers: {
 			'Cross-Origin-Embedder-Policy': 'require-corp',

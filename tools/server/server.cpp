@@ -120,20 +120,12 @@ int main(int argc, char ** argv, char ** envp) {
     // WebSocket Server (for MCP support) - only if --webui-mcp is enabled
     //
 
-    server_ws_context * ctx_ws = nullptr;
-    server_mcp_bridge * mcp_bridge = nullptr;
+    std::unique_ptr<server_ws_context> ctx_ws = nullptr;
+    std::unique_ptr<server_mcp_bridge> mcp_bridge = nullptr;
 
     if (params.webui_mcp) {
-        ctx_ws = new server_ws_context();
-        mcp_bridge = new server_mcp_bridge();
-
-        // Initialize WebSocket server with params (sets port to HTTP port + 1)
-        if (!ctx_ws->init(params)) {
-            LOG_ERR("%s: failed to initialize WebSocket server\n", __func__);
-            delete ctx_ws;
-            delete mcp_bridge;
-            return 1;
-        }
+        ctx_ws = std::make_unique<server_ws_context>();
+        mcp_bridge = std::make_unique<server_mcp_bridge>();
     }
 
     // Helper function to get MCP config path
@@ -289,6 +281,9 @@ int main(int argc, char ** argv, char ** envp) {
             res->data = response.dump();
             return res;
         });
+
+        ctx_http.get ("/mcp", ex_wrapper(ctx_ws->get_mcp));
+        ctx_http.post("/mcp", ex_wrapper(ctx_ws->post_mcp));
     }
 
     //
@@ -315,15 +310,8 @@ int main(int argc, char ** argv, char ** envp) {
     if (is_router_server) {
         LOG_INF("%s: starting router server, no model will be loaded in this process\n", __func__);
 
-        clean_up = [&models_routes, &ctx_ws, &mcp_bridge]() {
+        clean_up = [&models_routes]() {
             SRV_INF("%s: cleaning up before exit...\n", __func__);
-            if (ctx_ws) {
-                ctx_ws->stop();
-                delete ctx_ws;
-            }
-            if (mcp_bridge) {
-                delete mcp_bridge;
-            }
             if (models_routes.has_value()) {
                 models_routes->models.unload_all();
             }
@@ -337,34 +325,14 @@ int main(int argc, char ** argv, char ** envp) {
         }
         ctx_http.is_ready.store(true);
 
-        // Start WebSocket server (OS will assign an available port) - only if --webui-mcp is enabled
-        if (params.webui_mcp && ctx_ws) {
-            if (!ctx_ws->start()) {
-                clean_up();
-                LOG_ERR("%s: exiting due to WebSocket server error\n", __func__);
-                return 1;
-            }
-            LOG_INF("%s: WebSocket server started on port %d\n", __func__, ctx_ws->get_actual_port());
-        }
-
         shutdown_handler = [&](int) {
-            if (ctx_ws) {
-                ctx_ws->stop();
-            }
             ctx_http.stop();
         };
 
     } else {
         // setup clean up function, to be called before exit
-        clean_up = [&ctx_http, &ctx_ws, &ctx_server, &mcp_bridge]() {
+        clean_up = [&ctx_http, &ctx_server]() {
             SRV_INF("%s: cleaning up before exit...\n", __func__);
-            if (ctx_ws) {
-                ctx_ws->stop();
-                delete ctx_ws;
-            }
-            if (mcp_bridge) {
-                delete mcp_bridge;
-            }
             ctx_http.stop();
             ctx_server.terminate();
             llama_backend_free();
@@ -375,16 +343,6 @@ int main(int argc, char ** argv, char ** envp) {
             clean_up();
             LOG_ERR("%s: exiting due to HTTP server error\n", __func__);
             return 1;
-        }
-
-        // Start WebSocket server (OS will assign an available port) - only if --webui-mcp is enabled
-        if (params.webui_mcp && ctx_ws) {
-            if (!ctx_ws->start()) {
-                clean_up();
-                LOG_ERR("%s: exiting due to WebSocket server error\n", __func__);
-                return 1;
-            }
-            LOG_INF("%s: WebSocket server started on port %d\n", __func__, ctx_ws->get_actual_port());
         }
 
         // load the model
@@ -405,10 +363,6 @@ int main(int argc, char ** argv, char ** envp) {
         LOG_INF("%s: model loaded\n", __func__);
 
         shutdown_handler = [&](int) {
-            // this will unblock start_loop()
-            if (ctx_ws) {
-                ctx_ws->stop();
-            }
             ctx_server.terminate();
         };
     }
