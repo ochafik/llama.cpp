@@ -73,6 +73,11 @@ common_chat_params common_chat_params_init_deepseek_r1_peg(const common_chat_tem
             }
         }
 
+        // Response format parser (json_schema support)
+        if (inputs.json_schema.is_object() && !inputs.json_schema.empty()) {
+            return reasoning << p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema)) << consume_eos();
+        }
+
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
             if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 data.grammar_triggers.push_back({

@@ -686,6 +686,16 @@ static void test_parser_with_streaming(const common_chat_msg & expected, const s
 #define NEEDLE1_ARG_VALUE "$N1AV$"
 #define NEEDLE2_ARG_VALUE "$N2AV$"
 
+// JSON schema for json_schema needle tests
+static const char * const NEEDLE_JSON_SCHEMA = R"({
+    "type": "object",
+    "properties": {
+        "amount": {"type": "number"},
+        "notes": {"type": "string"}
+    },
+    "required": ["amount", "notes"]
+})";
+
 struct needle_field_needles {
     std::string first;
     std::string second;
@@ -719,6 +729,7 @@ struct needle_scenario {
     bool with_content = true;
     bool with_reasoning = false;
     bool with_tool_call = false;
+    bool with_json_schema = false;  // Use json_schema mode instead of free text
     size_t tool_call_count = 1;
     common_chat_tool_choice tool_choice = COMMON_CHAT_TOOL_CHOICE_NONE;
     bool expect_tool_ids = false;
@@ -726,6 +737,7 @@ struct needle_scenario {
     bool force_disable_thinking = false;
     bool require_thinking_support = false;
     bool require_tool_support = false;
+    bool require_json_schema_support = false;  // Skip if template doesn't support json_schema
     bool parallel_tool_calls = false;
     bool skip_if_thinking_forced = false;
     size_t args_per_tool_call = 2;
@@ -797,7 +809,14 @@ static needle_test_context make_needle_context(const needle_scenario & scenario,
     ctx.format = format;
     ctx.expected_msg.role = "assistant";
 
-    if (scenario.with_content) {
+    if (scenario.with_json_schema) {
+        // For json_schema mode, content is JSON with needles embedded in string value
+        ctx.has_content = true;
+        ctx.content_needles = {NEEDLE1_CONTENT, NEEDLE2_CONTENT};
+        // Build JSON content: {"amount": 123.45, "notes": "Before $N1C$ middle $N2C$ after"}
+        std::string notes_value = "Before " + ctx.content_needles.first + " middle " + ctx.content_needles.second + " after";
+        ctx.expected_msg.content = R"({"amount": 123.45, "notes": ")" + notes_value + R"("})";
+    } else if (scenario.with_content) {
         ctx.has_content = true;
         ctx.content_needles = {NEEDLE1_CONTENT, NEEDLE2_CONTENT};
         ctx.expected_msg.content = "Before " + ctx.content_needles.first + " middle " + ctx.content_needles.second + " after";
@@ -4766,6 +4785,58 @@ static std::vector<needle_scenario> build_needle_scenarios(const template_capabi
         }
     }
 
+    // json_schema scenarios - test structured output mode
+    // Only add for parsers with explicit json_schema support in their PEG parser
+    bool has_json_schema_support = false;
+    switch (info.format) {
+        case COMMON_CHAT_FORMAT_COMMAND_R7B:
+        case COMMON_CHAT_FORMAT_DEEPSEEK_R1:
+        case COMMON_CHAT_FORMAT_HERMES_2_PRO:
+        case COMMON_CHAT_FORMAT_GLM_4_5:
+        case COMMON_CHAT_FORMAT_GRANITE:
+        case COMMON_CHAT_FORMAT_SEED_OSS:
+        case COMMON_CHAT_FORMAT_MINIMAX_M2:
+        case COMMON_CHAT_FORMAT_NEMOTRON_V2:
+        case COMMON_CHAT_FORMAT_NEMOTRON_V3:
+        case COMMON_CHAT_FORMAT_APERTUS:
+        case COMMON_CHAT_FORMAT_KIMI_K2:
+        case COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1:
+        case COMMON_CHAT_FORMAT_FUNCTIONARY_V3_2:
+        case COMMON_CHAT_FORMAT_QWEN3_CODER_XML:
+        case COMMON_CHAT_FORMAT_XIAOMI_MIMO:
+        case COMMON_CHAT_FORMAT_GPT_OSS:
+        case COMMON_CHAT_FORMAT_DEEPSEEK_V3_1:
+            has_json_schema_support = true;
+            break;
+        default:
+            break;
+    }
+
+    if (has_json_schema_support) {
+        // Basic json_schema test without reasoning
+        needle_scenario json_schema_basic;
+        json_schema_basic.name = "json-schema-basic";
+        json_schema_basic.with_json_schema = true;
+        json_schema_basic.with_content = false;  // content is JSON, handled by with_json_schema
+        json_schema_basic.require_json_schema_support = true;
+        json_schema_basic.force_disable_thinking = true;
+        json_schema_basic.skip_if_thinking_forced = true;
+        scenarios.push_back(json_schema_basic);
+
+        // json_schema with reasoning (if supported)
+        if (info.supports_thinking == ThinkingSupport::Yes && info.reasoning_requires_tools == ReasoningRequiresTools::No) {
+            needle_scenario json_schema_with_reasoning;
+            json_schema_with_reasoning.name = "json-schema-with-reasoning";
+            json_schema_with_reasoning.with_json_schema = true;
+            json_schema_with_reasoning.with_content = false;
+            json_schema_with_reasoning.with_reasoning = true;
+            json_schema_with_reasoning.enable_thinking = true;
+            json_schema_with_reasoning.require_json_schema_support = true;
+            json_schema_with_reasoning.require_thinking_support = true;
+            scenarios.push_back(json_schema_with_reasoning);
+        }
+    }
+
     return scenarios;
 }
 
@@ -4782,6 +4853,9 @@ static std::string describe_scenario(const needle_scenario & scenario) {
         oss << "x" << scenario.args_per_tool_call << "args";
     } else {
         oss << 0;
+    }
+    if (scenario.with_json_schema) {
+        oss << ", json_schema";
     }
     if (scenario.with_reasoning) {
         oss << ", reasoning";
@@ -5102,6 +5176,10 @@ static bool test_systematic_needle_streaming() {
                                            } else {
                                                inputs.enable_thinking = false;
                                                inputs.reasoning_format = COMMON_REASONING_FORMAT_NONE;
+                                           }
+                                           // Set json_schema for structured output tests
+                                           if (scenario.with_json_schema) {
+                                               inputs.json_schema = NEEDLE_JSON_SCHEMA;
                                            }
                                        });
 
