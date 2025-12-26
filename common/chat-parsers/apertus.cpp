@@ -96,10 +96,39 @@ common_chat_params common_chat_params_init_apertus_peg(const common_chat_templat
         // Tool call parser - short form JSON array format
         // Format: <|tools_prefix|>[{"func_name": {...}}]<|tools_suffix|>
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
-            // Tool call: <|tools_prefix|> + JSON array + <|tools_suffix|>
+            // Set triggers only in AUTO mode (not REQUIRED)
+            if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
+                data.grammar_triggers = {{COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
+                    // If thinking_forced_open, then we capture the <|inner_suffix|> tag in the grammar
+                    std::string(data.thinking_forced_open ?
+                        "[\\s\\S]*?(<\\|inner_suffix\\|>\\s*)" :
+                        "(?:<\\|inner_prefix\\|>[\\s\\S]*?<\\|inner_suffix\\|>\\s*)?") +
+                    "(<\\|tools_prefix\\|>)[\\s\\S]*"}};
+            }
+
+            // Build schema for [{"func_name": {...}}] format
+            // Each tool call is an object with the function name as the key
+            auto schemas = json::array();
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
+                schemas.push_back({
+                    {"type", "object"},
+                    {"properties", {{name, parameters}}},
+                    {"required", json::array({name})}
+                });
+            });
+            auto schema = json{
+                {"type", "array"},
+                {"items", schemas.size() == 1 ? schemas[0] : json{{"anyOf", schemas}}},
+                {"minItems", 1}
+            };
+            if (!inputs.parallel_tool_calls) {
+                schema["maxItems"] = 1;
+            }
+
+            // Tool call: <|tools_prefix|> + JSON array with schema + <|tools_suffix|>
             auto tool_call = p.tag(Tag::TOOL,
                 p.atomic_tag(Tag::TOOL_OPEN, p.literal("<|tools_prefix|>"))
-                << p.tag(Tag::TOOL_ARGS, p.until("<|tools_suffix|>"))
+                << p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-calls", schema))
                 << p.atomic_tag(Tag::TOOL_CLOSE, p.literal("<|tools_suffix|>"))
             );
 
@@ -113,13 +142,6 @@ common_chat_params common_chat_params_init_apertus_peg(const common_chat_templat
             }
             return reasoning << p.tag(Tag::CONTENT, p.until("<|tools_prefix|>")) << tool_calls;
         }
-
-        data.grammar_triggers = {{COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
-            // If thinking_forced_open, then we capture the <|inner_suffix|> tag in the grammar
-            std::string(data.thinking_forced_open ?
-                "[\\s\\S]*?(<\\|inner_suffix\\|>\\s*)" :
-                "(?:<\\|inner_prefix\\|>[\\s\\S]*?<\\|inner_suffix\\|>\\s*)?") +
-            "(<\\|tools_prefix\\|>)[\\s\\S]*"}};
 
         return reasoning << p.tag(Tag::CONTENT, p.rest());
     });
