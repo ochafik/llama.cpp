@@ -55,3 +55,7 @@ std::vector<common_cached_model_info> common_list_cached_models();
 // resolve and download model from Docker registry
 // return local path to downloaded model file
 std::string common_docker_resolve_model(const std::string & docker);
+
+// Get remote file size via HEAD request
+// Returns -1 if size cannot be determined
+int64_t common_get_remote_file_size(const std::string & url, const std::string & bearer_token);

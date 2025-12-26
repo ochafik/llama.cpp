@@ -189,6 +189,7 @@ struct common_load_model_from_url_headers {
     std::string etag;
     std::string last_modified;
     std::string accept_ranges;
+    int64_t     content_length = -1;  // -1 means unknown
 };
 
 struct FILE_deleter {
@@ -201,6 +202,7 @@ static size_t common_header_callback(char * buffer, size_t, size_t n_items, void
     static std::regex                    etag_regex("ETag", std::regex_constants::icase);
     static std::regex                    last_modified_regex("Last-Modified", std::regex_constants::icase);
     static std::regex                    accept_ranges_regex("Accept-Ranges", std::regex_constants::icase);
+    static std::regex                    content_length_regex("Content-Length", std::regex_constants::icase);
     std::string                          header(buffer, n_items);
     std::smatch                          match;
     if (std::regex_match(header, match, header_regex)) {
@@ -212,6 +214,12 @@ static size_t common_header_callback(char * buffer, size_t, size_t n_items, void
             headers->last_modified = value;
         } else if (std::regex_match(key, match, accept_ranges_regex)) {
             headers->accept_ranges = value;
+        } else if (std::regex_match(key, match, content_length_regex)) {
+            try {
+                headers->content_length = std::stoll(value);
+            } catch (...) {
+                headers->content_length = -1;
+            }
         }
     }
 
@@ -467,6 +475,29 @@ std::pair<long, std::vector<char>> common_remote_get_content(const std::string &
     curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE, &res_code);
 
     return { res_code, std::move(res_buffer) };
+}
+
+int64_t common_get_remote_file_size(const std::string & url, const std::string & bearer_token) {
+    curl_ptr curl(curl_easy_init(), &curl_easy_cleanup);
+    if (!curl) {
+        return -1;
+    }
+
+    common_load_model_from_url_headers headers;
+    curl_easy_setopt(curl.get(), CURLOPT_HEADERDATA, &headers);
+    curl_slist_ptr http_headers;
+
+    if (!common_download_head(curl.get(), http_headers, url, bearer_token)) {
+        return -1;
+    }
+
+    long http_code = 0;
+    curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE, &http_code);
+    if (http_code < 200 || http_code >= 300) {
+        return -1;
+    }
+
+    return headers.content_length;
 }
 
 #elif defined(LLAMA_USE_HTTPLIB)
@@ -759,6 +790,33 @@ std::pair<long, std::vector<char>> common_remote_get_content(const std::string  
     }
 
     return { res->status, std::move(buf) };
+}
+
+int64_t common_get_remote_file_size(const std::string & url, const std::string & bearer_token) {
+    common_http_url_parts parts;
+    if (!common_http_parse_url(url, &parts)) {
+        return -1;
+    }
+
+    httplib::Client cli = common_http_client(parts);
+    if (!bearer_token.empty()) {
+        cli.set_bearer_token_auth(bearer_token);
+    }
+
+    auto head = cli.Head(parts.path);
+    if (!head || head->status < 200 || head->status >= 300) {
+        return -1;
+    }
+
+    if (head->has_header("Content-Length")) {
+        try {
+            return std::stoll(head->get_header_value("Content-Length"));
+        } catch (...) {
+            return -1;
+        }
+    }
+
+    return -1;
 }
 
 #endif // LLAMA_USE_CURL
@@ -1090,6 +1148,10 @@ bool common_download_model(const common_params_model &, const std::string &, boo
 
 std::string common_docker_resolve_model(const std::string &) {
     throw std::runtime_error("download functionality is not enabled in this build");
+}
+
+int64_t common_get_remote_file_size(const std::string &, const std::string &) {
+    return -1;  // download functionality not available
 }
 
 #endif // LLAMA_USE_CURL || LLAMA_USE_HTTPLIB

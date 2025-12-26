@@ -7,6 +7,7 @@
 #include "common.h"
 #include "download.h"
 #include "log.h"
+#include "llama.h"
 
 #include <nlohmann/json.hpp>
 
@@ -475,8 +476,30 @@ static void print_usage(int, char ** argv) {
     printf("\n");
 }
 
+// Check if --dry-run or -n is in arguments before full parsing
+static bool has_dry_run_arg(int argc, char ** argv) {
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--dry-run") == 0 || strcmp(argv[i], "-n") == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Silent log callback for suppressing output during initialization
+static void silent_log_callback(ggml_log_level, const char *, void *) {
+    // Do nothing - suppress all output
+}
+
 int main(int argc, char ** argv) {
     common_params params;
+
+    // Check for dry-run early to suppress backend initialization output
+    bool is_dry_run = has_dry_run_arg(argc, argv);
+    if (is_dry_run) {
+        // Suppress ggml backend initialization output (Metal, CUDA, etc.)
+        llama_log_set(silent_log_callback, nullptr);
+    }
 
     // Set up signal handlers
 #if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
@@ -495,7 +518,15 @@ int main(int argc, char ** argv) {
         return 1;
     }
 
-    common_init();
+    // For dry-run, suppress INFO-level logging (only show warnings and errors)
+    // For non-dry-run, restore normal logging and show build info
+    if (params.download_dry_run) {
+        // Restore logging but at reduced verbosity
+        llama_log_set(common_log_default_callback, nullptr);
+        common_log_set_verbosity_thold(LOG_LEVEL_WARN);
+    } else {
+        common_init();
+    }
 
     // Get cache directory
     std::string cache_dir = fs::path(fs_get_cache_directory()).string();
@@ -758,6 +789,13 @@ int main(int argc, char ** argv) {
         int resolve_count = 0;
         int resolve_errors = 0;
 
+        // Track sizes for disk space calculation
+        int64_t total_remote_size = 0;      // Total size to download
+        int64_t total_partial_size = 0;     // Already partially downloaded
+        int64_t total_cached_size = 0;      // Already fully cached
+        int64_t total_update_overhead = 0;  // Extra space for updates (old + new)
+        int unknown_sizes = 0;
+
         for (auto & item : queue.items) {
             if (item.status != download_status::pending) continue;
 
@@ -775,6 +813,18 @@ int main(int argc, char ** argv) {
 
             resolve_count++;
 
+            // Query remote file size
+            int64_t remote_size = -1;
+            if (!item.url.empty()) {
+                remote_size = common_get_remote_file_size(item.url, params.hf_token);
+                item.total_bytes = remote_size;
+            }
+
+            bool is_cached = fs::exists(item.path);
+            bool has_partial = fs::exists(item.path + ".downloadInProgress");
+            int64_t cached_size = is_cached ? static_cast<int64_t>(fs::file_size(item.path)) : 0;
+            int64_t partial_size = has_partial ? static_cast<int64_t>(fs::file_size(item.path + ".downloadInProgress")) : 0;
+
             if (params.download_dry_run) {
                 printf("[%s] %s\n", item.id.c_str(), item.source.c_str());
                 printf("  Type: %s\n", item.source_type.c_str());
@@ -783,32 +833,103 @@ int main(int argc, char ** argv) {
                 }
                 printf("  Path: %s\n", item.path.c_str());
 
+                // Show remote size
+                if (remote_size > 0) {
+                    printf("  Size: %s\n", format_size(static_cast<uint64_t>(remote_size)).c_str());
+                } else if (remote_size == 0) {
+                    printf("  Size: 0 B (empty file)\n");
+                } else {
+                    printf("  Size: (unknown)\n");
+                }
+
                 // Check if file already exists
-                if (fs::exists(item.path)) {
-                    auto size = fs::file_size(item.path);
-                    printf("  Status: Already cached (%s)\n", format_size(size).c_str());
-                } else if (fs::exists(item.path + ".downloadInProgress")) {
-                    auto size = fs::file_size(item.path + ".downloadInProgress");
-                    printf("  Status: Partial download exists (%s)\n", format_size(size).c_str());
+                if (is_cached) {
+                    printf("  Status: Already cached (%s)", format_size(static_cast<uint64_t>(cached_size)).c_str());
+                    // Check if it needs updating (size mismatch)
+                    if (remote_size > 0 && cached_size != remote_size) {
+                        printf(" -> will update");
+                    }
+                    printf("\n");
+                } else if (has_partial) {
+                    printf("  Status: Partial download (%s", format_size(static_cast<uint64_t>(partial_size)).c_str());
+                    if (remote_size > 0) {
+                        int pct = static_cast<int>((partial_size * 100) / remote_size);
+                        printf(" / %s, %d%%", format_size(static_cast<uint64_t>(remote_size)).c_str(), pct);
+                    }
+                    printf(")\n");
                 } else {
                     printf("  Status: Will download\n");
                 }
                 printf("\n");
             }
+
+            // Calculate download requirements
+            if (remote_size > 0) {
+                if (is_cached) {
+                    total_cached_size += cached_size;
+                    // For updates, we need space for both old and new temporarily
+                    if (cached_size != remote_size) {
+                        total_update_overhead += cached_size;  // Old file stays until new is complete
+                        total_remote_size += remote_size;
+                    }
+                } else if (has_partial) {
+                    total_partial_size += partial_size;
+                    total_remote_size += (remote_size - partial_size);  // Only need remaining
+                } else {
+                    total_remote_size += remote_size;
+                }
+            } else {
+                unknown_sizes++;
+            }
         }
 
-        // Show disk space info
+        // Show disk space info with projections
         auto space = get_disk_space(cache_dir);
+        printf("Disk space:\n");
         if (space.valid) {
-            printf("Disk space: %s available / %s total\n",
-                   format_size(space.available).c_str(),
-                   format_size(space.capacity).c_str());
+            printf("  Available:        %s\n", format_size(space.available).c_str());
+            printf("  Total capacity:   %s\n", format_size(space.capacity).c_str());
+        }
 
-            if (space.available < static_cast<uint64_t>(params.download_min_space_mb) * 1024 * 1024) {
-                fprintf(stderr, "WARNING: Low disk space! Only %s available, minimum %s required.\n",
-                        format_size(space.available).c_str(),
-                        format_size(static_cast<uint64_t>(params.download_min_space_mb) * 1024 * 1024).c_str());
+        printf("\nDownload estimate:\n");
+        if (total_remote_size > 0 || total_partial_size > 0) {
+            printf("  To download:      %s\n", format_size(static_cast<uint64_t>(total_remote_size)).c_str());
+            if (total_partial_size > 0) {
+                printf("  Already partial:  %s (will resume)\n", format_size(static_cast<uint64_t>(total_partial_size)).c_str());
             }
+            if (total_update_overhead > 0) {
+                printf("  Update overhead:  %s (old files kept until new complete)\n",
+                       format_size(static_cast<uint64_t>(total_update_overhead)).c_str());
+            }
+            if (unknown_sizes > 0) {
+                printf("  Unknown sizes:    %d item(s) - cannot estimate\n", unknown_sizes);
+            }
+
+            // Calculate peak space needed and final space after completion
+            int64_t peak_needed = total_remote_size + total_update_overhead;
+            int64_t net_change = total_remote_size - total_update_overhead;  // Updates replace old with new
+
+            if (space.valid) {
+                int64_t space_after = static_cast<int64_t>(space.available) - net_change;
+                int64_t space_during = static_cast<int64_t>(space.available) - peak_needed;
+
+                printf("\n");
+                printf("  Peak space needed:     %s (during updates)\n", format_size(static_cast<uint64_t>(peak_needed)).c_str());
+                printf("  Space during download: %s\n",
+                       space_during >= 0 ? format_size(static_cast<uint64_t>(space_during)).c_str() : "(insufficient!)");
+                printf("  Space after download:  %s\n",
+                       space_after >= 0 ? format_size(static_cast<uint64_t>(space_after)).c_str() : "(insufficient!)");
+
+                if (space_during < static_cast<int64_t>(params.download_min_space_mb) * 1024 * 1024) {
+                    fprintf(stderr, "\nWARNING: Insufficient disk space! Need %s peak, have %s.\n",
+                            format_size(static_cast<uint64_t>(peak_needed)).c_str(),
+                            format_size(space.available).c_str());
+                }
+            }
+        } else if (total_cached_size > 0) {
+            printf("  All items already cached (%s total)\n", format_size(static_cast<uint64_t>(total_cached_size)).c_str());
+        } else {
+            printf("  Nothing to download\n");
         }
 
         if (params.download_dry_run) {
@@ -822,11 +943,15 @@ int main(int argc, char ** argv) {
         }
 
         // Preflight mode: prompt if low space
-        if (space.valid && space.available < static_cast<uint64_t>(params.download_min_space_mb) * 1024 * 1024) {
-            fprintf(stderr, "Continue anyway? [y/N] ");
-            char c = getchar();
-            if (c != 'y' && c != 'Y') {
-                return 1;
+        if (space.valid) {
+            int64_t peak_needed = total_remote_size + total_update_overhead;
+            int64_t space_during = static_cast<int64_t>(space.available) - peak_needed;
+            if (space_during < static_cast<int64_t>(params.download_min_space_mb) * 1024 * 1024) {
+                fprintf(stderr, "Continue anyway? [y/N] ");
+                char c = getchar();
+                if (c != 'y' && c != 'Y') {
+                    return 1;
+                }
             }
         }
     }

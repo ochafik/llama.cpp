@@ -875,8 +875,10 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
 
     params.use_color = tty_can_use_colors();
 
-    // load dynamic backends
-    ggml_backend_load_all();
+    // load dynamic backends (not needed for download tool)
+    if (ex != LLAMA_EXAMPLE_DOWNLOAD) {
+        ggml_backend_load_all();
+    }
 
     common_params_context ctx_arg(params);
     ctx_arg.print_usage = print_usage;
