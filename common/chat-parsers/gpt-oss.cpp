@@ -123,18 +123,18 @@ common_chat_params common_chat_params_init_gpt_oss_peg(const common_chat_templat
             auto tool_choice = p.choice();
 
             foreach_function(inputs.tools, [&](const auto &, const auto & name, const auto & parameters, const auto &) {
-                // Tool call in channel: <|channel|>analysis|commentary to=functions.name<|message|>{...}
+                // Tool call in channel: <|channel|>analysis|commentary to=functions.name<|message|>{...}<|end|>
                 tool_choice |= p.rule("tool-channel-" + name, p.tag(Tag::TOOL,
-                    assistant_prefix()
-                    + p.atomic_tag(Tag::TOOL_OPEN, p.literal("<|channel|>"))
+                    p.atomic_tag(Tag::TOOL_OPEN, p.literal("<|channel|>"))
                     + (p.literal("analysis") | "commentary")
                     + " to=functions." + p.literal_tag(Tag::TOOL_NAME, name)
                     + p.optional(" " + p.literal("<|constrain|>") + "json")
                     + p.literal("<|message|>")
                     + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-params", parameters))
+                    + p.literal("<|end|>")
                 ));
 
-                // Tool call in role: to=functions.name<|channel|>analysis|commentary<|message|>{...}
+                // Tool call in role: <|start|>assistant to=functions.name<|channel|>analysis|commentary<|message|>{...}<|end|>
                 tool_choice |= p.rule("tool-role-" + name, p.tag(Tag::TOOL,
                     assistant_prefix()
                     + p.literal_tag(Tag::TOOL_OPEN, " to=functions.")
@@ -144,6 +144,7 @@ common_chat_params common_chat_params_init_gpt_oss_peg(const common_chat_templat
                     + p.optional(" " + p.literal("<|constrain|>") + "json")
                     + p.literal("<|message|>")
                     + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-params", parameters))
+                    + p.literal("<|end|>")
                 ));
             });
 
@@ -158,7 +159,11 @@ common_chat_params common_chat_params_init_gpt_oss_peg(const common_chat_templat
 
             auto pre_tool_content = p.repeat(commentary_content, 0, -1);
 
-            return reasoning_block << pre_tool_content << tool_calls;
+            // Allow direct tool calls (role format) or commentary followed by tool calls (channel format)
+            return reasoning_block << p.choice({
+                tool_calls,                      // Direct tool call (e.g., <|start|>assistant to=functions.name...)
+                pre_tool_content << tool_calls   // Commentary then tool (e.g., <|channel|>commentary...<|end|>...)
+            });
         }
 
         // Content only parser with optional reasoning
