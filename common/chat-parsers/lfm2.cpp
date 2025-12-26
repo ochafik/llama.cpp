@@ -19,7 +19,7 @@ common_chat_params common_chat_params_init_lfm2_peg(const common_chat_template &
     const auto is_grammar_provided = !inputs.grammar.empty();
     const auto are_tools_provided = inputs.tools.is_array() && !inputs.tools.empty();
 
-    // the logic requires potentially modifying the messages
+    // The logic requires potentially modifying the messages
     auto tweaked_messages = inputs.messages;
 
     auto replace_json_schema_marker = [](json & messages) -> bool {
@@ -36,7 +36,7 @@ common_chat_params common_chat_params_init_lfm2_peg(const common_chat_template &
             const auto pos = ifind_string(content, marker);
             if (pos != std::string::npos) {
                 content.replace(pos, marker.length(), "");
-                // inject modified content back into the messages
+                // Inject modified content back into the messages
                 messages.at(0).at("content") = content;
                 return true;
             }
@@ -45,52 +45,118 @@ common_chat_params common_chat_params_init_lfm2_peg(const common_chat_template &
         return false;
     };
 
-    // Lfm2 model does not natively work with json, but can generally understand the tools structure
-    // For the llama server compatibility with json tools semantic,
-    // the client can add "Follow json schema." line into the system message prompt to force the json output.
-    // if (are_tools_provided && (is_json_schema_provided || is_grammar_provided)) {
-    //     // server/utils.hpp prohibits that branch for the custom grammar anyways
-    //     throw std::runtime_error("Tools call must not use \"json_schema\" or \"grammar\", use non-tool invocation if you want to use custom grammar");
-    // } else if (are_tools_provided && replace_json_schema_marker(tweaked_messages)) {
-    
-    data.format = COMMON_CHAT_FORMAT_LFM2_WITH_JSON_TOOLS;
-    data.preserved_tokens = {"<|tool_call_start|>", "<|tool_call_end|>"};
+    // LFM2 model does not natively work with JSON, but can generally understand the tools structure
+    //
+    // Example of the pytorch dialog structure:
+    //     <|startoftext|><|im_start|>system
+    //     List of tools: <|tool_list_start|>[{"name": "get_candidate_status", "description": "Retrieves the current status of a candidate in the recruitment process", "parameters": {"type": "object", "properties": {"candidate_id": {"type": "string", "description": "Unique identifier for the candidate"}}, "required": ["candidate_id"]}}]<|tool_list_end|><|im_end|>
+    //     <|im_start|>user
+    //     What is the current status of candidate ID 12345?<|im_end|>
+    //     <|im_start|>assistant
+    //     <|tool_call_start|>[{"name": "get_candidate_status", "arguments": {"candidate_id": "12345"}}]<|tool_call_end|>Checking the current status of candidate ID 12345.<|im_end|>
+    //     <|im_start|>tool
+    //     <|tool_response_start|>{"candidate_id": "12345", "status": "Interview Scheduled", "position": "Clinical Research Associate", "date": "2023-11-20"}<|tool_response_end|><|im_end|>
+    //     <|im_start|>assistant
+    //     The candidate with ID 12345 is currently in the "Interview Scheduled" stage for the position of Clinical Research Associate, with an interview date set for 2023-11-20.<|im_end|>
+    //
+    // For the llama server compatibility with JSON tools semantic,
+    // the client can add "force json schema." line into the system message prompt to force the JSON output.
+    //
+    // When the marker is present, we build a custom schema with full validation for:
+    // - Tool name (exact match via const)
+    // - Parameter types (full schema validation)
+    // - Required id field
+    // - maxItems constraint when parallel_tool_calls=false
+    //
+    // When the marker is absent, we don't build a grammar (the model generates unconstrained).
 
-    // Build PEG parser
-    auto parser = build_chat_peg_parser([&](auto & p) {
-        using Tag = common_chat_peg_tag;
+    // Branch 1: Error - tools + custom grammar not allowed (server prohibits this combination)
+    if (are_tools_provided && (is_json_schema_provided || is_grammar_provided)) {
+        throw std::runtime_error("Tools call must not use \"json_schema\" or \"grammar\", use non-tool invocation if you want to use custom grammar");
+    }
 
-        // Tool call: <|tool_call_start|> + JSON array + <|tool_call_end|>
-        auto tool_call = p.tag(Tag::TOOL,
-            p.atomic_tag(Tag::TOOL_OPEN, p.literal("<|tool_call_start|>"))
-            + p.tag(Tag::TOOL_ARGS, p.json())
-            + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("<|tool_call_end|>"))
-        );
+    // Branch 2: Tools + "force json schema" marker → Full schema validation
+    bool force_json_schema = are_tools_provided && replace_json_schema_marker(tweaked_messages);
 
-        auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
-        auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-        auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, min_calls, max_calls));
+    if (force_json_schema) {
+        data.format = COMMON_CHAT_FORMAT_LFM2_WITH_JSON_TOOLS;
+        data.preserved_tokens = {"<|tool_call_start|>", "<|tool_call_end|>"};
 
-        bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
-        if (require_tools) {
-            return tool_calls;
-        }
-        return p.tag(Tag::CONTENT, p.until("<|tool_call_start|>")) << tool_calls;
-    });
+        // Build PEG parser with full schema validation
+        auto parser = build_chat_peg_parser([&](auto & p) {
+            using Tag = common_chat_peg_tag;
 
-    common_chat_build_peg_grammar(inputs, parser, data);
+            // Build custom schema for array format with metadata (name + arguments + id)
+            auto schemas = json::array();
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
+                schemas.push_back({
+                    {"type", "object"},
+                    {"properties", {
+                        {"name", {
+                            {"type", "string"},
+                            {"const", name},  // Exact tool name validation
+                        }},
+                        {"arguments", parameters},  // Full parameter validation
+                    }},
+                    {"required", json::array({"name", "arguments", "id"})},  // id required
+                });
+            });
 
-    data.grammar_triggers = {{COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL, "\\s*<\\|tool_call_start\\|>\\s*\\["}};
-// } else if (are_tools_provided && (!is_json_schema_provided && !is_grammar_provided)) {
-    data.preserved_tokens = {"<|tool_call_start|>", "<|tool_call_end|>"};
-    // } else if (is_json_schema_provided) {
-    //     data.grammar = json_schema_to_grammar(inputs.json_schema);
-    // } else if (is_grammar_provided) {
-    //     data.grammar = inputs.grammar;
-    // }
-    
-    replace_json_schema_marker(tweaked_messages);
+            auto schema = json{
+                {"type", "array"},
+                {"items", schemas.size() == 1 ? schemas[0] : json{{"anyOf", schemas}}},
+                {"minItems", 1},
+            };
+            if (!inputs.parallel_tool_calls) {
+                schema["maxItems"] = 1;  // Enforce single tool call constraint
+            }
+
+            // Tool call: <|tool_call_start|> + JSON array with schema validation + <|tool_call_end|>
+            auto tool_call = p.tag(Tag::TOOL,
+                p.atomic_tag(Tag::TOOL_OPEN, p.literal("<|tool_call_start|>"))
+                + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-calls", schema))
+                + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("<|tool_call_end|>"))
+            );
+
+            auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
+            auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
+            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, min_calls, max_calls));
+
+            bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+            if (require_tools) {
+                return tool_calls;
+            }
+            return p.tag(Tag::CONTENT, p.until("<|tool_call_start|>")) << tool_calls;
+        });
+
+        common_chat_build_peg_grammar(inputs, parser, data);
+
+        // Trigger lazy grammar activation on <|tool_call_start|>[ pattern
+        data.grammar_triggers = {{COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL, "\\s*<\\|tool_call_start\\|>\\s*\\["}};
+    } else if (are_tools_provided) {
+        // Branch 3: Tools without marker - no grammar, just preserved_tokens
+        // The model can generate unconstrained tool calls (validated at runtime)
+        LOG_INF("%s: Using tools without json schema or grammar\n", __func__);
+        data.format = COMMON_CHAT_FORMAT_CONTENT_ONLY;
+        data.preserved_tokens = {"<|tool_call_start|>", "<|tool_call_end|>"};
+    } else if (is_json_schema_provided) {
+        // Branch 4: json_schema passthrough
+        LOG_INF("%s: Using provided json schema to build a grammar\n", __func__);
+        data.format = COMMON_CHAT_FORMAT_CONTENT_ONLY;
+        data.grammar = json_schema_to_grammar(inputs.json_schema);
+    } else if (is_grammar_provided) {
+        // Branch 5: grammar passthrough
+        LOG_INF("%s: Using provided grammar\n", __func__);
+        data.format = COMMON_CHAT_FORMAT_CONTENT_ONLY;
+        data.grammar = inputs.grammar;
+    } else {
+        // Branch 6: Plain content (no tools, no schema, no grammar)
+        LOG_INF("%s: Using content relying on the template\n", __func__);
+        data.format = COMMON_CHAT_FORMAT_CONTENT_ONLY;
+    }
+
     data.prompt = apply(tmpl, inputs, /* messages_override= */ tweaked_messages);
+    LOG_DBG("%s: Prompt: %s\n", __func__, data.prompt.c_str());
 
     return data;
 }
