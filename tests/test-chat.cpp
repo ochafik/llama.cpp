@@ -505,12 +505,12 @@ static void test_templates(const struct common_chat_templates * tmpls, const std
                 syntax.parser.load(data.params.parser);
             }
             bool threw = false;
+            common_chat_msg msg;
             try {
-                const auto msg = common_chat_parse(delta, /* is_partial= */ false, syntax);
+                msg = common_chat_parse(delta, /* is_partial= */ false, syntax);
                 if (expect_parse_failure) {
                     throw std::runtime_error("Expected parse failure but parsing succeeded");
                 }
-                assert_msg_equals(test_message, msg, ignore_whitespace_differences);
             } catch (const std::exception & e) {
                 if (!expect_parse_failure) {
                     throw;
@@ -519,6 +519,9 @@ static void test_templates(const struct common_chat_templates * tmpls, const std
             }
             if (expect_parse_failure && !threw) {
                 throw std::runtime_error("Expected parse failure but parsing succeeded");
+            }
+            if (!threw) {
+                assert_msg_equals(test_message, msg, ignore_whitespace_differences);
             }
         }
 
