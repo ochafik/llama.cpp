@@ -136,27 +136,27 @@ common_chat_params common_chat_params_init_lfm2_peg(const common_chat_template &
     } else if (are_tools_provided) {
         // Branch 3: Tools without marker - no grammar, just preserved_tokens
         // The model can generate unconstrained tool calls (validated at runtime)
-        LOG_INF("%s: Using tools without json schema or grammar\n", __func__);
+        // LOG_INF("%s: Using tools without json schema or grammar\n", __func__);
         data.format = COMMON_CHAT_FORMAT_CONTENT_ONLY;
         data.preserved_tokens = {"<|tool_call_start|>", "<|tool_call_end|>"};
     } else if (is_json_schema_provided) {
         // Branch 4: json_schema passthrough
-        LOG_INF("%s: Using provided json schema to build a grammar\n", __func__);
+        // LOG_INF("%s: Using provided json schema to build a grammar\n", __func__);
         data.format = COMMON_CHAT_FORMAT_CONTENT_ONLY;
         data.grammar = json_schema_to_grammar(inputs.json_schema);
     } else if (is_grammar_provided) {
         // Branch 5: grammar passthrough
-        LOG_INF("%s: Using provided grammar\n", __func__);
+        // LOG_INF("%s: Using provided grammar\n", __func__);
         data.format = COMMON_CHAT_FORMAT_CONTENT_ONLY;
         data.grammar = inputs.grammar;
     } else {
         // Branch 6: Plain content (no tools, no schema, no grammar)
-        LOG_INF("%s: Using content relying on the template\n", __func__);
+        // LOG_INF("%s: Using content relying on the template\n", __func__);
         data.format = COMMON_CHAT_FORMAT_CONTENT_ONLY;
     }
 
     data.prompt = apply(tmpl, inputs, /* messages_override= */ tweaked_messages);
-    LOG_DBG("%s: Prompt: %s\n", __func__, data.prompt.c_str());
+    // LOG_DBG("%s: Prompt: %s\n", __func__, data.prompt.c_str());
 
     return data;
 }
