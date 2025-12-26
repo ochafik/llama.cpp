@@ -76,7 +76,7 @@ common_chat_params common_chat_params_init_nemotron_v3_peg(const common_chat_tem
                 auto schema_info = common_schema_info();
                 schema_info.resolve_refs(parameters);
 
-                // Check if additional properties are allowed
+                // Default to false for stricter parsing - only allow explicitly defined parameters
                 bool allow_additional = false;
                 bool additional_has_schema = false;
                 json additional_schema;
