@@ -17,6 +17,40 @@ common_chat_params common_chat_params_init_magistral_peg(const common_chat_templ
     bool has_tools = inputs.tools.is_array() && !inputs.tools.empty();
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
 
+    // Build custom schema for array format with metadata fields
+    // This is required because tool names are JSON property values (not literal tokens),
+    // so schema validation is the only mechanism to constrain tool names.
+    json tool_calls_schema = nullptr;
+    if (has_tools) {
+        auto schemas = json::array();
+        foreach_function(inputs.tools, [&](const auto &, const std::string & name, const json & parameters, const auto &) {
+            schemas.push_back({
+                {"type", "object"},
+                {"properties", {
+                    {"name", {
+                        {"type", "string"},
+                        {"const", name},  // Enforce exact tool name
+                    }},
+                    {"arguments", parameters},  // Full parameter validation
+                    {"id", {
+                        {"type", "string"},
+                        {"pattern", "^[a-zA-Z0-9]{9}$"},  // Enforce ID format (exactly 9 alphanumeric)
+                    }},
+                }},
+                {"required", json::array({"name", "arguments", "id"})},
+            });
+        });
+
+        tool_calls_schema = json{
+            {"type", "array"},
+            {"items", schemas.size() == 1 ? schemas[0] : json{{"anyOf", schemas}}},
+            {"minItems", 1},
+        };
+        if (!inputs.parallel_tool_calls) {
+            tool_calls_schema["maxItems"] = 1;
+        }
+    }
+
     // Build the PEG parser
     bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
     auto parser = build_chat_peg_parser([&](auto & p) {
@@ -34,9 +68,10 @@ common_chat_params common_chat_params_init_magistral_peg(const common_chat_templ
             }
 
             // Tool call parser: content followed by [TOOL_CALLS] and JSON array
+            // Uses p.schema() for full validation: tool name (const), arguments (full params), id (pattern)
             auto tool_call = p.tag(Tag::TOOL,
                 p.atomic_tag(Tag::TOOL_OPEN, p.literal("[TOOL_CALLS]"))
-                + p.tag(Tag::TOOL_ARGS, p.json())
+                + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-calls", tool_calls_schema))
             );
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
