@@ -94,21 +94,20 @@ common_chat_params common_chat_params_init_nemotron_v3_peg(const common_chat_tem
 
                 // Build schema-aware parameter rules
                 auto args = p.sequence();
-                foreach_parameter(parameters, [&](const std::string & param_name, const json & param_schema, bool /* is_required */) {
+                foreach_parameter(parameters, [&](const std::string & param_name, const json & param_schema, bool is_required) {
                     auto rule_name = "nemotron-v3-" + name + "-arg-" + param_name;
-                    auto arg_body = p.rule(rule_name + "-body", p.until_one_of({
-                        "\n</parameter>",
-                        "\n<parameter=",
-                        "\n</function>"
-                    }));
 
-                    auto arg_value = p.eps();
-                    if (schema_info.resolves_to_string(param_schema)) {
-                        arg_value = p.tag(Tag::TOOL_ARG_STRING_VALUE, arg_body);
-                    } else {
-                        // For non-string types, parse as JSON value
-                        arg_value = p.tag(Tag::TOOL_ARG_JSON_VALUE, arg_body);
-                    }
+                    // Use schema_or_raw_string_until for proper validation:
+                    // - String parameters: unconstrained p.until() (correct for raw text)
+                    // - Non-string parameters: full schema validation via p.schema()
+                    auto arg_value = p.schema_or_raw_string_until(
+                        rule_name + "-schema",
+                        param_schema,
+                        "\n</parameter>",
+                        schema_info,
+                        Tag::TOOL_ARG_STRING_VALUE,
+                        Tag::TOOL_ARG_JSON_VALUE,
+                        false);
 
                     auto arg_rule = p.rule(rule_name,
                         p.atomic_tag(Tag::TOOL_ARG_OPEN,
@@ -118,23 +117,25 @@ common_chat_params common_chat_params_init_nemotron_v3_peg(const common_chat_tem
                         + arg_value
                         + p.optional(newline)
                         + p.optional(p.atomic_tag(Tag::TOOL_ARG_CLOSE, p.literal("</parameter>\n"))));
-                    args += p.repeat(arg_rule, /* min = */ 0, /* max = */ 1);
+
+                    // Enforce required parameters using Seed-OSS pattern (Finding 11):
+                    // - Non-string types: always enforced via schema
+                    // - String types with maxLength: enforced via length-limited grammar
+                    // - String types without maxLength: not enforced (unlimited p.until() can't constrain)
+                    int max_length = param_schema.contains("maxLength") && param_schema["maxLength"].is_number_integer()
+                        ? param_schema["maxLength"].get<int>() : -1;
+                    bool can_enforce = !schema_info.resolves_to_string(param_schema) || max_length > 0;
+                    bool enforce_required = is_required && can_enforce;
+                    args += p.repeat(arg_rule, /* min = */ enforce_required ? 1 : 0, /* max = */ 1);
                 });
 
                 // Add generic rule for additional properties
                 if (allow_additional) {
-                    auto generic_arg_body = p.rule("nemotron-v3-" + name + "-arg-generic-body", p.until_one_of({
-                        "\n</parameter>",
-                        "\n<parameter=",
-                        "\n</function>"
-                    }));
-
-                    auto additional_value = p.eps();
-                    if (additional_has_schema && !schema_info.resolves_to_string(additional_schema)) {
-                        additional_value = p.tag(Tag::TOOL_ARG_JSON_VALUE, generic_arg_body);
-                    } else {
-                        additional_value = p.tag(Tag::TOOL_ARG_STRING_VALUE, generic_arg_body);
-                    }
+                    // Use schema_or_raw_string_until for additional properties with schema validation
+                    auto additional_value = additional_has_schema
+                        ? p.schema_or_raw_string_until("nemotron-v3-additional-" + name, additional_schema, "\n</parameter>",
+                            schema_info, Tag::TOOL_ARG_STRING_VALUE, Tag::TOOL_ARG_JSON_VALUE, true)
+                        : p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("\n</parameter>"));
 
                     auto generic_arg = p.rule("nemotron-v3-" + name + "-arg-generic",
                         p.atomic_tag(Tag::TOOL_ARG_OPEN,
