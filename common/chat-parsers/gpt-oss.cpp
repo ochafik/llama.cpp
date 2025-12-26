@@ -16,9 +16,8 @@ common_chat_params common_chat_params_init_gpt_oss_peg(const common_chat_templat
     auto adjusted_messages = json::array();
     for (const auto & msg : inputs.messages) {
         auto has_reasoning_content = msg.contains("reasoning_content") && msg.at("reasoning_content").is_string();
-        auto has_tool_calls = msg.contains("tool_calls") && msg.at("tool_calls").is_array();
 
-        if (has_reasoning_content && has_tool_calls) {
+        if (has_reasoning_content) {
             auto adjusted_message = msg;
             adjusted_message["thinking"] = msg.at("reasoning_content");
             adjusted_messages.push_back(adjusted_message);
@@ -83,8 +82,10 @@ common_chat_params common_chat_params_init_gpt_oss_peg(const common_chat_templat
 
         auto reasoning_block = p.eps();
         if (extract_reasoning) {
-            reasoning_block = p.optional(p.tag(Tag::REASONING,
-                p.literal("<|channel|>") + "analysis" + p.literal("<|message|>") + p.until("<|end|>")) + p.literal("<|end|>")
+            // Only tag the content between <|message|> and <|end|>, not the surrounding tokens
+            reasoning_block = p.optional(
+                p.literal("<|channel|>") + "analysis" + p.literal("<|message|>")
+                + p.tag(Tag::REASONING, p.until("<|end|>")) + p.literal("<|end|>")
                 + assistant_prefix()
             );
         }
@@ -134,17 +135,17 @@ common_chat_params common_chat_params_init_gpt_oss_peg(const common_chat_templat
                     + p.literal("<|end|>")
                 ));
 
-                // Tool call in role: <|start|>assistant to=functions.name<|channel|>analysis|commentary<|message|>{...}<|end|>
+                // Tool call in role: <|start|>assistant to=functions.name<|channel|>analysis|commentary<|message|>{...}<|call|>
                 tool_choice |= p.rule("tool-role-" + name, p.tag(Tag::TOOL,
                     assistant_prefix()
-                    + p.literal_tag(Tag::TOOL_OPEN, " to=functions.")
+                    + p.literal(" to=functions.")
                     + p.literal_tag(Tag::TOOL_NAME, name)
                     + p.literal("<|channel|>")
                     + (p.literal("analysis") | "commentary")
-                    + p.optional(" " + p.literal("<|constrain|>") + "json")
+                    + p.optional(p.literal(" ") + p.literal("<|constrain|>") + "json")
                     + p.literal("<|message|>")
                     + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-params", parameters))
-                    + p.literal("<|end|>")
+                    + p.literal("<|call|>")
                 ));
             });
 
