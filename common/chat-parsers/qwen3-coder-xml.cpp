@@ -87,7 +87,7 @@ common_chat_params common_chat_params_init_qwen3_coder_xml_peg(const common_chat
                 }
 
                 auto args = p.sequence();
-                foreach_parameter(parameters, [&](const std::string & param_name, const json & param_schema, bool /* is_required */) {
+                foreach_parameter(parameters, [&](const std::string & param_name, const json & param_schema, bool is_required) {
                     auto parameter_value = p.schema_or_raw_string_until("qwen-param-" + name + "-" + param_name, param_schema, "</parameter>",
                         schema_info, Tag::TOOL_ARG_STRING_VALUE, Tag::TOOL_ARG_JSON_VALUE, true);
 
@@ -101,7 +101,15 @@ common_chat_params common_chat_params_init_qwen3_coder_xml_peg(const common_chat
                         + p.space()  // Allow whitespace after </parameter>
                     );
 
-                    args += p.repeat(arg_rule, /* min = */ 0, /* max = */ 1);
+                    // Enforce required parameters using Seed-OSS pattern (Finding 11):
+                    // - Non-string types: always enforced via schema
+                    // - String types with maxLength: enforced via length-limited grammar
+                    // - String types without maxLength: not enforced (unlimited p.until() doesn't constrain model)
+                    int max_length = param_schema.contains("maxLength") && param_schema["maxLength"].is_number_integer()
+                        ? param_schema["maxLength"].get<int>() : -1;
+                    bool can_enforce = !schema_info.resolves_to_string(param_schema) || max_length > 0;
+                    bool enforce_required = is_required && can_enforce;
+                    args += p.repeat(arg_rule, /* min = */ enforce_required ? 1 : 0, /* max = */ 1);
                 });
 
                 if (allow_additional) {
