@@ -1472,7 +1472,7 @@ static common_chat_params common_chat_params_init_nemotron_v3(const common_chat_
                     "\n</function>"
                 }));
 
-                foreach_parameter(function, [&](const auto & param_name, const json & param_schema, bool is_required) {
+                foreach_parameter_legacy(function, [&](const auto & param_name, const json & param_schema, bool is_required) {
                     auto rule_name = "tool-" + name + "-arg-" + param_name;
 
                     auto arg_open = "<parameter=" + p.tool_arg_name(p.literal(param_name)) + ">\n";

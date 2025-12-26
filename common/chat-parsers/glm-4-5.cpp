@@ -119,7 +119,7 @@ common_chat_params common_chat_params_init_glm_4_5_peg(const common_chat_templat
                 auto tool_close = p.literal("</tool_call>");
                 auto args = p.sequence();
 
-                foreach_parameter(function, [&](const auto & param_name, const json & param_schema, bool is_required) {
+                foreach_parameter(parameters, [&](const auto & param_name, const json & param_schema, bool is_required) {
                     auto rule_name = "tool-" + name + "-arg-" + param_name;
 
                     auto arg_open = "<arg_key>" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + "</arg_key>\n<arg_value>";
