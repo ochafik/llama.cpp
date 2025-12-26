@@ -128,6 +128,7 @@ common_chat_params common_chat_params_init_llama_3_x_peg(const common_chat_templ
                 if (!builtin_tools.empty()) {
                     data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<|python_tag|>"});
                     data.format = COMMON_CHAT_FORMAT_LLAMA_3_X_WITH_BUILTIN_TOOLS;
+                    data.preserved_tokens.push_back("<|python_tag|>");
                 }
             }
 
