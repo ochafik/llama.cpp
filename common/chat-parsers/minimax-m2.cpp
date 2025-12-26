@@ -96,7 +96,7 @@ common_chat_params common_chat_params_init_minimax_m2_peg(const common_chat_temp
                 });
 
                 // By JSON Schema spec, missing additionalProperties defaults to true
-                bool allow_additional = true;
+                bool allow_additional = false;
                 bool additional_has_schema = false;
                 json additional_schema;
                 if (parameters.contains("additionalProperties")) {

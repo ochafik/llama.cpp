@@ -75,8 +75,8 @@ common_chat_params common_chat_params_init_qwen3_coder_xml_peg(const common_chat
                 auto schema_info = common_schema_info();
                 schema_info.resolve_refs(parameters);
 
-                // By JSON Schema spec, missing additionalProperties defaults to true
-                bool allow_additional = true;
+                // Default to false for stricter parsing - only allow explicitly defined parameters
+                bool allow_additional = false;
                 bool additional_has_schema = false;
                 json additional_schema;
                 if (parameters.contains("additionalProperties")) {
