@@ -57,7 +57,11 @@ common_chat_params common_chat_params_init_nemotron_v3_peg(const common_chat_tem
                 reasoning = p.optional(think_open + reasoning_content);
             }
         } else {
-            reasoning = p.optional(think_open + p.until("</think>") + think_close);
+            if (data.thinking_forced_open) {
+                reasoning = p.until("</think>") + think_close;
+            } else {
+                reasoning = p.optional(think_open + p.until("</think>") + think_close);
+            }
         }
 
         // Response format parser
