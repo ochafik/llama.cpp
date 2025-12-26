@@ -17,6 +17,34 @@ common_chat_params common_chat_params_init_firefunction_v2_peg(const common_chat
 
     bool has_tools = inputs.tools.is_array() && !inputs.tools.empty();
 
+    // Build schema for tool calls (matches original implementation)
+    // Format: [{"name": "function_name", "arguments": {...}}]
+    json tool_calls_schema = nullptr;
+    if (has_tools) {
+        auto schemas = json::array();
+        foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
+            schemas.push_back({
+                {"type", "object"},
+                {"properties", {
+                    {"name", {
+                        {"type", "string"},
+                        {"const", name},
+                    }},
+                    {"arguments", parameters},
+                }},
+                {"required", json::array({"name", "arguments"})},
+            });
+        });
+        tool_calls_schema = {
+            {"type", "array"},
+            {"items", schemas.size() == 1 ? schemas[0] : json{{"anyOf", schemas}}},
+            {"minItems", 1},
+        };
+        if (!inputs.parallel_tool_calls) {
+            tool_calls_schema["maxItems"] = 1;
+        }
+    }
+
     // Build the PEG parser
     bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
     auto parser = build_chat_peg_parser([&](auto & p) {
@@ -25,15 +53,16 @@ common_chat_params common_chat_params_init_firefunction_v2_peg(const common_chat
         // Stop tokens for Firefunction V2
         std::vector<std::string> stop_tokens = {"<|eot_id|>", "<|start_header_id|>"};
 
-        if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {            
+        if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
             if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, " functools["});
             }
 
-            // Tool call parser: content followed by functools[ and JSON array
+            // Tool call parser: content followed by functools[ and JSON array with schema
             auto tool_call = p.tag(Tag::TOOL,
-                p.atomic_tag(Tag::TOOL_OPEN, p.literal(" functools"))
-                + p.tag(Tag::TOOL_ARGS, p.json())
+                p.atomic_tag(Tag::TOOL_OPEN, p.literal(" functools["))
+                + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-calls", tool_calls_schema))
+                + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("]"))
             );
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
