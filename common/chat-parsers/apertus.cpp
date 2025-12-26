@@ -112,7 +112,13 @@ common_chat_params common_chat_params_init_apertus_peg(const common_chat_templat
             foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
                 schemas.push_back({
                     {"type", "object"},
-                    {"properties", {{name, parameters}}},
+                    {"properties", {
+                        {"name", {
+                            {"type", "string"},
+                            {"const", name},
+                        }},
+                        {"arguments", parameters},
+                    }},
                     {"required", json::array({name})}
                 });
             });
