@@ -61,10 +61,11 @@ common_chat_params common_chat_params_init_kimi_k2_peg(const common_chat_templat
 
             foreach_function(inputs.tools, [&](const auto &, const auto & name, const auto & parameters, const auto &) {
                 // Match: functions.{name}:{id}
+                // Counter must be one or more digits (matching original [0-9]+ pattern)
                 // Use atomic_tag to ensure tool calls are only created when fully matched
                 auto tool_open = p.literal("<|tool_call_begin|>")
                     + "functions." + p.literal_tag(Tag::TOOL_NAME, name) + ":"
-                    + p.tag(Tag::TOOL_ID, p.until("<|tool_call_argument_begin|>"))
+                    + p.tag(Tag::TOOL_ID, p.repeat(p.char_class("0-9"), 1, -1))
                     + "<|tool_call_argument_begin|>";
                 auto tool_close = p.literal("<|tool_call_end|>");
                 auto tool_args = p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters));
