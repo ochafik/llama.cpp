@@ -69,6 +69,11 @@ common_chat_params common_chat_params_init_hermes_2_pro_peg(const common_chat_te
             }
         }
 
+        // Response format parser (json_schema support)
+        if (inputs.json_schema.is_object() && !inputs.json_schema.empty()) {
+            return reasoning << p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema)) << consume_message_end();
+        }
+
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
             auto tool_choice = p.choice();
 

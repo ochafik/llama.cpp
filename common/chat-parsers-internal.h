@@ -202,8 +202,9 @@ inline void common_chat_build_peg_grammar(const struct templates_params & inputs
     if (!inputs.grammar.empty()) {
         // Throw something upstream??
         data.grammar = inputs.grammar;
-    } else if (!inputs.json_schema.is_null()) {
-        // Need a pass through parser
+    } else if (!inputs.json_schema.is_null() && !inputs.experimental_new_parsers) {
+        // Legacy path: use json_schema_to_grammar directly (bypasses PEG parser)
+        // New parsers handle json_schema internally via p.schema()
         data.grammar = json_schema_to_grammar(inputs.json_schema);
     } else {
         data.parser = parser.save();
