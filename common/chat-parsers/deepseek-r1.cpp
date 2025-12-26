@@ -43,7 +43,6 @@ common_chat_params common_chat_params_init_deepseek_r1_peg(const common_chat_tem
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
 
     data.format = COMMON_CHAT_FORMAT_DEEPSEEK_R1;
-    data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED && inputs.json_schema.is_null();
 
     data.preserved_tokens = {
         "<think>",
