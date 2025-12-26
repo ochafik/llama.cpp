@@ -4,6 +4,37 @@
 
 #include "chat-parsers-internal.h"
 
+static void validate_python_tool_schema(const std::string & name, const json & parameters) {
+    if (!parameters.contains("type")) {
+        throw std::runtime_error("Python tool '" + name + "' is missing 'type' in parameters");
+    }
+
+    const auto & type = parameters.at("type");
+
+    if (type == "object") {
+        if (!parameters.contains("properties") || !parameters.at("properties").is_object()) {
+            throw std::runtime_error("Python tool '" + name + "' has type 'object' but missing 'properties'");
+        }
+
+        const auto & properties = parameters.at("properties");
+        std::string string_property;
+        for (auto it = properties.begin(); it != properties.end(); ++it) {
+            if (it.value().contains("type") && it.value().at("type") == "string") {
+                if (!string_property.empty()) {
+                    throw std::runtime_error("Python tool '" + name + "' has multiple string properties (ambiguous code argument)");
+                }
+                string_property = it.key();
+            }
+        }
+
+        if (string_property.empty()) {
+            throw std::runtime_error("Python tool '" + name + "' has type 'object' but no string properties (code argument)");
+        }
+    } else if (type != "string") {
+        throw std::runtime_error("Python tool '" + name + "' has invalid type '" + type.dump() + "' (expected 'object' or 'string')");
+    }
+}
+
 common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1_peg(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
 
@@ -13,10 +44,11 @@ common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1_peg(const 
     data.prompt = apply(tmpl, inputs);
     data.format = COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1;
 
-    // Detect python tool (for <|python_tag|> support)
+    // Detect python tool (for <|python_tag|> support) and validate schema
     if (has_tools) {
-        foreach_function(inputs.tools, [&](const auto &, const auto & name, const json &, const auto &) {
+        foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
             if (name == "python" || name == "ipython") {
+                validate_python_tool_schema(name, parameters);
                 has_raw_python = true;
             }
         });
@@ -41,6 +73,9 @@ common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1_peg(const 
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
             if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<function="});
+                if (has_raw_python) {
+                    data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<|python_tag|>"});
+                }
             }
 
             auto tool_choice = p.choice();
