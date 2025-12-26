@@ -67,7 +67,7 @@ common_chat_params common_chat_params_init_granite_peg(const common_chat_templat
 
             // Build schema for tool calls array with name/arguments validation
             auto tool_call_schemas = json::array();
-            foreach_function(inputs.tools, [&](const auto & function, const auto & name, const json & parameters, const auto &) {
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
                 tool_call_schemas.push_back({
                     {"type", "object"},
                     {"properties", {

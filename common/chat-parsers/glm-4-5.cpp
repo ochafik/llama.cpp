@@ -95,7 +95,7 @@ common_chat_params common_chat_params_init_glm_4_5_peg(const common_chat_templat
             }
 
             auto tool_choice = p.choice();
-            foreach_function(inputs.tools, [&](const auto & function, const auto & name, const auto & parameters, const auto & schema_info) {
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const auto & parameters, const auto & schema_info) {
                 // Default to false for stricter parsing - only allow explicitly defined parameters
                 bool allow_additional = false;
                 bool additional_has_schema = false;
