@@ -119,7 +119,7 @@ common_chat_params common_chat_params_init_glm_4_5_peg(const common_chat_templat
                 auto tool_close = p.literal("</tool_call>");
                 auto args = p.sequence();
 
-                foreach_parameter(function, [&](const auto & param_name, const json & param_schema, bool /* is_required */) {
+                foreach_parameter(function, [&](const auto & param_name, const json & param_schema, bool is_required) {
                     auto rule_name = "tool-" + name + "-arg-" + param_name;
 
                     auto arg_open = "<arg_key>" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + "</arg_key>\n<arg_value>";
@@ -129,7 +129,16 @@ common_chat_params common_chat_params_init_glm_4_5_peg(const common_chat_templat
                         schema_info, Tag::TOOL_ARG_STRING_VALUE, Tag::TOOL_ARG_JSON_VALUE, false);
 
                     auto arg_rule = p.rule(rule_name, p.atomic_tag(Tag::TOOL_ARG_OPEN, arg_open) + arg_value + p.atomic_tag(Tag::TOOL_ARG_CLOSE, arg_close));
-                    args += p.repeat(arg_rule, /* min = */ 0, /* max = */ 1);
+
+                    // Enforce required parameters when possible (best-effort approach)
+                    // String parameters without maxLength cannot be constrained (unlimited p.until())
+                    // Non-string types and string types with maxLength can be enforced
+                    int max_length = param_schema.contains("maxLength") && param_schema["maxLength"].is_number_integer()
+                        ? param_schema["maxLength"].get<int>() : -1;
+                    bool can_enforce = !schema_info.resolves_to_string(param_schema) || max_length > 0;
+                    bool enforce_required = is_required && can_enforce;
+
+                    args += p.repeat(arg_rule, /* min = */ enforce_required ? 1 : 0, /* max = */ 1);
                 });
 
                 if (allow_additional) {
