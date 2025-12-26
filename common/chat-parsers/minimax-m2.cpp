@@ -78,7 +78,7 @@ common_chat_params common_chat_params_init_minimax_m2_peg(const common_chat_temp
 
                 auto arg_close = p.literal("</parameter>") + p.space();
 
-                foreach_parameter(parameters, [&](const auto & param_name, const json & param_schema, bool is_required) {
+                foreach_parameter(parameters, [&](const auto & param_name, const json & param_schema, bool /*is_required*/) {
                     auto rule_name = "tool-" + name + "-arg-" + param_name;
 
                     auto arg_open = "<parameter name=\"" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + "\">";
@@ -90,16 +90,10 @@ common_chat_params common_chat_params_init_minimax_m2_peg(const common_chat_temp
                         + arg_value
                         + p.atomic_tag(Tag::TOOL_ARG_CLOSE, arg_close));
 
-                    // Enforce required parameters when possible
-                    // String parameters without maxLength cannot be constrained by grammar (unlimited p.until())
-                    // Non-string types and string types with maxLength can be enforced
-                    int max_length = param_schema.contains("maxLength") && param_schema["maxLength"].is_number_integer()
-                        ? param_schema["maxLength"].get<int>() : -1;
-                    bool can_enforce = !schema_info.resolves_to_string(param_schema) || max_length > 0;
-                    bool enforce_required = is_required && can_enforce;
-
-                    parameter_choice |= p.rule(rule_name + "-opt",
-                        p.repeat(arg_rule, /* min = */ enforce_required ? 1 : 0, /* max = */ 1));
+                    // Add each parameter as a direct alternative in the choice
+                    // Don't wrap in repeat(0,1) - that makes each alternative match empty,
+                    // causing the choice to always pick the first alternative
+                    parameter_choice |= arg_rule;
                     has_parameter_rules = true;
                 });
 
