@@ -25,9 +25,6 @@ common_chat_params common_chat_params_init_llama_3_x_peg(const common_chat_templ
     data.format = COMMON_CHAT_FORMAT_LLAMA_3_X;
 
     data.preserved_tokens = {};
-    if (allow_python_tag_builtin_tools) {
-        data.preserved_tokens.push_back("<|python_tag|>");
-    }
 
     // Build PEG parser
     auto parser = build_chat_peg_parser([&](auto & p) {
@@ -53,8 +50,9 @@ common_chat_params common_chat_params_init_llama_3_x_peg(const common_chat_templ
         foreach_function(inputs.tools, [&](const auto &, const auto & name, const auto & parameters, const auto &) {
             // Check if this is a builtin tool
             if (allow_python_tag_builtin_tools) {
-                if (name == "wolfram_alpha" || name == "web_search" || name == "brave_search" ||
-                    name == "python" || name == "code_interpreter") {
+                if (name == "wolfram_alpha" || name == "web_search" || name == "brave_search") {
+                    // Validate that builtin tools have expected properties
+                    expect_tool_parameters(name, parameters, {"query"});
                     builtin_tool_names.push_back(name);
                     builtin_tools.push_back(name);
 
@@ -66,8 +64,35 @@ common_chat_params common_chat_params_init_llama_3_x_peg(const common_chat_templ
                             if (!first) {
                                 args = args + ", ";
                             }
-                            // Use constructed mapper tags: TOOL_ARG_NAME and TOOL_ARG_JSON_VALUE
-                            args = args + p.literal_tag(Tag::TOOL_ARG_NAME, it.key()) + "=" + p.tag(Tag::TOOL_ARG_JSON_VALUE, p.json_string());
+                            // Use schema validation for each argument value
+                            args = args + p.literal_tag(Tag::TOOL_ARG_NAME, it.key()) + "=" +
+                                   p.tag(Tag::TOOL_ARG_JSON_VALUE, p.schema(p.json(), "builtin-" + name + "-arg-" + it.key(), it.value()));
+                            first = false;
+                        }
+                    }
+
+                    tool_choice |= p.rule("builtin-" + name, p.tag(Tag::TOOL,
+                        p.atomic_tag(Tag::TOOL_OPEN, p.literal("<|python_tag|>") + p.literal_tag(Tag::TOOL_NAME, name) + ".call(")
+                        + args
+                        + p.literal_tag(Tag::TOOL_CLOSE, ")")
+                    ));
+                } else if (name == "python" || name == "code_interpreter") {
+                    // Validate that builtin tools have expected properties
+                    expect_tool_parameters(name, parameters, {"code"});
+                    builtin_tool_names.push_back(name);
+                    builtin_tools.push_back(name);
+
+                    // Builtin tool format: <|python_tag|>name.call(key="value")
+                    common_peg_parser args = p.eps();
+                    if (parameters.contains("properties")) {
+                        bool first = true;
+                        for (auto it = parameters.at("properties").begin(); it != parameters.at("properties").end(); ++it) {
+                            if (!first) {
+                                args = args + ", ";
+                            }
+                            // Use schema validation for each argument value
+                            args = args + p.literal_tag(Tag::TOOL_ARG_NAME, it.key()) + "=" +
+                                   p.tag(Tag::TOOL_ARG_JSON_VALUE, p.schema(p.json(), "builtin-" + name + "-arg-" + it.key(), it.value()));
                             first = false;
                         }
                     }
