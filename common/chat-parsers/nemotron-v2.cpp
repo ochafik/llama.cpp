@@ -74,10 +74,37 @@ common_chat_params common_chat_params_init_nemotron_v2_peg(const common_chat_tem
                     {COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<TOOLCALL>"}
                 };
             }
+
+            // Build schema for Nemotron V2 array format with named fields
+            // Format: [{"name": "func", "arguments": {...}}]
+            auto schemas = json::array();
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
+                schemas.push_back({
+                    {"type", "object"},
+                    {"properties", {
+                        {"name", {
+                            {"type", "string"},
+                            {"const", name},
+                        }},
+                        {"arguments", parameters},
+                    }},
+                    {"required", json::array({"name", "arguments"})},
+                });
+            });
+
+            auto schema = json{
+                {"type", "array"},
+                {"items", schemas.size() == 1 ? schemas[0] : json{{"anyOf", schemas}}},
+                {"minItems", 1},
+            };
+            if (!inputs.parallel_tool_calls) {
+                schema["maxItems"] = 1;
+            }
+
             // Tool call: <TOOLCALL> + JSON array + </TOOLCALL>
             auto tool_call = p.tag(Tag::TOOL,
                 p.atomic_tag(Tag::TOOL_OPEN, p.literal("<TOOLCALL>"))
-                + p.tag(Tag::TOOL_ARGS, p.json())
+                + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-calls", schema))
                 + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("</TOOLCALL>"))
             );
 
