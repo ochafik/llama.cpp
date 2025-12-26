@@ -68,7 +68,7 @@ common_chat_params common_chat_params_init_minimax_m2_peg(const common_chat_temp
             }
 
             auto invoke_choice = p.choice();
-            foreach_function(inputs.tools, [&](const auto & function, const auto & name, const auto & parameters, const auto & schema_info) {
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const auto & parameters, const auto & schema_info) {
                 // Format: <invoke name="function_name"><parameter name="key">value</parameter></invoke>
                 auto tool_open = "<invoke name=\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\">" + p.space();
                 auto tool_close = p.space() + p.literal("</invoke>") + p.space();
