@@ -5331,8 +5331,8 @@ int main(int argc, char ** argv) {
                     }
                     auto tmpls = read_templates(path);
                     auto parts  = string_split(path, "/");
-                    auto name   = parts[parts.size() - 1];
-                    auto format = common_chat_format_name(common_chat_templates_apply(tmpls.get(), inputs).format);
+                    const auto & name = parts[parts.size() - 1];
+                    const auto & format = common_chat_format_name(common_chat_templates_apply(tmpls.get(), inputs).format);
                     std::cout << "| " << name << " | " << format << " |\n";
                 } catch (const std::exception & e) {
                     std::cerr << "Failed to process " << argv[i] << ": " << e.what() << '\n';
@@ -5343,6 +5343,16 @@ int main(int argc, char ** argv) {
         {
             const std::string chat_test = std::getenv("CHAT_TEST") ? std::getenv("CHAT_TEST") : "";
 
+            if (chat_test == "" || chat_test == "format_detection_with_tools") {
+                if (!test_format_detection_with_tools()) {
+                    return 1;
+                }
+            }
+            if (chat_test == "" || chat_test == "systematic_needle_streaming") {
+                if (!test_systematic_needle_streaming()) {
+                    return 1;
+                }
+            }
             if (chat_test == "" || chat_test == "msg_diffs_compute") {
                 test_msg_diffs_compute();
             }
@@ -5361,16 +5371,6 @@ int main(int argc, char ** argv) {
             }
             if (chat_test == "" || chat_test == "required_tool_rejects_content") {
                 if (!test_required_tool_rejects_content()) {
-                    return 1;
-                }
-            }
-            if (chat_test == "" || chat_test == "format_detection_with_tools") {
-                if (!test_format_detection_with_tools()) {
-                    return 1;
-                }
-            }
-            if (chat_test == "" || chat_test == "systematic_needle_streaming") {
-                if (!test_systematic_needle_streaming()) {
                     return 1;
                 }
             }
