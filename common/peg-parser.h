@@ -456,7 +456,7 @@ class common_peg_parser_builder {
         const std::string & rule_name,
         const nlohmann::ordered_json & param_schema,
         const std::string & end_delimiter,
-        common_schema_info & schema_info,
+        const common_schema_info & schema_info,
         int string_tag,
         int json_tag,
         bool space_around_json = false);
@@ -467,7 +467,7 @@ class common_peg_parser_builder {
         const std::string & rule_name,
         const nlohmann::ordered_json & param_schema,
         const std::string & end_delimiter,
-        common_schema_info & schema_info,
+        const common_schema_info & schema_info,
         E string_tag,
         E json_tag,
         bool space_around_json = false)

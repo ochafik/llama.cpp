@@ -53,13 +53,13 @@ common_chat_params common_chat_params_init_kimi_k2_peg(const common_chat_templat
         // Format: <|tool_call_begin|>functions.{name}:{counter}<|tool_call_argument_begin|>{...}<|tool_call_end|>
         bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+            if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
+                data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<|tool_calls_section_begin|>"});
+            }
+
             auto tool_choice = p.choice();
 
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                std::string name = function.at("name");
-                auto parameters = function.at("parameters");
-
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const auto & parameters, const auto &) {
                 // Match: functions.{name}:{id}
                 // Use atomic_tag to ensure tool calls are only created when fully matched
                 auto tool_open = p.literal("<|tool_call_begin|>")
@@ -96,25 +96,7 @@ common_chat_params common_chat_params_init_kimi_k2_peg(const common_chat_templat
         return reasoning << optional_newline() << p.tag(Tag::CONTENT, p.rest());
     });
 
-    data.parser = parser.save();
-
-    if (include_grammar) {
-        data.grammar_lazy = has_tools && inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
-
-        // Build grammar from PEG parser
-        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-            foreach_function(inputs.tools, [&](const json & tool) {
-                auto schema = tool.at("function").at("parameters");
-                builder.resolve_refs(schema);
-            });
-            parser.build_grammar(builder, data.grammar_lazy);
-        });
-        if (data.grammar_lazy) {
-            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<|tool_calls_section_begin|>"});
-        } else {
-            data.grammar_triggers.clear();
-        }
-    }
+    common_chat_build_peg_grammar(inputs, parser, data);
 
     return data;
 }

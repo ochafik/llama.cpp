@@ -1,13 +1,10 @@
 #include "chat.h"
-#include "chat-parser.h"
 #include "chat-parser-xml-toolcall.h"
 #include "chat-peg-parser.h"
 #include "chat-parsers-internal.h"
 #include "common.h"
-#include "json-partial.h"
 #include "json-schema-to-grammar.h"
 #include "log.h"
-#include "regex-partial.h"
 
 #include <minja/chat-template.hpp>
 #include <minja/minja.hpp>
@@ -17,7 +14,6 @@
 #include <cctype>
 #include <exception>
 #include <functional>
-#include <iostream>
 #include <optional>
 #include <stdexcept>
 #include <string>

@@ -10,14 +10,12 @@ common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1_peg(const 
     auto has_raw_python = false;
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
 
-    data.format = has_tools ? COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1 : COMMON_CHAT_FORMAT_CONTENT_ONLY;
-    data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+    data.prompt = apply(tmpl, inputs);
+    data.format = COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1;
 
     // Detect python tool (for <|python_tag|> support)
     if (has_tools) {
-        foreach_function(inputs.tools, [&](const json & tool) {
-            const auto & function = tool.at("function");
-            std::string name = function.at("name");
+        foreach_function(inputs.tools, [&](const auto &, const auto & name, const json &, const auto &) {
             if (name == "python" || name == "ipython") {
                 has_raw_python = true;
             }
@@ -41,13 +39,13 @@ common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1_peg(const 
 
         // Tool call parser
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+            if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
+                data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<function="});
+            }
+
             auto tool_choice = p.choice();
 
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                std::string name = function.at("name");
-                auto parameters = function.at("parameters");
-
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const auto & parameters, const auto &) {
                 // Format: <function=name>{...}</function>
                 tool_choice |= p.rule("tool-" + name, p.tag(Tag::TOOL,
                     p.atomic_tag(Tag::TOOL_OPEN, p.literal("<function="))
@@ -88,32 +86,7 @@ common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1_peg(const 
         return p.tag(Tag::CONTENT, p.until_one_of({"<|eot_id|>", "<|eom_id|>", "<|end|>", "<|start_header_id|>"}));
     });
 
-    data.parser = parser.save();
+    common_chat_build_peg_grammar(inputs, parser, data);
 
-    if (has_tools) {
-
-        // Build grammar
-        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-            std::vector<std::string> tool_rules;
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                std::string name = function.at("name");
-                tool_rules.push_back(builder.add_rule(name + "-call",
-                    "\"<function=" + name + ">\" " +
-                    builder.add_schema(name + "-args", function.at("parameters")) +
-                    " \"</function>\" space"
-                ));
-            });
-            if (has_raw_python) {
-                tool_rules.push_back(builder.add_rule("python-call", "\"<|python_tag|>\" .*"));
-                data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<|python_tag|>"});
-            }
-            auto tool_call = builder.add_rule("tool_call", string_join(tool_rules, " | ")) + " space";
-            builder.add_rule("root", inputs.parallel_tool_calls ? "(" + tool_call + ")+" : tool_call);
-            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<function="});
-        });
-    }
-
-    data.prompt = apply(tmpl, inputs);
     return data;
 }

@@ -59,6 +59,13 @@ common_chat_params common_chat_params_init_granite_peg(const common_chat_templat
 
         // Tool call parser: Granite emits <|tool_call|>[{"name": "func", "arguments": {...}}]
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+
+            if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
+                if (data.grammar.find("<|tool_call|>") != std::string::npos) {
+                    data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<|tool_call|>"});
+                }
+            }
+                
             auto tool_call = p.tag(Tag::TOOL,
                 p.atomic_tag(Tag::TOOL_OPEN, p.literal("<|tool_call|>"))
                 + p.tag(Tag::TOOL_ARGS, p.json())
@@ -83,24 +90,7 @@ common_chat_params common_chat_params_init_granite_peg(const common_chat_templat
         return reasoning << p.choice({response_block, content_until_eot, p.tag(Tag::CONTENT, p.rest())});
     });
 
-    data.parser = parser.save();
-
-    if (include_grammar) {
-        data.grammar_lazy = has_tools && inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
-        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-            parser.build_grammar(builder, data.grammar_lazy);
-        });
-        // If lazy mode was requested but the trigger word doesn't appear in the grammar,
-        // it means no trigger rules were defined, so disable lazy mode
-        if (data.grammar_lazy && data.grammar.find("<|tool_call|>") == std::string::npos) {
-            data.grammar_lazy = false;
-            data.grammar_triggers.clear();
-        } else if (data.grammar_lazy) {
-            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<|tool_call|>"});
-        } else {
-            data.grammar_triggers.clear();
-        }
-    }
-
+    common_chat_build_peg_grammar(inputs, parser, data);
+    
     return data;
 }

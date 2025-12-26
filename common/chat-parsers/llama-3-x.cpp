@@ -3,6 +3,7 @@
 // Also supports builtin tools: <|python_tag|>python.call(code="...")
 
 #include "chat-parsers-internal.h"
+#include "chat.h"
 
 static void expect_tool_parameters(const std::string & name, const json & parameters, const std::vector<std::string> & expected_properties) {
     if (!parameters.contains("properties") || !parameters.at("properties").is_object()) {
@@ -21,8 +22,7 @@ common_chat_params common_chat_params_init_llama_3_x_peg(const common_chat_templ
     common_chat_params data;
 
     bool has_tools = inputs.tools.is_array() && !inputs.tools.empty();
-    data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
-    data.format = has_tools ? COMMON_CHAT_FORMAT_LLAMA_3_X : COMMON_CHAT_FORMAT_CONTENT_ONLY;
+    data.format = COMMON_CHAT_FORMAT_LLAMA_3_X;
 
     data.preserved_tokens = {};
     if (allow_python_tag_builtin_tools) {
@@ -50,11 +50,7 @@ common_chat_params common_chat_params_init_llama_3_x_peg(const common_chat_templ
         // Check for builtin tools
         std::vector<std::string> builtin_tool_names;
 
-        foreach_function(inputs.tools, [&](const json & tool) {
-            const auto & function = tool.at("function");
-            std::string name = function.at("name");
-            auto parameters = function.at("parameters");
-
+        foreach_function(inputs.tools, [&](const auto &, const auto & name, const auto & parameters, const auto &) {
             // Check if this is a builtin tool
             if (allow_python_tag_builtin_tools) {
                 if (name == "wolfram_alpha" || name == "web_search" || name == "brave_search" ||
@@ -98,6 +94,20 @@ common_chat_params common_chat_params_init_llama_3_x_peg(const common_chat_templ
 
         bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+            if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
+                // Grammar triggers
+                data.grammar_triggers.push_back({
+                    COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
+                    "(\\{\\s*(?:\"type\"\\s*:\\s*\"function\"\\s*,\\s*)?\"name\"\\s*:\\s*\")[\\s\\S]*",
+                });
+                if (!builtin_tools.empty()) {
+                    data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<|python_tag|>"});
+                    data.format = COMMON_CHAT_FORMAT_LLAMA_3_X_WITH_BUILTIN_TOOLS;
+                }
+            }
+
+            data.additional_stops.push_back("<|eom_id|>");
+            
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
 
@@ -123,31 +133,7 @@ common_chat_params common_chat_params_init_llama_3_x_peg(const common_chat_templ
         return p.choice({content_only, p.tag(Tag::CONTENT, p.rest())});
     });
 
-    data.parser = parser.save();
-
-    if (has_tools) {
-
-        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                auto schema = function.at("parameters");
-                builder.resolve_refs(schema);
-            });
-            parser.build_grammar(builder, data.grammar_lazy);
-        });
-
-        // Grammar triggers
-        data.grammar_triggers.push_back({
-            COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
-            "(\\{\\s*(?:\"type\"\\s*:\\s*\"function\"\\s*,\\s*)?\"name\"\\s*:\\s*\")[\\s\\S]*",
-        });
-        if (!builtin_tools.empty()) {
-            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<|python_tag|>"});
-            data.format = COMMON_CHAT_FORMAT_LLAMA_3_X_WITH_BUILTIN_TOOLS;
-        }
-
-        data.additional_stops.push_back("<|eom_id|>");
-    }
+    common_chat_build_peg_grammar(inputs, parser, data);
 
     data.prompt = apply(tmpl, inputs, /* messages_override =*/ std::nullopt, /* tools_override= */ std::nullopt, json {
         {"date_string", format_time(inputs.now, "%d %b %Y")},

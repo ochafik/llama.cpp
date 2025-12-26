@@ -34,8 +34,6 @@ common_chat_params common_chat_params_init_command_r7b_peg(const common_chat_tem
     bool has_tools = inputs.tools.is_array() && !inputs.tools.empty();
 
     data.format = COMMON_CHAT_FORMAT_COMMAND_R7B;
-    data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
-
     data.preserved_tokens = {
         "<|START_ACTION|>",
         "<|END_ACTION|>",
@@ -78,6 +76,14 @@ common_chat_params common_chat_params_init_command_r7b_peg(const common_chat_tem
         }
 
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+            if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
+                data.grammar_triggers.push_back({
+                    COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
+                    std::string(data.thinking_forced_open ? "[\\s\\S]*?(<\\|END_THINKING\\|>\\s*)" : "(?:<\\|START_THINKING\\|>[\\s\\S]*?<\\|END_THINKING\\|>\\s*)?") +
+                        "(<\\|START_ACTION\\|>)[\\s\\S]*"
+                });
+            }
+
             // Tool call: <|START_ACTION|>[...json array...]<|END_ACTION|>
             auto tool_call = p.tag(Tag::TOOL,
                 p.atomic_tag(Tag::TOOL_OPEN, p.literal("<|START_ACTION|>"))
@@ -100,53 +106,7 @@ common_chat_params common_chat_params_init_command_r7b_peg(const common_chat_tem
         return reasoning << response_block << p.optional(p.rest());
     });
 
-    data.parser = parser.save();
-
-    if (has_tools) {
-        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-            auto schemas = json::array();
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                schemas.push_back({
-                    {"type", "object"},
-                    {"properties", {
-                        {"tool_call_id", {
-                            {"type", "string"},
-                            // Command-R's template expects an integer string.
-                            {"pattern", "^[0-9]{1,10}$"},
-                        }},
-                        {"tool_name", {
-                            {"type", "string"},
-                            {"const", function.at("name")},
-                        }},
-                        {"parameters", function.at("parameters")},
-                    }},
-                    {"required", json::array({"tool_call_id", "tool_name", "parameters"})},
-                });
-            });
-            auto schema = json {
-                {"type", "array"},
-                {"items", schemas.size() == 1 ? schemas[0] : json {{"anyOf", schemas}}},
-                {"minItems", 1},
-            };
-            if (!inputs.parallel_tool_calls) {
-                schema["maxItems"] = 1;
-            }
-            builder.add_rule("root",
-                std::string(data.thinking_forced_open ? "( \"<|END_THINKING|>\" space )? " : "") +
-                "\"<|START_ACTION|>\" " + builder.add_schema("tool_calls", schema) + " \"<|END_ACTION|>\"");
-        });
-
-        if (data.grammar_lazy) {
-            data.grammar_triggers.push_back({
-                COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
-                std::string(data.thinking_forced_open ? "[\\s\\S]*?(<\\|END_THINKING\\|>\\s*)" : "(?:<\\|START_THINKING\\|>[\\s\\S]*?<\\|END_THINKING\\|>\\s*)?") +
-                    "(<\\|START_ACTION\\|>)[\\s\\S]*"
-            });
-        } else {
-            data.grammar_triggers.clear();
-        }
-    }
+    common_chat_build_peg_grammar(inputs, parser, data);
 
     return data;
 }
