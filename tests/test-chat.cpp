@@ -4560,6 +4560,99 @@ static bool verify_template_capabilities(const std::vector<template_capabilities
     return true;
 }
 
+// Verify that when experimental_new_parsers is enabled with tools, we get the expected format
+// (not CONTENT_ONLY) and that grammar + parser are properly generated.
+// This catches Pattern 1 failures: templates detected as Content-only when they should have
+// a proper tool-calling format.
+static bool test_format_detection_with_tools() {
+    printf("[%s]\n", __func__);
+
+    const char * template_filter = std::getenv("NEEDLE_TEMPLATE_FILTER");
+    const auto & templates = get_template_capabilities();
+
+    size_t tested = 0;
+    size_t passed = 0;
+    size_t skipped = 0;
+
+    for (const auto & info : templates) {
+        if (template_filter && std::string(info.name) != template_filter) {
+            continue;
+        }
+
+        // Skip templates without tool support
+        if (info.supports_tools != ToolSupport::Yes) {
+            continue;
+        }
+
+        auto tmpls = read_templates(info.jinja_path);
+        if (!tmpls) {
+            if (g_verbose >= 1) {
+                printf("  " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " %s (template not found)\n", info.name);
+            }
+            skipped++;
+            continue;
+        }
+
+        tested++;
+
+        // Apply template with tools and experimental_new_parsers
+        common_chat_templates_inputs inputs;
+        inputs.messages = {message_user};
+        inputs.tools = {python_tool};
+        inputs.tool_choice = COMMON_CHAT_TOOL_CHOICE_AUTO;
+        inputs.parallel_tool_calls = false;
+        inputs.experimental_new_parsers = true;
+
+        common_chat_params params;
+        try {
+            params = common_chat_templates_apply(tmpls.get(), inputs);
+        } catch (const std::exception & e) {
+            printf("  " ANSI_COLOR_RED "FAIL" ANSI_COLOR_RESET " %s: apply threw: %s\n", info.name, e.what());
+            continue;
+        }
+
+        bool format_ok = true;
+        bool grammar_ok = true;
+        bool parser_ok = true;
+
+        // Check 1: Format should match expected (not CONTENT_ONLY)
+        if (params.format != info.format) {
+            if (params.format == COMMON_CHAT_FORMAT_CONTENT_ONLY) {
+                printf("  " ANSI_COLOR_RED "FAIL" ANSI_COLOR_RESET " %s: format is CONTENT_ONLY, expected %d\n",
+                       info.name, static_cast<int>(info.format));
+            } else if (g_verbose >= 1) {
+                printf("  " ANSI_COLOR_YELLOW "NOTE" ANSI_COLOR_RESET " %s: format=%d, expected=%d\n",
+                       info.name, static_cast<int>(params.format), static_cast<int>(info.format));
+            }
+            // Only fail on CONTENT_ONLY, other format differences may be intentional
+            format_ok = (params.format != COMMON_CHAT_FORMAT_CONTENT_ONLY);
+        }
+
+        // Check 2: Grammar should be non-empty when tools are provided
+        if (params.grammar.empty()) {
+            printf("  " ANSI_COLOR_RED "FAIL" ANSI_COLOR_RESET " %s: grammar is empty with tools\n", info.name);
+            grammar_ok = false;
+        }
+
+        // Check 3: Parser should be non-empty when experimental_new_parsers is enabled
+        if (params.parser.empty()) {
+            printf("  " ANSI_COLOR_RED "FAIL" ANSI_COLOR_RESET " %s: parser is empty with experimental_new_parsers\n", info.name);
+            parser_ok = false;
+        }
+
+        if (format_ok && grammar_ok && parser_ok) {
+            passed++;
+            if (g_verbose >= 1) {
+                printf("  " ANSI_COLOR_GREEN "PASS" ANSI_COLOR_RESET " %s (format=%d, grammar=%zu bytes, parser=%zu bytes)\n",
+                       info.name, static_cast<int>(params.format), params.grammar.size(), params.parser.size());
+            }
+        }
+    }
+
+    printf("  Results: %zu/%zu passed, %zu skipped\n", passed, tested, skipped);
+    return passed == tested;
+}
+
 static const char * tool_choice_name(common_chat_tool_choice choice) {
     switch (choice) {
         case COMMON_CHAT_TOOL_CHOICE_AUTO: return "auto";
@@ -5265,6 +5358,11 @@ int main(int argc, char ** argv) {
             }
             if (chat_test == "" || chat_test == "required_tool_rejects_content") {
                 if (!test_required_tool_rejects_content()) {
+                    return 1;
+                }
+            }
+            if (chat_test == "" || chat_test == "format_detection_with_tools") {
+                if (!test_format_detection_with_tools()) {
                     return 1;
                 }
             }
