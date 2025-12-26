@@ -214,7 +214,6 @@ def test_completion_with_required_tool_tiny_slow(template_name: str, tool: dict,
     "models/templates/Qwen-Qwen3-0.6B.jinja",
     "models/templates/Qwen-QwQ-32B.jinja",
     "models/templates/Qwen3-Coder.jinja",
-    "models/templates/README.md",
     "models/templates/unsloth-Apriel-1.5.jinja",
     "models/templates/unsloth-mistral-Devstral-Small-2507.jinja",
 ])
