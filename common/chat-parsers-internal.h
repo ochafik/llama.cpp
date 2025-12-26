@@ -100,6 +100,15 @@ inline void foreach_parameter(const json & params, const std::function<void(cons
     }
 }
 
+// Helper to iterate over function parameters
+inline void foreach_parameter_legacy(const json & function, const std::function<void(const std::string &, const json &, bool)> & fn) {
+    if (!function.contains("parameters") || !function.at("parameters").is_object()) {
+        return;
+    }
+    const auto & params = function.at("parameters");
+    foreach_parameter(params, fn);
+}
+
 // Format time for template contexts
 inline std::string format_time(const std::chrono::system_clock::time_point & now, const std::string & format) {
     auto time = std::chrono::system_clock::to_time_t(now);
