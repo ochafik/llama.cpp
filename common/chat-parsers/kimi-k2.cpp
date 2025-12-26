@@ -65,7 +65,7 @@ common_chat_params common_chat_params_init_kimi_k2_peg(const common_chat_templat
                 // Use atomic_tag to ensure tool calls are only created when fully matched
                 auto tool_open = p.literal("<|tool_call_begin|>")
                     + "functions." + p.literal_tag(Tag::TOOL_NAME, name) + ":"
-                    + p.tag(Tag::TOOL_ID, p.repeat(p.char_class("0-9"), 1, -1))
+                    + p.tag(Tag::TOOL_ID, p.chars("0-9"))
                     + "<|tool_call_argument_begin|>";
                 auto tool_close = p.literal("<|tool_call_end|>");
                 auto tool_args = p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters));
