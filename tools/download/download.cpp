@@ -416,22 +416,13 @@ static bool download_item_with_retry(download_item & item, const common_params &
         item.status = download_status::downloading;
 
         try {
-            // Build a common_params_model for the download API
+            // Use the already-resolved URL and path from resolve_source
             common_params_model model;
-            if (item.source_type == "hf") {
-                model.hf_repo = item.source;
-            } else if (item.source_type == "docker") {
-                model.docker_repo = item.source;
-            } else {
-                model.url = item.url;
-            }
+            model.url = item.url;
+            model.path = item.path;
 
             bool success = common_download_model(model, params.hf_token, params.offline);
             if (success) {
-                // Update the path from the model struct (it gets set during download)
-                if (!model.path.empty()) {
-                    item.path = model.path;
-                }
                 item.status = download_status::completed;
                 item.last_error.clear();
                 return true;
