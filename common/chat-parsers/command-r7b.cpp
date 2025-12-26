@@ -84,10 +84,40 @@ common_chat_params common_chat_params_init_command_r7b_peg(const common_chat_tem
                 });
             }
 
+            // Build schema for Command R7B array format with metadata fields
+            // Format: [{"tool_call_id": "1", "tool_name": "func", "parameters": {...}}]
+            auto schemas = json::array();
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
+                schemas.push_back({
+                    {"type", "object"},
+                    {"properties", {
+                        {"tool_call_id", {
+                            {"type", "string"},
+                            {"pattern", "^[0-9]{1,10}$"},
+                        }},
+                        {"tool_name", {
+                            {"type", "string"},
+                            {"const", name},
+                        }},
+                        {"parameters", parameters},
+                    }},
+                    {"required", json::array({"tool_call_id", "tool_name", "parameters"})},
+                });
+            });
+
+            auto schema = json{
+                {"type", "array"},
+                {"items", schemas.size() == 1 ? schemas[0] : json{{"anyOf", schemas}}},
+                {"minItems", 1},
+            };
+            if (!inputs.parallel_tool_calls) {
+                schema["maxItems"] = 1;
+            }
+
             // Tool call: <|START_ACTION|>[...json array...]<|END_ACTION|>
             auto tool_call = p.tag(Tag::TOOL,
                 p.atomic_tag(Tag::TOOL_OPEN, p.literal("<|START_ACTION|>"))
-                + p.tag(Tag::TOOL_ARGS, p.json())  // JSON array with tool calls
+                + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-calls", schema))
                 + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("<|END_ACTION|>"))
             );
 
