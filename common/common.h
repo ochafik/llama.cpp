@@ -100,6 +100,7 @@ enum llama_example {
     LLAMA_EXAMPLE_DIFFUSION,
     LLAMA_EXAMPLE_FINETUNE,
     LLAMA_EXAMPLE_FIT_PARAMS,
+    LLAMA_EXAMPLE_DOWNLOAD,
 
     LLAMA_EXAMPLE_COUNT,
 };
@@ -556,6 +557,24 @@ struct common_params {
     // return false from callback to abort model loading or true to continue
     llama_progress_callback load_progress_callback = NULL;
     void *                  load_progress_callback_user_data = NULL;
+
+    // download params (for llama-download tool)
+    std::vector<std::string> download_sources;  // models to download (HF repo, URL, or Docker)
+    std::string download_input_file;            // file containing sources to download (one per line)
+    int32_t download_parallel    = 1;           // number of parallel downloads
+    int32_t download_retry_max   = 5;           // max retry attempts per download
+    int32_t download_retry_delay = 5;           // initial retry delay in seconds
+    int64_t download_min_space_mb = 1024;       // minimum free disk space in MB (default: 1GB)
+    bool    download_wait_net    = false;       // wait forever for internet connectivity
+    bool    download_progress    = true;        // show download progress
+    bool    download_list        = false;       // list cached models and queue status
+    bool    download_cancel      = false;       // cancel download(s)
+    bool    download_clear       = false;       // clear completed downloads from queue
+    bool    download_preflight   = true;        // check disk space before downloading
+    bool    download_resume      = false;       // resume pending downloads from queue
+    bool    download_update      = false;       // check cached models for updates
+    bool    download_dry_run     = false;       // show what would be downloaded without downloading
+    std::string download_cancel_id;             // ID of download to cancel
 
     bool has_speculative() const {
         return !speculative.model.path.empty() || !speculative.model.hf_repo.empty();

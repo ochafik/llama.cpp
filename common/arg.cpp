@@ -435,6 +435,11 @@ static bool common_params_parse_ex(int argc, char ** argv, common_params_context
             std::replace(arg.begin(), arg.end(), '_', '-');
         }
         if (arg_to_options.find(arg) == arg_to_options.end()) {
+            // For LLAMA_EXAMPLE_DOWNLOAD, treat unknown args without - prefix as positional (download sources)
+            if (ctx_arg.ex == LLAMA_EXAMPLE_DOWNLOAD && !arg.empty() && arg[0] != '-') {
+                params.download_sources.push_back(arg);
+                continue;
+            }
             throw std::invalid_argument(string_format("error: invalid argument: %s", arg.c_str()));
         }
         if (!seen_args.insert(arg).second) {
@@ -513,9 +518,9 @@ static bool common_params_parse_ex(int argc, char ** argv, common_params_context
         common_params_handle_model(params.vocoder.model,     params.hf_token, params.offline);
     }
 
-    // model is required (except for server)
+    // model is required (except for server and download tools)
     // TODO @ngxson : maybe show a list of available models in CLI in this case
-    if (params.model.path.empty() && ctx_arg.ex != LLAMA_EXAMPLE_SERVER && !params.usage && !params.completion) {
+    if (params.model.path.empty() && ctx_arg.ex != LLAMA_EXAMPLE_SERVER && ctx_arg.ex != LLAMA_EXAMPLE_DOWNLOAD && !params.usage && !params.completion) {
         throw std::invalid_argument("error: --model is required\n");
     }
 
@@ -3506,6 +3511,107 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             params.use_jinja = true;
         }
     ).set_examples({LLAMA_EXAMPLE_SERVER, LLAMA_EXAMPLE_CLI}));
+
+    // download tool arguments
+    add_opt(common_arg(
+        {"--list", "-l"},
+        "list cached models and download queue status",
+        [](common_params & params) {
+            params.download_list = true;
+        }
+    ).set_examples({LLAMA_EXAMPLE_DOWNLOAD}));
+    add_opt(common_arg(
+        {"--input-file", "-f"}, "FNAME",
+        "file containing model sources to download (one per line: HF repo, URL, or Docker)",
+        [](common_params & params, const std::string & value) {
+            params.download_input_file = value;
+        }
+    ).set_examples({LLAMA_EXAMPLE_DOWNLOAD}));
+    add_opt(common_arg(
+        {"--parallel", "-j"}, "N",
+        string_format("number of parallel downloads (default: %d)", params.download_parallel),
+        [](common_params & params, int value) {
+            params.download_parallel = value;
+        }
+    ).set_examples({LLAMA_EXAMPLE_DOWNLOAD}));
+    add_opt(common_arg(
+        {"--retry-max"}, "N",
+        string_format("max retry attempts per download (default: %d)", params.download_retry_max),
+        [](common_params & params, int value) {
+            params.download_retry_max = value;
+        }
+    ).set_examples({LLAMA_EXAMPLE_DOWNLOAD}));
+    add_opt(common_arg(
+        {"--retry-delay"}, "N",
+        string_format("initial retry delay in seconds (default: %d)", params.download_retry_delay),
+        [](common_params & params, int value) {
+            params.download_retry_delay = value;
+        }
+    ).set_examples({LLAMA_EXAMPLE_DOWNLOAD}));
+    add_opt(common_arg(
+        {"--wait-for-network", "-w"},
+        "wait indefinitely for internet connectivity on failure",
+        [](common_params & params) {
+            params.download_wait_net = true;
+        }
+    ).set_examples({LLAMA_EXAMPLE_DOWNLOAD}));
+    add_opt(common_arg(
+        {"--min-space"}, "N",
+        string_format("minimum free disk space in MB to maintain (default: %d)", (int)params.download_min_space_mb),
+        [](common_params & params, int value) {
+            params.download_min_space_mb = value;
+        }
+    ).set_examples({LLAMA_EXAMPLE_DOWNLOAD}));
+    add_opt(common_arg(
+        {"--no-preflight"},
+        "skip disk space preflight check before downloading",
+        [](common_params & params) {
+            params.download_preflight = false;
+        }
+    ).set_examples({LLAMA_EXAMPLE_DOWNLOAD}));
+    add_opt(common_arg(
+        {"--no-progress"},
+        "disable download progress display",
+        [](common_params & params) {
+            params.download_progress = false;
+        }
+    ).set_examples({LLAMA_EXAMPLE_DOWNLOAD}));
+    add_opt(common_arg(
+        {"--cancel"}, "ID",
+        "cancel a queued or in-progress download by ID",
+        [](common_params & params, const std::string & value) {
+            params.download_cancel = true;
+            params.download_cancel_id = value;
+        }
+    ).set_examples({LLAMA_EXAMPLE_DOWNLOAD}));
+    add_opt(common_arg(
+        {"--clear"},
+        "clear completed downloads from the queue",
+        [](common_params & params) {
+            params.download_clear = true;
+        }
+    ).set_examples({LLAMA_EXAMPLE_DOWNLOAD}));
+    add_opt(common_arg(
+        {"--resume", "-r"},
+        "resume pending downloads from the queue",
+        [](common_params & params) {
+            params.download_resume = true;
+        }
+    ).set_examples({LLAMA_EXAMPLE_DOWNLOAD}));
+    add_opt(common_arg(
+        {"--update", "-u"},
+        "check cached models for updates and enqueue those needing re-download",
+        [](common_params & params) {
+            params.download_update = true;
+        }
+    ).set_examples({LLAMA_EXAMPLE_DOWNLOAD}));
+    add_opt(common_arg(
+        {"--dry-run", "-n"},
+        "show what would be downloaded (URLs, paths, sizes) without actually downloading",
+        [](common_params & params) {
+            params.download_dry_run = true;
+        }
+    ).set_examples({LLAMA_EXAMPLE_DOWNLOAD}));
 
     return ctx_arg;
 }

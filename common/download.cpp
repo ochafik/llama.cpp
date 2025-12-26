@@ -371,19 +371,16 @@ static bool common_download_file_single_online(const std::string & url,
 
             const std::string path_temporary = path + ".downloadInProgress";
             if (should_download_from_scratch) {
+                // Only delete the temp file, NOT the completed file
+                // The completed file will be atomically replaced by rename() after successful download
                 if (std::filesystem::exists(path_temporary)) {
                     if (remove(path_temporary.c_str()) != 0) {
                         LOG_ERR("%s: unable to delete file: %s\n", __func__, path_temporary.c_str());
                         return false;
                     }
                 }
-
-                if (std::filesystem::exists(path)) {
-                    if (remove(path.c_str()) != 0) {
-                        LOG_ERR("%s: unable to delete file: %s\n", __func__, path.c_str());
-                        return false;
-                    }
-                }
+                // Note: We intentionally keep the existing completed file (path) until
+                // the new download finishes, so users don't lose their model if download fails
             }
             if (head_request_ok) {
                 write_etag(path, headers.etag);
@@ -682,11 +679,10 @@ static bool common_download_file_single_online(const std::string & url,
                 LOG_INF("%s: using cached file: %s\n", __func__, path.c_str());
                 return true;
             }
-            LOG_WRN("%s: deleting previous downloaded file: %s\n", __func__, path.c_str());
-            if (remove(path.c_str()) != 0) {
-                LOG_ERR("%s: unable to delete file: %s\n", __func__, path.c_str());
-                return false;
-            }
+            // Note: We intentionally keep the existing completed file (path) until
+            // the new download finishes, so users don't lose their model if download fails.
+            // The file will be atomically replaced by rename() after successful download.
+            LOG_INF("%s: will replace existing file after download: %s\n", __func__, path.c_str());
         }
 
         const std::string path_temporary = path + ".downloadInProgress";
