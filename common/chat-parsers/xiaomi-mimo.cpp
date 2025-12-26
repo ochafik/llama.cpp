@@ -29,6 +29,10 @@ common_chat_params common_chat_params_init_xiaomi_mimo_peg(const common_chat_tem
         // Tool call parser
         // Format: <tool_call>{"name": "func", "arguments": {...}}</tool_call>
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+            if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
+                data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_call>"});
+            }
+
             auto tool_call = p.tag(Tag::TOOL,
                 p.atomic_tag(Tag::TOOL_OPEN, p.literal("<tool_call>\n"))
                 + p.tag(Tag::TOOL_ARGS, p.json())
@@ -50,26 +54,7 @@ common_chat_params common_chat_params_init_xiaomi_mimo_peg(const common_chat_tem
         return p.tag(Tag::CONTENT, p.rest());
     });
 
-    data.parser = parser.save();
-
-    if (include_grammar) {
-        data.grammar_lazy = has_tools && inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
-
-        // Build grammar from PEG parser
-        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-            foreach_function(inputs.tools, [&](const json & tool) {
-                auto schema = tool.at("function").at("parameters");
-                builder.resolve_refs(schema);
-            });
-            parser.build_grammar(builder, data.grammar_lazy);
-        });
-
-        if (data.grammar_lazy) {
-            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_call>"});
-        } else {
-            data.grammar_triggers.clear();
-        }
-    }
+    common_chat_build_peg_grammar(inputs, parser, data);
 
     return data;
 }

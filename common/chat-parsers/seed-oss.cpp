@@ -64,21 +64,19 @@ common_chat_params common_chat_params_init_seed_oss_peg(const common_chat_templa
 
         // Tool call parser
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+            if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
+                data.grammar_triggers = {
+                    {COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<seed:tool_call>"}
+                };
+            }
             auto tool_choice = p.choice();
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                std::string name = function.at("name");
-                auto parameters = function.at("parameters");
-
-                auto schema_info = common_schema_info();
-                schema_info.resolve_refs(parameters);
-
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto & schema_info) {
                 // Default to false for stricter parsing - only allow explicitly defined parameters
                 bool allow_additional = false;
                 bool additional_has_schema = false;
                 json additional_schema;
                 if (parameters.contains("additionalProperties")) {
-                    const auto & additional = parameters.at("additionalProperties");
+                    const json & additional = parameters.at("additionalProperties");
                     if (additional.is_boolean()) {
                         allow_additional = additional.get<bool>();
                     } else if (additional.is_object()) {
@@ -92,7 +90,7 @@ common_chat_params common_chat_params_init_seed_oss_peg(const common_chat_templa
                 auto tool_close = p.literal("</function>");
                 auto args = p.sequence();
 
-                foreach_parameter(function, [&](const auto & param_name, const json & param_schema, bool is_required) {
+                foreach_parameter(parameters, [&](const auto & param_name, const json & param_schema, bool is_required) {
                     auto rule_name = "tool-" + name + "-arg-" + param_name;
 
                     auto arg_open = "<parameter=" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + ">";
@@ -177,28 +175,7 @@ common_chat_params common_chat_params_init_seed_oss_peg(const common_chat_templa
         return reasoning << content_tail << pre_eos_gap << eos;
     });
 
-    data.parser = parser.save();
-
-    if (include_grammar) {
-        data.grammar_lazy = has_tools && inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
-
-        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                auto schema = function.at("parameters");
-                builder.resolve_refs(schema);
-            });
-            parser.build_grammar(builder, data.grammar_lazy);
-        });
-
-        if (data.grammar_lazy) {
-            data.grammar_triggers = {
-                {COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<seed:tool_call>"}
-            };
-        } else {
-            data.grammar_triggers.clear();
-        }
-    }
+    common_chat_build_peg_grammar(inputs, parser, data);
 
     return data;
 }

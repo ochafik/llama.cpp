@@ -75,8 +75,7 @@ common_chat_params common_chat_params_init_apertus_peg(const common_chat_templat
 
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
-    auto include_grammar = true;
-
+    
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
         auto reasoning = p.eps();
@@ -115,49 +114,17 @@ common_chat_params common_chat_params_init_apertus_peg(const common_chat_templat
             return reasoning << p.tag(Tag::CONTENT, p.until("<|tools_prefix|>")) << tool_calls;
         }
 
-        // Content only parser
-        include_grammar = false;
-        return reasoning << p.tag(Tag::CONTENT, p.rest());
-    });
-
-    data.parser = parser.save();
-
-    if (include_grammar) {
-        data.grammar_lazy = has_tools && inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
-
-        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-            auto schemas = json::array();
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                // Apertus uses short form: {"func_name": {"arg1": value1}}
-                schemas.push_back({
-                    {"type", "object"},
-                    {"properties", {
-                        {function.at("name"), function.at("parameters")}
-                    }},
-                    {"required", json::array({function.at("name")})},
-                });
-            });
-            auto schema = json{
-                {"type", "array"},
-                {"items", schemas.size() == 1 ? schemas[0] : json{{"anyOf", schemas}}},
-                {"minItems", 1},
-            };
-            if (!inputs.parallel_tool_calls) {
-                schema["maxItems"] = 1;
-            }
-            builder.add_rule("root",
-                std::string(data.thinking_forced_open ? "( \"<|inner_suffix|>\" space )? " : "") +
-                "\"<|tools_prefix|>\" space " + builder.add_schema("tool_calls", schema) + " space \"<|tools_suffix|>\"");
-        });
-
         data.grammar_triggers = {{COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
             // If thinking_forced_open, then we capture the <|inner_suffix|> tag in the grammar
             std::string(data.thinking_forced_open ?
                 "[\\s\\S]*?(<\\|inner_suffix\\|>\\s*)" :
                 "(?:<\\|inner_prefix\\|>[\\s\\S]*?<\\|inner_suffix\\|>\\s*)?") +
             "(<\\|tools_prefix\\|>)[\\s\\S]*"}};
-    }
+
+        return reasoning << p.tag(Tag::CONTENT, p.rest());
+    });
+
+    common_chat_build_peg_grammar(inputs, parser, data);
 
     return data;
 }

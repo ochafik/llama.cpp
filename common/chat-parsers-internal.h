@@ -19,6 +19,7 @@
 #include <chrono>
 #include <functional>
 #include <optional>
+#include <stdexcept>
 #include <string>
 
 // JSON type alias
@@ -58,12 +59,33 @@ inline void foreach_function(const json & tools, const std::function<void(const 
     }
 }
 
-// Helper to iterate over function parameters
-inline void foreach_parameter(const json & function, const std::function<void(const std::string &, const json &, bool)> & fn) {
-    if (!function.contains("parameters") || !function.at("parameters").is_object()) {
-        return;
+// Helper to iterate over function tools
+inline void foreach_function(
+    const json & tools,
+    const std::function<void(
+        const json &,
+        const std::string &,
+        const json &,
+        const common_schema_info &
+    )> & fn_name_resolved_params)
+{
+    for (const auto & tool : tools) {
+        if (!tool.contains("type") || tool.at("type") != "function" || !tool.contains("function")) {
+            continue;
+        }
+        const auto & function = tool.at("function");
+        const std::string & name = function.at("name");
+        auto parameters = function.at("parameters");
+
+        auto schema_info = common_schema_info();
+        schema_info.resolve_refs(parameters);
+
+        fn_name_resolved_params(function, name, parameters, schema_info);
     }
-    const auto & params = function.at("parameters");
+}
+
+// Helper to iterate over function parameters
+inline void foreach_parameter(const json & params, const std::function<void(const std::string &, const json &, bool)> & fn) {
     if (!params.contains("properties") || !params.at("properties").is_object()) {
         return;
     }
@@ -166,3 +188,27 @@ common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1_peg(const 
 common_chat_params common_chat_params_init_functionary_v3_2_peg(const common_chat_template & tmpl, const struct templates_params & inputs);
 common_chat_params common_chat_params_init_gpt_oss_peg(const common_chat_template & tmpl, const struct templates_params & inputs);
 common_chat_params common_chat_params_init_generic_peg(const common_chat_template & tmpl, const struct templates_params & inputs);
+
+inline void common_chat_build_peg_grammar(const struct templates_params & inputs, const common_peg_arena & parser, common_chat_params & data){
+    if (!inputs.grammar.empty()) {
+        // Throw something upstream??
+        data.grammar = inputs.grammar;
+    } else if (!inputs.json_schema.is_null()) {
+        // Need a pass through parser
+        data.grammar = json_schema_to_grammar(inputs.json_schema);
+    } else {
+        data.parser = parser.save();
+        if (data.parser.empty()) {
+            throw std::runtime_error(std::string("Empty parser for ") + common_chat_format_name(data.format));
+        }
+        data.grammar_lazy = !data.grammar_triggers.empty() && inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
+        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
+            foreach_function(inputs.tools, [&](const json & tool) {
+                const auto & function = tool.at("function");
+                auto schema = function.at("parameters");
+                builder.resolve_refs(schema);
+            });
+            parser.build_grammar(builder, data.grammar_lazy);
+        });
+    }
+}

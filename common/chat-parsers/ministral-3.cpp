@@ -3,6 +3,7 @@
 // With optional [THINK]...[/THINK] reasoning blocks
 
 #include "chat-parsers-internal.h"
+#include "chat.h"
 
 common_chat_params common_chat_params_init_ministral_3_peg(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
@@ -48,7 +49,6 @@ common_chat_params common_chat_params_init_ministral_3_peg(const common_chat_tem
 
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
-    auto include_grammar = true;
 
     data.prompt = apply(tmpl, inputs, /* messages_override = */ adjusted_messages);
     data.format = COMMON_CHAT_FORMAT_MINISTRAL_3;
@@ -74,17 +74,18 @@ common_chat_params common_chat_params_init_ministral_3_peg(const common_chat_tem
         // Format: [TOOL_CALLS]func1[ARGS]{...}[TOOL_CALLS]func2[ARGS]{...}
         // Note: [TOOL_CALLS] prefix appears before EACH tool call
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+            if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
+                data.grammar_triggers = {
+                    {COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "[TOOL_CALLS]"}
+                };
+            }
             auto tool_choice = p.choice();
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                std::string name = function.at("name");
-                const auto & schema = function.at("parameters");
-
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const auto & parameters, const auto &) {
                 // Each tool call starts with [TOOL_CALLS] prefix
                 tool_choice |= p.rule("tool-" + name, p.tag(Tag::TOOL,
                     p.literal("[TOOL_CALLS]")
                     + p.atomic_tag(Tag::TOOL_OPEN, p.literal_tag(Tag::TOOL_NAME, name) + p.literal("[ARGS]"))
-                    + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-schema", schema))
+                    + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-schema", parameters))
                 ));
             });
 
@@ -98,33 +99,10 @@ common_chat_params common_chat_params_init_ministral_3_peg(const common_chat_tem
             return reasoning << p.tag(Tag::CONTENT, p.until("[TOOL_CALLS]")) << tool_calls;
         }
 
-        // Content only parser
-        include_grammar = false;
         return reasoning << p.tag(Tag::CONTENT, p.rest());
     });
 
-    data.parser = parser.save();
-
-    if (include_grammar) {
-        data.grammar_lazy = has_tools && inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
-
-        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                auto schema = function.at("parameters");
-                builder.resolve_refs(schema);
-            });
-            parser.build_grammar(builder, data.grammar_lazy);
-        });
-
-        if (data.grammar_lazy) {
-            data.grammar_triggers = {
-                {COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "[TOOL_CALLS]"}
-            };
-        } else {
-            data.grammar_triggers.clear();
-        }
-    }
+    common_chat_build_peg_grammar(inputs, parser, data);
 
     return data;
 }

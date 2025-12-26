@@ -28,8 +28,7 @@ common_chat_params common_chat_params_init_apriel_1_5_peg(const common_chat_temp
 
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
-    auto include_grammar = true;
-
+    
     const bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
@@ -76,6 +75,10 @@ common_chat_params common_chat_params_init_apriel_1_5_peg(const common_chat_temp
         // Tool call parser
         // Format: <tool_calls>[{"name": "func", "arguments": {...}}]</tool_calls>
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+            if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
+                data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_calls>"});
+            }
+
             auto tool_call = p.tag(Tag::TOOL,
                 p.atomic_tag(Tag::TOOL_OPEN, p.literal("<tool_calls>"))
                 + p.tag(Tag::TOOL_ARGS, p.until("</tool_calls>"))
@@ -98,31 +101,10 @@ common_chat_params common_chat_params_init_apriel_1_5_peg(const common_chat_temp
             return content_before_tools << newline_before_tools << tool_calls << consume_end();
         }
 
-        // Content only parser
-        include_grammar = false;
         return parse_content_until("<|end|>") << consume_end();
     });
 
-    data.parser = parser.save();
-
-    if (include_grammar) {
-        data.grammar_lazy = has_tools && inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
-
-        // Build grammar from PEG parser
-        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-            foreach_function(inputs.tools, [&](const json & tool) {
-                auto schema = tool.at("function").at("parameters");
-                builder.resolve_refs(schema);
-            });
-            parser.build_grammar(builder, data.grammar_lazy);
-        });
-
-        if (data.grammar_lazy) {
-            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_calls>"});
-        } else {
-            data.grammar_triggers.clear();
-        }
-    }
+    common_chat_build_peg_grammar(inputs, parser, data);
 
     return data;
 }

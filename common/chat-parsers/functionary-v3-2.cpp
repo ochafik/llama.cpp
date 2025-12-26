@@ -9,9 +9,10 @@ common_chat_params common_chat_params_init_functionary_v3_2_peg(const common_cha
     common_chat_params data;
     data.prompt = apply(tmpl, inputs);
     data.format = COMMON_CHAT_FORMAT_FUNCTIONARY_V3_2;
-
+    data.preserved_tokens = {
+        "<|end_header_id|>",
+    };
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
-    data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
 
     // Build PEG parser for >>>function_name\n{...} format
     auto parser = build_chat_peg_parser([&](auto & p) {
@@ -30,11 +31,8 @@ common_chat_params common_chat_params_init_functionary_v3_2_peg(const common_cha
             // Subsequent tool calls: with >>> prefix
             auto subsequent_tool_call = p.choice();
 
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                std::string name = function.at("name");
-                auto parameters = function.at("parameters");
-
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const auto & parameters, const auto &) {
+                std::string args_pattern;
                 if (name == "python") {
                     // Python can have raw code or JSON
                     auto python_args = p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-params", parameters))
@@ -46,6 +44,7 @@ common_chat_params common_chat_params_init_functionary_v3_2_peg(const common_cha
                     subsequent_tool_call |= p.rule("tool-" + name, p.tag(Tag::TOOL,
                         p.literal_tag(Tag::TOOL_OPEN, ">>>") + p.literal_tag(Tag::TOOL_NAME, name) + "\n" + python_args
                     ));
+                    args_pattern = "[\\s\\S]*";
                 } else {
                     // Regular JSON tool
                     auto tool_args = p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-params", parameters));
@@ -56,6 +55,13 @@ common_chat_params common_chat_params_init_functionary_v3_2_peg(const common_cha
                     subsequent_tool_call |= p.rule("tool-" + name, p.tag(Tag::TOOL,
                         p.literal_tag(Tag::TOOL_OPEN, ">>>") + p.literal_tag(Tag::TOOL_NAME, name) + "\n" + tool_args
                     ));
+                    args_pattern = "\\{" + args_pattern;
+                }
+                if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
+                    data.grammar_triggers.push_back({
+                        COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
+                        "(?:[\\s\\S]+?>>>)?" + regex_escape(name) + "\n" + args_pattern,
+                    });
                 }
             });
 
@@ -95,60 +101,7 @@ common_chat_params common_chat_params_init_functionary_v3_2_peg(const common_cha
         return content_with_all | content_without_all;
     });
 
-    data.parser = parser.save();
-
-    if (has_tools) {
-
-        // Build grammar
-        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-            std::vector<std::string> first_tool_rules;      // Without >>> (first tool, >>> in generation prompt)
-            std::vector<std::string> subsequent_tool_rules; // With >>> prefix
-
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                std::string name = function.at("name");
-                auto parameters = function.at("parameters");
-                builder.resolve_refs(parameters);
-
-                std::string args_pattern = "[\\s\\S]*";
-                auto args_rule = builder.add_schema(name + "-args", parameters);
-                if (name == "python") {
-                    args_rule = builder.add_rule(name + "-maybe-raw-args", args_rule + " | [^{] .*");
-                } else {
-                    args_pattern = "\\{" + args_pattern;
-                }
-
-                // First tool call: no >>> (it's in the generation prompt)
-                auto first_call_rule = builder.add_rule(name + "-first-call", "\"" + name + "\\n\" " + args_rule);
-                first_tool_rules.push_back(first_call_rule);
-
-                // Subsequent tool calls: with >>> prefix
-                auto call_rule = builder.add_rule(name + "-call", "\">>>\" \"" + name + "\\n\" " + args_rule);
-                subsequent_tool_rules.push_back(call_rule);
-
-                data.grammar_triggers.push_back({
-                    COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
-                    "(?:[\\s\\S]+?>>>)?" + regex_escape(name) + "\n" + args_pattern,
-                });
-            });
-
-            data.preserved_tokens = {
-                "<|end_header_id|>",
-            };
-
-            if (!first_tool_rules.empty()) {
-                auto first_tool_choice = builder.add_rule("first_tool_call", string_join(first_tool_rules, " | "));
-                auto subsequent_tool_choice = builder.add_rule("subsequent_tool_call", string_join(subsequent_tool_rules, " | "));
-                if (inputs.parallel_tool_calls) {
-                    // First tool (no >>>) + optional subsequent tools (with >>>)
-                    builder.add_rule("root", first_tool_choice + " (" + subsequent_tool_choice + " space)*");
-                } else {
-                    // Single tool only (no >>>)
-                    builder.add_rule("root", first_tool_choice + " space");
-                }
-            }
-        });
-    }
+    common_chat_build_peg_grammar(inputs, parser, data);
 
     return data;
 }

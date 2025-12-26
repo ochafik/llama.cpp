@@ -1011,7 +1011,7 @@ void common_schema_info::resolve_refs(nlohmann::ordered_json & schema) {
 // Some models emit raw string values rather than JSON-encoded strings for string parameters.
 // If any branch of the schema (via oneOf, anyOf, $ref, etc.) permits a string, this returns
 // true, allowing callers to handle the value as a raw string for simplicity.
-bool common_schema_info::resolves_to_string(const nlohmann::ordered_json & schema) {
+bool common_schema_info::resolves_to_string(const nlohmann::ordered_json & schema) const {
     std::unordered_set<std::string> visited_refs;
 
     std::function<bool(const json &)> check = [&](const json & s) -> bool {

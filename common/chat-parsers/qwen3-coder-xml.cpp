@@ -56,6 +56,9 @@ common_chat_params common_chat_params_init_qwen3_coder_xml_peg(const common_chat
 
         // Tool call parser
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+            if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
+                data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_call>"});
+            }
             auto parameter_name = p.choice();
             parameter_name |= p.tag(Tag::TOOL_ARG_NAME, p.until(">\r\n"));
             parameter_name |= p.tag(Tag::TOOL_ARG_NAME, p.until(">\n"));
@@ -67,20 +70,13 @@ common_chat_params common_chat_params_init_qwen3_coder_xml_peg(const common_chat
             });
 
             auto tool_choice = p.choice();
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                std::string name = function.at("name");
-                auto parameters = function.at("parameters");
-
-                auto schema_info = common_schema_info();
-                schema_info.resolve_refs(parameters);
-
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto & schema_info) {
                 // Default to false for stricter parsing - only allow explicitly defined parameters
                 bool allow_additional = false;
                 bool additional_has_schema = false;
                 json additional_schema;
                 if (parameters.contains("additionalProperties")) {
-                    const auto & additional = parameters.at("additionalProperties");
+                    const json & additional = parameters.at("additionalProperties");
                     if (additional.is_boolean()) {
                         allow_additional = additional.get<bool>();
                     } else if (additional.is_object()) {
@@ -91,7 +87,7 @@ common_chat_params common_chat_params_init_qwen3_coder_xml_peg(const common_chat
                 }
 
                 auto args = p.sequence();
-                foreach_parameter(function, [&](const std::string & param_name, const json & param_schema, bool /* is_required */) {
+                foreach_parameter(parameters, [&](const std::string & param_name, const json & param_schema, bool /* is_required */) {
                     auto parameter_value = p.schema_or_raw_string_until("qwen-param-" + name + "-" + param_name, param_schema, "</parameter>",
                         schema_info, Tag::TOOL_ARG_STRING_VALUE, Tag::TOOL_ARG_JSON_VALUE, true);
 
@@ -169,26 +165,7 @@ common_chat_params common_chat_params_init_qwen3_coder_xml_peg(const common_chat
         });
     });
 
-    data.parser = parser.save();
-
-    if (include_grammar) {
-        data.grammar_lazy = has_tools && inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
-
-        // Build grammar from PEG parser
-        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-            foreach_function(inputs.tools, [&](const json & tool) {
-                auto schema = tool.at("function").at("parameters");
-                builder.resolve_refs(schema);
-            });
-            parser.build_grammar(builder, data.grammar_lazy);
-        });
-
-        if (data.grammar_lazy) {
-            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_call>"});
-        } else {
-            data.grammar_triggers.clear();
-        }
-    }
+    common_chat_build_peg_grammar(inputs, parser, data);
 
     return data;
 }

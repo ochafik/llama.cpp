@@ -10,16 +10,15 @@ common_chat_params common_chat_params_init_generic_peg(const common_chat_templat
     common_chat_params data;
 
     auto tool_call_schemas = json::array();
-    foreach_function(inputs.tools, [&](const json & tool) {
-        const auto & function = tool.at("function");
+    foreach_function(inputs.tools, [&](const auto & function, const auto & name, const auto & parameters, const auto &) {
         auto tool_schema = json {
             {"type", "object"},
             {"properties", {
                 {"name", {
                     {"type", "string"},
-                    {"const", function.at("name")},
+                    {"const", name},
                 }},
-                {"arguments", function.at("parameters")},
+                {"arguments", parameters},
             }},
             {"required", json::array({"name", "arguments"})},
         };
@@ -78,11 +77,6 @@ common_chat_params common_chat_params_init_generic_peg(const common_chat_templat
             }
             : tool_call;
 
-    data.grammar_lazy = false;
-    data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-        builder.add_schema("root", schema);
-    });
-
     // Build PEG parser for generic JSON format
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
 
@@ -100,13 +94,13 @@ common_chat_params common_chat_params_init_generic_peg(const common_chat_templat
         return p.tag(Tag::CONTENT, p.json());
     });
 
-    data.parser = parser.save();
-
     auto tweaked_messages = common_chat_template::add_system(
         inputs.messages,
         "Respond in JSON format, either with `tool_call` (a request to call tools) or with `response` reply to the user's request");
 
-    data.prompt = apply(tmpl, inputs, /* messages_override= */ tweaked_messages);
+    data.prompt = apply(tmpl, inputs);
     data.format = COMMON_CHAT_FORMAT_GENERIC;
+    common_chat_build_peg_grammar(inputs, parser, data);
+
     return data;
 }

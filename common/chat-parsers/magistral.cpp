@@ -28,6 +28,11 @@ common_chat_params common_chat_params_init_magistral_peg(const common_chat_templ
             : p.eps();
 
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+            if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
+                data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "[TOOL_CALLS]"});
+                data.preserved_tokens.push_back("[TOOL_CALLS]");
+            }
+
             // Tool call parser: content followed by [TOOL_CALLS] and JSON array
             auto tool_call = p.tag(Tag::TOOL,
                 p.atomic_tag(Tag::TOOL_OPEN, p.literal("[TOOL_CALLS]"))
@@ -48,57 +53,7 @@ common_chat_params common_chat_params_init_magistral_peg(const common_chat_templ
         return reasoning << p.tag(Tag::CONTENT, p.rest());
     });
 
-    data.parser = parser.save();
-
-    if (has_tools) {
-        data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
-        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-            auto schemas = json::array();
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                schemas.push_back({
-                    {"type", "object"},
-                    {"properties", {
-                        {"name", {
-                            {"type", "string"},
-                            {"const", function.at("name")},
-                        }},
-                        {"arguments", function.at("parameters")},
-                        {"id", {
-                            {"type", "string"},
-                            {"pattern", "^[a-zA-Z0-9]{9}$"},
-                        }},
-                    }},
-                    {"required", json::array({"name", "arguments", "id"})},
-                });
-            });
-            auto schema = json {
-                {"type", "array"},
-                {"items", schemas.size() == 1 ? schemas[0] : json {{"anyOf", schemas}}},
-                {"minItems", 1},
-            };
-            if (!inputs.parallel_tool_calls) {
-                schema["maxItems"] = 1;
-            }
-            builder.add_rule("root", "\"[TOOL_CALLS]\" " + builder.add_schema("tool_calls", schema));
-        });
-        if (data.grammar_lazy) {
-            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "[TOOL_CALLS]"});
-        } else {
-            data.grammar_triggers.clear();
-        }
-        data.preserved_tokens.push_back("[TOOL_CALLS]");
-    } else {
-        data.grammar_lazy = false;
-        if (!inputs.json_schema.is_null()) {
-            if (!inputs.grammar.empty()) {
-                throw std::runtime_error("Either \"json_schema\" or \"grammar\" can be specified, but not both");
-            }
-            data.grammar = json_schema_to_grammar(inputs.json_schema);
-        } else {
-            data.grammar = inputs.grammar;
-        }
-    }
+    common_chat_build_peg_grammar(inputs, parser, data);
 
     return data;
 }

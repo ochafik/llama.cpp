@@ -62,13 +62,17 @@ common_chat_params common_chat_params_init_deepseek_v3_1_peg(const common_chat_t
         }
 
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+            if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
+                data.grammar_triggers.push_back({
+                    COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
+                    std::string(data.thinking_forced_open ? "[\\s\\S]*?(</think>\\s*)" : "(?:<think>[\\s\\S]*?</think>\\s*)?") +
+                        "(<｜tool▁calls▁begin｜>|<｜tool_calls_begin｜>|<｜tool calls begin｜>|<｜tool\\\\_calls\\\\_begin｜>|<｜tool▁calls｜>)[\\s\\S]*"
+                });
+            }
+
             auto tool_choice = p.choice();
 
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                std::string name = function.at("name");
-                auto parameters = function.at("parameters");
-
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
                 // Format: name<｜tool▁sep｜>{...}<｜tool▁call▁end｜>
                 tool_choice |= p.rule("tool-" + name, p.tag(Tag::TOOL,
                     p.optional(p.atomic_tag(Tag::TOOL_OPEN, p.literal("<｜tool▁call▁begin｜>")))
@@ -115,42 +119,7 @@ common_chat_params common_chat_params_init_deepseek_v3_1_peg(const common_chat_t
         return reasoning << p.choice({content_only, p.tag(Tag::CONTENT, p.rest())});
     });
 
-    data.parser = parser.save();
-
-    if (has_tools) {
-        // Build grammar manually for backward compatibility
-        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-            std::vector<std::string> tool_rules;
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                std::string name = function.at("name");
-                auto parameters = function.at("parameters");
-                builder.resolve_refs(parameters);
-                tool_rules.push_back(builder.add_rule(name + "-call",
-                    "( \"<｜tool▁call▁begin｜>\" )? \"" + name + "<｜tool▁sep｜>"
-                    "\" " + builder.add_schema(name + "-args", parameters) + " "
-                    "\"<｜tool▁call▁end｜>\""));
-            });
-            // Distill Qwen 7B & 32B models seem confused re/ syntax of their tool call opening tag,
-            // so we accept common variants (then it's all constrained)
-            builder.add_rule("root",
-                std::string(data.thinking_forced_open ? "( \"</think>\" space )? " : "") +
-                "( \"<｜tool▁calls▁begin｜>\" | \"<｜tool_calls_begin｜>\" | \"<｜tool calls begin｜>\" | \"<｜tool\\\\_calls\\\\_begin｜>\" | \"<｜tool▁calls｜>\" ) "
-                "(" + string_join(tool_rules, " | ") + ")" + (inputs.parallel_tool_calls ? "*" : "") + " "
-                "\"<｜tool▁calls▁end｜>\""
-                " space");
-        });
-
-        if (data.grammar_lazy) {
-            data.grammar_triggers.push_back({
-                COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
-                std::string(data.thinking_forced_open ? "[\\s\\S]*?(</think>\\s*)" : "(?:<think>[\\s\\S]*?</think>\\s*)?") +
-                    "(<｜tool▁calls▁begin｜>|<｜tool_calls_begin｜>|<｜tool calls begin｜>|<｜tool\\\\_calls\\\\_begin｜>|<｜tool▁calls｜>)[\\s\\S]*"
-            });
-        } else {
-            data.grammar_triggers.clear();
-        }
-    }
+    common_chat_build_peg_grammar(inputs, parser, data);
 
     return data;
 }

@@ -100,13 +100,29 @@ common_chat_params common_chat_params_init_gpt_oss_peg(const common_chat_templat
 
         // Tool call parser
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+            if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
+                // Trigger on tool calls that appear in the commentary channel
+                data.grammar_triggers.push_back({
+                    COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN,
+                    "<\\|channel\\|>(commentary|analysis) to"
+                });
+
+                // Trigger tool calls that appear in the role section, either at the
+                // start or in the middle.
+                data.grammar_triggers.push_back({
+                    COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
+                    "^ to"
+                });
+
+                data.grammar_triggers.push_back({
+                    COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN,
+                    "<\\|start\\|>assistant to"
+                });
+            }
+
             auto tool_choice = p.choice();
 
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                std::string name = function.at("name");
-                auto parameters = function.at("parameters");
-
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const auto & parameters, const auto &) {
                 // Tool call in channel: <|channel|>analysis|commentary to=functions.name<|message|>{...}
                 tool_choice |= p.rule("tool-channel-" + name, p.tag(Tag::TOOL,
                     assistant_prefix()
@@ -153,107 +169,7 @@ common_chat_params common_chat_params_init_gpt_oss_peg(const common_chat_templat
         return reasoning_block << content_sequence;
     });
 
-    data.parser = parser.save();
-
-    if (!inputs.json_schema.is_null()) {
-        data.grammar_lazy = false;
-        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-            auto schema = inputs.json_schema;
-            builder.resolve_refs(schema);
-
-            auto not_end = builder.add_rule("not-end",
-                "[^<] | \"<\" [^|] | \"<|\" [^e] | \"<|e\" [^n] | \"<|en\" [^d] | \"<|end\" [^|] | \"<|end|\" [^>]");
-            auto analysis = builder.add_rule("analysis",
-                "\"<|channel|>analysis<|message|>\" ( " + not_end + " )* \"<|end|>\"");
-            auto constraint = builder.add_rule("constraint", "\"<|constrain|>\"? [a-zA-Z0-9_-]+");
-            auto final = builder.add_rule("final",
-                "\"<|channel|>final\" ( \" \" " + constraint + " )? \"<|message|>\" " +
-                builder.add_schema("response", schema)
-            );
-
-            builder.add_rule("root", "( " + analysis + " \"<|start|>assistant\" )? " + final);
-        });
-    }
-
-    if (has_tools) {
-        data.grammar_lazy = inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED;
-        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-            // tool calls can appear in commentary or analysis channels
-            auto channel = builder.add_rule("channel", "\"<|channel|>\" ( \"commentary\" | \"analysis\" )");
-
-            std::vector<std::string> tool_rules_recipient_in_role;
-            std::vector<std::string> tool_rules_recipient_in_channel;
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                std::string name = function.at("name");
-                auto parameters = function.at("parameters");
-                builder.resolve_refs(parameters);
-
-                tool_rules_recipient_in_role.push_back(
-                    builder.add_rule(name + "-call",
-                        "\"" + name + "\"" + channel + " \" <|constrain|>json\"? \"<|message|>\" " +
-                        builder.add_schema(name + "-args", parameters)
-                    )
-                );
-
-                tool_rules_recipient_in_channel.push_back(
-                    builder.add_rule(name + "-call",
-                        "\"" + name + "\"" + " \" <|constrain|>json\"? \"<|message|>\" " +
-                        builder.add_schema(name + "-args", parameters)
-                    )
-                );
-            });
-
-            auto recipient_in_channel = builder.add_rule("recipient_in_channel",
-                channel + " \" to=functions.\" ( " +
-                string_join(tool_rules_recipient_in_channel, " | ") + " )"
-            );
-
-            if (data.grammar_lazy) {
-                auto recipient_in_role = builder.add_rule("recipient_in_role",
-                    "\"<|start|>assistant\"? \" to=functions.\" ( " +
-                    string_join(tool_rules_recipient_in_role, " | ") + " )"
-                );
-
-                builder.add_rule("root", recipient_in_role + " | " + recipient_in_channel);
-            } else {
-                auto not_end = builder.add_rule("not-end",
-                    "[^<] | \"<\" [^|] | \"<|\" [^e] | \"<|e\" [^n] | \"<|en\" [^d] | \"<|end\" [^|] | \"<|end|\" [^>]");
-                auto analysis = builder.add_rule("analysis",
-                    "\"<|channel|>analysis<|message|>\" ( " + not_end + " )* \"<|end|>\"");
-                auto commentary = builder.add_rule("commentary",
-                    "\"<|channel|>commentary<|message|>\" ( " + not_end + " )* \"<|end|>\"");
-
-                auto recipient_in_role = builder.add_rule("recipient_in_role",
-                    "\" to=functions.\" ( " + string_join(tool_rules_recipient_in_role, " | ") + " )"
-                );
-
-                builder.add_rule("root",
-                    "( " + analysis + " \"<|start|>assistant\" )? " +
-                    "( " + commentary + " \"<|start|>assistant\" )? " +
-                    "( " + recipient_in_role + " | " + recipient_in_channel + " )"
-                );
-            }
-
-            // Trigger on tool calls that appear in the commentary channel
-            data.grammar_triggers.push_back({
-                COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN,
-                "<\\|channel\\|>(commentary|analysis) to"
-            });
-
-            // Trigger tool calls that appear in the role section, either at the
-            // start or in the middle.
-            data.grammar_triggers.push_back({
-                COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
-                "^ to"
-            });
-
-            data.grammar_triggers.push_back({
-                COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN,
-                "<\\|start\\|>assistant to"
-            });
-        });
-    }
+    common_chat_build_peg_grammar(inputs, parser, data);
 
     return data;
 }

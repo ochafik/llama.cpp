@@ -1151,7 +1151,7 @@ common_peg_parser common_peg_parser_builder::schema_or_raw_string_until(
     const std::string & rule_name,
     const nlohmann::ordered_json & param_schema,
     const std::string & end_delimiter,
-    common_schema_info & schema_info,
+    const common_schema_info & schema_info,
     int string_tag,
     int json_tag,
     bool space_around_json)

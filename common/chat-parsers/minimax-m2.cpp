@@ -3,6 +3,7 @@
 // With optional <think>...</think> reasoning blocks
 
 #include "chat-parsers-internal.h"
+#include "chat.h"
 
 common_chat_params common_chat_params_init_minimax_m2_peg(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
@@ -62,15 +63,12 @@ common_chat_params common_chat_params_init_minimax_m2_peg(const common_chat_temp
 
         // Tool call parser
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+            if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
+                data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<minimax:tool_call>"});
+            }
+
             auto invoke_choice = p.choice();
-            foreach_function(inputs.tools, [&](const json & tool) {
-                const auto & function = tool.at("function");
-                std::string name = function.at("name");
-                auto parameters = function.at("parameters");
-
-                auto schema_info = common_schema_info();
-                schema_info.resolve_refs(parameters);
-
+            foreach_function(inputs.tools, [&](const auto & function, const auto & name, const auto & parameters, const auto & schema_info) {
                 // Format: <invoke name="function_name"><parameter name="key">value</parameter></invoke>
                 auto tool_open = "<invoke name=\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\">" + p.space();
                 auto tool_close = p.space() + p.literal("</invoke>") + p.space();
@@ -100,7 +98,7 @@ common_chat_params common_chat_params_init_minimax_m2_peg(const common_chat_temp
                 bool additional_has_schema = false;
                 json additional_schema;
                 if (parameters.contains("additionalProperties")) {
-                    const auto & additional = parameters.at("additionalProperties");
+                    const json & additional = parameters.at("additionalProperties");
                     if (additional.is_boolean()) {
                         allow_additional = additional.get<bool>();
                     } else if (additional.is_object()) {
@@ -190,26 +188,7 @@ common_chat_params common_chat_params_init_minimax_m2_peg(const common_chat_temp
         return reasoning << content_tail;
     });
 
-    data.parser = parser.save();
-
-    if (include_grammar) {
-        data.grammar_lazy = has_tools && inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_AUTO;
-
-        // Build grammar from PEG parser
-        data.grammar = build_grammar([&](const common_grammar_builder & builder) {
-            foreach_function(inputs.tools, [&](const json & tool) {
-                auto schema = tool.at("function").at("parameters");
-                builder.resolve_refs(schema);
-            });
-            parser.build_grammar(builder, data.grammar_lazy);
-        });
-
-        if (data.grammar_lazy) {
-            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<minimax:tool_call>"});
-        } else {
-            data.grammar_triggers.clear();
-        }
-    }
+    common_chat_build_peg_grammar(inputs, parser, data);
 
     return data;
 }
