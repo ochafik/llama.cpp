@@ -86,19 +86,29 @@ common_chat_params common_chat_params_init_generic_peg(const common_chat_templat
         // The generic format uses JSON with specific structure
         // {"tool_call": {...}} or {"tool_calls": [...]} or {"response": "..."}
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
-            // Parse as JSON and extract tool calls
-            return p.tag(Tag::TOOL_ARGS, p.json());
+            // Validate entire JSON structure against our complex schema with anyOf
+            return p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "generic-root", schema));
         }
 
-        // Content only - parse as JSON and extract response
-        return p.tag(Tag::CONTENT, p.json());
+        // Content only - validate response against response schema
+        auto response_schema = inputs.json_schema.is_null()
+            ? json{{"type", "string"}}
+            : inputs.json_schema;
+        auto response_obj_schema = json{
+            {"type", "object"},
+            {"properties", {
+                {"response", response_schema},
+            }},
+            {"required", json::array({"response"})},
+        };
+        return p.tag(Tag::CONTENT, p.schema(p.json(), "generic-response", response_obj_schema));
     });
 
     auto tweaked_messages = common_chat_template::add_system(
         inputs.messages,
         "Respond in JSON format, either with `tool_call` (a request to call tools) or with `response` reply to the user's request");
 
-    data.prompt = apply(tmpl, inputs);
+    data.prompt = apply(tmpl, inputs, /* messages_override= */ tweaked_messages);
     data.format = COMMON_CHAT_FORMAT_GENERIC;
     common_chat_build_peg_grammar(inputs, parser, data);
 
