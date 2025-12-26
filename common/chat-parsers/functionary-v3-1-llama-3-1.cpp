@@ -76,6 +76,10 @@ common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1_peg(const 
             }
 
             auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_choice, min_calls, max_calls));
+            bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+            if (require_tools) {
+                return tool_calls;
+            }
             return p.tag(Tag::CONTENT, p.until_one_of(delimiters)) << tool_calls;
         }
 

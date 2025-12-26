@@ -96,6 +96,7 @@ common_chat_params common_chat_params_init_llama_3_x_peg(const common_chat_templ
             ));
         });
 
+        bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
@@ -108,6 +109,9 @@ common_chat_params common_chat_params_init_llama_3_x_peg(const common_chat_templ
             auto content = p.tag(Tag::CONTENT, p.until_one_of(delimiters)) << consume_message_end();
             auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_choice, min_calls, max_calls));
 
+            if (require_tools) {
+                return tool_calls;
+            }
             return content << tool_calls;
         }
 

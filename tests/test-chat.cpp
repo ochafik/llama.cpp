@@ -4353,29 +4353,153 @@ static void test_template_output_peg_parsers() {
 // 2. Tool names are never split
 // 3. Tool arguments never regress
 
-// Scoped enums for better readability
+// Scoped enums for template capabilities - each field has its own type for type safety
 enum class ThinkingSupport { No, Yes };
 enum class ToolSupport { No, Yes };
+enum class Skip { No, Yes };
+enum class ReasoningRequiresTools { No, Yes };
+enum class ToolsEmitContentWithCalls { No, Yes };
+enum class InjectReasoningAfterFormat { No, Yes };
+enum class SupportsDisableThinking { No, Yes };
+enum class SupportsReasoningOnly { No, Yes };
+enum class ToolCallsHaveIds { No, Yes };
 
 struct template_capabilities {
     const char * name;
     const char * jinja_path;
     common_chat_format format;
-    ThinkingSupport supports_thinking;
-    ToolSupport supports_tools;
-    const char * think_open_tag;  // Opening tag for thinking (nullptr = auto-detect)
-    const char * think_close_tag; // Closing tag for thinking (nullptr = no thinking)
-    bool skip = false;
+    ThinkingSupport supports_thinking = ThinkingSupport::No;
+    ToolSupport supports_tools = ToolSupport::No;
+    const char * think_open_tag = nullptr;   // Opening tag for thinking (nullptr = auto-detect)
+    const char * think_close_tag = nullptr;  // Closing tag for thinking (nullptr = no thinking)
+    Skip skip = Skip::No;
     // TODO(ochafik): Add minja detection for these capabilities (see https://github.com/ochafik/minja/pull/20)
-    bool reasoning_requires_tools = false;      // Thinking only works when tools are provided
-    bool tools_emit_content_with_calls = true;  // Tool calls can include content text
-    bool inject_reasoning_after_format = false; // Test workaround: inject thinking after format
-    bool supports_disable_thinking = true;      // Template respects enable_thinking=false
-    bool supports_reasoning_only = true;        // Can have reasoning without content
-    bool tool_required_allows_content = true;   // tool_choice=required allows content
-    bool tool_calls_have_ids = false;           // Tool calls include IDs (cross-check with minja)
-    const char * needle_tool_name = nullptr;    // Tool name for needle tests (nullptr = use "python")
+    ReasoningRequiresTools reasoning_requires_tools = ReasoningRequiresTools::No;
+    ToolsEmitContentWithCalls tools_emit_content_with_calls = ToolsEmitContentWithCalls::Yes;
+    InjectReasoningAfterFormat inject_reasoning_after_format = InjectReasoningAfterFormat::No;
+    SupportsDisableThinking supports_disable_thinking = SupportsDisableThinking::Yes;
+    SupportsReasoningOnly supports_reasoning_only = SupportsReasoningOnly::Yes;
+    ToolCallsHaveIds tool_calls_have_ids = ToolCallsHaveIds::No;
+    const char * needle_tool_name = nullptr;  // Tool name for needle tests (nullptr = use "python")
 };
+
+// Shared template capabilities for all needle tests
+static const std::vector<template_capabilities> & get_template_capabilities() {
+    static const std::vector<template_capabilities> templates = {
+        // Templates with thinking support
+        {"Command R7B", "models/templates/CohereForAI-c4ai-command-r7b-12-2024-tool_use.jinja",
+            COMMON_CHAT_FORMAT_COMMAND_R7B, ThinkingSupport::Yes, ToolSupport::Yes,
+            "<|START_THINKING|>", "<|END_THINKING|>", Skip::No, ReasoningRequiresTools::Yes,
+            ToolsEmitContentWithCalls::No, InjectReasoningAfterFormat::No,
+            SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes,
+            ToolCallsHaveIds::Yes},
+        {"DeepSeek R1", "models/templates/deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja",
+            COMMON_CHAT_FORMAT_DEEPSEEK_R1, ThinkingSupport::Yes, ToolSupport::No,
+            "<think>", "</think>", Skip::No, ReasoningRequiresTools::No,
+            ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::Yes},
+        {"DeepSeek V3.1", "models/templates/deepseek-ai-DeepSeek-V3.1.jinja",
+            COMMON_CHAT_FORMAT_DEEPSEEK_V3_1, ThinkingSupport::Yes, ToolSupport::No,
+            "<think>", "</think>", Skip::No, ReasoningRequiresTools::No,
+            ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::Yes,
+            SupportsDisableThinking::No, SupportsReasoningOnly::No},
+        {"GLM 4.6", "models/templates/GLM-4.6.jinja",
+            COMMON_CHAT_FORMAT_GLM_4_5, ThinkingSupport::Yes, ToolSupport::Yes,
+            "<think>", "</think>", Skip::No, ReasoningRequiresTools::No,
+            ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
+            SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes},
+        {"Granite", "models/templates/llama-cpp-ibm-granite-granite-3.3-2B-Instruct.jinja",
+            COMMON_CHAT_FORMAT_GRANITE, ThinkingSupport::Yes, ToolSupport::Yes,
+            "<think>", "</think>", Skip::No, ReasoningRequiresTools::No,
+            ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::Yes,
+            SupportsDisableThinking::Yes, SupportsReasoningOnly::No},
+        {"Hermes 2 Pro", "models/templates/NousResearch-Hermes-2-Pro-Llama-3-8B-tool_use.jinja",
+            COMMON_CHAT_FORMAT_HERMES_2_PRO, ThinkingSupport::No, ToolSupport::Yes,
+            "<think>", "</think>", Skip::No, ReasoningRequiresTools::No,
+            ToolsEmitContentWithCalls::No, InjectReasoningAfterFormat::No,
+            SupportsDisableThinking::No, SupportsReasoningOnly::No},
+        {"Kimi K2", "models/templates/Kimi-K2-Instruct.jinja",
+            COMMON_CHAT_FORMAT_KIMI_K2, ThinkingSupport::No, ToolSupport::Yes,
+            nullptr, nullptr, Skip::No, ReasoningRequiresTools::No,
+            ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
+            SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes,
+            ToolCallsHaveIds::Yes},
+        {"MiniMax M2", "models/templates/MiniMax-M2.jinja",
+            COMMON_CHAT_FORMAT_MINIMAX_M2, ThinkingSupport::Yes, ToolSupport::Yes,
+            "<think>", "</think>", Skip::No, ReasoningRequiresTools::No,
+            ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
+            SupportsDisableThinking::No, SupportsReasoningOnly::No},
+        {"Nemotron V2", "models/templates/NVIDIA-Nemotron-Nano-v2.jinja",
+            COMMON_CHAT_FORMAT_NEMOTRON_V2, ThinkingSupport::No, ToolSupport::Yes,
+            nullptr, nullptr, Skip::No, ReasoningRequiresTools::No,
+            ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
+            SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes},
+        {"Nemotron V3", "models/templates/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16.jinja",
+            COMMON_CHAT_FORMAT_NEMOTRON_V3, ThinkingSupport::Yes, ToolSupport::Yes,
+            "<think>", "</think>", Skip::No, ReasoningRequiresTools::No,
+            ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
+            SupportsDisableThinking::No, SupportsReasoningOnly::No},
+        {"Nemotron V3 (Unsloth)", "models/templates/unsloth-Nemotron-3-Nano.jinja",
+            COMMON_CHAT_FORMAT_NEMOTRON_V3, ThinkingSupport::Yes, ToolSupport::Yes,
+            "<think>", "</think>", Skip::No, ReasoningRequiresTools::No,
+            ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
+            SupportsDisableThinking::No, SupportsReasoningOnly::No},
+        {"Seed OSS", "models/templates/ByteDance-Seed-OSS.jinja",
+            COMMON_CHAT_FORMAT_SEED_OSS, ThinkingSupport::Yes, ToolSupport::Yes,
+            "<seed:think>", "</seed:think>", Skip::No, ReasoningRequiresTools::No,
+            ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
+            SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes},
+
+        // Templates without thinking support
+        {"Firefunction V2", "models/templates/fireworks-ai-llama-3-firefunction-v2.jinja",
+            COMMON_CHAT_FORMAT_FIREFUNCTION_V2, ThinkingSupport::No, ToolSupport::No},
+        {"Functionary V3.1", "models/templates/meetkai-functionary-medium-v3.1.jinja",
+            COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1, ThinkingSupport::No, ToolSupport::Yes,
+            nullptr, nullptr, Skip::No, ReasoningRequiresTools::No,
+            ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
+            SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes,
+            ToolCallsHaveIds::No, "test_function"},
+        {"Functionary V3.2", "models/templates/meetkai-functionary-medium-v3.2.jinja",
+            COMMON_CHAT_FORMAT_FUNCTIONARY_V3_2, ThinkingSupport::No, ToolSupport::Yes,
+            nullptr, nullptr, Skip::No, ReasoningRequiresTools::No,
+            ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
+            SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes},
+        {"Llama 3.1", "models/templates/meta-llama-Llama-3.1-8B-Instruct.jinja",
+            COMMON_CHAT_FORMAT_LLAMA_3_X, ThinkingSupport::No, ToolSupport::Yes,
+            nullptr, nullptr, Skip::No, ReasoningRequiresTools::No,
+            ToolsEmitContentWithCalls::No, InjectReasoningAfterFormat::No,
+            SupportsDisableThinking::No, SupportsReasoningOnly::No},
+        {"Mistral Nemo", "models/templates/mistralai-Mistral-Nemo-Instruct-2407.jinja",
+            COMMON_CHAT_FORMAT_MISTRAL_NEMO, ThinkingSupport::No, ToolSupport::Yes,
+            nullptr, nullptr, Skip::No, ReasoningRequiresTools::No,
+            ToolsEmitContentWithCalls::No, InjectReasoningAfterFormat::No,
+            SupportsDisableThinking::No, SupportsReasoningOnly::No,
+            ToolCallsHaveIds::Yes},
+        {"Qwen3 Coder", "models/templates/Qwen3-Coder.jinja",
+            COMMON_CHAT_FORMAT_QWEN3_CODER_XML, ThinkingSupport::No, ToolSupport::Yes,
+            nullptr, nullptr, Skip::No, ReasoningRequiresTools::No,
+            ToolsEmitContentWithCalls::No, InjectReasoningAfterFormat::No,
+            SupportsDisableThinking::No, SupportsReasoningOnly::No},
+        {"Apertus", "models/templates/Apertus-8B-Instruct.jinja",
+            COMMON_CHAT_FORMAT_APERTUS, ThinkingSupport::Yes, ToolSupport::Yes,
+            "<|inner_prefix|>", "<|inner_suffix|>", Skip::No, ReasoningRequiresTools::No,
+            ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
+            SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes},
+        {"Apriel 1.5", "models/templates/unsloth-Apriel-1.5.jinja",
+            COMMON_CHAT_FORMAT_APRIEL_1_5, ThinkingSupport::Yes, ToolSupport::Yes,
+            "<thinking>", "</thinking>", Skip::Yes},
+        {"GPT OSS", "models/templates/openai-gpt-oss-120b.jinja",
+            COMMON_CHAT_FORMAT_GPT_OSS, ThinkingSupport::Yes, ToolSupport::Yes,
+            "<|inner_thoughts_begin|>", "<|inner_thoughts_end|>", Skip::No, ReasoningRequiresTools::No,
+            ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
+            SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes},
+        {"Xiaomi MiMo", "models/templates/MiMo-VL.jinja",
+            COMMON_CHAT_FORMAT_XIAOMI_MIMO, ThinkingSupport::No, ToolSupport::Yes,
+            nullptr, nullptr, Skip::No, ReasoningRequiresTools::No,
+            ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
+            SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes},
+    };
+    return templates;
+}
 
 // Cross-check declared capabilities against minja's detected capabilities.
 // This ensures our test configuration stays in sync with what minja detects from templates.
@@ -4459,7 +4583,7 @@ static std::vector<needle_scenario> build_needle_scenarios(const template_capabi
     content_no_tools.skip_if_thinking_forced = true;
     scenarios.push_back(content_no_tools);
 
-    if (info.supports_thinking == ThinkingSupport::Yes && !info.reasoning_requires_tools) {
+    if (info.supports_thinking == ThinkingSupport::Yes && info.reasoning_requires_tools == ReasoningRequiresTools::No) {
         needle_scenario reasoning_with_content;
         reasoning_with_content.name = "content-with-reasoning";
         reasoning_with_content.with_reasoning = true;
@@ -4467,7 +4591,7 @@ static std::vector<needle_scenario> build_needle_scenarios(const template_capabi
         reasoning_with_content.require_thinking_support = true;
         scenarios.push_back(reasoning_with_content);
 
-        if (info.supports_reasoning_only) {
+        if (info.supports_reasoning_only == SupportsReasoningOnly::Yes) {
             needle_scenario reasoning_only;
             reasoning_only.name = "reasoning-only";
             reasoning_only.with_content = false;
@@ -4477,7 +4601,7 @@ static std::vector<needle_scenario> build_needle_scenarios(const template_capabi
             scenarios.push_back(reasoning_only);
         }
 
-        if (info.supports_disable_thinking) {
+        if (info.supports_disable_thinking == SupportsDisableThinking::Yes) {
             needle_scenario thinking_disabled;
             thinking_disabled.name = "thinking-disabled";
             thinking_disabled.with_content = true;
@@ -4503,8 +4627,8 @@ static std::vector<needle_scenario> build_needle_scenarios(const template_capabi
         tool_auto.tool_choice = COMMON_CHAT_TOOL_CHOICE_AUTO;
         tool_auto.with_tool_call = true;
         tool_auto.require_tool_support = true;
-        tool_auto.with_content = info.tools_emit_content_with_calls;
-        tool_auto.expect_tool_ids = info.tool_calls_have_ids;
+        tool_auto.with_content = (info.tools_emit_content_with_calls == ToolsEmitContentWithCalls::Yes);
+        tool_auto.expect_tool_ids = (info.tool_calls_have_ids == ToolCallsHaveIds::Yes);
         scenarios.push_back(tool_auto);
 
         needle_scenario tool_required_only;
@@ -4512,9 +4636,9 @@ static std::vector<needle_scenario> build_needle_scenarios(const template_capabi
         tool_required_only.provide_tools = true;
         tool_required_only.tool_choice = COMMON_CHAT_TOOL_CHOICE_REQUIRED;
         tool_required_only.with_tool_call = true;
-        tool_required_only.with_content = info.tool_required_allows_content;
+        tool_required_only.with_content = false;  // tool_choice=required never allows content
         tool_required_only.require_tool_support = true;
-        tool_required_only.expect_tool_ids = info.tool_calls_have_ids;
+        tool_required_only.expect_tool_ids = (info.tool_calls_have_ids == ToolCallsHaveIds::Yes);
         scenarios.push_back(tool_required_only);
 
         needle_scenario tool_parallel;
@@ -4525,8 +4649,8 @@ static std::vector<needle_scenario> build_needle_scenarios(const template_capabi
         tool_parallel.tool_call_count = 2;
         tool_parallel.parallel_tool_calls = true;
         tool_parallel.require_tool_support = true;
-        tool_parallel.with_content = info.tools_emit_content_with_calls;
-        tool_parallel.expect_tool_ids = info.tool_calls_have_ids;
+        tool_parallel.with_content = (info.tools_emit_content_with_calls == ToolsEmitContentWithCalls::Yes);
+        tool_parallel.expect_tool_ids = (info.tool_calls_have_ids == ToolCallsHaveIds::Yes);
         scenarios.push_back(tool_parallel);
 
         if (info.supports_thinking == ThinkingSupport::Yes) {
@@ -4539,8 +4663,8 @@ static std::vector<needle_scenario> build_needle_scenarios(const template_capabi
             tool_with_reasoning.tool_choice = COMMON_CHAT_TOOL_CHOICE_AUTO;
             tool_with_reasoning.require_tool_support = true;
             tool_with_reasoning.require_thinking_support = true;
-            tool_with_reasoning.with_content = info.tools_emit_content_with_calls;
-            tool_with_reasoning.expect_tool_ids = info.tool_calls_have_ids;
+            tool_with_reasoning.with_content = (info.tools_emit_content_with_calls == ToolsEmitContentWithCalls::Yes);
+            tool_with_reasoning.expect_tool_ids = (info.tool_calls_have_ids == ToolCallsHaveIds::Yes);
             scenarios.push_back(tool_with_reasoning);
         }
     }
@@ -4573,6 +4697,132 @@ static std::string describe_scenario(const needle_scenario & scenario) {
     return oss.str();
 }
 
+// Test that parsers correctly reject content in tool_choice=required mode.
+// When tool_choice is REQUIRED, parsers should only accept tool calls (and optionally thinking),
+// but NOT content. This test verifies that invariant holds for all templates by using init_delta
+// to properly render assistant messages through templates.
+static bool test_required_tool_rejects_content() {
+    printf("[%s]\n", __func__);
+
+    const char * template_filter = std::getenv("NEEDLE_TEMPLATE_FILTER");
+
+    // Use shared template capabilities
+    const auto & templates = get_template_capabilities();
+
+    size_t tested = 0;
+    size_t passed = 0;
+    size_t skipped = 0;
+
+    for (const auto & info : templates) {
+        if (template_filter && std::string(info.name) != template_filter) {
+            continue;
+        }
+
+        // Skip templates without tool support
+        if (info.supports_tools != ToolSupport::Yes) {
+            continue;
+        }
+
+        auto tmpls = read_templates(info.jinja_path);
+        if (!tmpls) {
+            if (g_verbose >= 1) {
+                printf("  " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " %s (template not found)\n", info.name);
+            }
+            skipped++;
+            continue;
+        }
+
+        // Test scenarios that should FAIL in required mode:
+        // Messages with content (but no tool calls) rendered through the template
+        struct test_scenario {
+            const char * name;
+            common_chat_msg delta_msg;
+            common_reasoning_format reasoning_format;
+        };
+
+        std::vector<test_scenario> scenarios;
+
+        // Scenario 1: Content only - should always fail
+        scenarios.push_back({"content-only", simple_assist_msg("Hello, this is just content without any tool call."), COMMON_REASONING_FORMAT_NONE});
+
+        // Scenario 2: Thinking + content (if supported) - should fail (content is still present)
+        if (info.supports_thinking == ThinkingSupport::Yes) {
+            scenarios.push_back({"thinking-then-content",
+                simple_assist_msg("Here is my response.", "Let me think about this..."),
+                COMMON_REASONING_FORMAT_DEEPSEEK});
+        }
+
+        tested++;
+        bool template_passed = true;
+
+        for (const auto & scenario : scenarios) {
+            // Use init_delta to get the properly-rendered delta through the template
+            delta_data data;
+            try {
+                data = init_delta(
+                    tmpls.get(),
+                    {},  // end_tokens - let it use params.additional_stops
+                    message_user,
+                    scenario.delta_msg,
+                    {python_tool},  // tools
+                    COMMON_CHAT_TOOL_CHOICE_REQUIRED,
+                    scenario.reasoning_format,
+                    {},  // customize_inputs
+                    chat_parser_impl::EXPERIMENTAL
+                );
+            } catch (const std::exception & e) {
+                if (g_verbose >= 0) {
+                    printf("  " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " %s [%s]: init_delta failed: %s\n",
+                           info.name, scenario.name, e.what());
+                }
+                continue;
+            }
+
+            if (data.params.parser.empty()) {
+                if (g_verbose >= 1) {
+                    printf("  " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " %s [%s]: no PEG parser\n",
+                           info.name, scenario.name);
+                }
+                continue;
+            }
+
+            common_peg_arena arena;
+            arena.load(data.params.parser);
+
+            bool threw = false;
+            std::string error_msg;
+            try {
+                common_chat_peg_parse(arena, data.delta, /* is_partial = */ false, {data.params.format});
+            } catch (const std::exception & e) {
+                threw = true;
+                error_msg = e.what();
+            }
+
+            // In required mode, content should always cause parser to fail
+            if (!threw) {
+                if (g_verbose >= 0) {
+                    printf("  " ANSI_COLOR_RED "FAIL" ANSI_COLOR_RESET " %s [%s]: expected parser to reject content but it succeeded\n",
+                           info.name, scenario.name);
+                    printf("    Delta: %.80s%s\n", data.delta.c_str(), data.delta.size() > 80 ? "..." : "");
+                }
+                template_passed = false;
+            } else if (g_verbose >= 2) {
+                printf("  " ANSI_COLOR_GREEN "PASS" ANSI_COLOR_RESET " %s [%s]\n", info.name, scenario.name);
+            }
+        }
+
+        if (template_passed) {
+            passed++;
+            if (g_verbose >= 1) {
+                printf("  " ANSI_COLOR_GREEN "PASS" ANSI_COLOR_RESET " %s\n", info.name);
+            }
+        }
+    }
+
+    printf("  Results: %zu/%zu passed, %zu skipped\n", passed, tested, skipped);
+    return passed == tested;
+}
+
 static bool test_systematic_needle_streaming() {
     printf("[%s]\n", __func__);
 
@@ -4601,123 +4851,8 @@ static bool test_systematic_needle_streaming() {
     };
     std::vector<template_summary> summaries;
 
-    // Template capability matrix - each template has different think tags
-    // Note: think_open_tag/think_close_tag are used when thinking_forced_open=false
-    // When thinking_forced_open=true (determined at runtime), only close tag is needed
-    std::vector<template_capabilities> templates = {
-        // Templates with thinking support
-        {"Command R7B",     "models/templates/CohereForAI-c4ai-command-r7b-12-2024-tool_use.jinja",
-            COMMON_CHAT_FORMAT_COMMAND_R7B, ThinkingSupport::Yes, ToolSupport::Yes,
-            "<|START_THINKING|>", "<|END_THINKING|>", /* skip = */ false, /* reasoning_requires_tools = */ true,
-            /* tools_emit_content_with_calls = */ false, /* inject_reasoning_after_format = */ false,
-            /* supports_disable_thinking = */ true, /* supports_reasoning_only = */ true,
-            /* tool_required_allows_content = */ false, /* tool_calls_have_ids = */ true},
-        {"DeepSeek R1",     "models/templates/deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja",
-            COMMON_CHAT_FORMAT_DEEPSEEK_R1, ThinkingSupport::Yes, ToolSupport::No,
-            "<think>", "</think>", /* skip = */ false, /* reasoning_requires_tools = */ false,
-            /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ true},
-        {"DeepSeek V3.1",   "models/templates/deepseek-ai-DeepSeek-V3.1.jinja",
-            COMMON_CHAT_FORMAT_DEEPSEEK_V3_1, ThinkingSupport::Yes, ToolSupport::No,
-            "<think>", "</think>", /* skip = */ false, /* reasoning_requires_tools = */ false,
-            /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ true,
-            /* supports_disable_thinking = */ false, /* supports_reasoning_only = */ false},
-        {"GLM 4.6",         "models/templates/GLM-4.6.jinja",
-            COMMON_CHAT_FORMAT_GLM_4_5, ThinkingSupport::Yes, ToolSupport::Yes,
-            "<think>", "</think>", /* skip = */ false, /* reasoning_requires_tools = */ false,
-            /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ false,
-            /* supports_disable_thinking = */ true, /* supports_reasoning_only = */ true,
-            /* tool_required_allows_content = */ false},
-        {"Granite",         "models/templates/llama-cpp-ibm-granite-granite-3.3-2B-Instruct.jinja",
-            COMMON_CHAT_FORMAT_GRANITE, ThinkingSupport::Yes, ToolSupport::Yes,
-            "<think>", "</think>", /* skip = */ false, /* reasoning_requires_tools = */ false,
-            /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ true,
-            /* supports_disable_thinking = */ true, /* supports_reasoning_only = */ false,
-            /* tool_required_allows_content = */ false},
-        {"Hermes 2 Pro",    "models/templates/NousResearch-Hermes-2-Pro-Llama-3-8B-tool_use.jinja",
-            COMMON_CHAT_FORMAT_HERMES_2_PRO, ThinkingSupport::No, ToolSupport::Yes,
-            "<think>", "</think>", /* skip = */ false, /* reasoning_requires_tools = */ false,
-            /* tools_emit_content_with_calls = */ false, /* inject_reasoning_after_format = */ false,
-            /* supports_disable_thinking = */ false, /* supports_reasoning_only = */ false,
-            /* tool_required_allows_content = */ false},
-        {"Kimi K2",         "models/templates/Kimi-K2-Instruct.jinja",
-            COMMON_CHAT_FORMAT_KIMI_K2, ThinkingSupport::No, ToolSupport::Yes,
-            nullptr, nullptr, /* skip = */ false, /* reasoning_requires_tools = */ false,
-            /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ false,
-            /* supports_disable_thinking = */ true, /* supports_reasoning_only = */ true,
-            /* tool_required_allows_content = */ false, /* tool_calls_have_ids = */ true},
-        {"MiniMax M2",      "models/templates/MiniMax-M2.jinja",
-            COMMON_CHAT_FORMAT_MINIMAX_M2, ThinkingSupport::Yes, ToolSupport::Yes,
-            "<think>", "</think>", /* skip = */ false, /* reasoning_requires_tools = */ false,
-            /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ false,
-            /* supports_disable_thinking = */ false, /* supports_reasoning_only = */ false,
-            /* tool_required_allows_content = */ false},
-        {"Nemotron V2",     "models/templates/NVIDIA-Nemotron-Nano-v2.jinja",
-            COMMON_CHAT_FORMAT_NEMOTRON_V2, ThinkingSupport::No, ToolSupport::Yes,
-            nullptr, nullptr, /* skip = */ false, /* reasoning_requires_tools = */ false,
-            /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ false,
-            /* supports_disable_thinking = */ true, /* supports_reasoning_only = */ true,
-            /* tool_required_allows_content = */ false},
-        {"Nemotron V3",     "models/templates/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16.jinja",
-            COMMON_CHAT_FORMAT_NEMOTRON_V3, ThinkingSupport::Yes, ToolSupport::Yes,
-            "<think>", "</think>", /* skip = */ false, /* reasoning_requires_tools = */ false,
-            /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ false,
-            /* supports_disable_thinking = */ false, /* supports_reasoning_only = */ false,
-            /* tool_required_allows_content = */ false},
-        {"Nemotron V3 (Unsloth)", "models/templates/unsloth-Nemotron-3-Nano.jinja",
-            COMMON_CHAT_FORMAT_NEMOTRON_V3, ThinkingSupport::Yes, ToolSupport::Yes,
-            "<think>", "</think>", /* skip = */ false, /* reasoning_requires_tools = */ false,
-            /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ false,
-            /* supports_disable_thinking = */ false, /* supports_reasoning_only = */ false,
-            /* tool_required_allows_content = */ false},
-        {"Seed OSS",        "models/templates/ByteDance-Seed-OSS.jinja",
-            COMMON_CHAT_FORMAT_SEED_OSS, ThinkingSupport::Yes, ToolSupport::Yes,
-            "<seed:think>", "</seed:think>", /* skip = */ false, /* reasoning_requires_tools = */ false,
-            /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ false,
-            /* supports_disable_thinking = */ true, /* supports_reasoning_only = */ true,
-            /* tool_required_allows_content = */ false},
-
-        // Templates without thinking support
-        {"Firefunction V2", "models/templates/fireworks-ai-llama-3-firefunction-v2.jinja",
-            COMMON_CHAT_FORMAT_FIREFUNCTION_V2, ThinkingSupport::No, ToolSupport::No,
-            nullptr, nullptr},
-        {"Functionary V3.1","models/templates/meetkai-functionary-medium-v3.1.jinja",
-            COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1, ThinkingSupport::No, ToolSupport::Yes,
-            nullptr, nullptr, /* skip = */ false, /* reasoning_requires_tools = */ false,
-            /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ false,
-            /* supports_disable_thinking = */ true, /* supports_reasoning_only = */ true,
-            /* tool_required_allows_content = */ true, /* tool_calls_have_ids = */ false,
-            /* needle_tool_name = */ "test_function"},
-        {"Functionary V3.2","models/templates/meetkai-functionary-medium-v3.2.jinja",
-            COMMON_CHAT_FORMAT_FUNCTIONARY_V3_2, ThinkingSupport::No, ToolSupport::Yes,
-            nullptr, nullptr},
-        {"Llama 3.1",       "models/templates/meta-llama-Llama-3.1-8B-Instruct.jinja",
-            COMMON_CHAT_FORMAT_LLAMA_3_X, ThinkingSupport::No, ToolSupport::Yes,
-            nullptr, nullptr, /* skip = */ false, /* reasoning_requires_tools = */ false,
-            /* tools_emit_content_with_calls = */ false, /* inject_reasoning_after_format = */ false,
-            /* supports_disable_thinking = */ false, /* supports_reasoning_only = */ false,
-            /* tool_required_allows_content = */ false, /* tool_calls_have_ids = */ false},
-        {"Mistral Nemo",    "models/templates/mistralai-Mistral-Nemo-Instruct-2407.jinja",
-            COMMON_CHAT_FORMAT_MISTRAL_NEMO, ThinkingSupport::No, ToolSupport::Yes,
-            nullptr, nullptr, /* skip = */ false, /* reasoning_requires_tools = */ false,
-            /* tools_emit_content_with_calls = */ false, /* inject_reasoning_after_format = */ false,
-            /* supports_disable_thinking = */ false, /* supports_reasoning_only = */ false,
-            /* tool_required_allows_content = */ false, /* tool_calls_have_ids = */ true},
-        {"Qwen3 Coder",     "models/templates/Qwen3-Coder.jinja",
-            COMMON_CHAT_FORMAT_QWEN3_CODER_XML, ThinkingSupport::No, ToolSupport::Yes,
-            nullptr, nullptr, /* skip = */ false, /* reasoning_requires_tools = */ false,
-            /* tools_emit_content_with_calls = */ false, /* inject_reasoning_after_format = */ false,
-            /* supports_disable_thinking = */ false, /* supports_reasoning_only = */ false,
-            /* tool_required_allows_content = */ false, /* tool_calls_have_ids = */ false},
-        {"Apertus",         "models/templates/Apertus-8B-Instruct.jinja",
-            COMMON_CHAT_FORMAT_APERTUS, ThinkingSupport::Yes, ToolSupport::Yes,
-            "<|inner_prefix|>", "<|inner_suffix|>", /* skip = */ false, /* reasoning_requires_tools = */ false,
-            /* tools_emit_content_with_calls = */ true, /* inject_reasoning_after_format = */ false,
-            /* supports_disable_thinking = */ true, /* supports_reasoning_only = */ true,
-            /* tool_required_allows_content = */ false},
-        {"Apriel 1.5",      "models/templates/unsloth-Apriel-1.5.jinja",
-            COMMON_CHAT_FORMAT_APRIEL_1_5, ThinkingSupport::Yes, ToolSupport::Yes,
-            "<thinking>", "</thinking>", true},
-    };
+    // Use shared template capabilities
+    const auto & templates = get_template_capabilities();
 
     // Verify declared capabilities match what minja detects
     if (!verify_template_capabilities(templates)) {
@@ -4738,7 +4873,7 @@ static bool test_systematic_needle_streaming() {
             }
             continue;
         }
-        if (tmpl_info.skip) {
+        if (tmpl_info.skip == Skip::Yes) {
             if (g_verbose >= 1) {
                 printf("    " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " (temporarily disabled)\n");
             }
@@ -4901,7 +5036,7 @@ static bool test_systematic_needle_streaming() {
                 };
 
                 std::string raw_message = data.delta;
-                if (tmpl_info.inject_reasoning_after_format && scenario.with_reasoning &&
+                if (tmpl_info.inject_reasoning_after_format == InjectReasoningAfterFormat::Yes && scenario.with_reasoning &&
                     raw_message.find(ctx.reasoning_needles.first) == std::string::npos) {
                     const char * open = tmpl_info.think_open_tag ? tmpl_info.think_open_tag : "<think>";
                     const char * close = tmpl_info.think_close_tag ? tmpl_info.think_close_tag : "</think>";
@@ -5127,6 +5262,11 @@ int main(int argc, char ** argv) {
             }
             if (chat_test == "" || chat_test == "template_output_peg_parsers") {
                 test_template_output_peg_parsers();
+            }
+            if (chat_test == "" || chat_test == "required_tool_rejects_content") {
+                if (!test_required_tool_rejects_content()) {
+                    return 1;
+                }
             }
             if (chat_test == "" || chat_test == "systematic_needle_streaming") {
                 if (!test_systematic_needle_streaming()) {

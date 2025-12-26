@@ -80,6 +80,11 @@ common_chat_params common_chat_params_init_functionary_v3_2_peg(const common_cha
             auto without_content = p.trigger_rule("tool-without-content", first_tool_call)
                 << more_tool_calls << trailing_content;
 
+            bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+            if (require_tools) {
+                // In REQUIRED mode, only return tool calls without content
+                return p.trigger_rule("tool-required", first_tool_call) << more_tool_calls;
+            }
             return with_content | without_content;
         }
 

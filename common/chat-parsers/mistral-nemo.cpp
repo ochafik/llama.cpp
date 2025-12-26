@@ -32,6 +32,10 @@ common_chat_params common_chat_params_init_mistral_nemo_peg(const common_chat_te
             // No repeat needed - [TOOL_CALLS] appears once with the entire array
             auto tool_calls = p.trigger_rule("tool-call-root", tool_call);
 
+            bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+            if (require_tools) {
+                return tool_calls;
+            }
             return p.tag(Tag::CONTENT, p.until("[TOOL_CALLS]")) << tool_calls;
         }
 

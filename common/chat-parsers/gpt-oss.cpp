@@ -135,6 +135,11 @@ common_chat_params common_chat_params_init_gpt_oss_peg(const common_chat_templat
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
             auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_choice, min_calls, max_calls));
 
+            bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
+            if (require_tools) {
+                return reasoning_block << tool_calls;
+            }
+
             auto pre_tool_content = p.repeat(commentary_content, 0, -1);
 
             return reasoning_block << pre_tool_content << tool_calls;
