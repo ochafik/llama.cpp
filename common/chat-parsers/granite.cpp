@@ -33,7 +33,6 @@ common_chat_params common_chat_params_init_granite_peg(const common_chat_templat
 
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
-    auto include_grammar = true;
 
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
@@ -65,10 +64,35 @@ common_chat_params common_chat_params_init_granite_peg(const common_chat_templat
                     data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<|tool_call|>"});
                 }
             }
-                
+
+            // Build schema for tool calls array with name/arguments validation
+            auto tool_call_schemas = json::array();
+            foreach_function(inputs.tools, [&](const auto & function, const auto & name, const json & parameters, const auto &) {
+                tool_call_schemas.push_back({
+                    {"type", "object"},
+                    {"properties", {
+                        {"name", {
+                            {"type", "string"},
+                            {"const", name},  // Must match this tool's name
+                        }},
+                        {"arguments", parameters},  // Full parameter schema validation
+                    }},
+                    {"required", json::array({"name", "arguments"})},
+                });
+            });
+
+            auto tool_calls_schema = json{
+                {"type", "array"},
+                {"items", tool_call_schemas.size() == 1 ? tool_call_schemas[0] : json{{"anyOf", tool_call_schemas}}},
+                {"minItems", 1},
+            };
+            if (!inputs.parallel_tool_calls) {
+                tool_calls_schema["maxItems"] = 1;
+            }
+
             auto tool_call = p.tag(Tag::TOOL,
                 p.atomic_tag(Tag::TOOL_OPEN, p.literal("<|tool_call|>"))
-                + p.tag(Tag::TOOL_ARGS, p.json())
+                + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-calls", tool_calls_schema))
             );
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
@@ -86,7 +110,6 @@ common_chat_params common_chat_params_init_granite_peg(const common_chat_templat
         auto response_block = p.literal("<response>") + p.tag(Tag::CONTENT, p.until("</response>")) + (p.literal("</response>") | p.end());
         auto content_until_eot = p.tag(Tag::CONTENT, p.until("<|end_of_text|>")) << consume_eot();
 
-        include_grammar = false;
         return reasoning << p.choice({response_block, content_until_eot, p.tag(Tag::CONTENT, p.rest())});
     });
 
