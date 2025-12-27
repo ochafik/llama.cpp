@@ -8,7 +8,6 @@ common_chat_params common_chat_params_init_xiaomi_mimo_peg(const common_chat_tem
     common_chat_params data;
 
     data.prompt = apply(tmpl, inputs);
-    data.format = COMMON_CHAT_FORMAT_XIAOMI_MIMO;
 
     data.preserved_tokens = {
         "<tool_call>",
@@ -55,6 +54,7 @@ common_chat_params common_chat_params_init_xiaomi_mimo_peg(const common_chat_tem
     });
 
     common_chat_build_peg_grammar(inputs, parser, data);
+    data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
 
     return data;
 }

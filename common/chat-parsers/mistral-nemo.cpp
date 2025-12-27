@@ -7,7 +7,6 @@ common_chat_params common_chat_params_init_mistral_nemo_peg(const common_chat_te
     common_chat_params data;
 
     data.prompt = apply(tmpl, inputs);
-    data.format = COMMON_CHAT_FORMAT_MISTRAL_NEMO;
 
     data.preserved_tokens = {
         "[TOOL_CALLS]",
@@ -57,6 +56,7 @@ common_chat_params common_chat_params_init_mistral_nemo_peg(const common_chat_te
     });
 
     common_chat_build_peg_grammar(inputs, parser, data);
+    data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
 
     return data;
 }

@@ -44,17 +44,26 @@ void common_chat_peg_mapper::from_ast(const common_peg_ast_arena & arena, const 
 void common_chat_peg_mapper::map(const common_peg_ast_node & node) {
     auto tag = static_cast<Tag>(node.tag_id);
     if (tag == Tag::REASONING) {
-        result.reasoning_content = std::string(trim_trailing_space(node.text));
+        // Concatenate to handle multiple REASONING tags (trim trailing space like functional mapper)
+        auto text = std::string(trim_trailing_space(node.text));
+        if (!text.empty()) {
+            result.reasoning_content += text;
+        }
     } else if (tag == Tag::CONTENT) {
-        result.content = std::string(trim_trailing_space(node.text));
+        // Concatenate to handle multiple CONTENT tags (no trimming, like functional mapper)
+        result.content += std::string(node.text);
+    } else if (tag != Tag::NONE) {
+        throw std::runtime_error("Unexpected tag for this mapper: " + std::to_string(static_cast<int>(tag)));
     }
 }
 
 void common_chat_peg_native_mapper::map(const common_peg_ast_node & node) {
-    common_chat_peg_mapper::map(node);
-
     auto tag = static_cast<Tag>(node.tag_id);
     switch (tag) {
+        case Tag::TOOL:
+        case Tag::TOOL_CLOSE:
+            // Do nothing.
+            break;
         case Tag::TOOL_OPEN:
             // Be lazy: don't create tool call here, wait for TOOL_NAME
             // This avoids creating spurious tool calls during backtracking
@@ -81,16 +90,22 @@ void common_chat_peg_native_mapper::map(const common_peg_ast_node & node) {
                 current_tool->arguments = std::string(trim_trailing_space(node.text));
             }
             break;
-        default:
+        case Tag::REASONING:
+        case Tag::CONTENT:
+        case Tag::NONE:
+            common_chat_peg_mapper::map(node);
             break;
+        default:
+            throw std::runtime_error("Unexpected tag for this mapper: " + std::to_string(static_cast<int>(tag)));
     }
 }
 
 void common_chat_peg_constructed_mapper::map(const common_peg_ast_node & node) {
-    common_chat_peg_mapper::map(node);
-
     auto tag = static_cast<Tag>(node.tag_id);
     switch (tag) {
+        case Tag::TOOL:
+            // Do nothing.
+            break;
         case Tag::TOOL_OPEN:
             current_tool = nullptr;
             arg_count = 0;
@@ -161,8 +176,13 @@ void common_chat_peg_constructed_mapper::map(const common_peg_ast_node & node) {
                 current_tool = nullptr;
             }
             break;
-        default:
+        case Tag::REASONING:
+        case Tag::CONTENT:
+        case Tag::NONE:
+            common_chat_peg_mapper::map(node);
             break;
+        default:
+            throw std::runtime_error("Unexpected tag for this mapper: " + std::to_string(static_cast<int>(tag)));
     }
 }
 

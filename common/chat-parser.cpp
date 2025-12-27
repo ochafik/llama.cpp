@@ -1,5 +1,6 @@
 #include "chat-parser.h"
 #include "chat-peg-parser.h"
+#include "chat.h"
 #include "common.h"
 #include "log.h"
 #include "peg-parser.h"
@@ -826,7 +827,6 @@ static void common_chat_parse_deepseek_r1(common_chat_msg_parser & builder) {
 }
 
 // TODO(ochafik): remove once --experimental-new-parsers graduates.
-// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static void common_chat_parse_deepseek_v3_1_content(common_chat_msg_parser & builder) {
     static const common_regex function_regex("(?:<｜tool▁call▁begin｜>)?([^\\n<]+)(?:<｜tool▁sep｜>)");
 
@@ -1511,15 +1511,10 @@ static void common_chat_parse(common_chat_msg_parser & builder) {
 }
 
 common_chat_msg common_chat_parse(const std::string & input, bool is_partial, const common_chat_syntax & syntax) {
-    // TODO(ochafik): remove once --experimental-new-parsers graduates.
     // Use PEG parser if format explicitly requires it (backward compatibility)
     if (syntax.format == COMMON_CHAT_FORMAT_PEG_SIMPLE ||
         syntax.format == COMMON_CHAT_FORMAT_PEG_NATIVE ||
         syntax.format == COMMON_CHAT_FORMAT_PEG_CONSTRUCTED) {
-        return common_chat_peg_parse(syntax.parser, input, is_partial, syntax);
-    }
-    // Use PEG parser if one is provided (implies experimental_new_parsers is enabled)
-    if (!syntax.parser.empty()) {
         return common_chat_peg_parse(syntax.parser, input, is_partial, syntax);
     }
 
@@ -1559,16 +1554,9 @@ common_chat_msg common_chat_peg_parse(const common_peg_arena & parser, const std
     common_chat_msg msg;
     msg.role = "assistant";
 
-    // TODO(ochafik): remove once --experimental-new-parsers graduates.
     // Backward-compatible mapper selection: use explicit PEG format types first
     switch (syntax.format) {
         case COMMON_CHAT_FORMAT_PEG_CONSTRUCTED:
-        case COMMON_CHAT_FORMAT_NEMOTRON_V3:
-        case COMMON_CHAT_FORMAT_SEED_OSS:
-        case COMMON_CHAT_FORMAT_MINIMAX_M2:
-        case COMMON_CHAT_FORMAT_QWEN3_CODER_XML:
-        case COMMON_CHAT_FORMAT_GLM_4_5:
-        case COMMON_CHAT_FORMAT_LLAMA_3_X_WITH_BUILTIN_TOOLS:
             // These use build_generic_tool_calls_peg_parser which produces TOOL_ARG_* tags
             common_chat_peg_constructed_mapper(msg).from_ast(ctx.ast, result);
             break;
@@ -1576,24 +1564,11 @@ common_chat_msg common_chat_peg_parse(const common_peg_arena & parser, const std
             // Generic mapper for simple PEG format
             common_chat_peg_mapper(msg).from_ast(ctx.ast, result);
             break;
-        // COMMAND_R7B uses build_json_tool_calls_peg_parser, falls through to native_mapper
-        case COMMON_CHAT_FORMAT_GENERIC:
-            // Generic now uses build_json_tool_calls_peg_parser which produces native TOOL tags
-            // Fall through to native mapper
         case COMMON_CHAT_FORMAT_PEG_NATIVE:
-        case COMMON_CHAT_FORMAT_MISTRAL_NEMO:
-        case COMMON_CHAT_FORMAT_MAGISTRAL:
-        case COMMON_CHAT_FORMAT_FIREFUNCTION_V2:
-        case COMMON_CHAT_FORMAT_NEMOTRON_V2:
-        case COMMON_CHAT_FORMAT_GRANITE:
-        case COMMON_CHAT_FORMAT_APERTUS:
-        case COMMON_CHAT_FORMAT_APRIEL_1_5:
-        // Default to native mapper for JSON-based formats (including KIMI_K2, XIAOMI_MIMO)
-        default:
-        // These formats now use build_json_tool_calls_peg_parser which produces individual TOOL tags
             common_chat_peg_native_mapper(msg).from_ast(ctx.ast, result);
-            // apply_chat_peg_mapper(common_chat_peg_native_mapper_func(), ctx.ast, result, msg);
             break;
+        default:
+            throw std::runtime_error(std::string("Unsupported PEG format: ") + common_chat_format_name(syntax.format));
     }
     if (!is_partial) {
         LOG_DBG("Parsed message: %s\n", common_chat_msgs_to_json_oaicompat<json>({msg}).at(0).dump().c_str());

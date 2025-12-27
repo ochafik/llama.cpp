@@ -14,7 +14,6 @@ common_chat_params common_chat_params_init_granite_peg(const common_chat_templat
     };
 
     data.prompt = apply(tmpl, inputs, /* messages_override= */ std::nullopt, /* tools_override= */ std::nullopt, additional_context);
-    data.format = COMMON_CHAT_FORMAT_GRANITE;
 
     if (string_ends_with(data.prompt, "<think>\n") || string_ends_with(data.prompt, "<think>")) {
         if (!inputs.enable_thinking) {
@@ -87,6 +86,7 @@ common_chat_params common_chat_params_init_granite_peg(const common_chat_templat
     });
 
     common_chat_build_peg_grammar(inputs, parser, data);
+    data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
     
     return data;
 }

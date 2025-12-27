@@ -3,6 +3,7 @@
 // With optional <|inner_prefix|>...<|inner_suffix|> reasoning blocks
 
 #include "chat-parsers-internal.h"
+#include "chat.h"
 #include <optional>
 
 common_chat_params common_chat_params_init_apertus_peg(const common_chat_template & tmpl, const struct templates_params & inputs) {
@@ -48,7 +49,6 @@ common_chat_params common_chat_params_init_apertus_peg(const common_chat_templat
         }
     }
     data.prompt = apply(tmpl, inputs, /* messages_override= */ adjusted_messages);
-    data.format = COMMON_CHAT_FORMAT_APERTUS;
 
     // Handle thinking tags appropriately based on inputs.enable_thinking
     if (string_ends_with(data.prompt, "<|inner_prefix|>")) {
@@ -133,6 +133,7 @@ common_chat_params common_chat_params_init_apertus_peg(const common_chat_templat
     });
 
     common_chat_build_peg_grammar(inputs, parser, data);
+    data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
 
     return data;
 }

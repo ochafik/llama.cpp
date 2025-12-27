@@ -8,7 +8,6 @@ common_chat_params common_chat_params_init_apriel_1_5_peg(const common_chat_temp
     common_chat_params data;
 
     data.prompt = apply(tmpl, inputs);
-    data.format = COMMON_CHAT_FORMAT_APRIEL_1_5;
 
     // Handle thinking tags appropriately based on inputs.enable_thinking
     if (string_ends_with(data.prompt, "<thinking>\n") || string_ends_with(data.prompt, "<thinking>")) {
@@ -103,6 +102,7 @@ common_chat_params common_chat_params_init_apriel_1_5_peg(const common_chat_temp
     });
 
     common_chat_build_peg_grammar(inputs, parser, data);
+    data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
 
     return data;
 }

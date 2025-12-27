@@ -28,7 +28,6 @@ common_chat_params common_chat_params_init_deepseek_v3_1_peg(const common_chat_t
     bool has_tools = inputs.tools.is_array() && !inputs.tools.empty() && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE;
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
 
-    data.format = COMMON_CHAT_FORMAT_DEEPSEEK_V3_1;
     data.grammar_lazy = has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED && inputs.json_schema.is_null();
 
     data.preserved_tokens = {
@@ -110,6 +109,7 @@ common_chat_params common_chat_params_init_deepseek_v3_1_peg(const common_chat_t
     });
 
     common_chat_build_peg_grammar(inputs, parser, data);
+    data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
 
     return data;
 }

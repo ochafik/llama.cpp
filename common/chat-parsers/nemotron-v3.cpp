@@ -9,7 +9,6 @@ common_chat_params common_chat_params_init_nemotron_v3_peg(const common_chat_tem
     common_chat_params data;
 
     data.prompt = apply(tmpl, inputs);
-    data.format = COMMON_CHAT_FORMAT_NEMOTRON_V3;
 
     // Handle thinking tags appropriately based on inputs.enable_thinking
     if (string_ends_with(data.prompt, "<think>\n")) {
@@ -112,6 +111,7 @@ common_chat_params common_chat_params_init_nemotron_v3_peg(const common_chat_tem
     });
 
     common_chat_build_peg_grammar(inputs, parser, data);
+    data.format = COMMON_CHAT_FORMAT_PEG_CONSTRUCTED;
 
     return data;
 }

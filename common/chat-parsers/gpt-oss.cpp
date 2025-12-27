@@ -40,7 +40,6 @@ common_chat_params common_chat_params_init_gpt_oss_peg(const common_chat_templat
     }
 
     data.prompt = prompt;
-    data.format = COMMON_CHAT_FORMAT_GPT_OSS;
 
     // These special tokens are required to parse properly, so we include them
     // even if parse_tool_calls is false.
@@ -177,6 +176,7 @@ common_chat_params common_chat_params_init_gpt_oss_peg(const common_chat_templat
     });
 
     common_chat_build_peg_grammar(inputs, parser, data);
+    data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
 
     return data;
 }
