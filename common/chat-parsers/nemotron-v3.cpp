@@ -81,15 +81,15 @@ common_chat_params common_chat_params_init_nemotron_v3_peg(const common_chat_tem
             auto tool_calls = build_generic_tool_calls_peg_parser(
                 p,
                 inputs,
-                "<tool_call>",
-                "</tool_call><tool_call>",
-                "</tool_call>",
-                "<function=",
-                ">",
-                "</function>",
-                "<parameter=",
-                ">",
-                "</parameter>",
+                p.eps(),
+                p.eps(),
+                p.eps(),
+                "<tool_call>" + p.space() + "<function=",
+                ">" + p.space(),
+                "</function>" + p.space() + "</tool_call>" + p.space(),
+                p.literal("<parameter="),
+                ">" + p.space(),
+                "\n</parameter>\n",
                 /* allow_raw_string_param_value= */ true
             );
 

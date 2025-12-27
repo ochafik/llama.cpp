@@ -71,14 +71,14 @@ common_chat_params common_chat_params_init_minimax_m2_peg(const common_chat_temp
             auto tool_calls = build_generic_tool_calls_peg_parser(
                 p,
                 inputs,
-                "<minimax:tool_call>",
-                "\n",  // Multiple <invoke> blocks are separated by newlines within single wrapper
-                "</minimax:tool_call>",
-                "<invoke name=\"",
-                "\">",
-                "</invoke>",
-                "<parameter name=\"",
-                "\">",
+                p.space() + "<minimax:tool_call>",
+                p.eps(),
+                p.literal("</minimax:tool_call>"),
+                p.literal("<invoke name=\""),
+                p.literal("\">"),
+                "</invoke>" + p.space(),
+                p.literal("<parameter name=\""),
+                p.literal("\">"),
                 "</parameter>",
                 /* allow_raw_string_param_value= */ true
             );

@@ -114,15 +114,15 @@ common_chat_params common_chat_params_init_glm_4_5_peg(const common_chat_templat
             auto tool_calls = build_generic_tool_calls_peg_parser(
                 p,
                 inputs,
-                std::nullopt,
-                std::nullopt,
-                std::nullopt,
-                "<tool_call>",
-                "\n",
-                "</tool_call>",
-                "<arg_key>",
-                "</arg_key>\n<arg_value>",
-                "</arg_value>",
+                p.eps(),
+                p.eps(),
+                p.eps(),
+                p.space() + "<tool_call>",
+                p.space(),
+                p.space() + "</tool_call>",
+                p.space() + "<arg_key>",
+                "</arg_key>" + p.space() + "<arg_value>",
+                "</arg_value>\n",
                 /* allow_raw_string_param_value= */ true
             );
             
