@@ -4417,9 +4417,16 @@ static const std::vector<template_capabilities> & get_template_capabilities() {
             SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes,
             ToolCallsHaveIds::Yes},
         {"DeepSeek R1", "models/templates/deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja",
+            // Note: template only outputs tool_calls when content is none, can't emit both
             COMMON_CHAT_FORMAT_DEEPSEEK_R1, ThinkingSupport::Yes,
             "<think>", "</think>", Skip::No, ReasoningRequiresTools::No,
-            ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::Yes},
+            ToolsEmitContentWithCalls::No, InjectReasoningAfterFormat::Yes},
+        {"DeepSeek R1 (fixed)", "models/templates/llama-cpp-deepseek-r1.jinja",
+            // Our fixed template - also can't emit both content and calls (same design as original)
+            COMMON_CHAT_FORMAT_DEEPSEEK_R1, ThinkingSupport::Yes,
+            "<think>", "</think>", Skip::No, ReasoningRequiresTools::No,
+            ToolsEmitContentWithCalls::No, InjectReasoningAfterFormat::Yes,
+            SupportsDisableThinking::No, SupportsReasoningOnly::No},
         {"DeepSeek V3.1", "models/templates/deepseek-ai-DeepSeek-V3.1.jinja",
             COMMON_CHAT_FORMAT_DEEPSEEK_V3_1, ThinkingSupport::Yes,
             "<think>", "</think>", Skip::No, ReasoningRequiresTools::No,
