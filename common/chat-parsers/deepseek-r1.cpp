@@ -43,8 +43,6 @@ common_chat_params common_chat_params_init_deepseek_r1_peg(const common_chat_tem
     bool has_tools = inputs.tools.is_array() && !inputs.tools.empty();
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
 
-    data.format = COMMON_CHAT_FORMAT_DEEPSEEK_R1;
-
     data.preserved_tokens = {
         "<think>",
         "</think>",
@@ -127,6 +125,7 @@ common_chat_params common_chat_params_init_deepseek_r1_peg(const common_chat_tem
     });
 
     common_chat_build_peg_grammar(inputs, parser, data);
+    data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
 
     return data;
 }

@@ -8,7 +8,6 @@ common_chat_params common_chat_params_init_qwen3_coder_xml_peg(const common_chat
     common_chat_params data;
 
     data.prompt = apply(tmpl, inputs);
-    data.format = COMMON_CHAT_FORMAT_QWEN3_CODER_XML;
 
     data.preserved_tokens = {
         "<tool_call>",
@@ -87,6 +86,7 @@ common_chat_params common_chat_params_init_qwen3_coder_xml_peg(const common_chat
     });
 
     common_chat_build_peg_grammar(inputs, parser, data);
+    data.format = COMMON_CHAT_FORMAT_PEG_CONSTRUCTED;
 
     return data;
 }

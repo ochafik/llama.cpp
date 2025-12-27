@@ -171,17 +171,6 @@ inline common_peg_arena build_chat_peg_constructed_parser(const std::function<co
 typedef std::function<void(const common_peg_ast_node & node)> common_chat_peg_map_func;
 typedef std::function<common_chat_peg_map_func(common_chat_msg & result)> common_chat_peg_mapper_func;
 
-// Helper to apply a mapper to parse results
-inline void apply_chat_peg_mapper(
-    const common_chat_peg_mapper_func & mapper,
-    const common_peg_ast_arena & arena,
-    const common_peg_parse_result & parse_result,
-    common_chat_msg & msg
-) {
-    auto map_func = mapper(msg);
-    arena.visit(parse_result, map_func);
-}
-
 // Alias for the tag enum
 using Tag = common_chat_peg_tag;
 

@@ -42,7 +42,6 @@ common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1_peg(const 
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
 
     data.prompt = apply(tmpl, inputs);
-    data.format = COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1;
 
     // Detect python tool (for <|python_tag|> support) and validate schema
     if (has_tools) {
@@ -122,6 +121,7 @@ common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1_peg(const 
     });
 
     common_chat_build_peg_grammar(inputs, parser, data);
+    data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
 
     return data;
 }

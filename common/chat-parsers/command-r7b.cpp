@@ -33,7 +33,6 @@ common_chat_params common_chat_params_init_command_r7b_peg(const common_chat_tem
 
     bool has_tools = inputs.tools.is_array() && !inputs.tools.empty();
 
-    data.format = COMMON_CHAT_FORMAT_COMMAND_R7B;
     data.preserved_tokens = {
         "<|START_ACTION|>",
         "<|END_ACTION|>",
@@ -131,6 +130,7 @@ common_chat_params common_chat_params_init_command_r7b_peg(const common_chat_tem
     });
 
     common_chat_build_peg_grammar(inputs, parser, data);
+    data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
 
     return data;
 }

@@ -50,8 +50,6 @@ common_chat_params common_chat_params_init_firefunction_v2_peg(const common_chat
         return p.tag(Tag::CONTENT, p.until_one_of(stop_tokens));
     });
 
-    data.format = COMMON_CHAT_FORMAT_FIREFUNCTION_V2;
-
     // Add stop tokens
     data.additional_stops = {
         "<|eot_id|>",
@@ -59,6 +57,7 @@ common_chat_params common_chat_params_init_firefunction_v2_peg(const common_chat
     };
 
     common_chat_build_peg_grammar(inputs, parser, data);
+    data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
 
     return data;
 }

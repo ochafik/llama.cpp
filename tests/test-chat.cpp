@@ -4407,7 +4407,8 @@ enum class ToolCallsHaveIds { No, Yes };
 struct template_capabilities {
     const char * name;
     const char * jinja_path;
-    common_chat_format format;
+    common_chat_format legacy_format;
+    common_chat_format experimental_format;
     ThinkingSupport supports_thinking = ThinkingSupport::No;
     const char * think_open_tag = nullptr;   // Opening tag for thinking (nullptr = auto-detect)
     const char * think_close_tag = nullptr;  // Closing tag for thinking (nullptr = no thinking)
@@ -4427,126 +4428,126 @@ static const std::vector<template_capabilities> & get_template_capabilities() {
     static const std::vector<template_capabilities> templates = {
         // Templates with thinking support
         {"Command R7B", "models/templates/CohereForAI-c4ai-command-r7b-12-2024-tool_use.jinja",
-            COMMON_CHAT_FORMAT_COMMAND_R7B, ThinkingSupport::Yes,
+            COMMON_CHAT_FORMAT_COMMAND_R7B, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::Yes,
             "<|START_THINKING|>", "<|END_THINKING|>", Skip::No, ReasoningRequiresTools::Yes,
             ToolsEmitContentWithCalls::No, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes,
             ToolCallsHaveIds::Yes},
         {"DeepSeek R1", "models/templates/deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja",
             // Note: template only outputs tool_calls when content is none, can't emit both
-            COMMON_CHAT_FORMAT_DEEPSEEK_R1, ThinkingSupport::Yes,
+            COMMON_CHAT_FORMAT_DEEPSEEK_R1, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::Yes,
             "<think>", "</think>", Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::No, InjectReasoningAfterFormat::Yes},
         {"DeepSeek R1 (fixed)", "models/templates/llama-cpp-deepseek-r1.jinja",
             // Our fixed template - also can't emit both content and calls (same design as original)
-            COMMON_CHAT_FORMAT_DEEPSEEK_R1, ThinkingSupport::Yes,
+            COMMON_CHAT_FORMAT_DEEPSEEK_R1, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::Yes,
             "<think>", "</think>", Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::No, InjectReasoningAfterFormat::Yes,
             SupportsDisableThinking::No, SupportsReasoningOnly::No},
         {"DeepSeek V3.1", "models/templates/deepseek-ai-DeepSeek-V3.1.jinja",
-            COMMON_CHAT_FORMAT_DEEPSEEK_V3_1, ThinkingSupport::Yes,
+            COMMON_CHAT_FORMAT_DEEPSEEK_V3_1, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::Yes,
             "<think>", "</think>", Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::Yes,
             SupportsDisableThinking::No, SupportsReasoningOnly::No},
         {"GLM 4.6", "models/templates/GLM-4.6.jinja",
-            COMMON_CHAT_FORMAT_GLM_4_5, ThinkingSupport::Yes,
+            COMMON_CHAT_FORMAT_GLM_4_5, COMMON_CHAT_FORMAT_PEG_CONSTRUCTED, ThinkingSupport::Yes,
             "<think>", "</think>", Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes},
         {"Granite", "models/templates/llama-cpp-ibm-granite-granite-3.3-2B-Instruct.jinja",
-            COMMON_CHAT_FORMAT_GRANITE, ThinkingSupport::Yes,
+            COMMON_CHAT_FORMAT_GRANITE, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::Yes,
             "<think>", "</think>", Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::Yes,
             SupportsDisableThinking::Yes, SupportsReasoningOnly::No},
         {"Hermes 2 Pro", "models/templates/NousResearch-Hermes-2-Pro-Llama-3-8B-tool_use.jinja",
-            COMMON_CHAT_FORMAT_HERMES_2_PRO, ThinkingSupport::No,
+            COMMON_CHAT_FORMAT_HERMES_2_PRO, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::No,
             "<think>", "</think>", Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::No, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::No, SupportsReasoningOnly::No},
         {"Kimi K2", "models/templates/Kimi-K2-Instruct.jinja",
-            COMMON_CHAT_FORMAT_KIMI_K2, ThinkingSupport::No,
+            COMMON_CHAT_FORMAT_KIMI_K2, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::No,
             nullptr, nullptr, Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes,
             ToolCallsHaveIds::Yes},
         {"MiniMax M2", "models/templates/MiniMax-M2.jinja",
-            COMMON_CHAT_FORMAT_MINIMAX_M2, ThinkingSupport::Yes,
+            COMMON_CHAT_FORMAT_MINIMAX_M2, COMMON_CHAT_FORMAT_PEG_CONSTRUCTED, ThinkingSupport::Yes,
             "<think>", "</think>", Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::No, SupportsReasoningOnly::No},
         {"Nemotron V2", "models/templates/NVIDIA-Nemotron-Nano-v2.jinja",
-            COMMON_CHAT_FORMAT_NEMOTRON_V2, ThinkingSupport::No,
+            COMMON_CHAT_FORMAT_NEMOTRON_V2, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::No,
             nullptr, nullptr, Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes},
         {"Nemotron V3", "models/templates/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16.jinja",
-            COMMON_CHAT_FORMAT_NEMOTRON_V3, ThinkingSupport::Yes,
+            COMMON_CHAT_FORMAT_NEMOTRON_V3, COMMON_CHAT_FORMAT_PEG_CONSTRUCTED, ThinkingSupport::Yes,
             "<think>", "</think>", Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::No, SupportsReasoningOnly::No},
         {"Nemotron V3 (Unsloth)", "models/templates/unsloth-Nemotron-3-Nano.jinja",
-            COMMON_CHAT_FORMAT_NEMOTRON_V3, ThinkingSupport::Yes,
+            COMMON_CHAT_FORMAT_NEMOTRON_V3, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::Yes,
             "<think>", "</think>", Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::No, SupportsReasoningOnly::No},
         {"Seed OSS", "models/templates/ByteDance-Seed-OSS.jinja",
-            COMMON_CHAT_FORMAT_SEED_OSS, ThinkingSupport::Yes,
+            COMMON_CHAT_FORMAT_SEED_OSS, COMMON_CHAT_FORMAT_PEG_CONSTRUCTED, ThinkingSupport::Yes,
             "<seed:think>", "</seed:think>", Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes},
 
         // Templates without thinking support
         {"Generic", "chatml",
-            COMMON_CHAT_FORMAT_GENERIC, ThinkingSupport::No,
+            COMMON_CHAT_FORMAT_GENERIC, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::No,
             nullptr, nullptr, Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::No},  // Generic format: EITHER tool_calls OR response, not both
         {"Firefunction V2", "models/templates/fireworks-ai-llama-3-firefunction-v2.jinja",
             // Note: template uses `functions` not `tools`, so minja's supports_tools detection returns false
-            COMMON_CHAT_FORMAT_FIREFUNCTION_V2, ThinkingSupport::No},
+            COMMON_CHAT_FORMAT_FIREFUNCTION_V2, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::No},
         {"Functionary V3.1", "models/templates/meetkai-functionary-medium-v3.1.jinja",
-            COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1, ThinkingSupport::No,
+            COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::No,
             nullptr, nullptr, Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes,
             ToolCallsHaveIds::No, "test_function"},
         {"Functionary V3.2", "models/templates/meetkai-functionary-medium-v3.2.jinja",
-            COMMON_CHAT_FORMAT_FUNCTIONARY_V3_2, ThinkingSupport::No,
+            COMMON_CHAT_FORMAT_FUNCTIONARY_V3_2, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::No,
             nullptr, nullptr, Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes},
         {"Llama 3.1", "models/templates/meta-llama-Llama-3.1-8B-Instruct.jinja",
-            COMMON_CHAT_FORMAT_LLAMA_3_X, ThinkingSupport::No,
+            COMMON_CHAT_FORMAT_LLAMA_3_X, COMMON_CHAT_FORMAT_PEG_CONSTRUCTED, ThinkingSupport::No,
             nullptr, nullptr, Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::No, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::No, SupportsReasoningOnly::No,
             ToolCallsHaveIds::No, "special_function"},
         {"Mistral Nemo", "models/templates/mistralai-Mistral-Nemo-Instruct-2407.jinja",
-            COMMON_CHAT_FORMAT_MISTRAL_NEMO, ThinkingSupport::No,
+            COMMON_CHAT_FORMAT_MISTRAL_NEMO, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::No,
             nullptr, nullptr, Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::No, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::No, SupportsReasoningOnly::No,
             ToolCallsHaveIds::Yes},
         {"Qwen3 Coder", "models/templates/Qwen3-Coder.jinja",
-            COMMON_CHAT_FORMAT_QWEN3_CODER_XML, ThinkingSupport::No,
+            COMMON_CHAT_FORMAT_QWEN3_CODER_XML, COMMON_CHAT_FORMAT_PEG_CONSTRUCTED, ThinkingSupport::No,
             nullptr, nullptr, Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::No, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::No, SupportsReasoningOnly::No},
         {"Apertus", "models/templates/Apertus-8B-Instruct.jinja",
-            COMMON_CHAT_FORMAT_APERTUS, ThinkingSupport::Yes,
+            COMMON_CHAT_FORMAT_APERTUS, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::Yes,
             "<|inner_prefix|>", "<|inner_suffix|>", Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes},
         {"Apriel 1.5", "models/templates/unsloth-Apriel-1.5.jinja",
-            COMMON_CHAT_FORMAT_APRIEL_1_5, ThinkingSupport::Yes,
+            COMMON_CHAT_FORMAT_APRIEL_1_5, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::Yes,
             "<thinking>", "</thinking>", Skip::Yes},
         {"GPT OSS", "models/templates/openai-gpt-oss-120b.jinja",
-            COMMON_CHAT_FORMAT_GPT_OSS, ThinkingSupport::Yes,
+            COMMON_CHAT_FORMAT_GPT_OSS, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::Yes,
             "<|inner_thoughts_begin|>", "<|inner_thoughts_end|>", Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::No, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::Yes, SupportsReasoningOnly::No},  // Template always outputs final content
         // TODO(ochafik): Fix Xiaomi MiMo tool call parsing - currently failing tool-auto-single and parallel-tool-calls
         {"Xiaomi MiMo", "models/templates/MiMo-VL.jinja",
-            COMMON_CHAT_FORMAT_XIAOMI_MIMO, ThinkingSupport::No,
+            COMMON_CHAT_FORMAT_XIAOMI_MIMO, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::No,
             nullptr, nullptr, Skip::Yes, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes},
@@ -4613,7 +4614,7 @@ static bool verify_template_capabilities(const std::vector<template_capabilities
 // (not CONTENT_ONLY) and that grammar + parser are properly generated.
 // This catches Pattern 1 failures: templates detected as Content-only when they should have
 // a proper tool-calling format.
-static bool test_format_detection_with_tools() {
+static bool test_format_detection_with_tools(chat_parser_impl impl) {
     printf("[%s]\n", __func__);
 
     const char * template_filter = std::getenv("NEEDLE_TEMPLATE_FILTER");
@@ -4660,13 +4661,14 @@ static bool test_format_detection_with_tools() {
         bool parser_ok = true;
 
         // Check 1: Format should match expected (not CONTENT_ONLY)
-        if (params.format != info.format) {
+        auto expected_format = impl == chat_parser_impl::LEGACY ? info.legacy_format : info.experimental_format;
+        if (params.format != expected_format) {
             if (params.format == COMMON_CHAT_FORMAT_CONTENT_ONLY) {
                 printf("  " ANSI_COLOR_RED "FAIL" ANSI_COLOR_RESET " %s: format is CONTENT_ONLY, expected %d\n",
-                       info.name, static_cast<int>(info.format));
+                       info.name, static_cast<int>(expected_format));
             } else if (g_verbose >= 1) {
                 printf("  " ANSI_COLOR_YELLOW "NOTE" ANSI_COLOR_RESET " %s: format=%d, expected=%d\n",
-                       info.name, static_cast<int>(params.format), static_cast<int>(info.format));
+                       info.name, static_cast<int>(params.format), static_cast<int>(expected_format));
             }
             // Only fail on CONTENT_ONLY, other format differences may be intentional
             format_ok = (params.format != COMMON_CHAT_FORMAT_CONTENT_ONLY);
@@ -4811,34 +4813,7 @@ static std::vector<needle_scenario> build_needle_scenarios(const template_capabi
         scenarios.push_back(tool_with_reasoning);
     }
 
-    // json_schema scenarios - test structured output mode
-    // Only add for parsers with explicit json_schema support in their PEG parser
-    bool has_json_schema_support = false;
-    switch (info.format) {
-        case COMMON_CHAT_FORMAT_COMMAND_R7B:
-        case COMMON_CHAT_FORMAT_DEEPSEEK_R1:
-        case COMMON_CHAT_FORMAT_HERMES_2_PRO:
-        case COMMON_CHAT_FORMAT_GLM_4_5:
-        case COMMON_CHAT_FORMAT_GRANITE:
-        case COMMON_CHAT_FORMAT_SEED_OSS:
-        case COMMON_CHAT_FORMAT_MINIMAX_M2:
-        case COMMON_CHAT_FORMAT_NEMOTRON_V2:
-        case COMMON_CHAT_FORMAT_NEMOTRON_V3:
-        case COMMON_CHAT_FORMAT_APERTUS:
-        case COMMON_CHAT_FORMAT_KIMI_K2:
-        case COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1:
-        case COMMON_CHAT_FORMAT_FUNCTIONARY_V3_2:
-        case COMMON_CHAT_FORMAT_QWEN3_CODER_XML:
-        case COMMON_CHAT_FORMAT_XIAOMI_MIMO:
-        case COMMON_CHAT_FORMAT_GPT_OSS:
-        case COMMON_CHAT_FORMAT_DEEPSEEK_V3_1:
-            has_json_schema_support = true;
-            break;
-        default:
-            break;
-    }
-
-    if (has_json_schema_support) {
+    {
         // Basic json_schema test without reasoning
         needle_scenario json_schema_basic;
         json_schema_basic.name = "json-schema-basic";
@@ -4848,19 +4823,18 @@ static std::vector<needle_scenario> build_needle_scenarios(const template_capabi
         json_schema_basic.force_disable_thinking = true;
         json_schema_basic.skip_if_thinking_forced = true;
         scenarios.push_back(json_schema_basic);
-
-        // json_schema with reasoning (if supported)
-        if (info.supports_thinking == ThinkingSupport::Yes && info.reasoning_requires_tools == ReasoningRequiresTools::No) {
-            needle_scenario json_schema_with_reasoning;
-            json_schema_with_reasoning.name = "json-schema-with-reasoning";
-            json_schema_with_reasoning.with_json_schema = true;
-            json_schema_with_reasoning.with_content = false;
-            json_schema_with_reasoning.with_reasoning = true;
-            json_schema_with_reasoning.enable_thinking = true;
-            json_schema_with_reasoning.require_json_schema_support = true;
-            json_schema_with_reasoning.require_thinking_support = true;
-            scenarios.push_back(json_schema_with_reasoning);
-        }
+    }
+    // json_schema with reasoning (if supported)
+    if (info.supports_thinking == ThinkingSupport::Yes && info.reasoning_requires_tools == ReasoningRequiresTools::No) {
+        needle_scenario json_schema_with_reasoning;
+        json_schema_with_reasoning.name = "json-schema-with-reasoning";
+        json_schema_with_reasoning.with_json_schema = true;
+        json_schema_with_reasoning.with_content = false;
+        json_schema_with_reasoning.with_reasoning = true;
+        json_schema_with_reasoning.enable_thinking = true;
+        json_schema_with_reasoning.require_json_schema_support = true;
+        json_schema_with_reasoning.require_thinking_support = true;
+        scenarios.push_back(json_schema_with_reasoning);
     }
 
     return scenarios;
@@ -5128,7 +5102,7 @@ static bool test_systematic_needle_streaming() {
                     scenario_copy.tool_name = tmpl_info.needle_tool_name;
                 }
 
-                auto ctx = make_needle_context(scenario_copy, tmpl_info.format);
+                auto ctx = make_needle_context(scenario_copy, tmpl_info.experimental_format);
                 std::vector<common_chat_tool> scenario_tools;
                 if (scenario_copy.provide_tools) {
                     // Create dynamic tools with parameter names matching the needle markers
@@ -5480,7 +5454,10 @@ int main(int argc, char ** argv) {
             const std::string chat_test = std::getenv("CHAT_TEST") ? std::getenv("CHAT_TEST") : "";
 
             if (chat_test == "" || chat_test == "format_detection_with_tools") {
-                if (!test_format_detection_with_tools()) {
+                if (!test_format_detection_with_tools(chat_parser_impl::LEGACY)) {
+                    return 1;
+                }
+                if (!test_format_detection_with_tools(chat_parser_impl::EXPERIMENTAL)) {
                     return 1;
                 }
             }

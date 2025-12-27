@@ -79,7 +79,6 @@ common_chat_params common_chat_params_init_lfm2_peg(const common_chat_template &
     bool force_json_schema = are_tools_provided && replace_json_schema_marker(tweaked_messages);
 
     if (force_json_schema) {
-        data.format = COMMON_CHAT_FORMAT_LFM2_WITH_JSON_TOOLS;
         data.preserved_tokens = {"<|tool_call_start|>", "<|tool_call_end|>"};
 
         // Build PEG parser with full schema validation
@@ -114,6 +113,7 @@ common_chat_params common_chat_params_init_lfm2_peg(const common_chat_template &
         });
 
         common_chat_build_peg_grammar(inputs, parser, data);
+        data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
 
         // Trigger lazy grammar activation on <|tool_call_start|>[ pattern
         data.grammar_triggers = {{COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL, "\\s*<\\|tool_call_start\\|>\\s*\\["}};

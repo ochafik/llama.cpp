@@ -8,7 +8,6 @@ common_chat_params common_chat_params_init_minimax_m2_peg(const common_chat_temp
     common_chat_params data;
 
     data.prompt = apply(tmpl, inputs);
-    data.format = COMMON_CHAT_FORMAT_MINIMAX_M2;
 
     // Handle thinking tags based on prompt ending
     if (string_ends_with(data.prompt, "<think>\n")) {
@@ -125,6 +124,7 @@ common_chat_params common_chat_params_init_minimax_m2_peg(const common_chat_temp
     });
 
     common_chat_build_peg_grammar(inputs, parser, data);
+    data.format = COMMON_CHAT_FORMAT_PEG_CONSTRUCTED;
 
     return data;
 }

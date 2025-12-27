@@ -8,7 +8,6 @@
 common_chat_params common_chat_params_init_functionary_v3_2_peg(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
     data.prompt = apply(tmpl, inputs);
-    data.format = COMMON_CHAT_FORMAT_FUNCTIONARY_V3_2;
     data.preserved_tokens = {
         "<|end_header_id|>",
     };
@@ -105,6 +104,7 @@ common_chat_params common_chat_params_init_functionary_v3_2_peg(const common_cha
     });
 
     common_chat_build_peg_grammar(inputs, parser, data);
+    data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
 
     return data;
 }

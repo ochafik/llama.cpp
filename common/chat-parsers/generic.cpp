@@ -69,10 +69,12 @@ common_chat_params common_chat_params_init_generic_peg(const common_chat_templat
     } else {
         data.prompt = apply(tmpl, inputs);
     }
-    data.format = COMMON_CHAT_FORMAT_GENERIC;
+
     // ChatML-style end token (used by many templates when Generic fallback is triggered)
     data.additional_stops.push_back("<|im_end|>");
+
     common_chat_build_peg_grammar(inputs, parser, data);
+    data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
 
     return data;
 }

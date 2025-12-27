@@ -8,7 +8,6 @@ common_chat_params common_chat_params_init_seed_oss_peg(const common_chat_templa
     common_chat_params data;
 
     data.prompt = apply(tmpl, inputs);
-    data.format = COMMON_CHAT_FORMAT_SEED_OSS;
 
     // Handle thinking tags appropriately based on inputs.enable_thinking
     if (string_ends_with(data.prompt, "<seed:think>")) {
@@ -105,6 +104,7 @@ common_chat_params common_chat_params_init_seed_oss_peg(const common_chat_templa
     });
 
     common_chat_build_peg_grammar(inputs, parser, data);
+    data.format = COMMON_CHAT_FORMAT_PEG_CONSTRUCTED;
 
     return data;
 }

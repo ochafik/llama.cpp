@@ -51,7 +51,6 @@ common_chat_params common_chat_params_init_ministral_3_peg(const common_chat_tem
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
 
     data.prompt = apply(tmpl, inputs, /* messages_override = */ adjusted_messages);
-    data.format = COMMON_CHAT_FORMAT_MINISTRAL_3;
     data.preserved_tokens = {
         "[THINK]",
         "[/THINK]",
@@ -105,6 +104,7 @@ common_chat_params common_chat_params_init_ministral_3_peg(const common_chat_tem
     });
 
     common_chat_build_peg_grammar(inputs, parser, data);
+    data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
 
     return data;
 }
