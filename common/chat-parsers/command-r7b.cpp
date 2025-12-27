@@ -85,6 +85,8 @@ common_chat_params common_chat_params_init_command_r7b_peg(const common_chat_tem
             return reasoning << json_response << p.optional(p.rest());
         }
 
+        const auto eot = p.optional(p.literal("<|END_OF_TURN_TOKEN|>"));
+
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
             if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 data.grammar_triggers.push_back({
@@ -117,14 +119,14 @@ common_chat_params common_chat_params_init_command_r7b_peg(const common_chat_tem
             auto tool_calls = build_json_tool_calls_peg_parser(p, inputs, format);
 
             if (require_tools) {
-                return reasoning << tool_calls << p.optional(p.rest());
+                return reasoning << tool_calls << eot;// p.optional(p.rest());
             }
 
-            return reasoning << response_block << tool_calls << p.optional(p.rest());
+            return reasoning << response_block << tool_calls << eot;
         }
 
         // Content only parser
-        return reasoning << response_block << p.optional(p.rest());
+        return reasoning << response_block << eot;
     });
 
     common_chat_build_peg_grammar(inputs, parser, data);
