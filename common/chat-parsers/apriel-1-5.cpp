@@ -74,9 +74,10 @@ common_chat_params common_chat_params_init_apriel_1_5_peg(const common_chat_temp
         };
 
         // Response format parser
+        // Template outputs: content (JSON), then optional <thinking> reasoning, then end markers
         if (inputs.json_schema.is_object() && !inputs.json_schema.empty()) {
-            return (has_reasoning ? p.optional(reasoning_block) : p.eps())
-                << p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema))
+            return p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema))
+                << (has_reasoning ? p.optional(reasoning_block) : p.eps())
                 << consume_end();
         }
 

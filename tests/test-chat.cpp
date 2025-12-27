@@ -5113,7 +5113,7 @@ static bool test_systematic_needle_streaming() {
                     scenario_copy.tool_name = tmpl_info.needle_tool_name;
                 }
 
-                auto ctx = make_needle_context(scenario_copy, tmpl_info.experimental_format);
+                auto ctx = make_needle_context(scenario_copy, tmpl_info.experimental_format, tmpl_info.legacy_format);
                 std::vector<common_chat_tool> scenario_tools;
                 if (scenario_copy.provide_tools) {
                     // Create dynamic tools with parameter names matching the needle markers
