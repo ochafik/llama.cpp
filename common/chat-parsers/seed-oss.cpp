@@ -74,7 +74,7 @@ common_chat_params common_chat_params_init_seed_oss_peg(const common_chat_templa
                 p.eps(),
                 p.eps(),
                 p.eps(),
-                p.literal("\n<seed:tool_call>\n<function="),
+                p.space() + "<seed:tool_call>\n<function=",
                 p.literal(">\n"),
                 "</function>" + p.space() + "</seed:tool_call>",
                 p.literal("<parameter="),
