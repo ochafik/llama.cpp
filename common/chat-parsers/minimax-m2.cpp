@@ -68,20 +68,18 @@ common_chat_params common_chat_params_init_minimax_m2_peg(const common_chat_temp
                 data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<minimax:tool_call>"});
             }
 
-            auto tool_calls = build_generic_tool_calls_peg_parser(
-                p,
-                inputs,
-                p.space() + "<minimax:tool_call>",
-                p.eps(),
-                p.literal("</minimax:tool_call>"),
-                p.space() + "<invoke name=\"",
-                p.literal("\">"),
-                p.space() + "</invoke>" + p.space(),
-                p.space() + "<parameter name=\"",
-                p.literal("\">"),
-                "</parameter>",
-                /* allow_raw_string_param_value= */ true
-            );
+            generic_tool_call_format format;
+            format.tool_calls_start = p.space() + "<minimax:tool_call>";
+            format.tool_calls_sep = p.eps();
+            format.tool_calls_end = p.literal("</minimax:tool_call>");
+            format.tool_call_start = p.space() + "<invoke name=\"";
+            format.tool_call_name_params_sep = p.literal("\">");
+            format.tool_call_end = p.space() + "</invoke>" + p.space();
+            format.param_start = p.space() + "<parameter name=\"";
+            format.param_name_value_sep = p.literal("\">");
+            format.param_end = "</parameter>";
+            format.allow_raw_string_param_value = true;
+            auto tool_calls = build_generic_tool_calls_peg_parser(p, inputs, format);
             
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 return reasoning << tool_calls;

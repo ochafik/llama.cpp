@@ -68,20 +68,14 @@ common_chat_params common_chat_params_init_seed_oss_peg(const common_chat_templa
                 };
             }
 
-            auto tool_calls = build_generic_tool_calls_peg_parser(
-                p,
-                inputs,
-                p.eps(),
-                p.eps(),
-                p.eps(),
-                p.space() + "<seed:tool_call>\n<function=",
-                p.literal(">\n"),
-                "</function>" + p.space() + "</seed:tool_call>",
-                p.literal("<parameter="),
-                p.literal(">"),
-                "</parameter>\n",
-                /* allow_raw_string_param_value= */ true
-            );
+            generic_tool_call_format format;
+            format.tool_call_start = p.space() + "<seed:tool_call>\n<function=";
+            format.tool_call_name_params_sep = p.literal(">\n");
+            format.tool_call_end = "</function>" + p.space() + "</seed:tool_call>";
+            format.param_start = p.literal("<parameter=");
+            format.param_name_value_sep = p.literal(">");
+            format.param_end = "</parameter>\n";
+            auto tool_calls = build_generic_tool_calls_peg_parser(p, inputs, format);
 
             auto stop_before = std::vector<std::string> {
                 "\r\n\r\n<seed:tool_call>", "\n\n<seed:tool_call>",

@@ -33,12 +33,12 @@ common_chat_params common_chat_params_init_xiaomi_mimo_peg(const common_chat_tem
                 data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_call>"});
             }
 
+            json_tool_call_format format;
+            format.tool_calls_start = p.literal("<tool_call>");
+            format.tool_calls_sep = p.literal("</tool_call><tool_call>");
+            format.tool_calls_end = p.literal("</tool_call>");
             auto tool_calls = p.trigger_rule("tool-call-root",
-                build_json_tool_calls_peg_parser(p, inputs, 
-                    p.literal("<tool_call>"),
-                    p.literal("</tool_call><tool_call>"),
-                    p.literal("</tool_call>")
-                ));
+                build_json_tool_calls_peg_parser(p, inputs, format));
 
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 return tool_calls;

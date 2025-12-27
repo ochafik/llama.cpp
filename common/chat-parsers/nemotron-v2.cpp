@@ -75,12 +75,12 @@ common_chat_params common_chat_params_init_nemotron_v2_peg(const common_chat_tem
                 };
             }
 
+            json_tool_call_format format;
+            format.tool_calls_start = p.literal("<TOOLCALL>[");
+            format.tool_calls_sep = p.literal(",");
+            format.tool_calls_end = p.literal("]</TOOLCALL>");
             auto tool_calls = p.trigger_rule("tool-call-root",
-                build_json_tool_calls_peg_parser(p, inputs, 
-                    p.literal("<TOOLCALL>["),
-                    p.literal(","),
-                    p.literal("]</TOOLCALL>")
-                ));
+                build_json_tool_calls_peg_parser(p, inputs, format));
 
             if (require_tools) {
                 return reasoning << tool_calls;

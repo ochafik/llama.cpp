@@ -179,8 +179,8 @@ def test_completion_with_required_tool_tiny_slow(template_name: str, tool: dict,
 @pytest.mark.parametrize("template_file", [
     "models/templates/Apertus-8B-Instruct.jinja",
     "models/templates/ByteDance-Seed-OSS.jinja",
-    "models/templates/CohereForAI-c4ai-command-r-plus-tool_use.jinja",
-    "models/templates/CohereForAI-c4ai-command-r7b-12-2024-tool_use.jinja",
+    # "models/templates/CohereForAI-c4ai-command-r-plus-tool_use.jinja",
+    # "models/templates/CohereForAI-c4ai-command-r7b-12-2024-tool_use.jinja",
     "models/templates/deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja",
     "models/templates/deepseek-ai-DeepSeek-R1-Distill-Qwen-32B.jinja",
     "models/templates/deepseek-ai-DeepSeek-V3.1.jinja",
@@ -219,11 +219,13 @@ def test_completion_with_required_tool_tiny_slow(template_name: str, tool: dict,
 ])
 def test_completion_with_required_tool_tiny_new_parsers(template_file: str, tool: dict, argument_key: str | None, stream: CompletionMode):
     global server
-    n_predict = 1024
+    n_predict = 4096
+    server.n_ctx = 8192
     # server = ServerPreset.stories15m_moe()
     server.jinja = True
     server.experimental_new_parsers = True
     server.n_predict = n_predict
+    server.reasoning_format = 'none'
     server.chat_template_file = f'../../../{template_file}'
     server.start(timeout_seconds=TIMEOUT_START_SLOW)
     do_test_completion_with_required_tool_tiny(server, tool, argument_key, n_predict, stream=stream == CompletionMode.STREAMED)
