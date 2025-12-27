@@ -107,12 +107,19 @@ common_chat_params common_chat_params_init_apertus_peg(const common_chat_templat
                     "(<\\|tools_prefix\\|>)[\\s\\S]*"}};
             }
 
+            // <|tools_prefix|>[{"tool_name": tool_args}]<|tools_suffix|>
             auto tool_calls = build_json_tool_calls_peg_parser(
                 p,
                 inputs,
-                p.literal("<|tools_prefix|>"),
-                std::nullopt,
-                p.literal("<|tools_suffix|>"));
+                p.literal("<|tools_prefix|>["),
+                p.literal(", "),
+                p.literal("]<|tools_suffix|>"),
+                /* id= */ std::nullopt,
+                /* id_schema= */ std::nullopt,
+                p.literal("{\""),
+                p.literal("\": "),
+                p.literal("}")
+            );
 
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 return p.optional(reasoning) << tool_calls;
