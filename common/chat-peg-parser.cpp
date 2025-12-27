@@ -1,6 +1,7 @@
 #include "chat-peg-parser.h"
 
 #include <nlohmann/json.hpp>
+#include <stdexcept>
 
 using json = nlohmann::json;
 using Tag = common_chat_peg_tag;
@@ -89,20 +90,25 @@ void common_chat_peg_constructed_mapper::map(const common_peg_ast_node & node) {
     auto tag = static_cast<Tag>(node.tag_id);
     switch (tag) {
         case Tag::TOOL_OPEN:
-            result.tool_calls.emplace_back();
-            current_tool = &result.tool_calls.back();
+            current_tool = nullptr;
             arg_count = 0;
             break;
         case Tag::TOOL_NAME:
             if (current_tool) {
-                current_tool->name = std::string(node.text);
-                current_tool->arguments = "{";
+                throw std::runtime_error("bad state");
             }
+            result.tool_calls.emplace_back();
+            current_tool = &result.tool_calls.back();
+            current_tool->name = std::string(node.text);
+            current_tool->arguments = "{";
             break;
         case Tag::TOOL_ARG_OPEN:
             needs_closing_quote = false;
             break;
         case Tag::TOOL_ARG_NAME:
+            if (!current_tool) {
+                throw std::runtime_error("bad state");
+            }
             if (current_tool) {
                 if (arg_count > 0) {
                     current_tool->arguments += ",";
@@ -112,6 +118,9 @@ void common_chat_peg_constructed_mapper::map(const common_peg_ast_node & node) {
             }
             break;
         case Tag::TOOL_ARG_STRING_VALUE:
+            if (!current_tool) {
+                throw std::runtime_error("bad state");
+            }
             if (current_tool) {
                 // Serialize to JSON, but exclude the end quote
                 // Use trim_space to remove leading/trailing whitespace from raw string values
@@ -121,23 +130,33 @@ void common_chat_peg_constructed_mapper::map(const common_peg_ast_node & node) {
             }
             break;
         case Tag::TOOL_ARG_CLOSE:
+            if (!current_tool) {
+                throw std::runtime_error("bad state");
+            }
             if (current_tool && needs_closing_quote) {
                 current_tool->arguments += "\"";
                 needs_closing_quote = false;
             }
             break;
         case Tag::TOOL_ARG_JSON_VALUE:
+            if (!current_tool) {
+                throw std::runtime_error("bad state");
+            }
             if (current_tool) {
                 current_tool->arguments += std::string(trim_trailing_space(node.text));
             }
             break;
         case Tag::TOOL_CLOSE:
+            if (!current_tool) {
+                throw std::runtime_error("bad state");
+            }
             if (current_tool) {
                 if (needs_closing_quote) {
                     current_tool->arguments += "\"";
                     needs_closing_quote = false;
                 }
                 current_tool->arguments += "}";
+                current_tool = nullptr;
             }
             break;
         default:
