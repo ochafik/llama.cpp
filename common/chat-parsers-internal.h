@@ -276,7 +276,7 @@ struct json_tool_call_format {
         using Tag = common_chat_peg_tag;
         return p.sequence()
             + p.literal_tag(Tag::TOOL_OPEN, "{")
-            << "\"name\"" << ":" + ("\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"") << ","
+            << "\"name\"" << ":" << ("\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"") << ","
             << "\"arguments\"" << ":" << p.tag(Tag::TOOL_ARGS, args)
             << p.literal_tag(Tag::TOOL_CLOSE, "}");
     };

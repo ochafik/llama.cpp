@@ -38,7 +38,7 @@ common_chat_params common_chat_params_init_mistral_nemo_peg(const common_chat_te
                 using Tag = common_chat_peg_tag;
                 return p.sequence()
                     + p.literal_tag(Tag::TOOL_OPEN, "{")
-                    << "\"name\"" << ":" + ("\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"") << ","
+                    << "\"name\"" << ":" << ("\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"") << ","
                     << "\"arguments\"" << ":" << p.tag(Tag::TOOL_ARGS, args) << ","
                     << "\"id\"" << ":" << p.tag(Tag::TOOL_ID, p.schema(p.json(), "tool-id", id_schema))
                     << p.literal_tag(Tag::TOOL_CLOSE, "}");
