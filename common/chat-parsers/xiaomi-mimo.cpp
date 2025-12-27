@@ -33,9 +33,10 @@ common_chat_params common_chat_params_init_xiaomi_mimo_peg(const common_chat_tem
             }
 
             json_tool_call_format format;
-            format.tool_calls_start = p.literal("<tool_call>");
-            format.tool_calls_sep = p.literal("</tool_call><tool_call>");
-            format.tool_calls_end = p.literal("</tool_call>");
+            // Template format: <tool_call>\n{"name": ...}\n</tool_call>
+            format.tool_calls_start = p.literal("<tool_call>\n");
+            format.tool_calls_sep = p.literal("\n</tool_call>\n<tool_call>\n");
+            format.tool_calls_end = p.literal("\n</tool_call>");
             auto tool_calls = p.trigger_rule("tool-call-root",
                 build_json_tool_calls_peg_parser(p, inputs, format));
 
@@ -48,9 +49,9 @@ common_chat_params common_chat_params_init_xiaomi_mimo_peg(const common_chat_tem
                 << p.optional(p.literal("\n")) << tool_calls;
         }
 
-        // Content only parser
+        // Content only parser - stop before end-of-message token
         include_grammar = false;
-        return p.tag(Tag::CONTENT, p.rest());
+        return p.tag(Tag::CONTENT, p.until("<|im_end|>"));
     });
 
     common_chat_build_peg_grammar(inputs, parser, data);

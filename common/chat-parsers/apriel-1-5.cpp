@@ -7,7 +7,16 @@
 common_chat_params common_chat_params_init_apriel_1_5_peg(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
 
-    data.prompt = apply(tmpl, inputs);
+    auto adjusted_messages = json::array();
+    for (const auto & msg : inputs.messages) {
+        auto adjusted_message = msg;
+        if (msg.contains("reasoning_content") && msg.at("reasoning_content").is_string()) {
+            adjusted_message["thoughts"] = msg.at("reasoning_content");
+            adjusted_message.erase("reasoning_content");
+        }
+        adjusted_messages.push_back(adjusted_message);
+    }
+    data.prompt = apply(tmpl, inputs, /* messages_override= */ adjusted_messages);
 
     // Handle thinking tags appropriately based on inputs.enable_thinking
     if (string_ends_with(data.prompt, "<thinking>\n") || string_ends_with(data.prompt, "<thinking>")) {

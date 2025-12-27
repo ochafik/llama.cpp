@@ -15,17 +15,13 @@ common_chat_params common_chat_params_init_gpt_oss_peg(const common_chat_templat
     // Copy reasoning to the "thinking" field as expected by the gpt-oss template
     auto adjusted_messages = json::array();
     for (const auto & msg : inputs.messages) {
-        auto has_reasoning_content = msg.contains("reasoning_content") && msg.at("reasoning_content").is_string();
-
-        if (has_reasoning_content) {
-            auto adjusted_message = msg;
+        auto adjusted_message = msg;
+        if (msg.contains("reasoning_content") && msg.at("reasoning_content").is_string()) {
             adjusted_message["thinking"] = msg.at("reasoning_content");
-            adjusted_messages.push_back(adjusted_message);
-        } else {
-            adjusted_messages.push_back(msg);
+            adjusted_message.erase("reasoning_content");
         }
+        adjusted_messages.push_back(adjusted_message);
     }
-
     auto prompt = apply(tmpl, inputs, /* messages_override= */ adjusted_messages);
 
     // Check if we need to replace the return token with end token during

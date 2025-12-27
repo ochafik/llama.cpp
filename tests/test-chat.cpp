@@ -804,7 +804,7 @@ static void update_field_state(needle_field_state & state, const needle_field_ne
     }
 }
 
-static needle_test_context make_needle_context(const needle_scenario & scenario, common_chat_format format = COMMON_CHAT_FORMAT_CONTENT_ONLY) {
+static needle_test_context make_needle_context(const needle_scenario & scenario, common_chat_format format = COMMON_CHAT_FORMAT_CONTENT_ONLY, common_chat_format legacy_format = COMMON_CHAT_FORMAT_CONTENT_ONLY) {
     needle_test_context ctx;
     ctx.scenario_name = scenario.name;
     ctx.format = format;
@@ -867,7 +867,7 @@ static needle_test_context make_needle_context(const needle_scenario & scenario,
             call.arguments = args.dump();
             if (scenario.expect_tool_ids) {
                 // Mistral Nemo requires 9-character alphanumeric IDs
-                if (ctx.format == COMMON_CHAT_FORMAT_MISTRAL_NEMO) {
+                if (ctx.format == COMMON_CHAT_FORMAT_MISTRAL_NEMO || legacy_format == COMMON_CHAT_FORMAT_MISTRAL_NEMO) {
                     // Generate 9-character alphanumeric ID (e.g., "call00123", "abc456789")
                     std::string id = "call";
                     id += std::to_string(call_idx);
