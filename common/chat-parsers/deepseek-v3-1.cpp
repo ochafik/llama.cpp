@@ -68,31 +68,22 @@ common_chat_params common_chat_params_init_deepseek_v3_1_peg(const common_chat_t
                 });
             }
 
-            auto tool_choice = p.choice();
-
-            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
-                // Format: name<｜tool▁sep｜>{...}<｜tool▁call▁end｜>
-                tool_choice |= p.rule("tool-" + name, p.tag(Tag::TOOL,
-                    p.optional(p.atomic_tag(Tag::TOOL_OPEN, p.literal("<｜tool▁call▁begin｜>")))
-                    + p.literal_tag(Tag::TOOL_NAME, name) + p.literal("<｜tool▁sep｜>")
-                    + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters))
-                    + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("<｜tool▁call▁end｜>"))
-                ));
-            });
-
-            // Accept multiple variants of the tool calls begin marker
-            auto tool_calls_begin = p.choice()
-                | "<｜tool▁calls▁begin｜>"
-                | "<｜tool_calls_begin｜>"
-                | "<｜tool calls begin｜>"
-                | "<｜tool\\_calls\\_begin｜>"
-                | "<｜tool▁calls｜>";
-
-            auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
-            auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            auto tool_calls = p.trigger_rule("tool-call-root",
-                tool_calls_begin + p.repeat(tool_choice, min_calls, max_calls) + "<｜tool▁calls▁end｜>"
+            auto tool_calls = build_json_tool_calls_peg_parser(
+                p,
+                inputs,
+                p.literal("<｜tool▁calls▁begin｜>"),
+                p.space(),  // Allow newline between tool calls
+                p.optional(p.literal("<｜tool▁calls▁end｜>")),
+                /* id= */ std::nullopt,
+                /* id_schema= */ std::nullopt,
+                p.literal("<｜tool▁call▁begin｜>"),
+                p.literal("<｜tool▁sep｜>"),
+                p.optional(p.literal("\n```<｜tool▁call▁end｜>"))
             ) << consume_eos();
+
+            if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
+                return reasoning << tool_calls;
+            }
 
             // Content until tool calls marker
             auto content = p.tag(Tag::CONTENT, 
@@ -106,9 +97,6 @@ common_chat_params common_chat_params_init_deepseek_v3_1_peg(const common_chat_t
                     : p.schema(p.json(), "response-format", inputs.json_schema)
             );
 
-            if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
-                return reasoning << tool_calls;
-            }
             return reasoning << content << tool_calls;
         }
 

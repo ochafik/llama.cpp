@@ -74,10 +74,10 @@ common_chat_params common_chat_params_init_minimax_m2_peg(const common_chat_temp
                 p.space() + "<minimax:tool_call>",
                 p.eps(),
                 p.literal("</minimax:tool_call>"),
-                p.literal("<invoke name=\""),
+                p.space() + "<invoke name=\"",
                 p.literal("\">"),
-                "</invoke>" + p.space(),
-                p.literal("<parameter name=\""),
+                p.space() + "</invoke>" + p.space(),
+                p.space() + "<parameter name=\"",
                 p.literal("\">"),
                 "</parameter>",
                 /* allow_raw_string_param_value= */ true
