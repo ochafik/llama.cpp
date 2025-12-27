@@ -135,14 +135,15 @@ common_chat_params common_chat_params_init_gpt_oss_peg(const common_chat_templat
                     + p.literal("<|end|>")
                 ));
 
-                // Tool call in role: <|start|>assistant to=functions.name<|channel|>analysis|commentary<|message|>{...}<|call|>
-                tool_choice |= p.rule("tool-role-" + name,
-                    p.atomic_tag(Tag::TOOL_OPEN, assistant_prefix()
-                    + p.optional(p.literal(" ")) + p.literal("to=functions.")
+                // Tool call in role: <|start|>assistant to=functions.name<|channel|>analysis|commentary json<|message|>{...}<|call|>
+                tool_choice |= p.rule("tool-role-" + name, p.tag(Tag::TOOL,
+                    assistant_prefix()
+                    + p.optional(p.literal(" "))
+                    + p.atomic_tag(Tag::TOOL_OPEN, p.literal("to=functions."))
                     + p.literal_tag(Tag::TOOL_NAME, name)
                     + p.literal("<|channel|>")
                     + (p.literal("analysis") | "commentary")
-                    + p.optional(p.literal(" ") + p.literal("<|constrain|>") + "json")
+                    + p.optional(p.literal(" ") + p.until("<|message|>"))  // content type (e.g., "json") without <|constrain|>
                     + p.literal("<|message|>")
                     + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-params", parameters))
                     + p.literal("<|call|>")

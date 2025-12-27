@@ -4514,7 +4514,7 @@ static const std::vector<template_capabilities> & get_template_capabilities() {
             COMMON_CHAT_FORMAT_GPT_OSS, ThinkingSupport::Yes, ToolSupport::Yes,
             "<|inner_thoughts_begin|>", "<|inner_thoughts_end|>", Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::No, InjectReasoningAfterFormat::No,
-            SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes},
+            SupportsDisableThinking::Yes, SupportsReasoningOnly::No},  // Template always outputs final content
         {"Xiaomi MiMo", "models/templates/MiMo-VL.jinja",
             COMMON_CHAT_FORMAT_XIAOMI_MIMO, ThinkingSupport::No, ToolSupport::Yes,
             nullptr, nullptr, Skip::No, ReasoningRequiresTools::No,
