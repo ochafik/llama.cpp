@@ -3,12 +3,12 @@
 // With optional <think>...</think> reasoning blocks
 
 #include "chat-parsers-internal.h"
+#include "chat.h"
 
 common_chat_params common_chat_params_init_kimi_k2_peg(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
 
     data.prompt = apply(tmpl, inputs);
-    data.format = COMMON_CHAT_FORMAT_KIMI_K2;
 
     data.preserved_tokens = {
         "<think>",
@@ -96,6 +96,7 @@ common_chat_params common_chat_params_init_kimi_k2_peg(const common_chat_templat
     });
 
     common_chat_build_peg_grammar(inputs, parser, data);
+    data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
 
     return data;
 }
