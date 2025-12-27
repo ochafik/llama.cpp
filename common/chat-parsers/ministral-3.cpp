@@ -85,9 +85,14 @@ common_chat_params common_chat_params_init_ministral_3_peg(const common_chat_tem
             format.tool_calls_start = p.eps();
             format.tool_calls_sep = std::nullopt;  // No separator (each call has its own [TOOL_CALLS] prefix)
             format.tool_calls_end = p.eps();
-            format.tool_call_start = p.literal("[TOOL_CALLS]");
-            format.tool_call_name_params_sep = p.literal("[ARGS]");
-            format.tool_call_end = p.eps();
+            format.tool_call = [](auto & p, const auto & name, const auto & args) {
+                return p.sequence()
+                    + p.tag(Tag::TOOL_OPEN, p.literal("[TOOL_CALLS]"))
+                    + p.tag(Tag::TOOL_NAME, p.literal(name))
+                    + "[ARGS]"
+                    + p.tag(Tag::TOOL_ARGS, args)
+                    + p.tag(Tag::TOOL_CLOSE, p.eps());
+            };
             auto tool_calls = build_json_tool_calls_peg_parser(p, inputs, format);
 
             if (require_tools) {
