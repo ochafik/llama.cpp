@@ -86,44 +86,15 @@ common_chat_params common_chat_params_init_lfm2_peg(const common_chat_template &
         auto parser = build_chat_peg_parser([&](auto & p) {
             using Tag = common_chat_peg_tag;
 
-            // Build custom schema for array format with metadata (name + arguments + id)
-            auto schemas = json::array();
-            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
-                schemas.push_back({
-                    {"type", "object"},
-                    {"properties", {
-                        {"name", {
-                            {"type", "string"},
-                            {"const", name},  // Exact tool name validation
-                        }},
-                        {"arguments", parameters},  // Full parameter validation
-                    }},
-                    {"required", json::array({"name", "arguments", "id"})},  // id required
-                });
-            });
-
-            auto schema = json{
-                {"type", "array"},
-                {"items", schemas.size() == 1 ? schemas[0] : json{{"anyOf", schemas}}},
-                {"minItems", 1},
-            };
-            if (!inputs.parallel_tool_calls) {
-                schema["maxItems"] = 1;  // Enforce single tool call constraint
-            }
-
             // Tool call: <|tool_call_start|> + JSON array with schema validation + <|tool_call_end|>
-            auto tool_call = p.tag(Tag::TOOL,
-                p.atomic_tag(Tag::TOOL_OPEN, p.literal("<|tool_call_start|>"))
-                + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-calls", schema))
-                + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("<|tool_call_end|>"))
-            );
+            auto tool_calls = p.trigger_rule("tool-call-root", 
+                build_json_args_peg_parser(p, inputs, {{"type", "string"}},
+                    "<|tool_call_start|>[",
+                    ",",
+                    "]<|tool_call_end|>"
+                ));
 
-            auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
-            auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, min_calls, max_calls));
-
-            bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
-            if (require_tools) {
+            if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 return tool_calls;
             }
             return p.tag(Tag::CONTENT, p.until("<|tool_call_start|>")) << tool_calls;
