@@ -8,7 +8,17 @@
 common_chat_params common_chat_params_init_nemotron_v2_peg(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
 
-    data.prompt = apply(tmpl, inputs);
+    // Note: thoughts are not re-rendered by the template.
+    auto adjusted_messages = json::array({
+        json {
+            {"role", "user"},
+            {"content", inputs.enable_thinking ? "/think" : "/nothink"},
+        }
+    });
+    for (const auto & msg : inputs.messages) {
+        adjusted_messages.push_back(msg);
+    }
+    data.prompt = apply(tmpl, inputs, /* messages_override= */ adjusted_messages);
 
     // Handle thinking tags appropriately based on inputs.enable_thinking
     if (string_ends_with(data.prompt, "<think>\n")) {

@@ -4488,8 +4488,9 @@ static const std::vector<template_capabilities> & get_template_capabilities() {
             "<think>", "</think>", Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::No, SupportsReasoningOnly::No},
+        // Doesn't support rendering reasoning_content, even though supports /think / /nothink.
         {"Nemotron V2", "models/templates/NVIDIA-Nemotron-Nano-v2.jinja",
-            COMMON_CHAT_FORMAT_NEMOTRON_V2, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::Yes,
+            COMMON_CHAT_FORMAT_NEMOTRON_V2, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::No,
             nullptr, nullptr, Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes},
@@ -4758,10 +4759,11 @@ static std::string describe_scenario(const needle_scenario & scenario) {
     return oss.str();
 }
 
-// Test that parsers correctly reject content in tool_choice=required mode.
-// When tool_choice is REQUIRED, parsers should only accept tool calls (and optionally thinking),
-// but NOT content. This test verifies that invariant holds for all templates by using init_delta
-// to properly render assistant messages through templates.
+/*
+TODOs:
+- test that thinking is not forced open when thinking is disabled
+
+*/
 static bool test_required_tool_rejects_content() {
     printf("[%s]\n", __func__);
 
