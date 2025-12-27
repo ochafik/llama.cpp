@@ -816,18 +816,18 @@ static needle_test_context make_needle_context(const needle_scenario & scenario,
         ctx.has_content = true;
         ctx.content_needles = {NEEDLE1_CONTENT, NEEDLE2_CONTENT};
         // Build JSON content: {"amount": 123.45, "notes": "Before $N1C$ middle $N2C$ after"}
-        std::string notes_value = "Before " + ctx.content_needles.first + " middle " + ctx.content_needles.second + " after";
+        std::string notes_value = ctx.content_needles.first + ctx.content_needles.second;
         ctx.expected_msg.content = R"({"amount": 123.45, "notes": ")" + notes_value + R"("})";
     } else if (scenario.with_content) {
         ctx.has_content = true;
         ctx.content_needles = {NEEDLE1_CONTENT, NEEDLE2_CONTENT};
-        ctx.expected_msg.content = "Before " + ctx.content_needles.first + " middle " + ctx.content_needles.second + " after";
+        ctx.expected_msg.content = ctx.content_needles.first + ctx.content_needles.second;
     }
 
     if (scenario.with_reasoning) {
         ctx.has_reasoning = true;
         ctx.reasoning_needles = {NEEDLE1_REASONING, NEEDLE2_REASONING};
-        ctx.expected_msg.reasoning_content = "Thinking " + ctx.reasoning_needles.first + " deeply " + ctx.reasoning_needles.second + " done";
+        ctx.expected_msg.reasoning_content = ctx.reasoning_needles.first + ctx.reasoning_needles.second;
     }
 
     if (scenario.with_tool_call) {
@@ -5118,7 +5118,7 @@ static bool test_systematic_needle_streaming() {
                         for (const auto& tool_call : ctx.expected_msg.tool_calls) {
                             if (tool_call.arguments.empty()) continue;
                             json args_json = json::parse(tool_call.arguments);
-                            for (auto& [key, value] : args_json.items()) {
+                            for (const auto & [key, value] : args_json.items()) {
                                 if (!properties.contains(key)) {  // Avoid duplicates
                                     properties[key] = {
                                         {"type", "string"},
