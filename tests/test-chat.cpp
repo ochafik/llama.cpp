@@ -4539,7 +4539,7 @@ static const std::vector<template_capabilities> & get_template_capabilities() {
             SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes},
         {"Apriel 1.5", "models/templates/unsloth-Apriel-1.5.jinja",
             COMMON_CHAT_FORMAT_APRIEL_1_5, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::Yes,
-            "<thinking>", "</thinking>", Skip::Yes},
+            "<thinking>", "</thinking>", Skip::No},
         {"GPT OSS", "models/templates/openai-gpt-oss-120b.jinja",
             COMMON_CHAT_FORMAT_GPT_OSS, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::Yes,
             "<|inner_thoughts_begin|>", "<|inner_thoughts_end|>", Skip::No, ReasoningRequiresTools::No,
@@ -4548,7 +4548,7 @@ static const std::vector<template_capabilities> & get_template_capabilities() {
         // TODO(ochafik): Fix Xiaomi MiMo tool call parsing - currently failing tool-auto-single and parallel-tool-calls
         {"Xiaomi MiMo", "models/templates/MiMo-VL.jinja",
             COMMON_CHAT_FORMAT_XIAOMI_MIMO, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::No,
-            nullptr, nullptr, Skip::Yes, ReasoningRequiresTools::No,
+            nullptr, nullptr, Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes},
     };
