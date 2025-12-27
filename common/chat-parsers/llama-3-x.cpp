@@ -108,12 +108,11 @@ common_chat_params common_chat_params_init_llama_3_x_peg(const common_chat_templ
             // Standard JSON format: {"type":"function","name":"name","parameters":{...}}
             tool_choice |= p.rule("tool-" + name, p.tag(Tag::TOOL,
                 p.literal_tag(Tag::TOOL_OPEN, "{")
-                + p.optional("\"type\"" + p.space() + ":" + p.space() + "\"function\"" + p.space() + "," + p.space())
-                + "\"name\"" + p.space() + ":" + p.space()
-                + "\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"" + p.space() + "," + p.space()
-                + "\"parameters\"" + p.space() + ":" + p.space()
-                + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-params", parameters))
-                + p.atomic_tag(Tag::TOOL_CLOSE, p.space() + "}")
+                << p.optional("\"type\"" << p.literal(":") << "\"function\"" << ",")
+                << "\"name\"" << ":" << "\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"" << ","
+                << "\"parameters\"" << ":"
+                << p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-params", parameters))
+                << p.atomic_tag(Tag::TOOL_CLOSE, p.space() + "}")
             ));
         });
 
