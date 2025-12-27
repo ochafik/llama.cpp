@@ -90,14 +90,14 @@ common_chat_params common_chat_params_init_lfm2_peg(const common_chat_template &
                 {"type", "string"},
             };
             // Tool call: <|tool_call_start|> + JSON array with schema validation + <|tool_call_end|>
-            auto tool_calls = p.trigger_rule("tool-call-root", 
-                build_json_tool_calls_peg_parser(p, inputs,
-                    p.literal("<|tool_call_start|>["),
-                    p.literal(","),
-                    p.literal("]<|tool_call_end|>"),
-                    "id",
-                    id_schema
-                ));
+            json_tool_call_format format;
+            format.tool_calls_start = p.literal("<|tool_call_start|>[");
+            format.tool_calls_sep = p.literal(",");
+            format.tool_calls_end = p.literal("]<|tool_call_end|>");
+            format.tool_call_id_key = "id";
+            format.tool_call_id = p.schema(p.json(), "tool-id", id_schema);
+            auto tool_calls = p.trigger_rule("tool-call-root",
+                build_json_tool_calls_peg_parser(p, inputs, format));
 
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 return tool_calls;

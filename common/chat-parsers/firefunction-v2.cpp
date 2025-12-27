@@ -33,10 +33,12 @@ common_chat_params common_chat_params_init_firefunction_v2_peg(const common_chat
             }
 
             // Firefunction V2 format: functools[{...}, {...}]
-            
-            // Tool call: <|tool_call_start|> + JSON array with schema validation + <|tool_call_end|>
-            auto tool_calls = p.trigger_rule("tool-call-root", 
-                build_json_tool_calls_peg_parser(p, inputs, p.literal(" functools["), p.literal(","), p.literal("]")));
+            json_tool_call_format format;
+            format.tool_calls_start = p.literal(" functools[");
+            format.tool_calls_sep = p.literal(",");
+            format.tool_calls_end = p.literal("]");
+            auto tool_calls = p.trigger_rule("tool-call-root",
+                build_json_tool_calls_peg_parser(p, inputs, format));
 
             if (require_tools) {
                 return tool_calls;

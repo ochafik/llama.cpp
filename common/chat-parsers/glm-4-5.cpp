@@ -111,20 +111,15 @@ common_chat_params common_chat_params_init_glm_4_5_peg(const common_chat_templat
                 data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_call>"});
             }
 
-            auto tool_calls = build_generic_tool_calls_peg_parser(
-                p,
-                inputs,
-                p.eps(),
-                p.eps(),
-                p.eps(),
-                p.space() + "<tool_call>",
-                p.space(),
-                p.space() + "</tool_call>",
-                p.space() + "<arg_key>",
-                "</arg_key>" + p.space() + "<arg_value>",
-                "</arg_value>\n",
-                /* allow_raw_string_param_value= */ true
-            );
+            generic_tool_call_format format;
+            format.tool_call_start = p.space() + "<tool_call>";
+            format.tool_call_name_params_sep = p.space();
+            format.tool_call_end = p.space() + "</tool_call>";
+            format.param_start = p.space() + "<arg_key>";
+            format.param_name_value_sep = "</arg_key>" + p.space() + "<arg_value>";
+            format.param_end = "</arg_value>\n";
+            format.allow_raw_string_param_value = true;
+            auto tool_calls = build_generic_tool_calls_peg_parser(p, inputs, format);
             
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 // thinking? space? tools

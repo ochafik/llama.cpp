@@ -80,14 +80,11 @@ common_chat_params common_chat_params_init_apriel_1_5_peg(const common_chat_temp
             }
 
             // Use build_json_tool_calls_peg_parser for standard JSON tool call format
-            auto tool_calls = build_json_tool_calls_peg_parser(
-                p,
-                inputs,
-                p.literal("<tool_calls>["),
-                p.literal(", "),
-                p.literal("]</tool_calls>")
-                // Uses default {"name": "...", "arguments": ...} format
-            );
+            json_tool_call_format format;
+            format.tool_calls_start = p.literal("<tool_calls>[");
+            format.tool_calls_sep = p.literal(", ");
+            format.tool_calls_end = p.literal("]</tool_calls>");
+            auto tool_calls = build_json_tool_calls_peg_parser(p, inputs, format);
 
             auto newline_before_tools = p.optional(p.literal("\n"));
 

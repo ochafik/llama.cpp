@@ -29,14 +29,15 @@ common_chat_params common_chat_params_init_mistral_nemo_peg(const common_chat_te
                 {"pattern", "^[a-zA-Z0-9]{9}$"},  // Enforce ID format (exactly 9 alphanumeric)
             };
             // Tool call parser: content followed by [TOOL_CALLS] and JSON array
+            // Format: [TOOL_CALLS][{"name":"func","arguments":{},"id":"abc123def"}]
+            json_tool_call_format format;
+            format.tool_calls_start = p.literal("[TOOL_CALLS][");
+            format.tool_calls_sep = p.literal(",");
+            format.tool_calls_end = p.literal("]");
+            format.tool_call_id_key = "id";
+            format.tool_call_id = p.schema(p.json(), "tool-id", id_schema);
             auto tool_calls = p.trigger_rule("tool-call-root",
-                build_json_tool_calls_peg_parser(p, inputs, 
-                    p.literal("[TOOL_CALLS]["),
-                    p.literal(","),
-                    p.literal("]"),
-                    "id",
-                    id_schema
-                ));
+                build_json_tool_calls_peg_parser(p, inputs, format));
 
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 return tool_calls;

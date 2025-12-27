@@ -78,20 +78,14 @@ common_chat_params common_chat_params_init_nemotron_v3_peg(const common_chat_tem
                 };
             }
 
-            auto tool_calls = build_generic_tool_calls_peg_parser(
-                p,
-                inputs,
-                p.eps(),
-                p.eps(),
-                p.eps(),
-                "<tool_call>" + p.space() + "<function=",
-                ">" + p.space(),
-                "</function>" + p.space() + "</tool_call>" + p.space(),
-                p.literal("<parameter="),
-                ">" + p.space(),
-                "\n</parameter>\n",
-                /* allow_raw_string_param_value= */ true
-            );
+            generic_tool_call_format format;
+            format.tool_call_start = "<tool_call>" + p.space() + "<function=";
+            format.tool_call_name_params_sep = ">" + p.space();
+            format.tool_call_end = "</function>" + p.space() + "</tool_call>" + p.space();
+            format.param_start = p.literal("<parameter=");
+            format.param_name_value_sep = ">" + p.space();
+            format.param_end = "\n</parameter>\n";
+            auto tool_calls = build_generic_tool_calls_peg_parser(p, inputs, format);
 
             auto stop_before = std::vector<std::string>{
                 "\n<tool_call>", "\r\n<tool_call>", "<tool_call>",

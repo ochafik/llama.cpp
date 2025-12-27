@@ -66,8 +66,12 @@ common_chat_params common_chat_params_init_granite_peg(const common_chat_templat
                 }
             }
 
+            json_tool_call_format format;
+            format.tool_calls_start = p.literal("<|tool_call|>[");
+            format.tool_calls_sep = p.literal(",");
+            format.tool_calls_end = p.literal("]");
             auto tool_calls = p.trigger_rule("tool-call-root",
-                build_json_tool_calls_peg_parser(p, inputs, p.literal("<|tool_call|>["), p.literal(","), p.literal("]")));
+                build_json_tool_calls_peg_parser(p, inputs, format));
 
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 return reasoning << tool_calls << consume_eot();

@@ -88,18 +88,14 @@ common_chat_params common_chat_params_init_deepseek_r1_peg(const common_chat_tem
                 });
             }
 
-            auto tool_calls = build_json_tool_calls_peg_parser(
-                p,
-                inputs,
-                p.literal("<｜tool▁calls▁begin｜>"),
-                p.space(),  // Allow newline between tool calls
-                p.optional(p.literal("<｜tool▁calls▁end｜>")),
-                /* id= */ std::nullopt,
-                /* id_schema= */ std::nullopt,
-                p.literal("<｜tool▁call▁begin｜>function<｜tool▁sep｜>"),
-                p.literal("\n```json\n"),
-                p.optional(p.literal("\n```<｜tool▁call▁end｜>"))
-            ) << consume_eos();
+            json_tool_call_format format;
+            format.tool_calls_start = p.literal("<｜tool▁calls▁begin｜>");
+            format.tool_calls_sep = p.space();  // Allow newline between tool calls
+            format.tool_calls_end = p.optional(p.literal("<｜tool▁calls▁end｜>"));
+            format.tool_call_start = p.literal("<｜tool▁call▁begin｜>function<｜tool▁sep｜>");
+            format.tool_call_name_params_sep = p.literal("\n```json\n");
+            format.tool_call_end = p.optional(p.literal("\n```<｜tool▁call▁end｜>"));
+            auto tool_calls = build_json_tool_calls_peg_parser(p, inputs, format) << consume_eos();
 
             // Content until tool calls marker
             auto content = p.tag(Tag::CONTENT, p.until_one_of({
