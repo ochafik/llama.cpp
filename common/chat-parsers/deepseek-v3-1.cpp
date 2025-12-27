@@ -72,9 +72,14 @@ common_chat_params common_chat_params_init_deepseek_v3_1_peg(const common_chat_t
             format.tool_calls_start = p.literal("<｜tool▁calls▁begin｜>");
             format.tool_calls_sep = p.space();  // Allow newline between tool calls
             format.tool_calls_end = p.optional(p.literal("<｜tool▁calls▁end｜>"));
-            format.tool_call_start = p.literal("<｜tool▁call▁begin｜>");
-            format.tool_call_name_params_sep = p.literal("<｜tool▁sep｜>");
-            format.tool_call_end = p.optional(p.literal("\n```<｜tool▁call▁end｜>"));
+            format.tool_call = [](auto & p, const auto & name, const auto & args) {
+                return p.sequence()
+                    + p.tag(Tag::TOOL_OPEN, p.literal("<｜tool▁call▁begin｜>"))
+                    + p.tag(Tag::TOOL_NAME, p.literal(name))
+                    + "<｜tool▁sep｜>"
+                    + p.tag(Tag::TOOL_ARGS, args)
+                    + p.tag(Tag::TOOL_CLOSE, p.optional(p.literal("<｜tool▁call▁end｜>")));
+            };
             auto tool_calls = build_json_tool_calls_peg_parser(p, inputs, format) << consume_eos();
 
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {

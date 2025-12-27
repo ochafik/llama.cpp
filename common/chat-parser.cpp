@@ -1568,15 +1568,13 @@ common_chat_msg common_chat_peg_parse(const common_peg_arena & parser, const std
         case COMMON_CHAT_FORMAT_MINIMAX_M2:
         case COMMON_CHAT_FORMAT_QWEN3_CODER_XML:
         case COMMON_CHAT_FORMAT_GLM_4_5:
+        case COMMON_CHAT_FORMAT_COMMAND_R7B:
         case COMMON_CHAT_FORMAT_LLAMA_3_X_WITH_BUILTIN_TOOLS:
             common_chat_peg_constructed_mapper(msg).from_ast(ctx.ast, result);
             break;
         case COMMON_CHAT_FORMAT_PEG_SIMPLE:
             // Generic mapper for simple PEG format
             common_chat_peg_mapper(msg).from_ast(ctx.ast, result);
-            break;
-        case COMMON_CHAT_FORMAT_COMMAND_R7B:
-            apply_chat_peg_mapper(common_chat_peg_command_r7b_mapper(), ctx.ast, result, msg);
             break;
         case COMMON_CHAT_FORMAT_GENERIC:
             apply_chat_peg_mapper(common_chat_peg_generic_mapper(), ctx.ast, result, msg);
