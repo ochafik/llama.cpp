@@ -3,6 +3,7 @@
 // With optional <think>...</think> and <response>...</response> tags
 
 #include "chat-parsers-internal.h"
+#include <optional>
 
 common_chat_params common_chat_params_init_granite_peg(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
@@ -65,39 +66,8 @@ common_chat_params common_chat_params_init_granite_peg(const common_chat_templat
                 }
             }
 
-            // Build schema for tool calls array with name/arguments validation
-            auto tool_call_schemas = json::array();
-            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
-                tool_call_schemas.push_back({
-                    {"type", "object"},
-                    {"properties", {
-                        {"name", {
-                            {"type", "string"},
-                            {"const", name},  // Must match this tool's name
-                        }},
-                        {"arguments", parameters},  // Full parameter schema validation
-                    }},
-                    {"required", json::array({"name", "arguments"})},
-                });
-            });
-
-            auto tool_calls_schema = json{
-                {"type", "array"},
-                {"items", tool_call_schemas.size() == 1 ? tool_call_schemas[0] : json{{"anyOf", tool_call_schemas}}},
-                {"minItems", 1},
-            };
-            if (!inputs.parallel_tool_calls) {
-                tool_calls_schema["maxItems"] = 1;
-            }
-
-            auto tool_call = p.tag(Tag::TOOL,
-                p.atomic_tag(Tag::TOOL_OPEN, p.literal("<|tool_call|>"))
-                + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-calls", tool_calls_schema))
-            );
-
-            auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
-            auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, min_calls, max_calls));
+            auto tool_calls = p.trigger_rule("tool-call-root",
+                build_json_args_peg_parser(p, inputs, std::nullopt, "<|tool_call|>[", ",", "]"));
 
             bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
             if (require_tools) {
