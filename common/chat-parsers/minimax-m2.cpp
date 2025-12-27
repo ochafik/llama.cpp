@@ -72,7 +72,7 @@ common_chat_params common_chat_params_init_minimax_m2_peg(const common_chat_temp
                 p,
                 inputs,
                 "<minimax:tool_call>",
-                "</minimax:tool_call><minimax:tool_call>",
+                "\n",  // Multiple <invoke> blocks are separated by newlines within single wrapper
                 "</minimax:tool_call>",
                 "<invoke name=\"",
                 "\">",
