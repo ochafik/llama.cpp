@@ -93,7 +93,7 @@ common_chat_params common_chat_params_init_deepseek_r1_peg(const common_chat_tem
                 inputs,
                 p.literal("<｜tool▁calls▁begin｜>"),
                 std::nullopt,
-                p.literal("<｜tool▁calls▁end｜>"),
+                p.optional(p.literal("<｜tool▁calls▁end｜>")),
                 /* id= */ std::nullopt,
                 /* id_schema= */ std::nullopt,
                 p.literal("<｜tool▁call▁begin｜>function<｜tool▁sep｜>"),
