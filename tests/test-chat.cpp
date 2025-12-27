@@ -455,7 +455,10 @@ static delta_data init_delta(const struct common_chat_templates * tmpls, const s
             break;
         }
     }
-    return { delta, params_full };
+    // Use params_prefix for the parser since it's built with add_generation_prompt=true,
+    // which correctly sets thinking_forced_open when the template ends with <think>.
+    // The delta is extracted by stripping this prefix, so the parser should match accordingly.
+    return { delta, params_prefix };
 }
 
 /*
