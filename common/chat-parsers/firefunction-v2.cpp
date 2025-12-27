@@ -36,11 +36,7 @@ common_chat_params common_chat_params_init_firefunction_v2_peg(const common_chat
             
             // Tool call: <|tool_call_start|> + JSON array with schema validation + <|tool_call_end|>
             auto tool_calls = p.trigger_rule("tool-call-root", 
-                build_json_args_peg_parser(p, inputs, {{"type", "string"}},
-                    " functools[",
-                    ",",
-                    "]"
-                ));
+                build_json_args_peg_parser(p, inputs, json {{"type", "string"}}, " functools[", ",", "]"));
 
             if (require_tools) {
                 return tool_calls;
