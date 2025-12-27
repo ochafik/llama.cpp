@@ -58,16 +58,33 @@ common_chat_params common_chat_params_init_firefunction_v2_peg(const common_chat
                 data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, " functools["});
             }
 
-            // Tool call parser: content followed by functools[ and JSON array with schema
-            auto tool_call = p.tag(Tag::TOOL,
-                p.atomic_tag(Tag::TOOL_OPEN, p.literal(" functools["))
-                + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-calls", tool_calls_schema))
-                + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("]"))
-            );
+            // Build individual tool call parsers
+            // Format inside array: {"name": "func_name", "arguments": {...}}
+            auto tool_choice = p.choice();
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
+                // Match: {"name": "tool_name", "arguments": {...}}
+                // TOOL_OPEN on "{" creates a new tool call entry
+                // Using << for flexible whitespace handling
+                tool_choice |= p.rule("tool-" + name, p.tag(Tag::TOOL,
+                    p.atomic_tag(Tag::TOOL_OPEN, p.literal("{"))
+                    << "\"name\"" << ":" << "\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\""
+                    << "," << "\"arguments\"" << ":"
+                    << p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters))
+                    << p.atomic_tag(Tag::TOOL_CLOSE, p.literal("}"))
+                ));
+            });
 
-            auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
-            auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, min_calls, max_calls));
+            // Array structure: functools[ item (, item)* ]
+            auto array_open = p.literal(" functools[");
+
+            auto max_extra = inputs.parallel_tool_calls ? -1 : 0;
+
+            // Format: [ first_item (, additional_item)* ]
+            // When triggered, we always have at least one tool call
+            auto items = tool_choice << p.repeat(p.literal(",") << tool_choice, 0, max_extra);
+            auto tool_calls = p.trigger_rule("tool-call-root",
+                array_open << items << "]"
+            );
 
             if (require_tools) {
                 return tool_calls;
