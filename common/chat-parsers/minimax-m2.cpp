@@ -71,9 +71,9 @@ common_chat_params common_chat_params_init_minimax_m2_peg(const common_chat_temp
             auto tool_calls = build_generic_tool_calls_peg_parser(
                 p,
                 inputs,
-                std::nullopt,
-                std::nullopt,
-                std::nullopt,
+                "<minimax:tool_call>",
+                "</minimax:tool_call><minimax:tool_call>",
+                "</minimax:tool_call>",
                 "<invoke name=\"",
                 "\">",
                 "</invoke>",
