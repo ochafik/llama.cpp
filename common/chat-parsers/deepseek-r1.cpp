@@ -6,6 +6,7 @@
 // With optional <think>...</think> reasoning blocks
 
 #include "chat-parsers-internal.h"
+#include <optional>
 
 common_chat_params common_chat_params_init_deepseek_r1_peg(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
@@ -87,33 +88,17 @@ common_chat_params common_chat_params_init_deepseek_r1_peg(const common_chat_tem
                 });
             }
 
-            auto tool_choice = p.choice();
-
-            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
-                // Format: function<｜tool▁sep｜>name\n```json\n{...}\n```<｜tool▁call▁end｜>
-                // Note: template outputs \n between consecutive tool calls
-                tool_choice |= p.rule("tool-" + name, p.tag(Tag::TOOL,
-                    p.optional(p.literal("\n")) + p.optional(p.atomic_tag(Tag::TOOL_OPEN, p.literal("<｜tool▁call▁begin｜>")))
-                    + "function" + p.literal("<｜tool▁sep｜>") + p.literal_tag(Tag::TOOL_NAME, name) + "\n```json\n"
-                    + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters))
-                    + "\n```" + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("<｜tool▁call▁end｜>"))
-                ));
-            });
-
-            // Accept multiple variants of the tool calls begin marker
-            auto tool_calls_begin = p.choice()
-                | "<｜tool▁calls▁begin｜>"
-                | "<｜tool_calls_begin｜>"
-                | "<｜tool calls begin｜>"
-                | "<｜tool\\_calls\\_begin｜>"
-                | "<｜tool▁calls｜>";
-
-            auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
-            auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            // Note: official template has a bug - single tool calls don't get <｜tool▁calls▁end｜>
-            // We make the closing tag optional to handle this
-            auto tool_calls = p.trigger_rule("tool-call-root",
-                tool_calls_begin + p.repeat(tool_choice, min_calls, max_calls) + p.optional(p.literal("<｜tool▁calls▁end｜>"))
+            auto tool_calls = build_json_tool_calls_peg_parser(
+                p, 
+                inputs, 
+                p.literal("<｜tool▁calls▁begin｜>"),
+                std::nullopt,
+                p.literal("<｜tool▁calls▁end>"),
+                /* id= */ std::nullopt,
+                /* id_schema= */ std::nullopt,
+                p.literal("<｜tool▁call▁begin｜>function<｜tool▁sep｜>"),
+                p.literal("\n```json\n"),
+                p.literal("\n```<｜tool▁call▁end｜>")
             ) << consume_eos();
 
             // Content until tool calls marker

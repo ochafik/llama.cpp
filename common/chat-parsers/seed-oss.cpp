@@ -69,83 +69,21 @@ common_chat_params common_chat_params_init_seed_oss_peg(const common_chat_templa
                     {COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<seed:tool_call>"}
                 };
             }
-            auto tool_choice = p.choice();
-            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto & schema_info) {
-                // Default to false for stricter parsing - only allow explicitly defined parameters
-                bool allow_additional = false;
-                bool additional_has_schema = false;
-                json additional_schema;
-                if (parameters.contains("additionalProperties")) {
-                    const json & additional = parameters.at("additionalProperties");
-                    if (additional.is_boolean()) {
-                        allow_additional = additional.get<bool>();
-                    } else if (additional.is_object()) {
-                        allow_additional = true;
-                        additional_has_schema = true;
-                        additional_schema = additional;
-                    }
-                }
 
-                auto tool_open = "<function=" + p.literal_tag(Tag::TOOL_NAME, name) + ">";
-                auto tool_close = p.literal("</function>");
-                auto args = p.sequence();
-
-                foreach_parameter(parameters, [&](const auto & param_name, const json & param_schema, bool is_required) {
-                    auto rule_name = "tool-" + name + "-arg-" + param_name;
-
-                    auto arg_open = "<parameter=" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + ">";
-                    auto arg_close = p.literal("</parameter>");
-                    auto arg_value = p.schema_or_raw_string_until(rule_name + "-schema", param_schema, "</parameter>",
-                        schema_info, Tag::TOOL_ARG_STRING_VALUE, Tag::TOOL_ARG_JSON_VALUE, true);
-
-                    auto arg_rule = p.rule(rule_name,
-                        p.atomic_tag(Tag::TOOL_ARG_OPEN, arg_open)
-                        + arg_value
-                        + p.atomic_tag(Tag::TOOL_ARG_CLOSE, arg_close)
-                        + p.space());
-                    // Enforce required parameters:
-                    // - Non-string types: always enforced via schema
-                    // - String types with maxLength: enforced via length-limited grammar
-                    // - String types without maxLength: not enforced (unlimited p.until doesn't constrain model)
-                    int max_length = param_schema.contains("maxLength") && param_schema["maxLength"].is_number_integer()
-                        ? param_schema["maxLength"].get<int>() : -1;
-                    bool can_enforce = !schema_info.resolves_to_string(param_schema) || max_length > 0;
-                    bool enforce_required = is_required && can_enforce;
-                    args += p.repeat(arg_rule, /* min = */ enforce_required ? 1 : 0, /* max = */ 1);
-                });
-
-                if (allow_additional) {
-                    auto dynamic_name = p.tag(Tag::TOOL_ARG_NAME, p.until(">"));
-                    auto additional_value = additional_has_schema
-                        ? p.schema_or_raw_string_until("seed-oss-additional-" + name, additional_schema, "</parameter>",
-                            schema_info, Tag::TOOL_ARG_STRING_VALUE, Tag::TOOL_ARG_JSON_VALUE, true)
-                        : p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));
-
-                    auto additional_rule = p.rule("seed-parameter-generic-" + name,
-                        p.atomic_tag(Tag::TOOL_ARG_OPEN, "<parameter=" + dynamic_name + ">")
-                        + additional_value
-                        + p.atomic_tag(Tag::TOOL_ARG_CLOSE, p.literal("</parameter>"))
-                        + p.space());
-                    args += p.repeat(additional_rule, 0, -1);
-                }
-
-                tool_choice |= p.rule("tool-" + name,
-                    p.atomic_tag(Tag::TOOL_OPEN, tool_open)
-                    << args
-                    << p.atomic_tag(Tag::TOOL_CLOSE, tool_close));
-            });
-
-            auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
-            auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            // Add p.space() after </seed:tool_call> to consume whitespace between parallel tool calls
-            auto tool_call = p.rule("tool-call",
-                p.literal("<seed:tool_call>")
-                + p.space()
-                + tool_choice
-                + p.space()
-                + p.literal("</seed:tool_call>")
-                + p.space());
-            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, /* min = */ min_calls, /* max = */ max_calls));
+            auto tool_calls = build_generic_tool_calls_peg_parser(
+                p,
+                inputs,
+                "<seed:tool_call>",
+                "</seed:tool_call><seed:tool_call>",
+                "</seed:tool_call>",
+                "<function=",
+                ">",
+                "</function>",
+                "<parameter=",
+                ">",
+                "</parameter>",
+                /* allow_raw_string_param_value= */ true
+            );
 
             auto stop_before = std::vector<std::string> {
                 "\r\n\r\n<seed:tool_call>", "\n\n<seed:tool_call>",
@@ -158,7 +96,7 @@ common_chat_params common_chat_params_init_seed_oss_peg(const common_chat_templa
             // to prevent the grammar from allowing unlimited newlines
             auto post_tool_gap = p.repeat(newline, 0, 2);
             auto pre_calls_gap = p.repeat(newline, 0, -1);
-            if (require_tools) {
+            if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 return reasoning << pre_calls_gap << tool_calls << post_tool_gap << eos;
             }
             return reasoning << content_before << pre_calls_gap << tool_calls << post_tool_gap << eos;

@@ -3,6 +3,7 @@
 // With optional <|inner_prefix|>...<|inner_suffix|> reasoning blocks
 
 #include "chat-parsers-internal.h"
+#include <optional>
 
 common_chat_params common_chat_params_init_apertus_peg(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
@@ -106,44 +107,14 @@ common_chat_params common_chat_params_init_apertus_peg(const common_chat_templat
                     "(<\\|tools_prefix\\|>)[\\s\\S]*"}};
             }
 
-            // Build schema for [{"func_name": {...}}] format
-            // Each tool call is an object with the function name as the key
-            auto schemas = json::array();
-            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
-                schemas.push_back({
-                    {"type", "object"},
-                    {"properties", {
-                        {"name", {
-                            {"type", "string"},
-                            {"const", name},
-                        }},
-                        {"arguments", parameters},
-                    }},
-                    {"required", json::array({"name", "arguments"})},
-                });
-            });
-            auto schema = json{
-                {"type", "array"},
-                {"items", schemas.size() == 1 ? schemas[0] : json{{"anyOf", schemas}}},
-                {"minItems", 1}
-            };
-            if (!inputs.parallel_tool_calls) {
-                schema["maxItems"] = 1;
-            }
+            auto tool_calls = build_json_tool_calls_peg_parser(
+                p,
+                inputs,
+                p.literal("<|tools_prefix|>"),
+                std::nullopt,
+                p.literal("<|tools_suffix|>"));
 
-            // Tool call: <|tools_prefix|> + JSON array with schema + <|tools_suffix|>
-            auto tool_call = p.tag(Tag::TOOL,
-                p.atomic_tag(Tag::TOOL_OPEN, p.literal("<|tools_prefix|>"))
-                << p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-calls", schema))
-                << p.atomic_tag(Tag::TOOL_CLOSE, p.literal("<|tools_suffix|>"))
-            );
-
-            auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
-            auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, min_calls, max_calls));
-
-            bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
-            if (require_tools) {
+            if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 return p.optional(reasoning) << tool_calls;
             }
             return reasoning << p.tag(Tag::CONTENT, p.until("<|tools_prefix|>")) << tool_calls;

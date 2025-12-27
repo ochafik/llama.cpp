@@ -86,12 +86,17 @@ common_chat_params common_chat_params_init_lfm2_peg(const common_chat_template &
         auto parser = build_chat_peg_parser([&](auto & p) {
             using Tag = common_chat_peg_tag;
 
+            static const json id_schema {
+                {"type", "string"},
+            };
             // Tool call: <|tool_call_start|> + JSON array with schema validation + <|tool_call_end|>
             auto tool_calls = p.trigger_rule("tool-call-root", 
-                build_json_args_peg_parser(p, inputs, {{"type", "string"}},
-                    "<|tool_call_start|>[",
-                    ",",
-                    "]<|tool_call_end|>"
+                build_json_tool_calls_peg_parser(p, inputs,
+                    p.literal("<|tool_call_start|>["),
+                    p.literal(","),
+                    p.literal("]<|tool_call_end|>"),
+                    "id",
+                    id_schema
                 ));
 
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {

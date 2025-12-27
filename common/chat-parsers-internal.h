@@ -85,8 +85,54 @@ inline void foreach_function(
     }
 }
 
+enum class ParameterType { Optional, Required, Additional };
+
 // Helper to iterate over function parameters
-inline void foreach_parameter(const json & params, const std::function<void(const std::string &, const json &, bool)> & fn) {
+inline void foreach_parameter(
+    common_chat_peg_builder & p,
+    const json & params,
+    const std::function<void(const std::string &, const common_peg_parser &, const json &, ParameterType)> & fn)
+{
+    if (!params.contains("properties") || !params.at("properties").is_object()) {
+        return;
+    }
+    const auto & props = params.at("properties");
+    std::set<std::string> required;
+    if (params.contains("required") && params.at("required").is_array()) {
+        params.at("required").get_to(required);
+    }
+    for (const auto & [name, prop] : props.items()) {
+        bool is_required = (required.find(name) != required.end());
+        fn(name, p.literal(name), prop, is_required ? ParameterType::Required : ParameterType::Optional);
+    }
+
+    // Default to false for stricter parsing - only allow explicitly defined parameters
+    bool allow_additional = false;
+    // bool additional_has_schema = false;
+    json additional_schema;
+    if (params.contains("additionalProperties")) {
+        const json & additional = params.at("additionalProperties");
+        if (additional.is_boolean()) {
+            allow_additional = additional.get<bool>();
+        } else if (additional.is_object()) {
+            allow_additional = true;
+            // additional_has_schema = true;
+            additional_schema = additional;
+        }
+    }
+    if (allow_additional) {
+        // TODO: generate parser rule for string NOT in existing property names
+        auto additional_name = p.tag(Tag::TOOL_ARG_NAME, p.until(">"));
+        fn("additional", additional_name, additional_schema, ParameterType::Additional);
+    }
+}
+
+// Helper to iterate over function parameters
+inline void foreach_parameter_legacy(const json & function, const std::function<void(const std::string &, const json &, bool)> & fn) {
+    if (!function.contains("parameters") || !function.at("parameters").is_object()) {
+        return;
+    }
+    const auto & params = function.at("parameters");
     if (!params.contains("properties") || !params.at("properties").is_object()) {
         return;
     }
@@ -99,15 +145,7 @@ inline void foreach_parameter(const json & params, const std::function<void(cons
         bool is_required = (required.find(name) != required.end());
         fn(name, prop, is_required);
     }
-}
-
-// Helper to iterate over function parameters
-inline void foreach_parameter_legacy(const json & function, const std::function<void(const std::string &, const json &, bool)> & fn) {
-    if (!function.contains("parameters") || !function.at("parameters").is_object()) {
-        return;
-    }
-    const auto & params = function.at("parameters");
-    foreach_parameter(params, fn);
+    // Note: legacy parses handle additionalProperties themselves (if at all)
 }
 
 // Format time for template contexts
@@ -224,29 +262,112 @@ inline void common_chat_build_peg_grammar(const struct templates_params & inputs
     }
 }
 
-inline common_peg_parser build_json_args_peg_parser(
+inline common_peg_parser build_json_tool_calls_peg_parser(
     common_chat_peg_builder & p,
     const struct templates_params & inputs,
-    const std::optional<json> & id_schema,
-    const std::string & tool_calls_start,
-    const std::string & tool_calls_sep,
-    const std::string & tool_calls_end)
+    const common_peg_parser & tool_calls_start,
+    const std::optional<common_peg_parser> & tool_calls_sep,
+    const common_peg_parser & tool_calls_end,
+    const std::optional<std::string> & id_name = std::nullopt,
+    const std::optional<json> & id_schema = std::nullopt,
+    const std::optional<common_peg_parser> & tool_call_start = std::nullopt,
+    const std::optional<common_peg_parser> & tool_call_name_params_sep = std::nullopt,
+    const std::optional<common_peg_parser> & tool_call_end = std::nullopt
+)
 {
     auto tool_call = p.choice();
     foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
         // Build: {"name":"...","arguments":{...}} or {"name":"...","arguments":{...},"id":"..."}
-        auto obj = p.literal_tag(Tag::TOOL_OPEN, "{")
-            << "\"name\"" << ":" << ("\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"") << ","
-            << "\"arguments\"" << ":" << p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters));
-        if (id_schema) {
-            obj = obj << "," << "\"id\"" << ":" << p.tag(Tag::TOOL_ID, p.schema(p.json(), "tool-" + name + "-id", *id_schema));
+        auto obj = p.tag(Tag::TOOL_OPEN, tool_call_start ? *tool_call_start : p.literal("{\"name\": \""))
+            + p.literal_tag(Tag::TOOL_NAME, name)
+            + (tool_call_name_params_sep ? *tool_call_name_params_sep : p.literal("\", \"arguments\": "))
+            + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters));
+        if ((!!id_schema) != (!!id_name)) {
+            throw std::runtime_error("id_name and id_schema must be provided together or not at all");
         }
-        obj = obj << p.literal_tag(Tag::TOOL_CLOSE, "}");
+        if (id_schema) {
+            obj += ", \"" + p.literal(*id_name) + "\": " + p.tag(Tag::TOOL_ID, p.schema(p.json(), "tool-" + name + "-id", *id_schema));
+        }
+        obj += p.tag(Tag::TOOL_CLOSE, tool_call_end ? *tool_call_end : p.literal("}"));
         tool_call |= p.tag(Tag::TOOL, obj);
     });
 
+    if (tool_calls_sep) {
+        return
+            tool_calls_start
+            + tool_call + p.repeat(*tool_calls_sep << tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
+            + tool_calls_end;
+    }
     return
         tool_calls_start
-        + tool_call + p.repeat(tool_calls_sep << tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
+        + p.repeat(tool_call, 1, inputs.parallel_tool_calls ? -1 : 0)
         + tool_calls_end;
+}
+
+inline common_peg_parser build_generic_tool_calls_peg_parser(
+    common_chat_peg_builder & p,
+    const struct templates_params & inputs,
+    const std::optional<std::string> & tool_calls_start,
+    const std::optional<std::string> & tool_calls_sep,
+    const std::optional<std::string> & tool_calls_end,
+    const std::string & tool_call_start,
+    const std::string & tool_call_name_params_sep,
+    const std::string & tool_call_end,
+    const std::string & param_start,
+    const std::string & param_name_value_sep,
+    const std::string & param_end,
+    bool allow_raw_string_param_value
+)
+{
+    auto tool_call = p.choice();
+    foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto & schema_info) {
+        auto args = p.sequence();
+        foreach_parameter(p, parameters, [&](const std::string & param_name, const common_peg_parser & param_p, const json & param_schema, ParameterType param_type) {
+            auto arg = p.rule("tool-" + name + "-arg-" + param_name, 
+                p.literal_tag(Tag::TOOL_ARG_OPEN, param_start)
+                + p.tag(Tag::TOOL_ARG_NAME, param_p)
+                + param_name_value_sep
+                + (allow_raw_string_param_value
+                    ? p.schema_or_raw_string_until("tool-" + name + "-arg-" + param_name + "-schema", param_schema, param_end,
+                        schema_info, Tag::TOOL_ARG_STRING_VALUE, Tag::TOOL_ARG_JSON_VALUE, true)
+                    : p.schema(p.json(), "tool-" + name + "-arg-" + param_name, param_schema))
+                + p.literal_tag(Tag::TOOL_ARG_CLOSE, param_end));
+            switch (param_type) {
+                case ParameterType::Required:
+                    args += arg;
+                    break;
+                case ParameterType::Optional:
+                    args += p.optional(arg);
+                    break;
+                case ParameterType::Additional:
+                    args += p.repeat(arg, 0, -1);
+                    break;
+                default:
+                    throw std::runtime_error("Unhandled param type");
+            }
+        });
+
+        tool_call |= p.rule("tool-" + name, 
+            p.literal_tag(Tag::TOOL_OPEN, tool_call_start)
+            + p.literal_tag(Tag::TOOL_NAME, name)
+            + tool_call_name_params_sep
+            + p.tag(Tag::TOOL_ARGS, args)
+            + p.literal_tag(Tag::TOOL_CLOSE, tool_call_end));
+    });
+
+    auto opt_tool_calls_args_count =
+        (tool_calls_start ? 1 : 0) +
+        (tool_calls_sep ? 1 : 0) +
+        (tool_calls_end ? 1 : 0);
+    if (opt_tool_calls_args_count != 0 && opt_tool_calls_args_count != 3) {
+        throw std::runtime_error("Must specify tool_calls_start, tool_calls_end and tool_calls_sep together or not at all");
+    }
+    if (tool_calls_start) {
+        return
+            *tool_calls_start
+            + tool_call + p.repeat(*tool_calls_sep << tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
+            + *tool_calls_end;
+    }
+    
+    return tool_call + p.repeat(*tool_calls_sep << tool_call, 0, inputs.parallel_tool_calls ? -1 : 0);
 }
