@@ -295,12 +295,12 @@ inline common_peg_parser build_json_tool_calls_peg_parser(
     if (tool_calls_sep) {
         return
             tool_calls_start
-            + tool_call + p.repeat(*tool_calls_sep << tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
+            + tool_call + p.repeat(*tool_calls_sep << tool_call, 0, inputs.parallel_tool_calls ? -1 : 1)
             + tool_calls_end;
     }
     return
         tool_calls_start
-        + p.repeat(tool_call, 1, inputs.parallel_tool_calls ? -1 : 0)
+        + p.repeat(tool_call, 1, inputs.parallel_tool_calls ? -1 : 1)
         + tool_calls_end;
 }
 
