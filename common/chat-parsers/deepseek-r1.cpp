@@ -89,16 +89,16 @@ common_chat_params common_chat_params_init_deepseek_r1_peg(const common_chat_tem
             }
 
             auto tool_calls = build_json_tool_calls_peg_parser(
-                p, 
-                inputs, 
+                p,
+                inputs,
                 p.literal("<｜tool▁calls▁begin｜>"),
                 std::nullopt,
-                p.literal("<｜tool▁calls▁end>"),
+                p.literal("<｜tool▁calls▁end｜>"),
                 /* id= */ std::nullopt,
                 /* id_schema= */ std::nullopt,
                 p.literal("<｜tool▁call▁begin｜>function<｜tool▁sep｜>"),
                 p.literal("\n```json\n"),
-                p.literal("\n```<｜tool▁call▁end｜>")
+                p.optional(p.literal("\n```<｜tool▁call▁end｜>"))
             ) << consume_eos();
 
             // Content until tool calls marker
