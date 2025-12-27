@@ -111,63 +111,22 @@ common_chat_params common_chat_params_init_glm_4_5_peg(const common_chat_templat
                 data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_call>"});
             }
 
-            auto tool_choice = p.choice();
-            foreach_function(inputs.tools, [&](const auto &, const auto & name, const auto & parameters, const auto & schema_info) {
-                bool allow_additional = false;
-                bool additional_has_schema = false;
-                json additional_schema;
-                if (parameters.contains("additionalProperties")) {
-                    const json & additional = parameters.at("additionalProperties");
-                    if (additional.is_boolean()) {
-                        allow_additional = additional.get<bool>();
-                    } else if (additional.is_object()) {
-                        allow_additional = true;
-                        additional_has_schema = true;
-                        additional_schema = additional;
-                    }
-                }
-
-                auto tool_open = p.space() + "<tool_call>" + p.literal_tag(Tag::TOOL_NAME, name) + "\n";
-                auto tool_close = p.literal("</tool_call>");
-                auto args = p.sequence();
-
-                foreach_parameter(parameters, [&](const auto & param_name, const json & param_schema, bool is_required) {
-                    auto rule_name = "tool-" + name + "-arg-" + param_name;
-                    auto arg_open = "<arg_key>" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + "</arg_key>\n<arg_value>";
-                    auto arg_close = p.literal("</arg_value>") + p.optional(p.literal("\n"));
-                    auto arg_value = p.schema_or_raw_string_until(rule_name + "-schema", param_schema, "</arg_value>",
-                        schema_info, Tag::TOOL_ARG_STRING_VALUE, Tag::TOOL_ARG_JSON_VALUE, false);
-                    auto arg_rule = p.rule(rule_name, p.atomic_tag(Tag::TOOL_ARG_OPEN, arg_open) + arg_value + p.atomic_tag(Tag::TOOL_ARG_CLOSE, arg_close));
-
-                    int max_length = param_schema.contains("maxLength") && param_schema["maxLength"].is_number_integer()
-                        ? param_schema["maxLength"].get<int>() : -1;
-                    bool can_enforce = !schema_info.resolves_to_string(param_schema) || max_length > 0;
-                    bool enforce_required = is_required && can_enforce;
-                    args += p.repeat(arg_rule, enforce_required ? 1 : 0, 1);
-                });
-
-                if (allow_additional) {
-                    auto dynamic_key = p.literal("<arg_key>") + p.tag(Tag::TOOL_ARG_NAME, p.until("</arg_key>")) + p.literal("</arg_key>\n<arg_value>");
-                    auto dynamic_close = p.literal("</arg_value>") + p.optional(p.literal("\n"));
-                    auto additional_value = additional_has_schema
-                        ? p.schema_or_raw_string_until("glm-additional-" + name, additional_schema, "</arg_value>",
-                            schema_info, Tag::TOOL_ARG_STRING_VALUE, Tag::TOOL_ARG_JSON_VALUE, false)
-                        : p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</arg_value>"));
-                    auto additional_rule = p.rule("tool-" + name + "-arg-generic",
-                        p.atomic_tag(Tag::TOOL_ARG_OPEN, dynamic_key) + additional_value + p.atomic_tag(Tag::TOOL_ARG_CLOSE, dynamic_close));
-                    args += p.repeat(additional_rule, 0, -1);
-                }
-
-                tool_choice |= p.rule("tool-" + name, p.atomic_tag(Tag::TOOL_OPEN, tool_open) + args + p.atomic_tag(Tag::TOOL_CLOSE, tool_close) + p.space());
-            });
-
-            auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
-            auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_choice, min_calls, max_calls));
-
-            bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
-
-            if (require_tools) {
+            auto tool_calls = build_generic_tool_calls_peg_parser(
+                p,
+                inputs,
+                std::nullopt,
+                std::nullopt,
+                std::nullopt,
+                "<tool_call>",
+                "\n",
+                "</tool_call>",
+                "<arg_key>",
+                "</arg_key>\n<arg_value>",
+                "</arg_value>",
+                /* allow_raw_string_param_value= */ true
+            );
+            
+            if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 // thinking? tools
                 return thinking + tool_calls;
             }

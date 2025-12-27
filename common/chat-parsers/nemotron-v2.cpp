@@ -76,7 +76,11 @@ common_chat_params common_chat_params_init_nemotron_v2_peg(const common_chat_tem
             }
 
             auto tool_calls = p.trigger_rule("tool-call-root",
-                build_json_args_peg_parser(p, inputs, std::nullopt, "<TOOLCALL>[", ",", "]</TOOLCALL>"));
+                build_json_tool_calls_peg_parser(p, inputs, 
+                    p.literal("<TOOLCALL>["),
+                    p.literal(","),
+                    p.literal("]</TOOLCALL>")
+                ));
 
             if (require_tools) {
                 return reasoning << tool_calls;

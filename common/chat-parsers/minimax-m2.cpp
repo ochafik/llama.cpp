@@ -33,9 +33,8 @@ common_chat_params common_chat_params_init_minimax_m2_peg(const common_chat_temp
 
     data.additional_stops.push_back("[e~[");
 
-    auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
+    auto has_tools = inputs.tools.is_array() && !inputs.tools.empty() && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE;
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
-    auto include_grammar = true;
 
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
@@ -58,96 +57,33 @@ common_chat_params common_chat_params_init_minimax_m2_peg(const common_chat_temp
 
         // Response format parser
         if (inputs.json_schema.is_object() && !inputs.json_schema.empty()) {
-            return reasoning << p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema));
+            return reasoning
+                << p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema))
+                << consume_footer();
         }
 
         // Tool call parser
-        if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+        if (has_tools) {
             if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<minimax:tool_call>"});
             }
 
-            auto invoke_choice = p.choice();
-            foreach_function(inputs.tools, [&](const auto &, const auto & name, const auto & parameters, const auto & schema_info) {
-                // Format: <invoke name="function_name"><parameter name="key">value</parameter></invoke>
-                auto tool_open = "<invoke name=\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\">" + p.space();
-                auto tool_close = p.space() + p.literal("</invoke>") + p.space();
-
-                auto parameter_choice = p.choice();
-                bool has_parameter_rules = false;
-
-                auto arg_close = p.literal("</parameter>") + p.space();
-
-                foreach_parameter(parameters, [&](const auto & param_name, const json & param_schema, bool /*is_required*/) {
-                    auto rule_name = "tool-" + name + "-arg-" + param_name;
-
-                    auto arg_open = "<parameter name=\"" + p.literal_tag(Tag::TOOL_ARG_NAME, param_name) + "\">";
-                    auto arg_value = p.schema_or_raw_string_until(rule_name + "-schema", param_schema, "</parameter>",
-                        schema_info, Tag::TOOL_ARG_STRING_VALUE, Tag::TOOL_ARG_JSON_VALUE, false);
-
-                    auto arg_rule = p.rule(rule_name,
-                        p.atomic_tag(Tag::TOOL_ARG_OPEN, arg_open)
-                        + arg_value
-                        + p.atomic_tag(Tag::TOOL_ARG_CLOSE, arg_close));
-
-                    // Add each parameter as a direct alternative in the choice
-                    // Don't wrap in repeat(0,1) - that makes each alternative match empty,
-                    // causing the choice to always pick the first alternative
-                    parameter_choice |= arg_rule;
-                    has_parameter_rules = true;
-                });
-
-                // By JSON Schema spec, missing additionalProperties defaults to true
-                bool allow_additional = false;
-                bool additional_has_schema = false;
-                json additional_schema;
-                if (parameters.contains("additionalProperties")) {
-                    const json & additional = parameters.at("additionalProperties");
-                    if (additional.is_boolean()) {
-                        allow_additional = additional.get<bool>();
-                    } else if (additional.is_object()) {
-                        allow_additional = true;
-                        additional_has_schema = true;
-                        additional_schema = additional;
-                    }
-                }
-
-                if (allow_additional || !has_parameter_rules) {
-                    auto dynamic_key = "<parameter name=\"" + p.tag(Tag::TOOL_ARG_NAME, p.until("\"")) + "\">";
-                    auto additional_value = additional_has_schema
-                        ? p.schema_or_raw_string_until("tool-" + name + "-arg-generic", additional_schema, "</parameter>",
-                            schema_info, Tag::TOOL_ARG_STRING_VALUE, Tag::TOOL_ARG_JSON_VALUE, false)
-                        : p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));
-
-                    auto additional_rule = p.rule("tool-" + name + "-arg-generic",
-                        p.atomic_tag(Tag::TOOL_ARG_OPEN, dynamic_key)
-                        + additional_value
-                        + p.atomic_tag(Tag::TOOL_ARG_CLOSE, arg_close));
-                    parameter_choice |= additional_rule;
-                    has_parameter_rules = true;
-                }
-
-                common_peg_parser args = has_parameter_rules ? p.repeat(parameter_choice, 0, -1) : p.eps();
-
-                // Add p.space() after TOOL tag to consume whitespace between parallel tool calls
-                invoke_choice |= p.rule("tool-" + name, p.tag(Tag::TOOL,
-                    p.atomic_tag(Tag::TOOL_OPEN, tool_open)
-                    + args
-                    + p.atomic_tag(Tag::TOOL_CLOSE, tool_close)) + p.space());
-            });
-
-            auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
-            auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            auto tool_block = p.rule("tool-call-block",
-                p.literal("<minimax:tool_call>")
-                + p.space()
-                + p.repeat(invoke_choice, /* min = */ 1, /* max = */ -1)
-                + p.literal("</minimax:tool_call>")
-                + p.space());
-            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_block, /* min = */ min_calls, /* max = */ max_calls));
-
-            bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
-            if (require_tools) {
+            auto tool_calls = build_generic_tool_calls_peg_parser(
+                p,
+                inputs,
+                std::nullopt,
+                std::nullopt,
+                std::nullopt,
+                "<invoke name=\"",
+                "\">",
+                "</invoke>",
+                "<parameter name=\"",
+                "\">",
+                "</parameter>",
+                /* allow_raw_string_param_value= */ true
+            );
+            
+            if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 return reasoning << tool_calls;
             }
 
@@ -176,7 +112,6 @@ common_chat_params common_chat_params_init_minimax_m2_peg(const common_chat_temp
         }
 
         // Content only parser
-        include_grammar = false;
         auto stop_only = std::vector<std::string> {
             "\n<SPECIAL_12>", "<SPECIAL_12>",
             "\n<minimax:tool_call>", "<minimax:tool_call>",

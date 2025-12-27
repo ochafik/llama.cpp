@@ -59,106 +59,23 @@ common_chat_params common_chat_params_init_qwen3_coder_xml_peg(const common_chat
             if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_call>"});
             }
-            auto parameter_name = p.choice();
-            parameter_name |= p.tag(Tag::TOOL_ARG_NAME, p.until(">\r\n"));
-            parameter_name |= p.tag(Tag::TOOL_ARG_NAME, p.until(">\n"));
-            parameter_name |= p.tag(Tag::TOOL_ARG_NAME, p.until(">"));
-            auto parameter_terminator = p.choice({
-                p.literal(">\r\n"),
-                p.literal(">\n"),
-                p.literal(">"),
-            });
 
-            auto tool_choice = p.choice();
-            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto & schema_info) {
-                // Default to false for stricter parsing - only allow explicitly defined parameters
-                bool allow_additional = false;
-                bool additional_has_schema = false;
-                json additional_schema;
-                if (parameters.contains("additionalProperties")) {
-                    const json & additional = parameters.at("additionalProperties");
-                    if (additional.is_boolean()) {
-                        allow_additional = additional.get<bool>();
-                    } else if (additional.is_object()) {
-                        allow_additional = true;
-                        additional_has_schema = true;
-                        additional_schema = additional;
-                    }
-                }
-
-                auto args = p.sequence();
-                foreach_parameter(parameters, [&](const std::string & param_name, const json & param_schema, bool is_required) {
-                    auto parameter_value = p.schema_or_raw_string_until("qwen-param-" + name + "-" + param_name, param_schema, "</parameter>",
-                        schema_info, Tag::TOOL_ARG_STRING_VALUE, Tag::TOOL_ARG_JSON_VALUE, true);
-
-                    auto arg_rule = p.rule("qwen-parameter-" + name + "-" + param_name,
-                        p.atomic_tag(Tag::TOOL_ARG_OPEN,
-                            p.literal("<parameter=")
-                            + p.literal_tag(Tag::TOOL_ARG_NAME, param_name)
-                            + parameter_terminator)
-                        + parameter_value
-                        + p.atomic_tag(Tag::TOOL_ARG_CLOSE, p.literal("</parameter>"))
-                        + p.space()  // Allow whitespace after </parameter>
-                    );
-
-                    // Enforce required parameters using Seed-OSS pattern (Finding 11):
-                    // - Non-string types: always enforced via schema
-                    // - String types with maxLength: enforced via length-limited grammar
-                    // - String types without maxLength: not enforced (unlimited p.until() doesn't constrain model)
-                    int max_length = param_schema.contains("maxLength") && param_schema["maxLength"].is_number_integer()
-                        ? param_schema["maxLength"].get<int>() : -1;
-                    bool can_enforce = !schema_info.resolves_to_string(param_schema) || max_length > 0;
-                    bool enforce_required = is_required && can_enforce;
-                    args += p.repeat(arg_rule, /* min = */ enforce_required ? 1 : 0, /* max = */ 1);
-                });
-
-                if (allow_additional) {
-                    auto additional_value = additional_has_schema
-                        ? p.schema_or_raw_string_until("qwen-param-" + name + "-additional", additional_schema, "</parameter>",
-                            schema_info, Tag::TOOL_ARG_STRING_VALUE, Tag::TOOL_ARG_JSON_VALUE, true)
-                        : p.tag(Tag::TOOL_ARG_STRING_VALUE, p.until("</parameter>"));
-
-                    auto additional_rule = p.rule("qwen-parameter-generic-" + name,
-                        p.atomic_tag(Tag::TOOL_ARG_OPEN,
-                            p.literal("<parameter=")
-                            + parameter_name
-                            + parameter_terminator)
-                        + additional_value
-                        + p.atomic_tag(Tag::TOOL_ARG_CLOSE, p.literal("</parameter>"))
-                        + p.space()  // Allow whitespace after </parameter>
-                    );
-
-                    args += p.repeat(additional_rule, 0, -1);
-                }
-
-                // Format: <function=name><parameter=key>value</parameter></function>
-                // Allow optional whitespace/indentation for flexibility
-                tool_choice |= p.rule("tool-" + name,
-                    p.atomic_tag(Tag::TOOL_OPEN, p.literal("<function=") + p.literal_tag(Tag::TOOL_NAME, name) + p.literal(">"))
-                    + p.space()  // Allow whitespace after <function=name>
-                    + args
-                    + p.space()  // Allow whitespace before </function>
-                    + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("</function>"))
-                );
-            });
-
-            auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
-            auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            // Format:<tool_call>\n<function=name>...</function>\n</tool_call>
-            // Add p.space() to consume whitespace between parallel tool calls
-            auto tool_call = p.rule("tool-call",
-                p.space()
-                + "<tool_call>"
-                + p.space()
-                + tool_choice
-                + p.space()
-                + "</tool_call>"
-                + p.space()
+            auto tool_calls = build_generic_tool_calls_peg_parser(
+                p,
+                inputs,
+                "<tool_call>",
+                "</tool_call><tool_call>",
+                "</tool_call>",
+                "<function=",
+                ">",
+                "</function>",
+                "<parameter=",
+                ">",
+                "</parameter>",
+                /* allow_raw_string_param_value= */ true
             );
-            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, /* min = */ min_calls, /* max = */ max_calls));
 
-            bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
-            if (require_tools) {
+            if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 return tool_calls + consume_end_block();
             }
             return p.optional(content_before_tool) + tool_calls + consume_end_block();

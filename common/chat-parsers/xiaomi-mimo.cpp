@@ -34,7 +34,11 @@ common_chat_params common_chat_params_init_xiaomi_mimo_peg(const common_chat_tem
             }
 
             auto tool_calls = p.trigger_rule("tool-call-root",
-                build_json_args_peg_parser(p, inputs, std::nullopt, "<tool_call>", "</tool_call><tool_call>", "</tool_call>"));
+                build_json_tool_calls_peg_parser(p, inputs, 
+                    p.literal("<tool_call>"),
+                    p.literal("</tool_call><tool_call>"),
+                    p.literal("</tool_call>")
+                ));
 
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 return tool_calls;

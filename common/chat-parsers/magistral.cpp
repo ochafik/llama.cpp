@@ -38,12 +38,19 @@ common_chat_params common_chat_params_init_magistral_peg(const common_chat_templ
                 data.preserved_tokens.push_back("[TOOL_CALLS]");
             }
 
+            static const json id_schema {
+                {"type", "string"},
+                {"pattern", "^[a-zA-Z0-9]{9}$"},  // Enforce ID format (exactly 9 alphanumeric)
+            };
             // Tool call parser: content followed by [TOOL_CALLS] and JSON array
             auto tool_calls = p.trigger_rule("tool-call-root",
-                build_json_args_peg_parser(p, inputs, json {
-                    {"type", "string"},
-                    {"pattern", "^[a-zA-Z0-9]{9}$"},  // Enforce ID format (exactly 9 alphanumeric)
-                }, "[TOOL_CALLS][", ",", "]"));
+                build_json_tool_calls_peg_parser(p, inputs, 
+                    p.literal("[TOOL_CALLS]["),
+                    p.literal(","),
+                    p.literal("]"),
+                    "id",
+                    id_schema
+                ));
 
             if (require_tools) {
                 return reasoning << tool_calls;

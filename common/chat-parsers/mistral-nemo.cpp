@@ -24,12 +24,19 @@ common_chat_params common_chat_params_init_mistral_nemo_peg(const common_chat_te
                 data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "[TOOL_CALLS]"});
             }
 
-            // Tool call parser: [TOOL_CALLS] followed by a JSON array of tool calls
+            static const json id_schema {
+                {"type", "string"},
+                {"pattern", "^[a-zA-Z0-9]{9}$"},  // Enforce ID format (exactly 9 alphanumeric)
+            };
+            // Tool call parser: content followed by [TOOL_CALLS] and JSON array
             auto tool_calls = p.trigger_rule("tool-call-root",
-                build_json_args_peg_parser(p, inputs, json {
-                    {"type", "string"},
-                    {"pattern", "^[a-zA-Z0-9]{9}$"},  // Enforce ID format (exactly 9 alphanumeric)
-                }, "[TOOL_CALLS][", ",", "]"));
+                build_json_tool_calls_peg_parser(p, inputs, 
+                    p.literal("[TOOL_CALLS]["),
+                    p.literal(","),
+                    p.literal("]"),
+                    "id",
+                    id_schema
+                ));
 
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 return tool_calls;

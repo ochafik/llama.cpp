@@ -19,12 +19,13 @@ common_chat_params common_chat_params_init_generic_peg(const common_chat_templat
         // The generic format uses JSON with specific structure
         // {"tool_calls": [...]} or {"response": "..."}
         if (has_tools) {
+            static const json id_schema {
+                {"type", "string"},
+                {"minLength", 4},
+            };
             // Tool call: <|tool_call_start|> + JSON array with schema validation + <|tool_call_end|>
             auto tool_calls = p.trigger_rule("tool-call-root", 
-                build_json_args_peg_parser(p, inputs, json {
-                    {"type", "string"},
-                    {"minLength", 4},
-                }, "[", ",", "]"));
+                build_json_tool_calls_peg_parser(p, inputs, p.literal("["), p.literal(","), p.literal("]"), "id", id_schema));
 
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 return "{" << p.literal("\"tool_calls\"") << ":" << tool_calls << "}";
