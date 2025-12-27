@@ -127,17 +127,17 @@ common_chat_params common_chat_params_init_glm_4_5_peg(const common_chat_templat
             );
             
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
-                // thinking? tools
-                return thinking + tool_calls;
+                // thinking? space? tools
+                return thinking + p.space() + tool_calls;
             }
 
-            // thinking? content? tools content?
+            // thinking? content? space? tools content?
             auto content_before = p.optional(
                 p.optional(p.literal("\n"))
                 + p.tag(Tag::CONTENT, p.until_one_of({"\n<tool_call>", "<tool_call>"}))
             );
             auto content_after = p.optional(p.tag(Tag::CONTENT, p.rest()));
-            return thinking + content_before + tool_calls + content_after;
+            return thinking + content_before + p.space() + tool_calls + content_after;
         }
 
         // No tools: thinking? content
