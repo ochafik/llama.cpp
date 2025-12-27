@@ -117,11 +117,10 @@ common_chat_params common_chat_params_init_command_r7b_peg(const common_chat_tem
                     << "\"parameters\"" << ":" << p.tag(Tag::TOOL_ARGS, args)
                     << p.literal_tag(Tag::TOOL_CLOSE, "}");
             };
-            auto tool_calls = p.trigger_rule("tool-call-root",
-                build_json_tool_calls_peg_parser(p, inputs, format));
+            auto tool_calls = build_json_tool_calls_peg_parser(p, inputs, format);
 
             if (require_tools) {
-                return reasoning << response_block << tool_calls << p.optional(p.rest());
+                return reasoning << tool_calls << p.optional(p.rest());
             }
 
             return reasoning << response_block << tool_calls << p.optional(p.rest());

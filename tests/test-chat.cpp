@@ -4508,7 +4508,9 @@ static const std::vector<template_capabilities> & get_template_capabilities() {
 
         // Templates without thinking support
         {"Generic", "chatml",
-            COMMON_CHAT_FORMAT_GENERIC, ThinkingSupport::No},
+            COMMON_CHAT_FORMAT_GENERIC, ThinkingSupport::No,
+            nullptr, nullptr, Skip::No, ReasoningRequiresTools::No,
+            ToolsEmitContentWithCalls::No},  // Generic format: EITHER tool_calls OR response, not both
         {"Firefunction V2", "models/templates/fireworks-ai-llama-3-firefunction-v2.jinja",
             // Note: template uses `functions` not `tools`, so minja's supports_tools detection returns false
             COMMON_CHAT_FORMAT_FIREFUNCTION_V2, ThinkingSupport::No},

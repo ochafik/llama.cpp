@@ -1,8 +1,6 @@
 // Generic tool call format (fallback)
-// Format: JSON with tool_call/tool_calls or response field
-// Single: {"tool_call": {"name": "func", "arguments": {...}}}
-// Multiple: {"tool_calls": [{"name": "func", "arguments": {...}}]}
-// Response: {"response": "..."}
+// Format: {"tool_calls": [...]} OR {"response": "..."} (not both together)
+// Or plain text response without tools
 
 #include "chat-parsers-internal.h"
 #include "chat.h"
@@ -12,12 +10,10 @@ common_chat_params common_chat_params_init_generic_peg(const common_chat_templat
 
     // Build PEG parser for generic JSON format
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty() && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE;
-    
+
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
 
-        // The generic format uses JSON with specific structure
-        // {"tool_calls": [...]} or {"response": "..."}
         if (has_tools) {
             static const json id_schema {
                 {"type", "string"},
@@ -25,30 +21,34 @@ common_chat_params common_chat_params_init_generic_peg(const common_chat_templat
             };
             // Tool call: [{"name": "...", "arguments": {...}, "id": "..."}]
             json_tool_call_format format;
-            format.tool_calls_start = p.literal("[");
-            format.tool_calls_sep = p.literal(",");
-            format.tool_calls_end = p.literal("]");
-            // Generic format with ID at end: {"name": "...", "arguments": {...}, "id": "..."}
+            format.tool_calls_start = p.literal("[") + p.space();
+            format.tool_calls_sep = p.space() + p.literal(",") + p.space();
+            format.tool_calls_end = p.space() + p.literal("]");
+            // Generic format with optional ID at end: {"name": "...", "arguments": {...}, "id": "..."}
             format.tool_call = [&](auto & p, const auto & name, const auto & args) {
                 using Tag = common_chat_peg_tag;
+                // Make ID field optional since some models don't generate it
+                auto id_field = p.optional(
+                    p.literal(",") << "\"id\"" << ":" << p.tag(Tag::TOOL_ID, p.schema(p.json(), "tool-id", id_schema))
+                );
                 return p.sequence()
                     + p.literal_tag(Tag::TOOL_OPEN, "{")
                     << "\"name\"" << ":" << ("\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"") << ","
-                    << "\"arguments\"" << ":" << p.tag(Tag::TOOL_ARGS, args) << ","
-                    << "\"id\"" << ":" << p.tag(Tag::TOOL_ID, p.schema(p.json(), "tool-id", id_schema))
+                    << "\"arguments\"" << ":" << p.tag(Tag::TOOL_ARGS, args)
+                    << id_field
                     << p.literal_tag(Tag::TOOL_CLOSE, "}");
             };
             auto tool_calls = p.trigger_rule("tool-call-root",
-                build_json_tool_calls_peg_parser(p, inputs, format));
+                p.literal("{") << "\"tool_calls\"" << ":" << build_json_tool_calls_peg_parser(p, inputs, format) << "}");
 
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
-                return "{" << p.literal("\"tool_calls\"") << ":" << tool_calls << "}";
+                // Only tool calls allowed when required
+                return tool_calls;
             }
 
-            return "{" << (p.choice()
-                | (p.literal("\"tool_calls\"") << ":" << tool_calls)
-                | (p.literal("\"response\"") << ":" << p.schema(p.json(), "response-format", inputs.json_schema.is_null() ? json {{"type", "string"}} : inputs.json_schema))
-            ) << "}";
+            // Allow EITHER tool_calls OR response, but NOT both together
+            auto response = p.literal("{") << "\"response\"" << ":" << p.tag(Tag::CONTENT, p.schema(p.json(), "response", json {{"type", "string"}})) << "}";
+            return tool_calls | response;
         }
 
         // json_schema without tools - parse directly without {response: ...} wrapper
@@ -64,12 +64,14 @@ common_chat_params common_chat_params_init_generic_peg(const common_chat_templat
     if (has_tools) {
         auto tweaked_messages = common_chat_template::add_system(
             inputs.messages,
-            "Respond in JSON format, either with `tool_call` (a request to call tools) or with `response` reply to the user's request");
+            "Respond in JSON format, either {\"tool_calls\": [...]} or {\"response\": \"...\"}");
         data.prompt = apply(tmpl, inputs, /* messages_override= */ tweaked_messages);
     } else {
         data.prompt = apply(tmpl, inputs);
     }
     data.format = COMMON_CHAT_FORMAT_GENERIC;
+    // ChatML-style end token (used by many templates when Generic fallback is triggered)
+    data.additional_stops.push_back("<|im_end|>");
     common_chat_build_peg_grammar(inputs, parser, data);
 
     return data;
