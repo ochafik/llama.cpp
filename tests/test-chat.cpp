@@ -20,6 +20,7 @@
 #include <iostream>
 #include <sstream>
 #include <functional>
+#include <stdexcept>
 #include <string>
 
 using json = nlohmann::ordered_json;
@@ -112,12 +113,13 @@ bool equals(const common_chat_msg & expected, const common_chat_msg & actual) {
     return normalize(expected) == normalize(actual);
 }
 
-template <class T> static void assert_equals(const T & expected, const T & actual) {
+template <class T> static void assert_equals(const T & expected, const T & actual, const std::string & desc = "") {
     if (!equals(expected, actual)) {
-        std::cerr << "Expected: " << expected << std::endl;
-        std::cerr << "Actual: " << actual << std::endl;
-        std::cerr << std::flush;
-        throw std::runtime_error("Test failed");
+        std::ostringstream ss;
+        ss << "Expected: " << expected << std::endl;
+        ss << "Actual: " << actual << std::endl;
+        ss << std::flush;
+        throw std::runtime_error(desc.empty() ? "Test failed" : "Test failed (" + desc + "):\n" + ss.str());
     }
 }
 
@@ -4416,8 +4418,8 @@ enum class SupportsReasoningOnly { No, Yes };
 enum class ToolCallsHaveIds { No, Yes };
 
 struct template_capabilities {
-    const char * name;
-    const char * jinja_path;
+    std::string name;
+    std::string jinja_path;
     common_chat_format legacy_format;
     common_chat_format experimental_format;
     ThinkingSupport supports_thinking = ThinkingSupport::No;
@@ -4487,7 +4489,7 @@ static const std::vector<template_capabilities> & get_template_capabilities() {
             ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::No, SupportsReasoningOnly::No},
         {"Nemotron V2", "models/templates/NVIDIA-Nemotron-Nano-v2.jinja",
-            COMMON_CHAT_FORMAT_NEMOTRON_V2, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::No,
+            COMMON_CHAT_FORMAT_NEMOTRON_V2, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::Yes,
             nullptr, nullptr, Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::Yes, SupportsReasoningOnly::Yes},
@@ -4497,7 +4499,7 @@ static const std::vector<template_capabilities> & get_template_capabilities() {
             ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::No, SupportsReasoningOnly::No},
         {"Nemotron V3 (Unsloth)", "models/templates/unsloth-Nemotron-3-Nano.jinja",
-            COMMON_CHAT_FORMAT_NEMOTRON_V3, COMMON_CHAT_FORMAT_PEG_NATIVE, ThinkingSupport::Yes,
+            COMMON_CHAT_FORMAT_NEMOTRON_V3, COMMON_CHAT_FORMAT_PEG_CONSTRUCTED, ThinkingSupport::Yes,
             "<think>", "</think>", Skip::No, ReasoningRequiresTools::No,
             ToolsEmitContentWithCalls::Yes, InjectReasoningAfterFormat::No,
             SupportsDisableThinking::No, SupportsReasoningOnly::No},
@@ -4566,148 +4568,24 @@ static const std::vector<template_capabilities> & get_template_capabilities() {
     return templates;
 }
 
-// Cross-check declared capabilities against minja's detected capabilities.
-// This ensures our test configuration stays in sync with what minja detects from templates.
-// Note: minja's detection is heuristic (checks if output differs with capability enabled).
-// Our declarations may intentionally differ if we know the template's actual behavior.
-static bool verify_template_capabilities(const std::vector<template_capabilities> & templates) {
-    printf("[%s]\n", __func__);
-    size_t checked = 0;
-    size_t tools_mismatches = 0;
-    size_t thinking_mismatches = 0;
+static void test_format_detection_with_tools(chat_parser_impl impl, const template_capabilities & info, const common_chat_templates_ptr & tmpls) {
+    // Apply template with tools and experimental_new_parsers
+    common_chat_templates_inputs inputs;
+    inputs.messages = {message_user};
+    inputs.tools = {python_tool};
+    inputs.experimental_new_parsers = impl == chat_parser_impl::EXPERIMENTAL;
 
-    const char * template_filter = std::getenv("NEEDLE_TEMPLATE_FILTER");
-    
-    for (const auto & info : templates) {
-        if (template_filter && std::string(info.name) != template_filter) {
-            continue;
-        }
-        auto tmpls = read_templates(info.jinja_path);
-        if (!tmpls) {
-            continue;
-        }
+    common_chat_params params = common_chat_templates_apply(tmpls.get(), inputs);
 
-        // Cross-check thinking support
-        // Note: minja checks if enable_thinking changes output, which may differ from
-        // whether the template has explicit thinking tags we can parse.
-        bool minja_thinking = common_chat_templates_support_enable_thinking(tmpls.get());
-        bool our_thinking = info.supports_thinking == ThinkingSupport::Yes;
-        if (minja_thinking != our_thinking) {
-            if (g_verbose >= 1) {
-                printf("  " ANSI_COLOR_YELLOW "NOTE" ANSI_COLOR_RESET " %s: minja.supports_thinking=%s, declared=%s\n",
-                       info.name, minja_thinking ? "yes" : "no", our_thinking ? "yes" : "no");
-            }
-            thinking_mismatches++;
-        }
+    auto expected_format = impl == chat_parser_impl::LEGACY ? info.legacy_format : info.experimental_format;
+    assert_equals(
+        common_chat_format_name(expected_format),
+        common_chat_format_name(params.format));
 
-        // TODO(ochafik): Cross-check tool_calls_have_ids with minja's supports_tool_call_id
-        // once minja exposes this capability (see https://github.com/ochafik/minja/pull/20)
-
-        checked++;
+    if (impl == chat_parser_impl::EXPERIMENTAL) {
+        assert_equals(false, params.grammar.empty());
+        assert_equals(false, params.parser.empty());
     }
-
-    // Tools mismatch is a hard failure - should always match
-    if (tools_mismatches > 0) {
-        printf("  " ANSI_COLOR_RED "FAIL" ANSI_COLOR_RESET " %zu tools capability mismatches\n", tools_mismatches);
-        return false;
-    }
-
-    // Thinking mismatches are informational - minja detection is heuristic
-    if (thinking_mismatches > 0 && g_verbose >= 1) {
-        printf("  " ANSI_COLOR_YELLOW "INFO" ANSI_COLOR_RESET " %zu thinking capability differences (may be intentional)\n", thinking_mismatches);
-    }
-
-    printf("  " ANSI_COLOR_GREEN "OK" ANSI_COLOR_RESET " (%zu templates verified against minja)\n", checked);
-    return true;
-}
-
-// Verify that when experimental_new_parsers is enabled with tools, we get the expected format
-// (not CONTENT_ONLY) and that grammar + parser are properly generated.
-// This catches Pattern 1 failures: templates detected as Content-only when they should have
-// a proper tool-calling format.
-static bool test_format_detection_with_tools(chat_parser_impl impl) {
-    printf("[%s]\n", __func__);
-
-    const char * template_filter = std::getenv("NEEDLE_TEMPLATE_FILTER");
-    const auto & templates = get_template_capabilities();
-
-    size_t tested = 0;
-    size_t passed = 0;
-    size_t skipped = 0;
-
-    for (const auto & info : templates) {
-        if (template_filter && std::string(info.name) != template_filter) {
-            continue;
-        }
-
-        auto tmpls = read_templates(info.jinja_path);
-        if (!tmpls) {
-            if (g_verbose >= 1) {
-                printf("  " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " %s (template not found)\n", info.name);
-            }
-            skipped++;
-            continue;
-        }
-
-        tested++;
-
-        // Apply template with tools and experimental_new_parsers
-        common_chat_templates_inputs inputs;
-        inputs.messages = {message_user};
-        inputs.tools = {python_tool};
-        inputs.tool_choice = COMMON_CHAT_TOOL_CHOICE_AUTO;
-        inputs.parallel_tool_calls = false;
-        inputs.experimental_new_parsers = true;
-
-        common_chat_params params;
-        try {
-            params = common_chat_templates_apply(tmpls.get(), inputs);
-        } catch (const std::exception & e) {
-            printf("  " ANSI_COLOR_RED "FAIL" ANSI_COLOR_RESET " %s: apply threw: %s\n", info.name, e.what());
-            continue;
-        }
-
-        bool format_ok = true;
-        bool grammar_ok = true;
-        bool parser_ok = true;
-
-        // Check 1: Format should match expected (not CONTENT_ONLY)
-        auto expected_format = impl == chat_parser_impl::LEGACY ? info.legacy_format : info.experimental_format;
-        if (params.format != expected_format) {
-            if (params.format == COMMON_CHAT_FORMAT_CONTENT_ONLY) {
-                printf("  " ANSI_COLOR_RED "FAIL" ANSI_COLOR_RESET " %s: format is CONTENT_ONLY, expected %d\n",
-                       info.name, static_cast<int>(expected_format));
-            } else if (g_verbose >= 1) {
-                printf("  " ANSI_COLOR_YELLOW "NOTE" ANSI_COLOR_RESET " %s: format=%d, expected=%d\n",
-                       info.name, static_cast<int>(params.format), static_cast<int>(expected_format));
-            }
-            // Only fail on CONTENT_ONLY, other format differences may be intentional
-            format_ok = (params.format != COMMON_CHAT_FORMAT_CONTENT_ONLY);
-        }
-
-        // Check 2: Grammar should be non-empty when tools are provided
-        if (params.grammar.empty()) {
-            printf("  " ANSI_COLOR_RED "FAIL" ANSI_COLOR_RESET " %s: grammar is empty with tools\n", info.name);
-            grammar_ok = false;
-        }
-
-        // Check 3: Parser should be non-empty when experimental_new_parsers is enabled
-        if (params.parser.empty()) {
-            printf("  " ANSI_COLOR_RED "FAIL" ANSI_COLOR_RESET " %s: parser is empty with experimental_new_parsers\n", info.name);
-            parser_ok = false;
-        }
-
-        if (format_ok && grammar_ok && parser_ok) {
-            passed++;
-            if (g_verbose >= 1) {
-                printf("  " ANSI_COLOR_GREEN "PASS" ANSI_COLOR_RESET " %s (format=%d, grammar=%zu bytes, parser=%zu bytes)\n",
-                       info.name, static_cast<int>(params.format), params.grammar.size(), params.parser.size());
-            }
-        }
-    }
-
-    printf("  Results: %zu/%zu passed, %zu skipped\n", passed, tested, skipped);
-    return passed == tested;
 }
 
 static const char * tool_choice_name(common_chat_tool_choice choice) {
@@ -4896,14 +4774,14 @@ static bool test_required_tool_rejects_content() {
     size_t skipped = 0;
 
     for (const auto & info : templates) {
-        if (template_filter && std::string(info.name) != template_filter) {
+        if (template_filter && std::string(info.name.c_str()) != template_filter) {
             continue;
         }
 
         auto tmpls = read_templates(info.jinja_path);
         if (!tmpls) {
             if (g_verbose >= 1) {
-                printf("  " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " %s (template not found)\n", info.name);
+                printf("  " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " %s (template not found)\n", info.name.c_str());
             }
             skipped++;
             continue;
@@ -4950,7 +4828,7 @@ static bool test_required_tool_rejects_content() {
             } catch (const std::exception & e) {
                 if (g_verbose >= 0) {
                     printf("  " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " %s [%s]: init_delta failed: %s\n",
-                           info.name, scenario.name, e.what());
+                           info.name.c_str(), scenario.name, e.what());
                 }
                 continue;
             }
@@ -4958,7 +4836,7 @@ static bool test_required_tool_rejects_content() {
             if (data.params.parser.empty()) {
                 if (g_verbose >= 1) {
                     printf("  " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " %s [%s]: no PEG parser\n",
-                           info.name, scenario.name);
+                           info.name.c_str(), scenario.name);
                 }
                 continue;
             }
@@ -4979,19 +4857,19 @@ static bool test_required_tool_rejects_content() {
             if (!threw) {
                 if (g_verbose >= 0) {
                     printf("  " ANSI_COLOR_RED "FAIL" ANSI_COLOR_RESET " %s [%s]: expected parser to reject content but it succeeded\n",
-                           info.name, scenario.name);
+                           info.name.c_str(), scenario.name);
                     printf("    Delta: %.80s%s\n", data.delta.c_str(), data.delta.size() > 80 ? "..." : "");
                 }
                 template_passed = false;
             } else if (g_verbose >= 2) {
-                printf("  " ANSI_COLOR_GREEN "PASS" ANSI_COLOR_RESET " %s [%s]\n", info.name, scenario.name);
+                printf("  " ANSI_COLOR_GREEN "PASS" ANSI_COLOR_RESET " %s [%s]\n", info.name.c_str(), scenario.name);
             }
         }
 
         if (template_passed) {
             passed++;
             if (g_verbose >= 1) {
-                printf("  " ANSI_COLOR_GREEN "PASS" ANSI_COLOR_RESET " %s\n", info.name);
+                printf("  " ANSI_COLOR_GREEN "PASS" ANSI_COLOR_RESET " %s\n", info.name.c_str());
             }
         }
     }
@@ -5031,76 +4909,37 @@ static bool test_systematic_needle_streaming() {
     // Use shared template capabilities
     const auto & templates = get_template_capabilities();
 
-    // Verify declared capabilities match what minja detects
-    if (!verify_template_capabilities(templates)) {
-        return false;
-    }
-
     // Test each template
     for (const auto & tmpl_info : templates) {
-        if (template_filter && std::string(tmpl_info.name) != template_filter) {
+        if (!matches_filter(template_filter, tmpl_info.name.c_str())) {
             continue;
         }
 
         auto tmpls = read_templates(tmpl_info.jinja_path);
         if (!tmpls) {
-            if (g_verbose >= 1) {
-                printf("    " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " (template not found)\n");
-            }
-            continue;
-        }
-        if (tmpl_info.skip == Skip::Yes) {
-            if (g_verbose >= 1) {
-                printf("    " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " (temporarily disabled)\n");
-            }
-            continue;
-        }
-        if (!matches_filter(template_filter, tmpl_info.name)) {
-            if (g_verbose >= 2) {
-                printf("    " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " (template filter)\n");
-            }
-            continue;
+            throw std::runtime_error(std::string("Template not found: ") + tmpl_info.jinja_path);
         }
 
-        // Cross-check static template info with minja's capabilities detection
-        // Note: minja detection relies on the template using 'enable_thinking' variable.
-        // Some templates (e.g., Seed OSS) always include thinking tags but don't use this variable,
-        // so we only warn about mismatches rather than failing.
-        bool minja_thinks = common_chat_templates_support_enable_thinking(tmpls.get());
-        bool static_thinks = (tmpl_info.supports_thinking == ThinkingSupport::Yes);
+        test_format_detection_with_tools(chat_parser_impl::LEGACY, tmpl_info, tmpls);
+        test_format_detection_with_tools(chat_parser_impl::EXPERIMENTAL, tmpl_info, tmpls);
 
-        if (minja_thinks != static_thinks && g_verbose >= 1) {
-            printf("    " ANSI_COLOR_YELLOW "⚠" ANSI_COLOR_RESET " thinking support: static=%s, minja=%s\n",
-                   static_thinks ? "Yes" : "No", minja_thinks ? "Yes" : "No");
-        }
+        bool minja_thinking = common_chat_templates_support_enable_thinking(tmpls.get());
+        bool our_thinking = tmpl_info.supports_thinking == ThinkingSupport::Yes;
+        assert_equals(minja_thinking, our_thinking, "thinking detection for " + tmpl_info.name);
 
         template_summary summary_entry;
-        summary_entry.name = tmpl_info.name;
+        summary_entry.name = tmpl_info.name.c_str();
 
         auto scenarios = build_needle_scenarios(tmpl_info);
         for (const auto & scenario : scenarios) {
             if (!matches_filter(scenario_filter, scenario.name)) {
-                if (g_verbose >= 2) {
-                    printf("      - %s: " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " (filter)\n", scenario.name.c_str());
-                }
                 continue;
             }
             if (scenario.require_thinking_support && tmpl_info.supports_thinking == ThinkingSupport::No) {
-                if (g_verbose >= 2) {
-                    printf("      - %s: " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " (no thinking)\n", scenario.name.c_str());
-                }
                 continue;
             }
             if (scenario.parallel_tool_calls && !common_chat_templates_support_parallel_tool_calls(tmpls.get())) {
-                if (g_verbose >= 2) {
-                    printf("      - %s: " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " (no parallel)\n", scenario.name.c_str());
-                }
                 continue;
-            }
-
-            if (g_verbose >= 2) {
-                printf("    🔵 %s (%s)\n", scenario.name.c_str(), describe_scenario(scenario).c_str());
-                fflush(stdout);
             }
 
             summary_entry.scenarios_total++;
@@ -5464,14 +5303,6 @@ int main(int argc, char ** argv) {
         {
             const std::string chat_test = std::getenv("CHAT_TEST") ? std::getenv("CHAT_TEST") : "";
 
-            if (chat_test == "" || chat_test == "format_detection_with_tools") {
-                if (!test_format_detection_with_tools(chat_parser_impl::LEGACY)) {
-                    return 1;
-                }
-                if (!test_format_detection_with_tools(chat_parser_impl::EXPERIMENTAL)) {
-                    return 1;
-                }
-            }
             if (chat_test == "" || chat_test == "systematic_needle_streaming") {
                 if (!test_systematic_needle_streaming()) {
                     return 1;
