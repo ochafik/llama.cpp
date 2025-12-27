@@ -33,8 +33,6 @@ common_chat_params common_chat_params_init_seed_oss_peg(const common_chat_templa
 
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
-    auto include_grammar = true;
-    bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
 
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
@@ -103,7 +101,6 @@ common_chat_params common_chat_params_init_seed_oss_peg(const common_chat_templa
         }
 
         // Content only parser
-        include_grammar = false;
         auto content_tail = p.optional(p.tag(Tag::CONTENT, p.until_one_of({
             "\r\n\r\n<seed:eos>", "\n\n<seed:eos>",
             "\r\n<seed:eos>", "\n<seed:eos>", "<seed:eos>"
