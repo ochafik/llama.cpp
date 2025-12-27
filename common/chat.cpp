@@ -1454,24 +1454,53 @@ static common_chat_params common_chat_params_init_nemotron_v3(const common_chat_
 
         // Tool call parser
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
-            auto tool_calls = build_generic_tool_calls_peg_parser(
-                p,
-                inputs,
-                "<tool_call>",
-                "</tool_call><tool_call>",
-                "</tool_call>",
-                "<function=",
-                ">",
-                "</function>",
-                "<parameter=",
-                ">",
-                "</parameter>",
-                /* allow_raw_string_param_value= */ true
-            );
+            auto tool_choice = p.choice();
+            foreach_function(inputs.tools, [&](const json & tool) {
+                const auto & function = tool.at("function");
+                std::string name = function.at("name");
+                auto parameters = function.at("parameters");
 
-            if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
-                return reasoning << tool_calls;    
-            }
+                auto schema_info = common_schema_info();
+                schema_info.resolve_refs(parameters);
+
+                auto tool_open = "<function=" + p.tool_name(p.literal(name)) + ">\n";
+                auto tool_close = p.literal("</function>\n");
+                auto args = p.sequence();
+                auto arg_string = p.rule("xml-arg-string", p.until_one_of({
+                    "\n</parameter>",
+                    "\n<parameter=",
+                    "\n</function>"
+                }));
+
+                foreach_parameter_legacy(function, [&](const auto & param_name, const json & param_schema, bool is_required) {
+                    auto rule_name = "tool-" + name + "-arg-" + param_name;
+
+                    auto arg_open = "<parameter=" + p.tool_arg_name(p.literal(param_name)) + ">\n";
+                    auto arg_close = p.literal("</parameter>\n");
+                    auto arg_value = p.eps();
+
+                    if (schema_info.resolves_to_string(param_schema)) {
+                        arg_value = p.tool_arg_string_value(arg_string) + "\n";
+                    } else {
+                        arg_value = p.tool_arg_json_value(p.schema(p.json(), rule_name + "-schema", param_schema));
+                    }
+
+                    // Model may or my not close with </parameter>
+                    auto arg_rule = p.rule(rule_name, p.tool_arg_open(arg_open) + arg_value + p.optional(p.tool_arg_close(arg_close)));
+                    args += p.repeat(arg_rule, /* min = */ is_required ? 1 : 0, /* max = */ 1);
+                });
+
+                tool_choice |= p.rule("tool-" + name, p.tool_open(tool_open) + args + p.tool_close(tool_close));
+            });
+
+            auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
+            auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
+            auto tool_call = p.rule("tool-call", "<tool_call>\n" + tool_choice + "</tool_call>" + p.space());
+            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, /* min = */ min_calls, /* max = */ max_calls));
+
+            // if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
+            //     return reasoning << tool_calls;    
+            // }
             return reasoning << p.content(p.until("<tool_call>")) << tool_calls;
         }
 
