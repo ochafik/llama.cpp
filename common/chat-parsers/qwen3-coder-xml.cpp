@@ -2,6 +2,7 @@
 // Format: <tool_call><function=name><parameter=key>value</parameter></function></tool_call>
 
 #include "chat-parsers-internal.h"
+#include <optional>
 
 common_chat_params common_chat_params_init_qwen3_coder_xml_peg(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
@@ -63,15 +64,18 @@ common_chat_params common_chat_params_init_qwen3_coder_xml_peg(const common_chat
             auto tool_calls = build_generic_tool_calls_peg_parser(
                 p,
                 inputs,
-                "<tool_call>",
-                "</tool_call><tool_call>",
-                "</tool_call>",
-                "<function=",
-                ">",
+                std::nullopt,
+                std::nullopt,
+                std::nullopt,
+                // "<tool_call>",
+                // "</tool_call><tool_call>",
+                // "</tool_call>",
+                "<tool_call>\n<function=",
+                ">\n",
                 "</function>",
                 "<parameter=",
-                ">",
-                "</parameter>",
+                ">\n",
+                "\n</parameter>\n",
                 /* allow_raw_string_param_value= */ true
             );
 
