@@ -10,6 +10,7 @@
 #include "chat-peg-parser.h"
 #include "common.h"
 #include "json-schema-to-grammar.h"
+#include "peg-parser.h"
 #include "regex-partial.h"
 
 #include <minja/chat-template.hpp>
@@ -221,4 +222,34 @@ inline void common_chat_build_peg_grammar(const struct templates_params & inputs
             parser.build_grammar(builder, data.grammar_lazy);
         });
     }
+}
+
+inline common_peg_parser build_json_args_peg_parser(
+    common_chat_peg_builder & p,
+    const struct templates_params & inputs,
+    const std::optional<json> & id_schema,
+    const std::string & tool_calls_start,
+    const std::string & tool_calls_sep,
+    const std::string & tool_calls_end)
+{
+    auto tool_item = p.choice();
+    const json string_schema {{"type", "string"}};
+    foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
+        auto obj = p.literal_tag(Tag::TOOL_OPEN, "{");
+        if (id_schema) {
+            obj = obj << p.literal("\"name\"") << p.literal(":") << p.tag(Tag::TOOL_ID, p.schema(p.json(), "tool-" + name + "-id", *id_schema));
+        }
+        obj = obj << p.literal("\"name\"") << p.literal(":") << p.literal("\"") + p.literal_tag(Tag::TOOL_NAME, name) + p.literal("\"") << p.literal(",")
+            << p.literal("\"arguments\"") << p.literal(":") << p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters))
+            << p.literal_tag(Tag::TOOL_CLOSE, "}");
+        tool_item |= p.tag(Tag::TOOL, obj);
+    });
+
+    auto max_extra = inputs.parallel_tool_calls ? -1 : 0;
+    auto tool_calls = 
+        tool_calls_start
+        + tool_item + p.repeat(p.literal(tool_calls_sep) << tool_item, 0, max_extra)
+        + tool_calls_end;
+
+    return tool_calls;
 }
