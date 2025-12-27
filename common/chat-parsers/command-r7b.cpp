@@ -97,46 +97,28 @@ common_chat_params common_chat_params_init_command_r7b_peg(const common_chat_tem
                 });
             }
 
-            // Build schema for Command R7B array format with metadata fields
-            // Format: [{"tool_call_id": "1", "tool_name": "func", "parameters": {...}}]
-            auto schemas = json::array();
-            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
-                schemas.push_back({
-                    {"type", "object"},
-                    {"properties", {
-                        {"tool_call_id", {
-                            {"type", "string"},
-                            {"pattern", "^[0-9]{1,10}$"},
-                        }},
-                        {"tool_name", {
-                            {"type", "string"},
-                            {"const", name},
-                        }},
-                        {"parameters", parameters},
-                    }},
-                    {"required", json::array({"tool_call_id", "tool_name", "parameters"})},
-                });
-            });
-
-            auto schema = json{
-                {"type", "array"},
-                {"items", schemas.size() == 1 ? schemas[0] : json{{"anyOf", schemas}}},
-                {"minItems", 1},
+            // Format: <|START_ACTION|>[{"tool_call_id": "1", "tool_name": "func", "parameters": {...}}]<|END_ACTION|>
+            static const json id_schema {
+                {"type", "string"},
+                // Command-R's template expects an integer string.
+                {"pattern", "^[0-9]{1,10}$"},
             };
-            if (!inputs.parallel_tool_calls) {
-                schema["maxItems"] = 1;
-            }
-
-            // Tool call: <|START_ACTION|>[...json array...]<|END_ACTION|>
-            auto tool_call = p.tag(Tag::TOOL,
-                p.atomic_tag(Tag::TOOL_OPEN, p.literal("<|START_ACTION|>"))
-                + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-calls", schema))
-                + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("<|END_ACTION|>"))
-            );
-
-            auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
-            auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, min_calls, max_calls));
+            json_tool_call_format format;
+            format.tool_calls_start = p.literal("<|START_ACTION|>[") + p.space();
+            format.tool_calls_sep = p.literal(",") + p.space();
+            format.tool_calls_end = p.space() + "]<|END_ACTION|>";
+            // Command R7B: {"tool_call_id": "...", "tool_name": "...", "parameters": {...}}
+            format.tool_call = [&](auto & p, const auto & name, const auto & args) {
+                using Tag = common_chat_peg_tag;
+                return p.sequence()
+                    + p.literal_tag(Tag::TOOL_OPEN, "{")
+                    << "\"tool_call_id\"" << ":" << p.tag(Tag::TOOL_ID, p.schema(p.json(), "tool-call-id", id_schema)) << ","
+                    << "\"tool_name\"" << ":" << ("\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"") << ","
+                    << "\"parameters\"" << ":" << p.tag(Tag::TOOL_ARGS, args)
+                    << p.literal_tag(Tag::TOOL_CLOSE, "}");
+            };
+            auto tool_calls = p.trigger_rule("tool-call-root",
+                build_json_tool_calls_peg_parser(p, inputs, format));
 
             if (require_tools) {
                 return reasoning << response_block << tool_calls << p.optional(p.rest());

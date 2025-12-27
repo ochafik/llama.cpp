@@ -112,9 +112,15 @@ common_chat_params common_chat_params_init_apertus_peg(const common_chat_templat
             format.tool_calls_start = p.literal("<|tools_prefix|>[");
             format.tool_calls_sep = p.literal(", ");
             format.tool_calls_end = p.literal("]<|tools_suffix|>");
-            format.tool_call_start = p.literal("{\"");
-            format.tool_call_name_params_sep = p.literal("\": ");
-            format.tool_call_end = p.literal("}");
+            // Apertus uses short form: {"func_name": {...args...}}
+            format.tool_call = [](auto & p, const auto & name, const auto & args) {
+                using Tag = common_chat_peg_tag;
+                return p.sequence()
+                    + p.literal_tag(Tag::TOOL_OPEN, "{\"")
+                    + p.literal_tag(Tag::TOOL_NAME, name)
+                    << "\": " << p.tag(Tag::TOOL_ARGS, args)
+                    << p.literal_tag(Tag::TOOL_CLOSE, "}");
+            };
             auto tool_calls = build_json_tool_calls_peg_parser(p, inputs, format);
 
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {

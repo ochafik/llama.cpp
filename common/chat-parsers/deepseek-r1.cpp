@@ -92,9 +92,15 @@ common_chat_params common_chat_params_init_deepseek_r1_peg(const common_chat_tem
             format.tool_calls_start = p.literal("<｜tool▁calls▁begin｜>");
             format.tool_calls_sep = p.space();  // Allow newline between tool calls
             format.tool_calls_end = p.optional(p.literal("<｜tool▁calls▁end｜>"));
-            format.tool_call_start = p.literal("<｜tool▁call▁begin｜>function<｜tool▁sep｜>");
-            format.tool_call_name_params_sep = p.literal("\n```json\n");
-            format.tool_call_end = p.optional(p.literal("\n```<｜tool▁call▁end｜>"));
+            // DeepSeek R1 format: <｜tool▁call▁begin｜>function<｜tool▁sep｜>name\n```json\n{...}\n```<｜tool▁call▁end｜>
+            format.tool_call = [](auto & p, const auto & name, const auto & args) {
+                using Tag = common_chat_peg_tag;
+                return p.sequence()
+                    + p.tag(Tag::TOOL_OPEN, p.literal("<｜tool▁call▁begin｜>function<｜tool▁sep｜>"))
+                    + p.literal_tag(Tag::TOOL_NAME, name)
+                    + p.literal("\n```json\n") << p.tag(Tag::TOOL_ARGS, args)
+                    + p.literal_tag(Tag::TOOL_CLOSE, "\n```<｜tool▁call▁end｜>");
+            };
             auto tool_calls = build_json_tool_calls_peg_parser(p, inputs, format) << consume_eos();
 
             // Content until tool calls marker
