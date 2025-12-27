@@ -165,7 +165,7 @@ bool common_chat_templates_support_tools(const common_chat_templates * chat_temp
     const auto & tmpl = chat_templates->template_tool_use
         ? *chat_templates->template_tool_use
         : *chat_templates->template_default;
-    return tmpl.original_caps().supports_tools;
+    return tmpl.original_caps().supports_tool_calls;
 }
 
 bool common_chat_templates_support_parallel_tool_calls(const common_chat_templates * chat_templates) {
@@ -2672,17 +2672,17 @@ static common_chat_params common_chat_templates_apply_jinja(
 
     // DeepSeek V3.1: detect based on specific patterns in the template
     if (src.find("message['prefix'] is defined and message['prefix'] and thinking") != std::string::npos &&
-        params.json_schema.is_null()) {
+        (params.json_schema.is_null() || inputs.experimental_new_parsers)) {
         return common_chat_params_init_deepseek_v3_1(tmpl, params);
     }
 
     // DeepSeek R1: use handler in all cases except json schema (thinking / tools).
-    if (src.find("<｜tool▁calls▁begin｜>") != std::string::npos && params.json_schema.is_null()) {
+    if (src.find("<｜tool▁calls▁begin｜>") != std::string::npos && (params.json_schema.is_null() || inputs.experimental_new_parsers)) {
         return common_chat_params_init_deepseek_r1(tmpl, params);
     }
 
     // Command R7B: : use handler in all cases except json schema (thinking / tools).
-    if (src.find("<|END_THINKING|><|START_ACTION|>") != std::string::npos && params.json_schema.is_null()) {
+    if (src.find("<|END_THINKING|><|START_ACTION|>") != std::string::npos && (params.json_schema.is_null() || inputs.experimental_new_parsers)) {
         return common_chat_params_init_command_r7b(tmpl, params);
     }
 
@@ -2695,7 +2695,7 @@ static common_chat_params common_chat_templates_apply_jinja(
     if (src.find("[gMASK]<sop>") != std::string::npos &&
         src.find("<arg_key>") != std::string::npos &&
         src.find("<arg_value>") != std::string::npos &&
-        params.json_schema.is_null()) {
+        (params.json_schema.is_null() || inputs.experimental_new_parsers)) {
         return common_chat_params_init_glm_4_5(tmpl, params);
     }
 
@@ -2736,7 +2736,7 @@ static common_chat_params common_chat_templates_apply_jinja(
     }
 
     // Hermes 2/3 Pro, Qwen 2.5 Instruct (w/ tools)
-    if (src.find("<tool_call>") != std::string::npos && params.json_schema.is_null()) {
+    if (src.find("<tool_call>") != std::string::npos && (params.json_schema.is_null() || inputs.experimental_new_parsers)) {
         return common_chat_params_init_hermes_2_pro(tmpl, params);
     }
 
@@ -2778,9 +2778,8 @@ static common_chat_params common_chat_templates_apply_jinja(
         return common_chat_params_init_kimi_k2(tmpl, params);
     }
 
-    // Use generic handler when mixing tools + JSON schema.
-    // TODO: support that mix in handlers below.
-    if ((params.tools.is_array() && params.json_schema.is_object())) {
+    // Use generic handler when mixing tools + JSON schema (except for experimental_new_parsers which all support json_schema)
+    if ((params.tools.is_array() && params.json_schema.is_object()) && !inputs.experimental_new_parsers) {
         return common_chat_params_init_generic(tmpl, params);
     }
 
@@ -2818,7 +2817,7 @@ static common_chat_params common_chat_templates_apply_jinja(
     }
 
     // Plain handler (no tools)
-    if (params.tools.is_null() || inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_NONE) {
+    if ((params.tools.is_null() || inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_NONE) && !inputs.experimental_new_parsers) {
         return common_chat_params_init_without_tools(tmpl, params);
     }
 
