@@ -29,34 +29,6 @@ common_chat_params common_chat_params_init_apriel_1_5_peg(const common_chat_temp
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
 
-    // Build schema for tool calls (matches original implementation)
-    // Format: [{"name": "function_name", "arguments": {...}}]
-    json tool_calls_schema = nullptr;
-    if (has_tools) {
-        auto schemas = json::array();
-        foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
-            schemas.push_back({
-                {"type", "object"},
-                {"properties", {
-                    {"name", {
-                        {"type", "string"},
-                        {"const", name},
-                    }},
-                    {"arguments", parameters},
-                }},
-                {"required", json::array({"name", "arguments"})},
-            });
-        });
-        tool_calls_schema = {
-            {"type", "array"},
-            {"items", schemas.size() == 1 ? schemas[0] : json{{"anyOf", schemas}}},
-            {"minItems", 1},
-        };
-        if (!inputs.parallel_tool_calls) {
-            tool_calls_schema["maxItems"] = 1;
-        }
-    }
-
     const bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
@@ -107,15 +79,16 @@ common_chat_params common_chat_params_init_apriel_1_5_peg(const common_chat_temp
                 data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_calls>"});
             }
 
-            auto tool_call = p.tag(Tag::TOOL,
-                p.atomic_tag(Tag::TOOL_OPEN, p.literal("<tool_calls>"))
-                + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-calls", tool_calls_schema))
-                + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("</tool_calls>"))
+            // Use build_json_tool_calls_peg_parser for standard JSON tool call format
+            auto tool_calls = build_json_tool_calls_peg_parser(
+                p,
+                inputs,
+                p.literal("<tool_calls>["),
+                p.literal(", "),
+                p.literal("]</tool_calls>")
+                // Uses default {"name": "...", "arguments": ...} format
             );
 
-            auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
-            auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, min_calls, max_calls));
             auto newline_before_tools = p.optional(p.literal("\n"));
 
             if (require_tools) {
