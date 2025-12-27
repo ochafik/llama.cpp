@@ -4769,7 +4769,7 @@ static std::vector<needle_scenario> build_needle_scenarios(const template_capabi
         tool_with_reasoning.with_tool_call = true;
         tool_with_reasoning.with_reasoning = true;
         tool_with_reasoning.enable_thinking = true;
-        tool_with_reasoning.tool_choice = COMMON_CHAT_TO
+        tool_with_reasoning.tool_choice = COMMON_CHAT_TOOL_CHOICE_AUTO;
         tool_with_reasoning.require_thinking_support = true;
         tool_with_reasoning.with_content = (info.tools_emit_content_with_calls == ToolsEmitContentWithCalls::Yes);
         tool_with_reasoning.expect_tool_ids = (info.tool_calls_have_ids == ToolCallsHaveIds::Yes);
@@ -5184,13 +5184,24 @@ static bool test_systematic_needle_streaming() {
                 };
 
                 std::string raw_message = data.delta;
+                if (g_verbose >= 2) {
+                    // Escape newlines for debug output
+                    std::string escaped;
+                    for (char c : raw_message.substr(0, 200)) {
+                        if (c == '\n') escaped += "\\n";
+                        else if (c == '\r') escaped += "\\r";
+                        else escaped += c;
+                    }
+                    printf("    DEBUG delta len=%zu: '%s'\n", raw_message.size(), escaped.c_str());
+                }
                 if (tmpl_info.inject_reasoning_after_format == InjectReasoningAfterFormat::Yes && scenario.with_reasoning &&
                     raw_message.find(ctx.reasoning_needles.first) == std::string::npos) {
                     const char * open = tmpl_info.think_open_tag ? tmpl_info.think_open_tag : "<think>";
                     const char * close = tmpl_info.think_close_tag ? tmpl_info.think_close_tag : "</think>";
                     std::string prefix;
                     if (data.params.thinking_forced_open) {
-                        prefix = ctx.expected_msg.reasoning_content;
+                        // When thinking is forced open, prompt ends with <think> - we need content + closing tag
+                        prefix = ctx.expected_msg.reasoning_content + std::string(close);
                     } else {
                         prefix = std::string(open) + ctx.expected_msg.reasoning_content + std::string(close);
                     }
@@ -5203,6 +5214,15 @@ static bool test_systematic_needle_streaming() {
                     }
                 }
 
+                if (g_verbose >= 2) {
+                    std::string escaped;
+                    for (char c : raw_message) {
+                        if (c == '\n') escaped += "\\n";
+                        else if (c == '\r') escaped += "\\r";
+                        else escaped += c;
+                    }
+                    printf("    DEBUG raw_message len=%zu: '%s'\n", raw_message.size(), escaped.c_str());
+                }
                 auto result = test_streaming_with_needles(ctx, raw_message, parse_fn);
                 verify_needle_results(ctx, result);
                 if (g_verbose >= 1) {
