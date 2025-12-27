@@ -204,7 +204,14 @@ common_chat_peg_mapper_func common_chat_peg_native_mapper_func() {
                     break;
                 case Tag::TOOL_ID:
                     if (current_tool) {
-                        current_tool->id = std::string(trim_trailing_space(node.text));
+                        auto text = std::string(trim_trailing_space(node.text));
+                        // HACK: Strip surrounding quotes if present (JSON string value)
+                        // TODO(ochafik): clean this up - ideally the parser should capture
+                        // the string content without quotes, not the full JSON string value
+                        if (text.size() >= 2 && text.front() == '"' && text.back() == '"') {
+                            text = text.substr(1, text.size() - 2);
+                        }
+                        current_tool->id = text;
                     }
                     break;
                 case Tag::TOOL_NAME:

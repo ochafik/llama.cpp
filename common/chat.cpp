@@ -2210,7 +2210,7 @@ static common_chat_params common_chat_params_init_firefunction_v2(const common_c
                         }},
                         {"arguments", function.at("parameters")},
                     }},
-                    {"required", json::array({"name", "arguments", "id"})},
+                    {"required", json::array({"name", "arguments"})},
                 });
             });
             auto schema = json {

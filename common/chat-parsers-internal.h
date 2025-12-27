@@ -234,13 +234,14 @@ inline common_peg_parser build_json_args_peg_parser(
 {
     auto tool_call = p.choice();
     foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
-        auto obj = p.literal_tag(Tag::TOOL_OPEN, "{");
+        // Build: {"name":"...","arguments":{...}} or {"name":"...","arguments":{...},"id":"..."}
+        auto obj = p.literal_tag(Tag::TOOL_OPEN, "{")
+            << "\"name\"" << ":" << ("\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"") << ","
+            << "\"arguments\"" << ":" << p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters));
         if (id_schema) {
-            obj = obj << p.literal("\"id\"") << p.literal(":") << p.tag(Tag::TOOL_ID, p.schema(p.json(), "tool-" + name + "-id", *id_schema));
+            obj = obj << "," << "\"id\"" << ":" << p.tag(Tag::TOOL_ID, p.schema(p.json(), "tool-" + name + "-id", *id_schema));
         }
-        obj = obj << p.literal("\"name\"") << p.literal(":") << p.literal("\"") + p.literal_tag(Tag::TOOL_NAME, name) + p.literal("\"") << p.literal(",")
-            << p.literal("\"arguments\"") << p.literal(":") << p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters))
-            << p.literal_tag(Tag::TOOL_CLOSE, "}");
+        obj = obj << p.literal_tag(Tag::TOOL_CLOSE, "}");
         tool_call |= p.tag(Tag::TOOL, obj);
     });
 
