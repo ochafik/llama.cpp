@@ -76,8 +76,16 @@ common_chat_params common_chat_params_init_command_r7b_peg(const common_chat_tem
         }
 
         // Response format parser (json_schema support)
+        // Note: template wraps response in RESPONSE tags even for json_schema
         if (inputs.json_schema.is_object() && !inputs.json_schema.empty()) {
-            return reasoning << p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema)) << p.optional(p.rest());
+            auto json_response = p.optional(
+                p.optional(p.literal("<|START_OF_TURN_TOKEN|>"))
+                + p.optional(p.literal("<|CHATBOT_TOKEN|>"))
+                + (p.literal("<|START_RESPONSE|>") | p.literal("RESPONSE|>"))
+                + p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema))
+                + (p.literal("<|END_RESPONSE|>") | p.literal("END_RESPONSE|>"))
+            );
+            return reasoning << json_response << p.optional(p.rest());
         }
 
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
