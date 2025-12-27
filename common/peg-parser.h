@@ -511,7 +511,7 @@ class common_peg_parser_builder {
 
     // Literal tag: combines atomic(), tag(), and literal() - for tagging string literals
     template<typename E, typename = std::enable_if_t<std::is_enum_v<E>>>
-    common_peg_parser literal_tag(E tag_id, const std::string & s) { return atomic(tag(tag_id, literal(s))); }
+    common_peg_parser literal_tag(E tag_id, const std::string & s) { return tag(tag_id, literal(s)); }
 
     void set_root(const common_peg_parser & p);
 
