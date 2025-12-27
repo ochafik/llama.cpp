@@ -69,8 +69,7 @@ common_chat_params common_chat_params_init_granite_peg(const common_chat_templat
             auto tool_calls = p.trigger_rule("tool-call-root",
                 build_json_args_peg_parser(p, inputs, std::nullopt, "<|tool_call|>[", ",", "]"));
 
-            bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
-            if (require_tools) {
+            if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 return reasoning << tool_calls << consume_eot();
             }
             return reasoning << p.tag(Tag::CONTENT, p.until("<|tool_call|>")) << tool_calls << consume_eot();

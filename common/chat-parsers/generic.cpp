@@ -5,94 +5,39 @@
 // Response: {"response": "..."}
 
 #include "chat-parsers-internal.h"
+#include "chat.h"
 
 common_chat_params common_chat_params_init_generic_peg(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
 
-    auto tool_call_schemas = json::array();
-    foreach_function(inputs.tools, [&](const auto & function, const auto & name, const auto & parameters, const auto &) {
-        auto tool_schema = json {
-            {"type", "object"},
-            {"properties", {
-                {"name", {
-                    {"type", "string"},
-                    {"const", name},
-                }},
-                {"arguments", parameters},
-            }},
-            {"required", json::array({"name", "arguments"})},
-        };
-        if (function.contains("description")) {
-            tool_schema["description"] = function.at("description");
-        }
-        if (inputs.parallel_tool_calls) {
-            tool_schema.at("properties")["id"] = {
-                {"type", "string"},
-                {"minLength", 4},
-            };
-            tool_schema.at("required").push_back("id");
-        }
-        tool_call_schemas.emplace_back(tool_schema);
-    });
-    const auto tool_call =
-        inputs.parallel_tool_calls
-            ? json {
-                {"type", "object"},
-                {"properties", {
-                    {"tool_calls", {
-                        {"type", "array"},
-                        {"items", tool_call_schemas.size() == 1 ? tool_call_schemas[0] : json {
-                            {"anyOf", tool_call_schemas},
-                        }},
-                        {"minItems", 1},
-                    }},
-                }},
-                {"required", json::array({"tool_calls"})},
-            }
-            : json {
-                {"type", "object"},
-                {"properties", {
-                    {"tool_call", tool_call_schemas.size() == 1 ? tool_call_schemas[0] : json {
-                        {"anyOf", tool_call_schemas},
-                    }},
-                }},
-                {"required", json::array({"tool_call"})},
-            };
-    const auto schema =
-        inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED
-            ? json {
-                {"anyOf", json::array({
-                    tool_call,
-                    {
-                        {"type", "object"},
-                        {"properties", {
-                            {"response", inputs.json_schema.is_null()
-                                ? json {{"type", "string"}}
-                                : inputs.json_schema
-                            },
-                        }},
-                        {"required", json::array({"response"})},
-                    },
-                })}
-            }
-            : tool_call;
-
     // Build PEG parser for generic JSON format
-    auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
-    auto has_json_schema = inputs.json_schema.is_object() && !inputs.json_schema.empty();
-
+    auto has_tools = inputs.tools.is_array() && !inputs.tools.empty() && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE;
+    
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
 
         // The generic format uses JSON with specific structure
-        // {"tool_call": {...}} or {"tool_calls": [...]} or {"response": "..."}
-        if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
-            // Validate entire JSON structure against our complex schema with anyOf
-            return p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "generic-root", schema));
+        // {"tool_calls": [...]} or {"response": "..."}
+        if (has_tools) {
+            // Tool call: <|tool_call_start|> + JSON array with schema validation + <|tool_call_end|>
+            auto tool_calls = p.trigger_rule("tool-call-root", 
+                build_json_args_peg_parser(p, inputs, json {
+                    {"type", "string"},
+                    {"minLength", 4},
+                }, "[", ",", "]"));
+
+            if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
+                return "{" << p.literal("\"tool_calls\"") << ":" << tool_calls << "}";
+            }
+
+            return "{" << (p.choice()
+                | (p.literal("\"tool_calls\"") << ":" << tool_calls)
+                | (p.literal("\"response\"") << ":" << p.schema(p.json(), "response-format", inputs.json_schema.is_null() ? json {{"type", "string"}} : inputs.json_schema))
+            ) << "}";
         }
 
         // json_schema without tools - parse directly without {response: ...} wrapper
-        if (has_json_schema) {
+        if (!inputs.json_schema.is_null()) {
             return p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema));
         }
 
@@ -101,7 +46,7 @@ common_chat_params common_chat_params_init_generic_peg(const common_chat_templat
     });
 
     // Only add JSON format system message when tools are involved
-    if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+    if (has_tools) {
         auto tweaked_messages = common_chat_template::add_system(
             inputs.messages,
             "Respond in JSON format, either with `tool_call` (a request to call tools) or with `response` reply to the user's request");

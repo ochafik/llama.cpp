@@ -119,7 +119,7 @@ common_chat_params common_chat_params_init_apertus_peg(const common_chat_templat
                         }},
                         {"arguments", parameters},
                     }},
-                    {"required", json::array({name})}
+                    {"required", json::array({"name", "arguments"})},
                 });
             });
             auto schema = json{

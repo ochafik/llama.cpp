@@ -2,6 +2,8 @@
 // Format: functools[{"name":"func","arguments":{}}]
 
 #include "chat-parsers-internal.h"
+#include "chat.h"
+#include <optional>
 common_chat_params common_chat_params_init_firefunction_v2_peg(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
 
@@ -15,35 +17,7 @@ common_chat_params common_chat_params_init_firefunction_v2_peg(const common_chat
     };
     data.prompt = apply(tmpl, inputs, /* messages_override =*/ std::nullopt, tools_override, additional_context);
 
-    bool has_tools = inputs.tools.is_array() && !inputs.tools.empty();
-
-    // Build schema for tool calls (matches original implementation)
-    // Format: [{"name": "function_name", "arguments": {...}}]
-    json tool_calls_schema = nullptr;
-    if (has_tools) {
-        auto schemas = json::array();
-        foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
-            schemas.push_back({
-                {"type", "object"},
-                {"properties", {
-                    {"name", {
-                        {"type", "string"},
-                        {"const", name},
-                    }},
-                    {"arguments", parameters},
-                }},
-                {"required", json::array({"name", "arguments"})},
-            });
-        });
-        tool_calls_schema = {
-            {"type", "array"},
-            {"items", schemas.size() == 1 ? schemas[0] : json{{"anyOf", schemas}}},
-            {"minItems", 1},
-        };
-        if (!inputs.parallel_tool_calls) {
-            tool_calls_schema["maxItems"] = 1;
-        }
-    }
+    bool has_tools = inputs.tools.is_array() && !inputs.tools.empty() && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE;
 
     // Build the PEG parser
     bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
@@ -53,38 +27,20 @@ common_chat_params common_chat_params_init_firefunction_v2_peg(const common_chat
         // Stop tokens for Firefunction V2
         std::vector<std::string> stop_tokens = {"<|eot_id|>", "<|start_header_id|>"};
 
-        if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+        if (has_tools) {
             if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, " functools["});
             }
 
-            // Build individual tool call parsers
-            // Format inside array: {"name": "func_name", "arguments": {...}}
-            auto tool_choice = p.choice();
-            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
-                // Match: {"name": "tool_name", "arguments": {...}}
-                // TOOL_OPEN on "{" creates a new tool call entry
-                // Using << for flexible whitespace handling
-                tool_choice |= p.rule("tool-" + name, p.tag(Tag::TOOL,
-                    p.atomic_tag(Tag::TOOL_OPEN, p.literal("{"))
-                    << "\"name\"" << ":" << "\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\""
-                    << "," << "\"arguments\"" << ":"
-                    << p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters))
-                    << p.atomic_tag(Tag::TOOL_CLOSE, p.literal("}"))
+            // Firefunction V2 format: functools[{...}, {...}]
+            
+            // Tool call: <|tool_call_start|> + JSON array with schema validation + <|tool_call_end|>
+            auto tool_calls = p.trigger_rule("tool-call-root", 
+                build_json_args_peg_parser(p, inputs, {{"type", "string"}},
+                    " functools[",
+                    ",",
+                    "]"
                 ));
-            });
-
-            // Array structure: functools[ item (, item)* ]
-            auto array_open = p.literal(" functools[");
-
-            auto max_extra = inputs.parallel_tool_calls ? -1 : 0;
-
-            // Format: [ first_item (, additional_item)* ]
-            // When triggered, we always have at least one tool call
-            auto items = tool_choice << p.repeat(p.literal(",") << tool_choice, 0, max_extra);
-            auto tool_calls = p.trigger_rule("tool-call-root",
-                array_open << items << "]"
-            );
 
             if (require_tools) {
                 return tool_calls;

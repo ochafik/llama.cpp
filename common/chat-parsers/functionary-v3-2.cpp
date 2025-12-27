@@ -19,8 +19,11 @@ common_chat_params common_chat_params_init_functionary_v3_2_peg(const common_cha
         using Tag = common_chat_peg_tag;
 
         // Response format parser
+        // Note: template outputs "all\n" prefix even for json_schema responses
         if (inputs.json_schema.is_object() && !inputs.json_schema.empty()) {
-            return p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema));
+            auto json_content = p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema));
+            auto with_all = "all\n" + json_content;
+            return with_all | json_content;
         }
 
         // Tool call parser: first tool call has no >>> prefix (it's in the generation prompt),
