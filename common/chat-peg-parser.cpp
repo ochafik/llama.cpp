@@ -56,8 +56,9 @@ void common_chat_peg_native_mapper::map(const common_peg_ast_node & node) {
     auto tag = static_cast<Tag>(node.tag_id);
     switch (tag) {
         case Tag::TOOL_OPEN:
-            result.tool_calls.emplace_back();
-            current_tool = &result.tool_calls.back();
+            // Be lazy: don't create tool call here, wait for TOOL_NAME
+            // This avoids creating spurious tool calls during backtracking
+            current_tool = nullptr;
             break;
         case Tag::TOOL_ID:
             if (current_tool) {
@@ -70,9 +71,10 @@ void common_chat_peg_native_mapper::map(const common_peg_ast_node & node) {
             }
             break;
         case Tag::TOOL_NAME:
-            if (current_tool) {
-                current_tool->name = std::string(trim_trailing_space(node.text));
-            }
+            // Create tool call lazily on TOOL_NAME, not on TOOL_OPEN
+            result.tool_calls.emplace_back();
+            current_tool = &result.tool_calls.back();
+            current_tool->name = std::string(trim_trailing_space(node.text));
             break;
         case Tag::TOOL_ARGS:
             if (current_tool) {
@@ -280,16 +282,18 @@ common_chat_peg_mapper_func common_chat_peg_constructed_mapper_func() {
 
             switch (static_cast<Tag>(node.tag_id)) {
                 case Tag::TOOL_OPEN:
-                    result.tool_calls.emplace_back();
-                    current_tool = &result.tool_calls.back();
+                    // Be lazy: don't create tool call here, wait for TOOL_NAME
+                    // This avoids creating spurious tool calls during backtracking
+                    current_tool = nullptr;
                     arg_count = 0;
                     args_complete = false;
                     break;
                 case Tag::TOOL_NAME:
-                    if (current_tool) {
-                        current_tool->name = std::string(node.text);
-                        current_tool->arguments = "{";
-                    }
+                    // Create tool call lazily on TOOL_NAME, not on TOOL_OPEN
+                    result.tool_calls.emplace_back();
+                    current_tool = &result.tool_calls.back();
+                    current_tool->name = std::string(node.text);
+                    current_tool->arguments = "{";
                     break;
                 case Tag::TOOL_ARG_OPEN:
                     needs_closing_quote = false;
@@ -412,15 +416,10 @@ common_chat_peg_mapper_func common_chat_peg_generic_mapper() {
                     break;
                 }
                 case Tag::CONTENT: {
-                    try {
-                        auto data = json::parse(node.text);
-                        if (data.contains("response")) {
-                            const auto & resp = data.at("response");
-                            result.content = resp.is_string() ? resp.get<std::string>() : resp.dump();
-                        }
-                    } catch (...) {
-                        // JSON parse error - ignore
-                    }
+                    // Content can be either:
+                    // 1. Plain text (when no tools are available)
+                    // 2. A JSON string value extracted from {"response": "..."}
+                    result.content += std::string(node.text);
                     break;
                 }
                 default:

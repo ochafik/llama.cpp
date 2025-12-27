@@ -78,11 +78,9 @@ common_chat_params common_chat_params_init_kimi_k2_peg(const common_chat_templat
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            auto tool_calls = p.trigger_rule("tool-call-root",
-                "<|tool_calls_section_begin|>"
+            auto tool_calls = "<|tool_calls_section_begin|>"
                 + p.repeat(tool_choice, min_calls, max_calls)
-                + "<|tool_calls_section_end|>"
-            );
+                + "<|tool_calls_section_end|>";
 
             auto content_before = optional_newline() + p.tag(Tag::CONTENT, p.until("<|tool_calls_section_begin|>"));
             auto content_after = optional_newline() + p.tag(Tag::CONTENT, p.rest());
