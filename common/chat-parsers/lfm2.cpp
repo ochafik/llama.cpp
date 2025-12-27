@@ -89,13 +89,21 @@ common_chat_params common_chat_params_init_lfm2_peg(const common_chat_template &
             static const json id_schema {
                 {"type", "string"},
             };
-            // Tool call: <|tool_call_start|> + JSON array with schema validation + <|tool_call_end|>
+            // Tool call: <|tool_call_start|>[{"name": "...", "arguments": {...}, "id": "..."}]<|tool_call_end|>
             json_tool_call_format format;
             format.tool_calls_start = p.literal("<|tool_call_start|>[");
             format.tool_calls_sep = p.literal(",");
             format.tool_calls_end = p.literal("]<|tool_call_end|>");
-            format.tool_call_id_key = "id";
-            format.tool_call_id = p.schema(p.json(), "tool-id", id_schema);
+            // LFM2 format with ID at end: {"name": "...", "arguments": {...}, "id": "..."}
+            format.tool_call = [&](auto & p, const auto & name, const auto & args) {
+                using Tag = common_chat_peg_tag;
+                return p.sequence()
+                    + p.literal_tag(Tag::TOOL_OPEN, "{")
+                    << "\"name\"" << ":" << ("\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"") << ","
+                    << "\"arguments\"" << ":" << p.tag(Tag::TOOL_ARGS, args) << ","
+                    << "\"id\"" << ":" << p.tag(Tag::TOOL_ID, p.schema(p.json(), "tool-id", id_schema))
+                    << p.literal_tag(Tag::TOOL_CLOSE, "}");
+            };
             auto tool_calls = p.trigger_rule("tool-call-root",
                 build_json_tool_calls_peg_parser(p, inputs, format));
 

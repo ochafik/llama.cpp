@@ -269,14 +269,21 @@ struct json_tool_call_format {
     std::optional<common_peg_parser> tool_calls_start;  // Required: wrapper start (e.g., "[")
     std::optional<common_peg_parser> tool_calls_sep;    // Optional: separator between calls (e.g., ",")
     std::optional<common_peg_parser> tool_calls_end;    // Required: wrapper end (e.g., "]")
-    std::optional<common_peg_parser> tool_call_start;   // Optional: per-call start (default: {"name": ")
-    std::optional<common_peg_parser> tool_call_name_params_sep; // Optional: name-to-args separator (default: ", "arguments": )
-    std::optional<common_peg_parser> tool_call_end;     // Optional: per-call end (default: })
+    // Receives the parser for the JSON arguments already tagged as TOOL_ARGS.
+    std::function<common_peg_parser(common_chat_peg_builder &, const std::string &, const common_peg_parser &)>
+        tool_call = [](auto & p, const auto & name, const auto & args)
+    {
+        using Tag = common_chat_peg_tag;
+        return p.sequence()
+            + p.literal_tag(Tag::TOOL_OPEN, "{")
+            << "\"name\"" << ":" + ("\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"") << ","
+            << "\"arguments\"" << ":" << p.tag(Tag::TOOL_ARGS, args)
+            << p.literal_tag(Tag::TOOL_CLOSE, "}");
+    };
 
     std::string tool_call_name_key = "name";
     std::string tool_call_arguments_key = "arguments";
-    std::optional<std::string> tool_call_id_key;
-    std::optional<common_peg_parser> tool_call_id;
+    bool tool_call_id_comes_first = false;  // If true: {id, name, args}; if false: {name, args, id}
 };
 
 inline common_peg_parser build_json_tool_calls_peg_parser(
@@ -291,43 +298,21 @@ inline common_peg_parser build_json_tool_calls_peg_parser(
         throw std::runtime_error("tool_calls_start and tool_calls_end are required");
     }
 
-    auto tool_call = p.choice();
+    auto any_tool_call = p.choice();
     foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
-        if (format.tool_call_id_key.has_value() != format.tool_call_id.has_value()) {
-            throw std::runtime_error("tool_call_id_key and tool_call_id must be provided together or not at all");
-        }
-
-        // Build: {"name":"...","arguments":{...}} or with custom format
-        // Default: {"name": "
-        auto obj = p.tag(Tag::TOOL_OPEN, format.tool_call_start
-            ? *format.tool_call_start
-            : p.literal("{\"" + format.tool_call_name_key + "\": \""))
-            + p.literal_tag(Tag::TOOL_NAME, name);
-
-        // Default: ", "arguments":
-        obj += (format.tool_call_name_params_sep
-            ? *format.tool_call_name_params_sep
-            : p.literal("\", \"" + format.tool_call_arguments_key + "\": "))
-            + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters));
-
-        // ID after arguments (e.g., {"name":"...","arguments":{...},"id":"..."})
-        if (format.tool_call_id) {
-            obj += p.literal(", \"" + *format.tool_call_id_key + "\": ") + p.tag(Tag::TOOL_ID, *format.tool_call_id);
-        }
-
-        obj += p.tag(Tag::TOOL_CLOSE, format.tool_call_end ? *format.tool_call_end : p.literal("}"));
-        tool_call |= p.tag(Tag::TOOL, obj);
+        auto tool_call = format.tool_call(p, name, p.schema(p.json(), "tool-" + name + "-args", parameters));
+        any_tool_call |= p.tag(Tag::TOOL, tool_call);
     });
 
     if (format.tool_calls_sep) {
         return
             *format.tool_calls_start
-            + tool_call + p.repeat(*format.tool_calls_sep << tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
+            + any_tool_call + p.repeat(*format.tool_calls_sep << any_tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
             + *format.tool_calls_end;
     }
     return
         *format.tool_calls_start
-        + p.repeat(tool_call, 1, inputs.parallel_tool_calls ? -1 : 1)
+        + p.repeat(any_tool_call, 1, inputs.parallel_tool_calls ? -1 : 1)
         + *format.tool_calls_end;
 }
 
