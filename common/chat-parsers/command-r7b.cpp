@@ -10,14 +10,12 @@ common_chat_params common_chat_params_init_command_r7b_peg(const common_chat_tem
     for (const auto & msg : inputs.messages) {
         auto has_reasoning_content = msg.contains("reasoning_content") && msg.at("reasoning_content").is_string();
         auto has_tool_calls = msg.contains("tool_calls") && msg.at("tool_calls").is_array();
+        auto adjusted_message = msg;
         if (has_reasoning_content && has_tool_calls) {
-            auto adjusted_message = msg;
             adjusted_message["tool_plan"] = msg.at("reasoning_content");
             adjusted_message.erase("reasoning_content");
-            adjusted_messages.push_back(adjusted_message);
-        } else {
-            adjusted_messages.push_back(msg);
         }
+        adjusted_messages.push_back(adjusted_message);
     }
     data.prompt = apply(tmpl, inputs, /* messages_override= */ adjusted_messages);
 
