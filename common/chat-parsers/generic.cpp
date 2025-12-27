@@ -79,6 +79,7 @@ common_chat_params common_chat_params_init_generic_peg(const common_chat_templat
 
     // Build PEG parser for generic JSON format
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
+    auto has_json_schema = inputs.json_schema.is_object() && !inputs.json_schema.empty();
 
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
@@ -90,25 +91,24 @@ common_chat_params common_chat_params_init_generic_peg(const common_chat_templat
             return p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "generic-root", schema));
         }
 
-        // Content only - validate response against response schema
-        auto response_schema = inputs.json_schema.is_null()
-            ? json{{"type", "string"}}
-            : inputs.json_schema;
-        auto response_obj_schema = json{
-            {"type", "object"},
-            {"properties", {
-                {"response", response_schema},
-            }},
-            {"required", json::array({"response"})},
-        };
-        return p.tag(Tag::CONTENT, p.schema(p.json(), "generic-response", response_obj_schema));
+        // json_schema without tools - parse directly without {response: ...} wrapper
+        if (has_json_schema) {
+            return p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema));
+        }
+
+        // No tools and no json_schema - just capture all content
+        return p.tag(Tag::CONTENT, p.rest());
     });
 
-    auto tweaked_messages = common_chat_template::add_system(
-        inputs.messages,
-        "Respond in JSON format, either with `tool_call` (a request to call tools) or with `response` reply to the user's request");
-
-    data.prompt = apply(tmpl, inputs, /* messages_override= */ tweaked_messages);
+    // Only add JSON format system message when tools are involved
+    if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+        auto tweaked_messages = common_chat_template::add_system(
+            inputs.messages,
+            "Respond in JSON format, either with `tool_call` (a request to call tools) or with `response` reply to the user's request");
+        data.prompt = apply(tmpl, inputs, /* messages_override= */ tweaked_messages);
+    } else {
+        data.prompt = apply(tmpl, inputs);
+    }
     data.format = COMMON_CHAT_FORMAT_GENERIC;
     common_chat_build_peg_grammar(inputs, parser, data);
 
