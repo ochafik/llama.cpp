@@ -1561,42 +1561,40 @@ common_chat_msg common_chat_peg_parse(const common_peg_arena & parser, const std
 
     // TODO(ochafik): remove once --experimental-new-parsers graduates.
     // Backward-compatible mapper selection: use explicit PEG format types first
-    if (syntax.format == COMMON_CHAT_FORMAT_PEG_NATIVE) {
-        auto mapper = common_chat_peg_native_mapper(msg);
-        mapper.from_ast(ctx.ast, result);
-    } else if (syntax.format == COMMON_CHAT_FORMAT_PEG_CONSTRUCTED) {
-        auto mapper = common_chat_peg_constructed_mapper(msg);
-        mapper.from_ast(ctx.ast, result);
-    } else if (syntax.format == COMMON_CHAT_FORMAT_PEG_SIMPLE) {
-        // Generic mapper for simple PEG format
-        auto mapper = common_chat_peg_mapper(msg);
-        mapper.from_ast(ctx.ast, result);
-    }
-    // Format-specific mapper selection for new parsers
-    else if (syntax.format == COMMON_CHAT_FORMAT_NEMOTRON_V3 ||
-             syntax.format == COMMON_CHAT_FORMAT_SEED_OSS ||
-             syntax.format == COMMON_CHAT_FORMAT_MINIMAX_M2 ||
-             syntax.format == COMMON_CHAT_FORMAT_QWEN3_CODER_XML ||
-             syntax.format == COMMON_CHAT_FORMAT_GLM_4_5 ||
-             syntax.format == COMMON_CHAT_FORMAT_LLAMA_3_X_WITH_BUILTIN_TOOLS) {
-        apply_chat_peg_mapper(common_chat_peg_constructed_mapper_func(), ctx.ast, result, msg);
-    } else if (syntax.format == COMMON_CHAT_FORMAT_APERTUS ||
-               syntax.format == COMMON_CHAT_FORMAT_APRIEL_1_5) {
-        apply_chat_peg_mapper(common_chat_peg_short_form_mapper(), ctx.ast, result, msg);
-    } else if (syntax.format == COMMON_CHAT_FORMAT_COMMAND_R7B) {
-        apply_chat_peg_mapper(common_chat_peg_command_r7b_mapper(), ctx.ast, result, msg);
-    } else if (syntax.format == COMMON_CHAT_FORMAT_GENERIC) {
-        apply_chat_peg_mapper(common_chat_peg_generic_mapper(), ctx.ast, result, msg);
-    } else if (syntax.format == COMMON_CHAT_FORMAT_MISTRAL_NEMO ||
-               syntax.format == COMMON_CHAT_FORMAT_MAGISTRAL ||
-               syntax.format == COMMON_CHAT_FORMAT_FIREFUNCTION_V2 ||
-               syntax.format == COMMON_CHAT_FORMAT_NEMOTRON_V2 ||
-               syntax.format == COMMON_CHAT_FORMAT_GRANITE) {
-        // These formats now use build_json_tool_calls_peg_parser which produces individual TOOL tags
-        apply_chat_peg_mapper(common_chat_peg_native_mapper_func(), ctx.ast, result, msg);
-    } else {
+    switch (syntax.format) {
+        case COMMON_CHAT_FORMAT_PEG_CONSTRUCTED:
+        case COMMON_CHAT_FORMAT_NEMOTRON_V3:
+        case COMMON_CHAT_FORMAT_SEED_OSS:
+        case COMMON_CHAT_FORMAT_MINIMAX_M2:
+        case COMMON_CHAT_FORMAT_QWEN3_CODER_XML:
+        case COMMON_CHAT_FORMAT_GLM_4_5:
+        case COMMON_CHAT_FORMAT_LLAMA_3_X_WITH_BUILTIN_TOOLS:
+            common_chat_peg_constructed_mapper(msg).from_ast(ctx.ast, result);
+            break;
+        case COMMON_CHAT_FORMAT_PEG_SIMPLE:
+            // Generic mapper for simple PEG format
+            common_chat_peg_mapper(msg).from_ast(ctx.ast, result);
+            break;
+        case COMMON_CHAT_FORMAT_COMMAND_R7B:
+            apply_chat_peg_mapper(common_chat_peg_command_r7b_mapper(), ctx.ast, result, msg);
+            break;
+        case COMMON_CHAT_FORMAT_GENERIC:
+            apply_chat_peg_mapper(common_chat_peg_generic_mapper(), ctx.ast, result, msg);
+            break;
+        case COMMON_CHAT_FORMAT_PEG_NATIVE:
+        case COMMON_CHAT_FORMAT_MISTRAL_NEMO:
+        case COMMON_CHAT_FORMAT_MAGISTRAL:
+        case COMMON_CHAT_FORMAT_FIREFUNCTION_V2:
+        case COMMON_CHAT_FORMAT_NEMOTRON_V2:
+        case COMMON_CHAT_FORMAT_GRANITE:
+        case COMMON_CHAT_FORMAT_APERTUS:
+        case COMMON_CHAT_FORMAT_APRIEL_1_5:
         // Default to native mapper for JSON-based formats (including KIMI_K2, XIAOMI_MIMO)
-        apply_chat_peg_mapper(common_chat_peg_native_mapper_func(), ctx.ast, result, msg);
+        default:
+        // These formats now use build_json_tool_calls_peg_parser which produces individual TOOL tags
+            common_chat_peg_native_mapper(msg).from_ast(ctx.ast, result);
+            // apply_chat_peg_mapper(common_chat_peg_native_mapper_func(), ctx.ast, result, msg);
+            break;
     }
     if (!is_partial) {
         LOG_DBG("Parsed message: %s\n", common_chat_msgs_to_json_oaicompat<json>({msg}).at(0).dump().c_str());
