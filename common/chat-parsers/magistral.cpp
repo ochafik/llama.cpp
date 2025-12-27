@@ -14,42 +14,8 @@ common_chat_params common_chat_params_init_magistral_peg(const common_chat_templ
         "[/THINK]",
     };
 
-    bool has_tools = inputs.tools.is_array() && !inputs.tools.empty();
+    bool has_tools = inputs.tools.is_array() && !inputs.tools.empty() && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE;
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
-
-    // Build custom schema for array format with metadata fields
-    // This is required because tool names are JSON property values (not literal tokens),
-    // so schema validation is the only mechanism to constrain tool names.
-    json tool_calls_schema = nullptr;
-    if (has_tools) {
-        auto schemas = json::array();
-        foreach_function(inputs.tools, [&](const auto &, const std::string & name, const json & parameters, const auto &) {
-            schemas.push_back({
-                {"type", "object"},
-                {"properties", {
-                    {"name", {
-                        {"type", "string"},
-                        {"const", name},  // Enforce exact tool name
-                    }},
-                    {"arguments", parameters},  // Full parameter validation
-                    {"id", {
-                        {"type", "string"},
-                        {"pattern", "^[a-zA-Z0-9]{9}$"},  // Enforce ID format (exactly 9 alphanumeric)
-                    }},
-                }},
-                {"required", json::array({"name", "arguments", "id"})},
-            });
-        });
-
-        tool_calls_schema = json{
-            {"type", "array"},
-            {"items", schemas.size() == 1 ? schemas[0] : json{{"anyOf", schemas}}},
-            {"minItems", 1},
-        };
-        if (!inputs.parallel_tool_calls) {
-            tool_calls_schema["maxItems"] = 1;
-        }
-    }
 
     // Build the PEG parser
     bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
@@ -66,22 +32,18 @@ common_chat_params common_chat_params_init_magistral_peg(const common_chat_templ
             return reasoning << p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema));
         }
 
-        if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
+        if (has_tools) {
             if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "[TOOL_CALLS]"});
                 data.preserved_tokens.push_back("[TOOL_CALLS]");
             }
 
             // Tool call parser: content followed by [TOOL_CALLS] and JSON array
-            // Uses p.schema() for full validation: tool name (const), arguments (full params), id (pattern)
-            auto tool_call = p.tag(Tag::TOOL,
-                p.atomic_tag(Tag::TOOL_OPEN, p.literal("[TOOL_CALLS]"))
-                + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-calls", tool_calls_schema))
-            );
-
-            auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
-            auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_call, min_calls, max_calls));
+            auto tool_calls = p.trigger_rule("tool-call-root",
+                build_json_args_peg_parser(p, inputs, json {
+                    {"type", "string"},
+                    {"pattern", "^[a-zA-Z0-9]{9}$"},  // Enforce ID format (exactly 9 alphanumeric)
+                }, "[TOOL_CALLS][", ",", "]"));
 
             if (require_tools) {
                 return reasoning << tool_calls;
