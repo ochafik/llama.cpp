@@ -71,15 +71,15 @@ common_chat_params common_chat_params_init_seed_oss_peg(const common_chat_templa
             auto tool_calls = build_generic_tool_calls_peg_parser(
                 p,
                 inputs,
-                "<seed:tool_call>",
-                "</seed:tool_call><seed:tool_call>",
-                "</seed:tool_call>",
-                "<function=",
-                ">",
-                "</function>",
-                "<parameter=",
-                ">",
-                "</parameter>",
+                p.eps(),
+                p.eps(),
+                p.eps(),
+                p.literal("\n<seed:tool_call>\n<function="),
+                p.literal(">\n"),
+                "</function>" + p.space() + "</seed:tool_call>",
+                p.literal("<parameter="),
+                p.literal(">"),
+                "</parameter>\n",
                 /* allow_raw_string_param_value= */ true
             );
 

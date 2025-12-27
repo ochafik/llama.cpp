@@ -17,6 +17,18 @@ static std::string_view trim_trailing_space(std::string_view sv, int max = -1) {
     return sv;
 }
 
+static std::string_view trim_space(std::string_view sv) {
+    // Trim leading whitespace
+    while (!sv.empty() && std::isspace(static_cast<unsigned char>(sv.front()))) {
+        sv.remove_prefix(1);
+    }
+    // Trim trailing whitespace
+    while (!sv.empty() && std::isspace(static_cast<unsigned char>(sv.back()))) {
+        sv.remove_suffix(1);
+    }
+    return sv;
+}
+
 // ============================================================================
 // Class-based mapper implementations (used by legacy parsers in chat.cpp)
 // TODO(ochafik): Remove once --experimental-new-parsers graduates.
@@ -48,7 +60,12 @@ void common_chat_peg_native_mapper::map(const common_peg_ast_node & node) {
             break;
         case Tag::TOOL_ID:
             if (current_tool) {
-                current_tool->id = std::string(trim_trailing_space(node.text));
+                auto text = std::string(trim_trailing_space(node.text));
+                // Strip surrounding quotes if present (JSON string value)
+                if (text.size() >= 2 && text.front() == '"' && text.back() == '"') {
+                    text = text.substr(1, text.size() - 2);
+                }
+                current_tool->id = text;
             }
             break;
         case Tag::TOOL_NAME:
@@ -97,7 +114,8 @@ void common_chat_peg_constructed_mapper::map(const common_peg_ast_node & node) {
         case Tag::TOOL_ARG_STRING_VALUE:
             if (current_tool) {
                 // Serialize to JSON, but exclude the end quote
-                std::string dumped = json(trim_trailing_space(node.text)).dump();
+                // Use trim_space to remove leading/trailing whitespace from raw string values
+                std::string dumped = json(trim_space(node.text)).dump();
                 current_tool->arguments += dumped.substr(0, dumped.size() - 1);
                 needs_closing_quote = true;
             }

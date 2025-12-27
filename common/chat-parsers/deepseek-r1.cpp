@@ -92,7 +92,7 @@ common_chat_params common_chat_params_init_deepseek_r1_peg(const common_chat_tem
                 p,
                 inputs,
                 p.literal("<｜tool▁calls▁begin｜>"),
-                std::nullopt,
+                p.space(),  // Allow newline between tool calls
                 p.optional(p.literal("<｜tool▁calls▁end｜>")),
                 /* id= */ std::nullopt,
                 /* id_schema= */ std::nullopt,
