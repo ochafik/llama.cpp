@@ -13,12 +13,14 @@
 
 #include "../src/llama-grammar.h"
 
+#include <exception>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <functional>
 #include <stdexcept>
@@ -1269,95 +1271,173 @@ void test_systematic_needle_streaming(chat_parser_impl impl, const template_capa
     }
 }
 
+
 static void test_chat_parsers()
 {
-    test_apertus_parser(chat_parser_impl::LEGACY);
-    test_apertus_parser(chat_parser_impl::EXPERIMENTAL);
+    printf("[%s]\n", __func__);
 
-    test_apriel_1_5_parser(chat_parser_impl::LEGACY);
-    test_apriel_1_5_parser(chat_parser_impl::EXPERIMENTAL);
-
-    test_command_r7b_parser(chat_parser_impl::LEGACY);
-    test_command_r7b_parser(chat_parser_impl::EXPERIMENTAL);
-
-    test_deepseek_r1_parser(chat_parser_impl::LEGACY);
-    // TODO: DeepSeek R1 has unicode chars in its tokens, PEG parsing infra escapes them incorrectly:
-    // test_deepseek_r1_parser(chat_parser_impl::EXPERIMENTAL);
-
-    test_deepseek_v3_1_parser(chat_parser_impl::LEGACY);
-    // TODO: DeepSeek v3.1 has unicode chars in its tokens, PEG parsing infra escapes them incorrectly:
-    // test_deepseek_v3_1_parser(chat_parser_impl::EXPERIMENTAL);
-
-    test_firefunction_v2_parser(chat_parser_impl::LEGACY);
-    test_firefunction_v2_parser(chat_parser_impl::EXPERIMENTAL);
-
-    test_functionary_v3_1_llama_3_1_parser(chat_parser_impl::LEGACY);
-    test_functionary_v3_1_llama_3_1_parser(chat_parser_impl::EXPERIMENTAL);
-
-    test_functionary_v3_2_parser(chat_parser_impl::LEGACY);
-    test_functionary_v3_2_parser(chat_parser_impl::EXPERIMENTAL);
-
-    test_generic_parser(chat_parser_impl::LEGACY);
-    test_generic_parser(chat_parser_impl::EXPERIMENTAL);
-
-    test_glm_4_5_parser(chat_parser_impl::LEGACY);
-    // TODO(ochafik): fix! (chokes on "Hello, world!\nWhat's up?")
-    // test_glm_4_5_parser(chat_parser_impl::EXPERIMENTAL);
-
-    test_gpt_oss_parser(chat_parser_impl::LEGACY);
-    test_gpt_oss_parser(chat_parser_impl::EXPERIMENTAL);
-
-    test_granite_parser(chat_parser_impl::LEGACY);
-    test_granite_parser(chat_parser_impl::EXPERIMENTAL);
-
-    test_hermes_2_pro_parser(chat_parser_impl::LEGACY);
-    test_hermes_2_pro_parser(chat_parser_impl::EXPERIMENTAL);
-
-    // // TODO
-    // test_kimi_k2_parser(chat_parser_impl::LEGACY);
-    // test_kimi_k2_parser(chat_parser_impl::EXPERIMENTAL);
-
-    // // TODO
-    // test_lfm2_parser(chat_parser_impl::LEGACY);
-    // test_lfm2_parser(chat_parser_impl::EXPERIMENTAL);
-
-    test_llama_3_x_parser(chat_parser_impl::LEGACY);
-    // TODO(ochafik): this peg parser needs both TOOL_ARG_NAME (builtins) and TOOL_ARGS (regular) so will need its own mapper
-    // test_llama_3_x_parser(chat_parser_impl::EXPERIMENTAL);
+    const auto * filter = getenv("TEST");
     
-    // // TODO (completely new test)
-    // test_magistral_parser(chat_parser_impl::LEGACY);
-    // test_magistral_parser(chat_parser_impl::EXPERIMENTAL);
+    enum class test_status { Enabled, Disabled };
+    enum class test_outcome { Passed, Failed, Skipped };
+    struct test_result {
+        std::string name;
+        test_outcome outcome;
+    };
+    std::vector<test_result> results;
 
-    test_minimax_m2_parser(chat_parser_impl::LEGACY);
+    auto test_chat_parser = [&](test_status status, const std::string & name, chat_parser_impl impl, const std::function<void(chat_parser_impl)> & test_fn)
+    {
+        auto full_name = name + "_" + chat_parser_impl_name(impl);
+        if (!(filter && filter == std::string("*"))) {
+            if (status == test_status::Enabled) {
+                if (filter && filter != full_name) {
+                    return;
+                }
+            } else {
+                if (!filter) {
+                    printf("[%s] ⚠️ Skipping disabled test\n", full_name.c_str());
+                    results.push_back({full_name, test_outcome::Skipped});
+                    return;
+                }
+                if  (filter != full_name) {
+                    return;
+                }
+            }
+        }
+        printf("[%s]\n", full_name.c_str());
+
+        try {
+            test_fn(impl);
+            printf("[%s] ✅︎ SUCCESS\n", full_name.c_str());
+            results.push_back({full_name, test_outcome::Passed});
+        } catch (const std::exception & ex) {
+            // Print
+            printf("[%s] ❌ FAILURE\n%s\n", full_name.c_str(), ex.what());
+            results.push_back({full_name, test_outcome::Failed});
+        }
+    };
+    
+    test_chat_parser(test_status::Enabled, "apertus", chat_parser_impl::LEGACY, test_apertus_parser);
+    test_chat_parser(test_status::Disabled, "apertus", chat_parser_impl::EXPERIMENTAL, test_apertus_parser);
+
+    test_chat_parser(test_status::Enabled, "apriel_1_5", chat_parser_impl::LEGACY, test_apriel_1_5_parser);
+    test_chat_parser(test_status::Enabled, "apriel_1_5", chat_parser_impl::EXPERIMENTAL, test_apriel_1_5_parser);
+
+    test_chat_parser(test_status::Enabled, "command_r7b", chat_parser_impl::LEGACY, test_command_r7b_parser);
+    test_chat_parser(test_status::Enabled, "command_r7b", chat_parser_impl::EXPERIMENTAL, test_command_r7b_parser);
+
+    test_chat_parser(test_status::Enabled, "deepseek_r1", chat_parser_impl::LEGACY, test_deepseek_r1_parser);
+    // TODO: DeepSeek R1 has unicode chars in its tokens, PEG parsing infra escapes them incorrectly:
+    test_chat_parser(test_status::Disabled, "deepseek_r1", chat_parser_impl::EXPERIMENTAL, test_deepseek_r1_parser);
+
+    test_chat_parser(test_status::Enabled, "deepseek_v3_1", chat_parser_impl::LEGACY, test_deepseek_v3_1_parser);
+    // TODO: DeepSeek v3.1 has unicode chars in its tokens, PEG parsing infra escapes them incorrectly:
+    test_chat_parser(test_status::Disabled, "deepseek_v3_1", chat_parser_impl::EXPERIMENTAL, test_deepseek_v3_1_parser);
+
+    test_chat_parser(test_status::Enabled, "firefunction_v2", chat_parser_impl::LEGACY, test_firefunction_v2_parser);
+    test_chat_parser(test_status::Enabled, "firefunction_v2", chat_parser_impl::EXPERIMENTAL, test_firefunction_v2_parser);
+
+    test_chat_parser(test_status::Enabled, "functionary_v3_1_llama_3_1", chat_parser_impl::LEGACY, test_functionary_v3_1_llama_3_1_parser);
+    test_chat_parser(test_status::Enabled, "functionary_v3_1_llama_3_1", chat_parser_impl::EXPERIMENTAL, test_functionary_v3_1_llama_3_1_parser);
+
+    test_chat_parser(test_status::Enabled, "functionary_v3_2", chat_parser_impl::LEGACY, test_functionary_v3_2_parser);
+    test_chat_parser(test_status::Enabled, "functionary_v3_2", chat_parser_impl::EXPERIMENTAL, test_functionary_v3_2_parser);
+
+    test_chat_parser(test_status::Enabled, "generic", chat_parser_impl::LEGACY, test_generic_parser);
+    test_chat_parser(test_status::Enabled, "generic", chat_parser_impl::EXPERIMENTAL, test_generic_parser);
+
+    test_chat_parser(test_status::Enabled, "glm_4_5", chat_parser_impl::LEGACY, test_glm_4_5_parser);
+    // TODO(ochafik): fix! (chokes on "Hello, world!\nWhat's up?")
+    test_chat_parser(test_status::Disabled, "glm_4_5", chat_parser_impl::EXPERIMENTAL, test_glm_4_5_parser);
+
+    test_chat_parser(test_status::Enabled, "gpt_oss", chat_parser_impl::LEGACY, test_gpt_oss_parser);
+    test_chat_parser(test_status::Enabled, "gpt_oss", chat_parser_impl::EXPERIMENTAL, test_gpt_oss_parser);
+
+    test_chat_parser(test_status::Enabled, "granite", chat_parser_impl::LEGACY, test_granite_parser);
+    test_chat_parser(test_status::Enabled, "granite", chat_parser_impl::EXPERIMENTAL, test_granite_parser);
+
+    test_chat_parser(test_status::Enabled, "hermes_2_pro", chat_parser_impl::LEGACY, test_hermes_2_pro_parser);
+    test_chat_parser(test_status::Enabled, "hermes_2_pro", chat_parser_impl::EXPERIMENTAL, test_hermes_2_pro_parser);
+
+    // TODO
+    test_chat_parser(test_status::Disabled, "kimi_k2", chat_parser_impl::LEGACY, test_kimi_k2_parser);
+    // TODO
+    test_chat_parser(test_status::Disabled, "kimi_k2", chat_parser_impl::EXPERIMENTAL, test_kimi_k2_parser);
+
+    // TODO
+    test_chat_parser(test_status::Disabled, "lfm2", chat_parser_impl::LEGACY, test_lfm2_parser);
+    // TODO
+    test_chat_parser(test_status::Disabled, "lfm2", chat_parser_impl::EXPERIMENTAL, test_lfm2_parser);
+
+    test_chat_parser(test_status::Enabled, "llama_3_x", chat_parser_impl::LEGACY, test_llama_3_x_parser);
+    // TODO(ochafik): this peg parser needs both TOOL_ARG_NAME (builtins) and TOOL_ARGS (regular) so will need its own mapper
+    test_chat_parser(test_status::Disabled, "llama_3_x", chat_parser_impl::EXPERIMENTAL, test_llama_3_x_parser);
+
+    // TODO (completely new test)
+    test_chat_parser(test_status::Disabled, "magistral", chat_parser_impl::LEGACY, test_magistral_parser);
+    // TODO
+    test_chat_parser(test_status::Disabled, "magistral", chat_parser_impl::EXPERIMENTAL, test_magistral_parser);
+
+    test_chat_parser(test_status::Enabled, "minimax_m2", chat_parser_impl::LEGACY, test_minimax_m2_parser);
     // TODO:
-    // test_minimax_m2_parser(chat_parser_impl::EXPERIMENTAL);
+    test_chat_parser(test_status::Disabled, "minimax_m2", chat_parser_impl::EXPERIMENTAL, test_minimax_m2_parser);
 
     // TODO(ochafik): tool call number mismatch
-    // test_ministral_3_parser(chat_parser_impl::LEGACY);
+    test_chat_parser(test_status::Disabled, "ministral_3", chat_parser_impl::LEGACY, test_ministral_3_parser);
     // TODO(ochafik): Debug auto-single
-    // test_ministral_3_parser(chat_parser_impl::EXPERIMENTAL);
+    test_chat_parser(test_status::Disabled, "ministral_3", chat_parser_impl::EXPERIMENTAL, test_ministral_3_parser);
 
-    test_mistral_nemo_parser(chat_parser_impl::LEGACY);
-    test_mistral_nemo_parser(chat_parser_impl::EXPERIMENTAL);
+    test_chat_parser(test_status::Enabled, "mistral_nemo", chat_parser_impl::LEGACY, test_mistral_nemo_parser);
+    test_chat_parser(test_status::Enabled, "mistral_nemo", chat_parser_impl::EXPERIMENTAL, test_mistral_nemo_parser);
 
-    test_nemotron_v2_parser(chat_parser_impl::LEGACY);
+    test_chat_parser(test_status::Enabled, "nemotron_v2", chat_parser_impl::LEGACY, test_nemotron_v2_parser);
     // TODO(ochafik): debug: content-with-reasoning failed for Nemotron V3: Content: Never saw NEEDLE1
-    // test_nemotron_v2_parser(chat_parser_impl::EXPERIMENTAL);
+    test_chat_parser(test_status::Disabled, "nemotron_v2", chat_parser_impl::EXPERIMENTAL, test_nemotron_v2_parser);
 
     // TODO(ochafk): fix (chokes on "Hello, world!\nWhat's up?")
-    // test_nemotron_v3_parser(chat_parser_impl::LEGACY);
-    test_nemotron_v3_parser(chat_parser_impl::EXPERIMENTAL);
+    test_chat_parser(test_status::Disabled, "nemotron_v3", chat_parser_impl::LEGACY, test_nemotron_v3_parser);
+    test_chat_parser(test_status::Enabled, "nemotron_v3", chat_parser_impl::EXPERIMENTAL, test_nemotron_v3_parser);
 
-    test_qwen3_coder_xml_parser(chat_parser_impl::LEGACY);
-    test_qwen3_coder_xml_parser(chat_parser_impl::EXPERIMENTAL);
+    test_chat_parser(test_status::Enabled, "qwen3_coder_xml", chat_parser_impl::LEGACY, test_qwen3_coder_xml_parser);
+    test_chat_parser(test_status::Enabled, "qwen3_coder_xml", chat_parser_impl::EXPERIMENTAL, test_qwen3_coder_xml_parser);
 
-    test_seed_oss_parser(chat_parser_impl::LEGACY);
+    test_chat_parser(test_status::Enabled, "seed_oss", chat_parser_impl::LEGACY, test_seed_oss_parser);
     // TODO(ochafik): debug (not sure why we have an experimental-only section, it explodes)
-    // test_seed_oss_parser(chat_parser_impl::EXPERIMENTAL);
+    test_chat_parser(test_status::Disabled, "seed_oss", chat_parser_impl::EXPERIMENTAL, test_seed_oss_parser);
 
-    test_xiaomi_mimo_parser(chat_parser_impl::LEGACY);
-    test_xiaomi_mimo_parser(chat_parser_impl::EXPERIMENTAL);
+    test_chat_parser(test_status::Enabled, "xiaomi_mimo", chat_parser_impl::LEGACY, test_xiaomi_mimo_parser);
+    test_chat_parser(test_status::Enabled, "xiaomi_mimo", chat_parser_impl::EXPERIMENTAL, test_xiaomi_mimo_parser);
+
+    std::cout << std::flush;
+    std::cerr << std::flush;
+
+    size_t skipped_count = 0;
+    size_t success_count = 0;
+    size_t error_count = 0;
+    printf("\n[%s] Summary:\n", __func__);
+    for (const auto & result : results) {
+        std::string icon;
+        std::string text;
+        if (result.outcome == test_outcome::Skipped) {
+            icon = "⚠️";
+            text = "SKIPPED";
+            skipped_count++;
+        } else if (result.outcome == test_outcome::Failed) {
+            icon = "❌";
+            text = "FAILURE";
+            error_count++;
+        } else if (result.outcome == test_outcome::Passed) {
+            icon = "✅︎";
+            text = "SUCCESS";
+            success_count++;
+        }
+        printf("- %s %s (%s)\n", icon.c_str(), result.name.c_str(), text.c_str());
+    }
+    printf("[%s] %s Passed (%zu / %zu) tests, skipped %zu\n", __func__, error_count ? "❌" : "✅︎", success_count, success_count + error_count, skipped_count);
+    if (error_count) {
+        throw std::runtime_error("Test failed");
+    }
 }
 
 static const char * tool_choice_name(common_chat_tool_choice choice) {
@@ -1482,7 +1562,7 @@ static void test_msg_diffs_compute() {
 }
 
 int main(int argc, char ** argv) {
-    common_log_set_verbosity_thold(999);
+    // common_log_set_verbosity_thold(999);
 
 #ifndef _WIN32
         if (argc > 1) {
