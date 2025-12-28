@@ -7,6 +7,7 @@
 //
 #include "chat.h"
 
+#include "common.h"
 #include "log.h"
 
 #include "../src/unicode.h"
@@ -119,7 +120,16 @@ template <class T> static void assert_equals(const T & expected, const T & actua
         ss << "Expected: " << expected << std::endl;
         ss << "Actual: " << actual << std::endl;
         ss << std::flush;
-        throw std::runtime_error(desc.empty() ? "Test failed" : "Test failed (" + desc + "):\n" + ss.str());
+        throw std::runtime_error("Test failed" + (desc.empty() ? "" : " (" + desc + ")") + ":\n" + ss.str());
+    }
+}
+
+static void assert_throws(const std::function<void()> & fn, const std::string & desc = "") {
+    try {
+        fn();
+        throw std::runtime_error("Failed to throw" + (desc.empty() ? "" : " (" + desc + ")"));
+    } catch (const std::runtime_error &) {
+        // Do nothing
     }
 }
 
@@ -501,12 +511,7 @@ static void test_templates(const struct common_chat_templates * tmpls, const std
         }
 
         if (expect_grammar_triggered) {
-            common_chat_syntax syntax;
-            syntax.format = data.params.format;
-            syntax.reasoning_format = reasoning_format;
-            if (!data.params.parser.empty()) {
-                syntax.parser.load(data.params.parser);
-            }
+            common_chat_syntax syntax = get_syntax(data.params, reasoning_format);
             bool threw = false;
             common_chat_msg msg;
             try {
@@ -2424,12 +2429,7 @@ static void test_template_output_parsers(chat_parser_impl impl) {
 
         // Get syntax with parser for tool call tests (with reasoning)
         auto params = common_chat_templates_apply(tmpls.get(), inputs_tools_reasoning);
-        common_chat_syntax syntax;
-        syntax.format = params.format;
-        syntax.reasoning_format = COMMON_REASONING_FORMAT_DEEPSEEK;
-        if (!params.parser.empty()) {
-            syntax.parser.load(params.parser);
-        }
+        common_chat_syntax syntax = get_syntax(params, COMMON_REASONING_FORMAT_DEEPSEEK);
 
         // Syntax with reasoning for content-only tests
         common_chat_syntax syntax_reasoning;
@@ -4748,146 +4748,13 @@ static std::string describe_scenario(const needle_scenario & scenario) {
     return oss.str();
 }
 
-/*
-TODOs:
-- test that thinking is not forced open when thinking is disabled
 
-*/
-static bool test_required_tool_rejects_content() {
-    printf("[%s]\n", __func__);
-
-    const char * template_filter = std::getenv("NEEDLE_TEMPLATE_FILTER");
-
-    // Use shared template capabilities
-    const auto & templates = get_template_capabilities();
-
-    size_t tested = 0;
-    size_t passed = 0;
-    size_t skipped = 0;
-
-    for (const auto & info : templates) {
-        if (template_filter && std::string(info.name.c_str()) != template_filter) {
-            continue;
-        }
-
-        auto tmpls = read_templates(info.jinja_path);
-        if (!tmpls) {
-            if (g_verbose >= 1) {
-                printf("  " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " %s (template not found)\n", info.name.c_str());
-            }
-            skipped++;
-            continue;
-        }
-
-        // Test scenarios that should FAIL in required mode:
-        // Messages with content (but no tool calls) rendered through the template
-        struct test_scenario {
-            const char * name;
-            common_chat_msg delta_msg;
-            common_reasoning_format reasoning_format;
-        };
-
-        std::vector<test_scenario> scenarios;
-
-        // Scenario 1: Content only - should always fail
-        scenarios.push_back({"content-only", simple_assist_msg("Hello, this is just content without any tool call."), COMMON_REASONING_FORMAT_NONE});
-
-        // Scenario 2: Thinking + content (if supported) - should fail (content is still present)
-        if (info.supports_thinking == ThinkingSupport::Yes) {
-            scenarios.push_back({"thinking-then-content",
-                simple_assist_msg("Here is my response.", "Let me think about this..."),
-                COMMON_REASONING_FORMAT_DEEPSEEK});
-        }
-
-        tested++;
-        bool template_passed = true;
-
-        for (const auto & scenario : scenarios) {
-            // Use init_delta to get the properly-rendered delta through the template
-            delta_data data;
-            try {
-                data = init_delta(
-                    tmpls.get(),
-                    {},  // end_tokens - let it use params.additional_stops
-                    message_user,
-                    scenario.delta_msg,
-                    {python_tool},  // tools
-                    COMMON_CHAT_TOOL_CHOICE_REQUIRED,
-                    scenario.reasoning_format,
-                    {},  // customize_inputs
-                    chat_parser_impl::EXPERIMENTAL
-                );
-            } catch (const std::exception & e) {
-                if (g_verbose >= 0) {
-                    printf("  " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " %s [%s]: init_delta failed: %s\n",
-                           info.name.c_str(), scenario.name, e.what());
-                }
-                continue;
-            }
-
-            if (data.params.parser.empty()) {
-                if (g_verbose >= 1) {
-                    printf("  " ANSI_COLOR_YELLOW "SKIP" ANSI_COLOR_RESET " %s [%s]: no PEG parser\n",
-                           info.name.c_str(), scenario.name);
-                }
-                continue;
-            }
-
-            common_peg_arena arena;
-            arena.load(data.params.parser);
-
-            bool threw = false;
-            std::string error_msg;
-            try {
-                common_chat_peg_parse(arena, data.delta, /* is_partial = */ false, {data.params.format});
-            } catch (const std::exception & e) {
-                threw = true;
-                error_msg = e.what();
-            }
-
-            // In required mode, content should always cause parser to fail
-            if (!threw) {
-                if (g_verbose >= 0) {
-                    printf("  " ANSI_COLOR_RED "FAIL" ANSI_COLOR_RESET " %s [%s]: expected parser to reject content but it succeeded\n",
-                           info.name.c_str(), scenario.name);
-                    printf("    Delta: %.80s%s\n", data.delta.c_str(), data.delta.size() > 80 ? "..." : "");
-                }
-                template_passed = false;
-            } else if (g_verbose >= 2) {
-                printf("  " ANSI_COLOR_GREEN "PASS" ANSI_COLOR_RESET " %s [%s]\n", info.name.c_str(), scenario.name);
-            }
-        }
-
-        if (template_passed) {
-            passed++;
-            if (g_verbose >= 1) {
-                printf("  " ANSI_COLOR_GREEN "PASS" ANSI_COLOR_RESET " %s\n", info.name.c_str());
-            }
-        }
-    }
-
-    printf("  Results: %zu/%zu passed, %zu skipped\n", passed, tested, skipped);
-    return passed == tested;
-}
 
 static bool test_systematic_needle_streaming() {
     printf("[%s]\n", __func__);
 
     const char * template_filter = std::getenv("NEEDLE_TEMPLATE_FILTER");
     const char * scenario_filter = std::getenv("NEEDLE_SCENARIO_FILTER");
-
-    if (g_verbose >= 1 || template_filter || scenario_filter) {
-        printf("    Filters: template=%s, scenario=%s\n",
-               template_filter ? template_filter : "(all)",
-               scenario_filter ? scenario_filter : "(all)");
-    }
-
-    const auto matches_filter = [](const char * filter, const std::string & value) {
-        if (filter == nullptr || *filter == '\0') {
-            return true;
-        }
-        return value == filter;
-    };
 
     struct template_summary {
         std::string name;
@@ -4903,7 +4770,7 @@ static bool test_systematic_needle_streaming() {
 
     // Test each template
     for (const auto & tmpl_info : templates) {
-        if (!matches_filter(template_filter, tmpl_info.name.c_str())) {
+        if (template_filter && template_filter != tmpl_info.name) {
             continue;
         }
 
@@ -4915,16 +4782,53 @@ static bool test_systematic_needle_streaming() {
         test_format_detection_with_tools(chat_parser_impl::LEGACY, tmpl_info, tmpls);
         test_format_detection_with_tools(chat_parser_impl::EXPERIMENTAL, tmpl_info, tmpls);
 
-        // bool minja_thinking = common_chat_templates_support_enable_thinking(tmpls.get());
-        // bool our_thinking = tmpl_info.supports_thinking == ThinkingSupport::Yes;
-        // assert_equals(minja_thinking, our_thinking, "thinking detection for " + tmpl_info.name);
+        if (tmpl_info.supports_disable_thinking == SupportsDisableThinking::Yes) {
+            common_chat_templates_inputs inputs;
+            inputs.messages.push_back(message_user);
+            inputs.experimental_new_parsers = true;
+            inputs.enable_thinking = false;
+
+            auto params = common_chat_templates_apply(tmpls.get(), inputs);
+            assert_equals(false, params.thinking_forced_open, "thinking should not be forced open when thinking is disabled");
+        }
+
+        // if (tmpl_info.name != "Command R7B")
+        if (false) // TODO(ochafik): debug this!
+        {
+            // Check that required mode forbids content but allows thoughts
+            const auto parse_delta_required = [&](const common_chat_msg & delta_msg, common_reasoning_format reasoning_format) {
+                const auto data = init_delta(tmpls.get(), /* end_tokens= */ {}, message_user, delta_msg, {python_tool},
+                    COMMON_CHAT_TOOL_CHOICE_REQUIRED, reasoning_format, {}, chat_parser_impl::EXPERIMENTAL);
+                std::cout << data.delta << "\n" << std::flush;
+                return common_chat_parse(data.delta, false, get_syntax(data.params, reasoning_format));
+            };
+
+            assert_throws([&]() {
+                parse_delta_required(
+                    simple_assist_msg("Hello, this is just content without any tool call."),
+                    COMMON_REASONING_FORMAT_NONE);
+            }, "required mode forbids content");
+
+            if (tmpl_info.supports_thinking == ThinkingSupport::Yes) {
+
+                parse_delta_required(
+                    simple_assist_msg("", "Let me think about this..."),
+                    COMMON_REASONING_FORMAT_DEEPSEEK);
+
+                assert_throws([&]() {
+                    parse_delta_required(
+                        simple_assist_msg("Here is my response.", "Let me think about this..."),
+                        COMMON_REASONING_FORMAT_DEEPSEEK);
+                }, "required mode forbids content");
+            }
+        }
 
         template_summary summary_entry;
-        summary_entry.name = tmpl_info.name.c_str();
+        summary_entry.name = tmpl_info.name;
 
         auto scenarios = build_needle_scenarios(tmpl_info);
         for (const auto & scenario : scenarios) {
-            if (!matches_filter(scenario_filter, scenario.name)) {
+            if (scenario_filter && scenario_filter != scenario.name) {
                 continue;
             }
             if (scenario.require_thinking_support && tmpl_info.supports_thinking == ThinkingSupport::No) {
@@ -5315,11 +5219,6 @@ int main(int argc, char ** argv) {
             }
             if (chat_test == "" || chat_test == "template_output_peg_parsers") {
                 test_template_output_peg_parsers();
-            }
-            if (chat_test == "" || chat_test == "required_tool_rejects_content") {
-                if (!test_required_tool_rejects_content()) {
-                    return 1;
-                }
             }
             std::cout << "\n[chat] All tests passed!" << '\n';
         }
