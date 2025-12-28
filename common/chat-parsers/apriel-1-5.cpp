@@ -11,7 +11,7 @@ common_chat_params common_chat_params_init_apriel_1_5_peg(const common_chat_temp
     for (const auto & msg : inputs.messages) {
         auto adjusted_message = msg;
         if (msg.contains("reasoning_content") && msg.at("reasoning_content").is_string()) {
-            adjusted_message["thoughts"] = msg.at("reasoning_content");
+            adjusted_message["thought"] = msg.at("reasoning_content");
             adjusted_message.erase("reasoning_content");
         }
         adjusted_messages.push_back(adjusted_message);
