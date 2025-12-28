@@ -1352,8 +1352,7 @@ static void test_chat_parsers()
     test_chat_parser(test_status::Disabled, "glm_4_5", chat_parser_impl::EXPERIMENTAL, test_glm_4_5_parser);
 
     test_chat_parser(test_status::Enabled, "gpt_oss", chat_parser_impl::LEGACY, test_gpt_oss_parser);
-    // TODO
-    test_chat_parser(test_status::Disabled, "gpt_oss", chat_parser_impl::EXPERIMENTAL, test_gpt_oss_parser);
+    test_chat_parser(test_status::Enabled, "gpt_oss", chat_parser_impl::EXPERIMENTAL, test_gpt_oss_parser);
 
     test_chat_parser(test_status::Enabled, "granite", chat_parser_impl::LEGACY, test_granite_parser);
     test_chat_parser(test_status::Enabled, "granite", chat_parser_impl::EXPERIMENTAL, test_granite_parser);

@@ -24,7 +24,8 @@ void test_gpt_oss_parser(chat_parser_impl impl)
     template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::No;
     template_caps.supports_disable_thinking = SupportsDisableThinking::Yes;
     template_caps.supports_reasoning_only = SupportsReasoningOnly::No;  // Template always outputs final content
-    template_caps.end_tokens = { "<|return|>", "<|call|>" };
+    // See eos_token_id in https://huggingface.co/openai/gpt-oss-20b/blob/main/generation_config.json
+    template_caps.end_tokens = { "<|return|>", "<|call|>", "<|endoftext|>" };
 
     auto tmpls = read_templates(template_caps.jinja_path);
 
