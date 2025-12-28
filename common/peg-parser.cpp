@@ -1417,6 +1417,10 @@ void common_peg_arena::build_grammar(const common_grammar_builder & builder, boo
                 auto child_gbnf = to_gbnf(p.child);
                 const auto & child_parser = parsers_.at(p.child);
                 if (p.min_count == 0 && p.max_count == 1) {
+                    // Optional of epsilon is just epsilon
+                    if (child_gbnf.empty()) {
+                        return "";
+                    }
                     // For optional (min=0, max=1), check original type before adding "?"
                     // If child is choice/sequence and was wrapped, the "?" goes BEFORE the closing ")"
                     // Otherwise "?" is added after the child
