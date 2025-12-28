@@ -2,7 +2,7 @@
 
 void test_firefunction_v2_parser(chat_parser_impl impl)
 {
-    printf("[%s]\n", __func__);
+    printf("[%s (%s)]\n", __func__, chat_parser_impl_name(impl));
 
     common_chat_templates_inputs inputs_no_tools;
     inputs_no_tools.messages                = {message_user};

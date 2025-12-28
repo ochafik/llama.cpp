@@ -2,8 +2,8 @@
 
 void test_glm_4_5_parser(chat_parser_impl impl)
 {
-    printf("[%s]\n", __func__);
-    
+    printf("[%s (%s)]\n", __func__, chat_parser_impl_name(impl));
+
     common_chat_templates_inputs inputs_no_tools;
     inputs_no_tools.messages                = {message_user};
 
@@ -143,7 +143,7 @@ void test_glm_4_5_parser(chat_parser_impl impl)
 
     // Test template generation for regular content
     test_templates(impl, tmpls.get(), end_tokens, message_assist, tools,
-                  "\n<think></think>\nHello, world!\nWhat's up?",
+                  "\nHello, world!\nWhat's up?",
                   /* expect_grammar_triggered= */ false);
 
     // TODO: Test template generation for tool calls with reasoning

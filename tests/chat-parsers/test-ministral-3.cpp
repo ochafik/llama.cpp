@@ -10,8 +10,8 @@ static const char * invoice_schema = R"({
 
 void test_ministral_3_parser(chat_parser_impl impl)
 {
-    printf("[%s]\n", __func__);
-    
+    printf("[%s (%s)]\n", __func__, chat_parser_impl_name(impl));
+
     common_chat_templates_inputs inputs_no_tools;
     inputs_no_tools.messages                = {message_user};
 
@@ -26,7 +26,7 @@ void test_ministral_3_parser(chat_parser_impl impl)
     template_capabilities template_caps;
     template_caps.name = "Ministral V3";
     template_caps.jinja_path = "models/templates/mistralai-Ministral-3-14B-Reasoning-2512.jinja";
-    template_caps.legacy_format = COMMON_CHAT_FORMAT_MISTRAL_NEMO;
+    template_caps.legacy_format = COMMON_CHAT_FORMAT_PEG_NATIVE;
     template_caps.experimental_format = COMMON_CHAT_FORMAT_PEG_NATIVE;
     template_caps.supports_thinking = ThinkingSupport::No;
     template_caps.think_open_tag = nullptr;

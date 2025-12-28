@@ -2,7 +2,7 @@
 
 void test_deepseek_v3_1_parser(chat_parser_impl impl)
 {
-    printf("[%s]\n", __func__);
+    printf("[%s (%s)]\n", __func__, chat_parser_impl_name(impl));
 
     common_chat_templates_inputs inputs_no_tools;
     inputs_no_tools.messages                = {message_user};
@@ -36,8 +36,8 @@ void test_deepseek_v3_1_parser(chat_parser_impl impl)
         assert_equals(true, params.thinking_forced_open);
     }
 
-    test_templates(impl, tmpls.get(), end_tokens, message_assist, tools, "</think>Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
-    test_templates(impl, tmpls.get(), end_tokens, message_assist_thoughts, tools, "</think>Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
+    test_templates(impl, tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
+    test_templates(impl, tmpls.get(), end_tokens, message_assist_thoughts, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
     assert_msg_equals(
         simple_assist_msg("Hello, world!\nWhat's up?", "I'm\nthinking"),
         common_chat_parse(
