@@ -30,11 +30,6 @@ static std::string_view trim_space(std::string_view sv) {
     return sv;
 }
 
-// ============================================================================
-// Class-based mapper implementations (used by legacy parsers in chat.cpp)
-// TODO(ochafik): Remove once --experimental-new-parsers graduates.
-// ============================================================================
-
 void common_chat_peg_mapper::from_ast(const common_peg_ast_arena & arena, const common_peg_parse_result & result) {
     arena.visit(result, [this](const common_peg_ast_node & node) {
         map(node);

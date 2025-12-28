@@ -641,7 +641,6 @@ const char * common_chat_format_name(common_chat_format format) {
         case COMMON_CHAT_FORMAT_GPT_OSS: return "GPT-OSS";
         case COMMON_CHAT_FORMAT_SEED_OSS: return "Seed-OSS";
         case COMMON_CHAT_FORMAT_NEMOTRON_V2: return "Nemotron V2";
-        case COMMON_CHAT_FORMAT_NEMOTRON_V3: return "Nemotron V3";
         case COMMON_CHAT_FORMAT_APERTUS: return "Apertus";
         case COMMON_CHAT_FORMAT_LFM2_WITH_JSON_TOOLS: return "LFM2 with JSON tools";
         case COMMON_CHAT_FORMAT_MINIMAX_M2: return "MiniMax-M2";
@@ -820,6 +819,7 @@ static common_chat_params common_chat_params_init_mistral_nemo(const common_chat
     data.format = COMMON_CHAT_FORMAT_MISTRAL_NEMO;
     return data;
 }
+
 
 // Case-insensitive find
 static size_t ifind_string(const std::string & haystack, const std::string & needle, size_t pos = 0) {
@@ -1382,7 +1382,7 @@ static common_chat_params common_chat_params_init_nemotron_v3(const common_chat_
     common_chat_params data;
 
     data.prompt = apply(tmpl, inputs);
-    data.format = COMMON_CHAT_FORMAT_NEMOTRON_V3;
+    data.format = COMMON_CHAT_FORMAT_PEG_CONSTRUCTED;
 
     // Handle thinking tags appropriately based on inputs.enable_thinking
     if (string_ends_with(data.prompt, "<think>\n")) {
@@ -2525,6 +2525,7 @@ static common_chat_params common_chat_params_init_granite(const common_chat_temp
     return data;
 }
 
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
 static common_chat_params common_chat_params_init_without_tools(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
     data.prompt = apply(tmpl, inputs);
@@ -2551,7 +2552,12 @@ static common_chat_params common_chat_params_init_without_tools(const common_cha
     return data;
 }
 
-static common_chat_params common_chat_params_init_seed_oss(const common_chat_template & tmpl, const struct templates_params & params) {
+
+// TODO(ochafik): remove once --experimental-new-parsers graduates.
+static common_chat_params common_chat_params_init_seed_oss(
+    const common_chat_template         & tmpl,
+    templates_params                   & params)
+{
     if (params.experimental_new_parsers) {
         return common_chat_params_init_seed_oss_peg(tmpl, params);
     }

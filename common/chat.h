@@ -117,7 +117,6 @@ enum common_chat_format {
     COMMON_CHAT_FORMAT_GPT_OSS,
     COMMON_CHAT_FORMAT_SEED_OSS,
     COMMON_CHAT_FORMAT_NEMOTRON_V2,
-    COMMON_CHAT_FORMAT_NEMOTRON_V3,
     COMMON_CHAT_FORMAT_APERTUS,
     COMMON_CHAT_FORMAT_LFM2_WITH_JSON_TOOLS,
     COMMON_CHAT_FORMAT_GLM_4_5,
@@ -127,7 +126,6 @@ enum common_chat_format {
     COMMON_CHAT_FORMAT_APRIEL_1_5,
     COMMON_CHAT_FORMAT_XIAOMI_MIMO,
 
-    // TODO(ochafik): remove once --experimental-new-parsers graduates.
     // These are intended to be parsed by the PEG parser
     COMMON_CHAT_FORMAT_PEG_SIMPLE,
     COMMON_CHAT_FORMAT_PEG_NATIVE,
