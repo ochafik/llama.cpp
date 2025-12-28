@@ -160,14 +160,6 @@ bool common_chat_templates_support_enable_thinking(const common_chat_templates *
     return rendered_no_thinking.prompt != rendered_with_thinking.prompt;
 }
 
-bool common_chat_templates_support_tools(const common_chat_templates * chat_templates) {
-    // Check the template that would be used for tools (tool_use variant if available, otherwise default)
-    const auto & tmpl = chat_templates->template_tool_use
-        ? *chat_templates->template_tool_use
-        : *chat_templates->template_default;
-    return tmpl.original_caps().supports_tool_calls;
-}
-
 bool common_chat_templates_support_parallel_tool_calls(const common_chat_templates * chat_templates) {
     // Check the template that would be used for tools (tool_use variant if available, otherwise default)
     const auto & tmpl = chat_templates->template_tool_use
@@ -688,32 +680,6 @@ common_reasoning_format common_reasoning_format_from_name(const std::string & fo
         return COMMON_REASONING_FORMAT_DEEPSEEK_LEGACY;
     }
     throw std::runtime_error("Unknown reasoning format: " + format);
-}
-
-static common_chat_params common_chat_params_init_without_tools(const common_chat_template & tmpl, const struct templates_params & inputs) {
-    common_chat_params data;
-    data.prompt = apply(tmpl, inputs);
-    data.format = COMMON_CHAT_FORMAT_CONTENT_ONLY;
-    data.grammar_lazy = false;
-    if (!inputs.json_schema.is_null()) {
-        if (!inputs.grammar.empty()) {
-            throw std::runtime_error("Either \"json_schema\" or \"grammar\" can be specified, but not both");
-        }
-        data.grammar = json_schema_to_grammar(inputs.json_schema);
-    } else {
-        data.grammar = inputs.grammar;
-    }
-
-    // Build a basic content-only parser (use new parsers if flag is set)
-    if (inputs.experimental_new_parsers) {
-        auto parser = build_chat_peg_parser([&](auto & p) {
-            using Tag = common_chat_peg_tag;
-            return p.tag(Tag::CONTENT, p.rest());
-        });
-        data.parser = parser.save();
-    }
-
-    return data;
 }
 
 // TODO(ochafik): remove once --experimental-new-parsers graduates.
@@ -2559,6 +2525,32 @@ static common_chat_params common_chat_params_init_granite(const common_chat_temp
     return data;
 }
 
+static common_chat_params common_chat_params_init_without_tools(const common_chat_template & tmpl, const struct templates_params & inputs) {
+    common_chat_params data;
+    data.prompt = apply(tmpl, inputs);
+    data.format = COMMON_CHAT_FORMAT_CONTENT_ONLY;
+    data.grammar_lazy = false;
+    if (!inputs.json_schema.is_null()) {
+        if (!inputs.grammar.empty()) {
+            throw std::runtime_error("Either \"json_schema\" or \"grammar\" can be specified, but not both");
+        }
+        data.grammar = json_schema_to_grammar(inputs.json_schema);
+    } else {
+        data.grammar = inputs.grammar;
+    }
+
+    // Build a basic content-only parser (use new parsers if flag is set)
+    if (inputs.experimental_new_parsers) {
+        auto parser = build_chat_peg_parser([&](auto & p) {
+            using Tag = common_chat_peg_tag;
+            return p.tag(Tag::CONTENT, p.rest());
+        });
+        data.parser = parser.save();
+    }
+
+    return data;
+}
+
 static common_chat_params common_chat_params_init_seed_oss(const common_chat_template & tmpl, const struct templates_params & params) {
     if (params.experimental_new_parsers) {
         return common_chat_params_init_seed_oss_peg(tmpl, params);
@@ -2624,17 +2616,6 @@ static common_chat_params common_chat_templates_apply_jinja(
     const auto & src = tmpl.source();
     const auto & caps = tmpl.original_caps();
     params.messages = common_chat_msgs_to_json_oaicompat<json>(inputs.messages, /* concat_text= */ !tmpl.original_caps().requires_typed_content);
-    if (params.messages.is_array()) {
-        for (auto & msg : params.messages) {
-            if (!msg.contains("reasoning_content") || msg.at("reasoning_content").is_null()) {
-                continue;
-            }
-            // Some templates (e.g., Apriel 1.5) expect the reasoning text under a 'thought' key.
-            if (!msg.contains("thought") || msg.at("thought").is_null()) {
-                msg["thought"] = msg.at("reasoning_content");
-            }
-        }
-    }
     params.add_generation_prompt = inputs.add_generation_prompt;
     params.tool_choice = inputs.tool_choice;
     params.reasoning_format = inputs.reasoning_format;
@@ -2648,9 +2629,6 @@ static common_chat_params common_chat_templates_apply_jinja(
     params.extra_context = json::object();
     for (auto el : inputs.chat_template_kwargs) {
         params.extra_context[el.first] = json::parse(el.second);
-    }
-    if (!params.extra_context.contains("add_thoughts")) {
-        params.extra_context["add_thoughts"] = inputs.enable_thinking;
     }
 
     if (!inputs.json_schema.empty()) {
@@ -2900,11 +2878,7 @@ common_chat_params common_chat_templates_apply(
     const struct common_chat_templates_inputs & inputs)
 {
     GGML_ASSERT(tmpls != nullptr);
-    common_chat_params params = inputs.use_jinja
+    return inputs.use_jinja
         ? common_chat_templates_apply_jinja(tmpls, inputs)
         : common_chat_templates_apply_legacy(tmpls, inputs);
-    if (!params.grammar_lazy && !params.grammar_triggers.empty()) {
-        params.grammar_triggers.clear();
-    }
-    return params;
 }
