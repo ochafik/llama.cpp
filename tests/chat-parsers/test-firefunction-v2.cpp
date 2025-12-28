@@ -18,7 +18,7 @@ void test_firefunction_v2_parser(chat_parser_impl impl)
     template_caps.legacy_format = COMMON_CHAT_FORMAT_FIREFUNCTION_V2;
     template_caps.experimental_format = COMMON_CHAT_FORMAT_PEG_NATIVE;
     template_caps.supports_thinking = ThinkingSupport::No;
-    std::vector<std::string>   end_tokens{ "<|eot_id|>" };
+    template_caps.end_tokens = { "<|eot_id|>" };
 
     auto tmpls = read_templates(template_caps.jinja_path);
 

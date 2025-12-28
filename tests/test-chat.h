@@ -421,9 +421,9 @@ static void test_parser_with_streaming(const common_chat_msg & expected, const s
     for (size_t i = 1; i <= raw_message.size(); ++i) {
         auto curr_msg = parse_msg(std::string(utf8_truncate_safe_view(std::string_view(raw_message).substr(0, i))));
         if (curr_msg == simple_assist_msg("")) continue;
-        LOG_INF("Streaming msg: %s\n", common_chat_msgs_to_json_oaicompat<json>({curr_msg}).dump().c_str());
+        // LOG_INF("Streaming msg: %s\n", common_chat_msgs_to_json_oaicompat<json>({curr_msg}).dump().c_str());
         for (auto diff: common_chat_msg_diff::compute_diffs(last_msg, curr_msg)) {
-            LOG_INF("Streaming diff: %s\n", common_chat_msg_diff_to_json_oaicompat<json>(diff).dump().c_str());
+            // LOG_INF("Streaming diff: %s\n", common_chat_msg_diff_to_json_oaicompat<json>(diff).dump().c_str());
             if (!diff.reasoning_content_delta.empty()) {
                 merged.reasoning_content += diff.reasoning_content_delta;
             }
