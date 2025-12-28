@@ -1,4 +1,5 @@
 #include "../test-chat.h"
+#include "chat.h"
 
 void test_qwen3_coder_xml_parser(chat_parser_impl impl)
 {
@@ -30,6 +31,30 @@ void test_qwen3_coder_xml_parser(chat_parser_impl impl)
 
     run_template_test_suite(impl, template_caps, tmpls);
 
+    {
+        common_chat_templates_inputs inputs;
+        inputs.messages = {message_user};
+        inputs.tools = {special_function_tool};
+        inputs.parallel_tool_calls = true;
+        inputs.experimental_new_parsers = impl == chat_parser_impl::EXPERIMENTAL;
+
+        auto params = common_chat_templates_apply(tmpls.get(), inputs);
+        auto syntax = get_syntax(params);
+        assert_equals(inputs.experimental_new_parsers ? COMMON_CHAT_FORMAT_PEG_CONSTRUCTED : COMMON_CHAT_FORMAT_QWEN3_CODER_XML, params.format);
+
+        assert_msg_equals(
+            message_assist_call,
+            common_chat_parse(
+                " <tool_call>\n"
+                "<function=special_function> <parameter=arg1>1\n"
+                "</parameter>\n"
+                "</function> </tool_call>\n"
+                "\n"
+                "\n",
+                /* is_partial= */ false,
+                syntax));
+    }
+    
     // Test Qwen3-Coder XML format
     {
         // Load template and build parser with tools
