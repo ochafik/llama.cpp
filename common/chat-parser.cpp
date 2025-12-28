@@ -1554,21 +1554,16 @@ common_chat_msg common_chat_peg_parse(const common_peg_arena & parser, const std
     common_chat_msg msg;
     msg.role = "assistant";
 
-    // Backward-compatible mapper selection: use explicit PEG format types first
-    switch (syntax.format) {
-        case COMMON_CHAT_FORMAT_PEG_CONSTRUCTED:
-            // These use build_generic_tool_calls_peg_parser which produces TOOL_ARG_* tags
-            common_chat_peg_constructed_mapper(msg).from_ast(ctx.ast, result);
-            break;
-        case COMMON_CHAT_FORMAT_PEG_SIMPLE:
-            // Generic mapper for simple PEG format
-            common_chat_peg_mapper(msg).from_ast(ctx.ast, result);
-            break;
-        case COMMON_CHAT_FORMAT_PEG_NATIVE:
-            common_chat_peg_native_mapper(msg).from_ast(ctx.ast, result);
-            break;
-        default:
-            throw std::runtime_error(std::string("Unsupported PEG format: ") + common_chat_format_name(syntax.format));
+    if (syntax.format == COMMON_CHAT_FORMAT_PEG_NATIVE) {
+        auto mapper = common_chat_peg_native_mapper(msg);
+        mapper.from_ast(ctx.ast, result);
+    } else if (syntax.format == COMMON_CHAT_FORMAT_PEG_CONSTRUCTED) {
+        auto mapper = common_chat_peg_constructed_mapper(msg);
+        mapper.from_ast(ctx.ast, result);
+    } else {
+        // Generic mapper
+        auto mapper = common_chat_peg_mapper(msg);
+        mapper.from_ast(ctx.ast, result);
     }
     if (!is_partial) {
         LOG_DBG("Parsed message: %s\n", common_chat_msgs_to_json_oaicompat<json>({msg}).at(0).dump().c_str());

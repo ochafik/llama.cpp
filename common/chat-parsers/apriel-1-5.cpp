@@ -16,7 +16,10 @@ common_chat_params common_chat_params_init_apriel_1_5_peg(const common_chat_temp
         }
         adjusted_messages.push_back(adjusted_message);
     }
-    data.prompt = apply(tmpl, inputs, /* messages_override= */ adjusted_messages);
+    json additional_context = {
+        {"add_thoughts", inputs.enable_thinking},
+    };
+    data.prompt = apply(tmpl, inputs, /* messages_override= */ adjusted_messages, /* tools_override= */ nullptr, additional_context);
 
     // Handle thinking tags appropriately based on inputs.enable_thinking
     if (string_ends_with(data.prompt, "<thinking>\n") || string_ends_with(data.prompt, "<thinking>")) {
