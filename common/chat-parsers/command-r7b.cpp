@@ -102,21 +102,22 @@ common_chat_params common_chat_params_init_command_r7b_peg(const common_chat_tem
                 // Command-R's template expects an integer string.
                 {"pattern", "^[0-9]{1,10}$"},
             };
-            json_tool_call_format format;
-            format.tool_calls_start = p.literal("<|START_ACTION|>[") + p.space();
-            format.tool_calls_sep = p.literal(",") + p.space();
-            format.tool_calls_end = p.space() + "]<|END_ACTION|>";
             // Command R7B: {"tool_call_id": "...", "tool_name": "...", "parameters": {...}}
-            format.tool_call = [&](auto & p, const auto & name, const auto & args) {
+            auto any_tool_call = p.choice();
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
                 using Tag = common_chat_peg_tag;
-                return p.sequence()
+                any_tool_call |= p.tag(Tag::TOOL, p.sequence()
                     + p.literal_tag(Tag::TOOL_OPEN, "{")
                     << "\"tool_call_id\"" << ":" << p.tag(Tag::TOOL_ID, p.schema(p.json(), "tool-call-id", id_schema)) << ","
                     << "\"tool_name\"" << ":" << ("\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"") << ","
-                    << "\"parameters\"" << ":" << p.tag(Tag::TOOL_ARGS, args)
-                    << p.literal_tag(Tag::TOOL_CLOSE, "}");
-            };
-            auto tool_calls = build_json_tool_calls_peg_parser(p, inputs, format);
+                    << "\"parameters\"" << ":" << p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters))
+                    << p.literal_tag(Tag::TOOL_CLOSE, "}"));
+            });
+
+            auto tool_calls =
+                p.literal("<|START_ACTION|>[") + p.space()
+                + any_tool_call + p.repeat(p.literal(",") + p.space() << any_tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
+                + p.space() + "]<|END_ACTION|>";
 
             if (require_tools) {
                 return reasoning << tool_calls << eot;

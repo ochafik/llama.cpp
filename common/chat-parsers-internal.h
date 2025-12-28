@@ -265,57 +265,6 @@ inline void common_chat_build_peg_grammar(const struct templates_params & inputs
     }
 }
 
-struct json_tool_call_format {
-    std::optional<common_peg_parser> tool_calls_start;  // Required: wrapper start (e.g., "[")
-    std::optional<common_peg_parser> tool_calls_sep;    // Optional: separator between calls (e.g., ",")
-    std::optional<common_peg_parser> tool_calls_end;    // Required: wrapper end (e.g., "]")
-    // Receives the parser for the JSON arguments already tagged as TOOL_ARGS.
-    std::function<common_peg_parser(common_chat_peg_builder &, const std::string &, const common_peg_parser &)>
-        tool_call = [](auto & p, const auto & name, const auto & args)
-    {
-        using Tag = common_chat_peg_tag;
-        return p.sequence()
-            + p.literal_tag(Tag::TOOL_OPEN, "{")
-            << "\"name\"" << ":" << ("\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"") << ","
-            << "\"arguments\"" << ":" << p.tag(Tag::TOOL_ARGS, args)
-            << p.literal_tag(Tag::TOOL_CLOSE, "}");
-    };
-
-    std::string tool_call_name_key = "name";
-    std::string tool_call_arguments_key = "arguments";
-    bool tool_call_id_comes_first = false;  // If true: {id, name, args}; if false: {name, args, id}
-};
-
-inline common_peg_parser build_json_tool_calls_peg_parser(
-    common_chat_peg_builder & p,
-    const struct templates_params & inputs,
-    const json_tool_call_format & format
-)
-{
-    using Tag = common_chat_peg_tag;
-
-    if (!format.tool_calls_start || !format.tool_calls_end) {
-        throw std::runtime_error("tool_calls_start and tool_calls_end are required");
-    }
-
-    auto any_tool_call = p.choice();
-    foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
-        auto tool_call = format.tool_call(p, name, p.schema(p.json(), "tool-" + name + "-args", parameters));
-        any_tool_call |= p.tag(Tag::TOOL, tool_call);
-    });
-
-    if (format.tool_calls_sep) {
-        return
-            *format.tool_calls_start
-            + any_tool_call + p.repeat(*format.tool_calls_sep << any_tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
-            + *format.tool_calls_end;
-    }
-    return
-        *format.tool_calls_start
-        + p.repeat(any_tool_call, 1, inputs.parallel_tool_calls ? -1 : 1)
-        + *format.tool_calls_end;
-}
-
 // Format struct for XML-style tool calls with individual parameters
 // Example: <tool_call><function=name><parameter=key>value</parameter></function></tool_call>
 struct generic_tool_call_format {

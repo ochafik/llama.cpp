@@ -91,12 +91,21 @@ common_chat_params common_chat_params_init_apriel_1_5_peg(const common_chat_temp
                 data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_calls>"});
             }
 
-            // Use build_json_tool_calls_peg_parser for standard JSON tool call format
-            json_tool_call_format format;
-            format.tool_calls_start = p.literal("<tool_calls>[");
-            format.tool_calls_sep = p.literal(", ");
-            format.tool_calls_end = p.literal("]</tool_calls>");
-            auto tool_calls = build_json_tool_calls_peg_parser(p, inputs, format);
+            // Standard JSON tool call format
+            auto any_tool_call = p.choice();
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
+                using Tag = common_chat_peg_tag;
+                any_tool_call |= p.tag(Tag::TOOL, p.sequence()
+                    + p.literal_tag(Tag::TOOL_OPEN, "{")
+                    << "\"name\"" << ":" << ("\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"") << ","
+                    << "\"arguments\"" << ":" << p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters))
+                    << p.literal_tag(Tag::TOOL_CLOSE, "}"));
+            });
+
+            auto tool_calls =
+                p.literal("<tool_calls>[")
+                + any_tool_call + p.repeat(p.literal(", ") << any_tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
+                + p.literal("]</tool_calls>");
 
             auto newline_before_tools = p.optional(p.literal("\n"));
 

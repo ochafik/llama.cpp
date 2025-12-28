@@ -108,20 +108,20 @@ common_chat_params common_chat_params_init_apertus_peg(const common_chat_templat
             }
 
             // <|tools_prefix|>[{"tool_name": tool_args}]<|tools_suffix|>
-            json_tool_call_format format;
-            format.tool_calls_start = p.literal("<|tools_prefix|>[");
-            format.tool_calls_sep = p.literal(", ");
-            format.tool_calls_end = p.literal("]<|tools_suffix|>");
             // Apertus uses short form: {"func_name": {...args...}}
-            format.tool_call = [](auto & p, const auto & name, const auto & args) {
-                using Tag = common_chat_peg_tag;
-                return p.sequence()
+            auto any_tool_call = p.choice();
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
+                any_tool_call |= p.tag(Tag::TOOL, p.sequence()
                     + p.literal_tag(Tag::TOOL_OPEN, "{\"")
                     + p.literal_tag(Tag::TOOL_NAME, name)
-                    << "\": " << p.tag(Tag::TOOL_ARGS, args)
-                    << p.literal_tag(Tag::TOOL_CLOSE, "}");
-            };
-            auto tool_calls = build_json_tool_calls_peg_parser(p, inputs, format);
+                    << "\": " << p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters))
+                    << p.literal_tag(Tag::TOOL_CLOSE, "}"));
+            });
+
+            auto tool_calls =
+                p.literal("<|tools_prefix|>[")
+                + any_tool_call + p.repeat(p.literal(", ") << any_tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
+                + p.literal("]<|tools_suffix|>");
 
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 return p.optional(reasoning) << tool_calls;

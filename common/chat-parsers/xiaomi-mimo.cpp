@@ -32,13 +32,20 @@ common_chat_params common_chat_params_init_xiaomi_mimo_peg(const common_chat_tem
                 data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_call>"});
             }
 
-            json_tool_call_format format;
             // Template format: <tool_call>\n{"name": ...}\n</tool_call>
-            format.tool_calls_start = p.literal("<tool_call>\n");
-            format.tool_calls_sep = p.literal("\n</tool_call>\n<tool_call>\n");
-            format.tool_calls_end = p.literal("\n</tool_call>");
+            auto any_tool_call = p.choice();
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
+                any_tool_call |= p.tag(Tag::TOOL, p.sequence()
+                    + p.literal_tag(Tag::TOOL_OPEN, "{")
+                    << "\"name\"" << ":" << ("\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"") << ","
+                    << "\"arguments\"" << ":" << p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters))
+                    << p.literal_tag(Tag::TOOL_CLOSE, "}"));
+            });
+
             auto tool_calls = p.trigger_rule("tool-call-root",
-                build_json_tool_calls_peg_parser(p, inputs, format));
+                p.literal("<tool_call>\n")
+                    + any_tool_call + p.repeat(p.literal("\n</tool_call>\n<tool_call>\n") << any_tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
+                    + p.literal("\n</tool_call>"));
 
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 return tool_calls;
