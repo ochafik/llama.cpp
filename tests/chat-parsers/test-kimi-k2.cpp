@@ -32,6 +32,7 @@ void test_kimi_k2_parser(chat_parser_impl impl)
     template_caps.end_tokens = { "<|im_end|>" };
     
     auto tmpls = read_templates(template_caps.jinja_path);
+    run_template_test_suite(impl, template_caps, tmpls);
 
     assert_equals(COMMON_CHAT_FORMAT_KIMI_K2, common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);
     assert_equals(COMMON_CHAT_FORMAT_KIMI_K2, common_chat_templates_apply(tmpls.get(), inputs_tools).format);
