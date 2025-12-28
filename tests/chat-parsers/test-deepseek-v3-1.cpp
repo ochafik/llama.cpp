@@ -28,7 +28,7 @@ void test_deepseek_v3_1_parser(chat_parser_impl impl)
 
     auto tmpls = read_templates(template_caps.jinja_path);
 
-    test_systematic_needle_streaming(impl, template_caps, tmpls);
+    run_template_test_suite(impl, template_caps, tmpls);
 
     for (const auto & inputs : { inputs_no_tools, inputs_tools }) {
         auto params = common_chat_templates_apply(tmpls.get(), inputs);

@@ -33,7 +33,7 @@ void test_lfm2_parser(chat_parser_impl impl)
     
     auto tmpls = read_templates(template_caps.jinja_path);
 
-    test_systematic_needle_streaming(impl, template_caps, tmpls);
+    run_template_test_suite(impl, template_caps, tmpls);
     
 
     auto inputs_tools_forced_json_schema = std::invoke([&]() -> common_chat_templates_inputs {

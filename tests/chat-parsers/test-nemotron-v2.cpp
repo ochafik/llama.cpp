@@ -29,7 +29,7 @@ void test_nemotron_v2_parser(chat_parser_impl impl)
 
     auto tmpls = read_templates("models/templates/NVIDIA-Nemotron-Nano-v2.jinja");
 
-    test_systematic_needle_streaming(impl, template_caps, tmpls);
+    run_template_test_suite(impl, template_caps, tmpls);
 
     assert_equals(COMMON_CHAT_FORMAT_NEMOTRON_V2, common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);
     assert_equals(COMMON_CHAT_FORMAT_NEMOTRON_V2, common_chat_templates_apply(tmpls.get(), inputs_tools).format);

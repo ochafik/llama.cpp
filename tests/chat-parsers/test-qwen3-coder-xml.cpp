@@ -28,7 +28,7 @@ void test_qwen3_coder_xml_parser(chat_parser_impl impl)
 
     auto tmpls = read_templates(template_caps.jinja_path);
 
-    test_systematic_needle_streaming(impl, template_caps, tmpls);
+    run_template_test_suite(impl, template_caps, tmpls);
 
     // Test Qwen3-Coder XML format
     {

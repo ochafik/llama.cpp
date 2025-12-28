@@ -381,5 +381,5 @@ void test_hermes_2_pro_parser(chat_parser_impl impl)
                 /* .reasoning_format = */ COMMON_REASONING_FORMAT_DEEPSEEK,
             }));
 
-    test_systematic_needle_streaming(impl, template_caps, tmpls);
+    run_template_test_suite(impl, template_caps, tmpls);
 }
