@@ -2719,12 +2719,8 @@ static common_chat_params common_chat_templates_apply_jinja(
 
     // Xiaomi MiMo format detection (must come before Hermes 2 Pro)
     // Template uses singular <tool_call>/<tool_call> not plural <tool_calls>
-    if (src.find("<tools>") != std::string::npos &&
-        src.find("# Tools") != std::string::npos &&
-        src.find("</tools>") != std::string::npos &&
-        src.find("<tool_call>") != std::string::npos &&
-        src.find("</tool_call>") != std::string::npos &&
-        src.find("<tool_response>") != std::string::npos) {
+    if (src.find("MiMo, an AI assistant developed by Xiaomi") != std::string::npos &&
+        src.find("<tools>") != std::string::npos && src.find("<tool_call>") != std::string::npos) {
         return common_chat_params_init_xiaomi_mimo(tmpl, params);
     }
 
