@@ -62,10 +62,11 @@ common_chat_params common_chat_params_init_functionary_v3_2_peg(const common_cha
                 if (inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                     data.grammar_triggers.push_back({
                         COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL,
-                        "(?:[\\s\\S]+?>>>)?" + regex_escape(name) + "\n" + args_pattern,
+                        "^(>>>)?" + regex_escape(name) + "\n" + args_pattern,
                     });
                 }
             });
+            data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<function="});
 
             // Build pattern: optional content with "all\n" marker, then tool calls
             // Format with content: all\n<content>>>>name\n{...}>>>name2\n{...}
