@@ -119,7 +119,7 @@ common_chat_params common_chat_params_init_command_r7b_peg(const common_chat_tem
             auto tool_calls = build_json_tool_calls_peg_parser(p, inputs, format);
 
             if (require_tools) {
-                return reasoning << tool_calls << eot;// p.optional(p.rest());
+                return reasoning << tool_calls << eot;
             }
 
             return reasoning << response_block << tool_calls << eot;
