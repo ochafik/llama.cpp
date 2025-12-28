@@ -417,8 +417,8 @@ static delta_data init_delta(const struct common_chat_templates * tmpls, const s
     inputs.tools       = tools;
     inputs.tool_choice = tool_choice;
     // Enable thinking when reasoning is expected - this builds the parser with reasoning block support
-    if (reasoning_format != COMMON_REASONING_FORMAT_NONE) {
-        inputs.enable_thinking = true;
+    inputs.enable_thinking = (reasoning_format != COMMON_REASONING_FORMAT_NONE);
+    if (inputs.enable_thinking) {
         inputs.reasoning_format = reasoning_format;
     }
     // Set parser implementation based on enum (env var can override for backwards compat)
