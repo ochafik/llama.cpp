@@ -1009,7 +1009,9 @@ private:
     }
 
     void clear_slot(server_slot & slot, bool allow_processing = false) const {
-        GGML_ASSERT(allow_processing || !slot.is_processing());
+        if (!allow_processing) {
+            GGML_ASSERT(!slot.is_processing());
+        }
 
         SLT_WRN(slot, "clearing slot with %zu tokens\n", slot.prompt.tokens.size());
 
