@@ -25,7 +25,7 @@ void test_generic_parser(chat_parser_impl impl)
 
     auto tmpls = read_templates(template_caps.jinja_path);
 
-    test_systematic_needle_streaming(impl, template_caps, tmpls);
+    run_template_test_suite(impl, template_caps, tmpls);
 
     assert_equals(COMMON_CHAT_FORMAT_CONTENT_ONLY, common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);
     assert_equals(COMMON_CHAT_FORMAT_GENERIC, common_chat_templates_apply(tmpls.get(), inputs_tools).format);
