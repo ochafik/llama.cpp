@@ -57,7 +57,8 @@ void common_chat_peg_native_mapper::map(const common_peg_ast_node & node) {
     switch (tag) {
         case Tag::TOOL:
         case Tag::TOOL_CLOSE:
-            // Do nothing.
+        case Tag::REASONING_BLOCK:
+            // Structural wrappers - do nothing.
             break;
         case Tag::TOOL_OPEN:
             // Be lazy: don't create tool call here, wait for TOOL_NAME
@@ -106,7 +107,8 @@ void common_chat_peg_constructed_mapper::map(const common_peg_ast_node & node) {
     auto tag = static_cast<Tag>(node.tag_id);
     switch (tag) {
         case Tag::TOOL:
-            // Do nothing.
+        case Tag::TOOL_ARG:
+            // Structural wrappers - do nothing.
             break;
         case Tag::TOOL_OPEN:
             current_tool = nullptr;
