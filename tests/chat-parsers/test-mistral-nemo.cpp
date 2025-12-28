@@ -29,17 +29,17 @@ void test_mistral_nemo_parser(chat_parser_impl impl)
     template_caps.supports_disable_thinking = SupportsDisableThinking::No;
     template_caps.supports_reasoning_only = SupportsReasoningOnly::No;
     template_caps.tool_calls_have_ids = ToolCallsHaveIds::Yes;
+    template_caps.end_tokens = { "</s>" };
 
     auto tmpls = read_templates(template_caps.jinja_path);
     test_systematic_needle_streaming(impl, template_caps, tmpls);
 
-    std::vector<std::string> end_tokens{ "</s>" };
 
     assert_equals(COMMON_CHAT_FORMAT_MISTRAL_NEMO, common_chat_templates_apply(tmpls.get(), inputs_tools).format);
 
-    test_templates(impl, tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
+    test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
     test_templates(
-        impl, tmpls.get(), end_tokens, message_assist_call_id, tools,
+        impl, tmpls.get(), template_caps.end_tokens, message_assist_call_id, tools,
         "[TOOL_CALLS][{\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}, \"id\": \"123456789\"}]");
 }
             

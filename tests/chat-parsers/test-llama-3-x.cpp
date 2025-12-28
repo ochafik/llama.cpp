@@ -16,60 +16,75 @@ void test_llama_3_x_parser(chat_parser_impl impl)
     inputs_tools_builtin.tools              = {python_tool};
     
     {
-        auto tmpls = read_templates("models/templates/meta-llama-Llama-3.2-3B-Instruct.jinja");
-        std::vector<std::string>   end_tokens{ "<|eom_id|>", "<|eot_id|>" };
+        template_capabilities template_caps;
+        template_caps.name = "Llama 3.1";
+        template_caps.jinja_path = "models/templates/meta-llama-Llama-3.1-8B-Instruct.jinja";
+        template_caps.legacy_format = COMMON_CHAT_FORMAT_LLAMA_3_X;
+        template_caps.experimental_format = COMMON_CHAT_FORMAT_PEG_NATIVE;
+        template_caps.supports_thinking = ThinkingSupport::No;
+        template_caps.reasoning_requires_tools = ReasoningRequiresTools::No;
+        template_caps.tools_emit_content_with_calls = ToolsEmitContentWithCalls::No;
+        template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::No;
+        template_caps.supports_disable_thinking = SupportsDisableThinking::No;
+        template_caps.supports_reasoning_only = SupportsReasoningOnly::No;
+        template_caps.tool_calls_have_ids = ToolCallsHaveIds::No;
+        template_caps.end_tokens = { "<|eom_id|>", "<|eot_id|>" };
+
+        auto tmpls = read_templates(template_caps.jinja_path);
+
+        test_systematic_needle_streaming(impl, template_caps, tmpls);
 
         assert_equals(COMMON_CHAT_FORMAT_LLAMA_3_X, common_chat_templates_apply(tmpls.get(), inputs_tools).format);
         assert_equals(COMMON_CHAT_FORMAT_CONTENT_ONLY, common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);
 
-        test_templates(impl, tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
-        test_templates(impl, tmpls.get(), end_tokens, message_assist_call, tools,
+        test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
+        test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist_call, tools,
                         "{\"name\": \"special_function\", \"parameters\": {\"arg1\": 1}}");
     }
 
-    template_capabilities template_caps;
-    template_caps.name = "Llama 3.1";
-    template_caps.jinja_path = "models/templates/meta-llama-Llama-3.1-8B-Instruct.jinja";
-    template_caps.legacy_format = COMMON_CHAT_FORMAT_LLAMA_3_X_WITH_BUILTIN_TOOLS;
-    template_caps.experimental_format = COMMON_CHAT_FORMAT_PEG_NATIVE;
-    template_caps.supports_thinking = ThinkingSupport::No;
-    template_caps.think_open_tag = nullptr;
-    template_caps.think_close_tag = nullptr;
-    template_caps.reasoning_requires_tools = ReasoningRequiresTools::No;
-    template_caps.tools_emit_content_with_calls = ToolsEmitContentWithCalls::No;
-    template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::No;
-    template_caps.supports_disable_thinking = SupportsDisableThinking::No;
-    template_caps.supports_reasoning_only = SupportsReasoningOnly::No;
-    template_caps.tool_calls_have_ids = ToolCallsHaveIds::No;
+    {
+        template_capabilities template_caps;
+        template_caps.name = "Llama 3.1";
+        template_caps.jinja_path = "models/templates/meta-llama-Llama-3.1-8B-Instruct.jinja";
+        template_caps.legacy_format = COMMON_CHAT_FORMAT_LLAMA_3_X_WITH_BUILTIN_TOOLS;
+        template_caps.experimental_format = COMMON_CHAT_FORMAT_PEG_NATIVE;
+        template_caps.supports_thinking = ThinkingSupport::No;
+        template_caps.reasoning_requires_tools = ReasoningRequiresTools::No;
+        template_caps.tools_emit_content_with_calls = ToolsEmitContentWithCalls::No;
+        template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::No;
+        template_caps.supports_disable_thinking = SupportsDisableThinking::No;
+        template_caps.supports_reasoning_only = SupportsReasoningOnly::No;
+        template_caps.tool_calls_have_ids = ToolCallsHaveIds::No;
+        template_caps.end_tokens = { "<|eom_id|>", "<|eot_id|>" };
 
-    auto tmpls = read_templates(template_caps.jinja_path);
+        auto tmpls = read_templates(template_caps.jinja_path);
 
-    test_systematic_needle_streaming(impl, template_caps, tmpls);
+        test_systematic_needle_streaming(impl, template_caps, tmpls);
 
-    std::vector<std::string>   end_tokens{ "<|eom_id|>", "<|eot_id|>" };
 
-    assert_equals(COMMON_CHAT_FORMAT_CONTENT_ONLY, common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);
-    assert_equals(COMMON_CHAT_FORMAT_LLAMA_3_X, common_chat_templates_apply(tmpls.get(), inputs_tools).format);
-    assert_equals(COMMON_CHAT_FORMAT_LLAMA_3_X_WITH_BUILTIN_TOOLS,
-                    common_chat_templates_apply(tmpls.get(), inputs_tools_builtin).format);
-    assert_equals(COMMON_CHAT_FORMAT_LLAMA_3_X_WITH_BUILTIN_TOOLS,
-                    common_chat_templates_apply(
-                        read_templates("models/templates/meta-llama-Llama-3.3-70B-Instruct.jinja").get(),
-                        inputs_tools_builtin)
-                        .format);
+        assert_equals(COMMON_CHAT_FORMAT_CONTENT_ONLY, common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);
+        assert_equals(COMMON_CHAT_FORMAT_LLAMA_3_X, common_chat_templates_apply(tmpls.get(), inputs_tools).format);
+        assert_equals(COMMON_CHAT_FORMAT_LLAMA_3_X_WITH_BUILTIN_TOOLS,
+                        common_chat_templates_apply(tmpls.get(), inputs_tools_builtin).format);
+        assert_equals(COMMON_CHAT_FORMAT_LLAMA_3_X_WITH_BUILTIN_TOOLS,
+                        common_chat_templates_apply(
+                            read_templates("models/templates/meta-llama-Llama-3.3-70B-Instruct.jinja").get(),
+                            inputs_tools_builtin)
+                            .format);
 
-    assert_equals(
-        message_assist_call,
-        common_chat_parse(
-            "{\"name\": \"special_function\", \"parameters\": {\"arg1\": 1}}",
-            /* is_partial= */ false,
-            {COMMON_CHAT_FORMAT_LLAMA_3_X}));
+        assert_equals(
+            message_assist_call,
+            common_chat_parse(
+                "{\"name\": \"special_function\", \"parameters\": {\"arg1\": 1}}",
+                /* is_partial= */ false,
+                {COMMON_CHAT_FORMAT_LLAMA_3_X}));
 
-    // test_templates(impl, tmpls.get(), end_tokens, message_assist, tools, R"(?)", /* expect_grammar_triggered= */ false);
-    test_templates(impl, tmpls.get(), end_tokens, message_assist_call_code_interpreter, llama_3_1_tools,
-                    "<|python_tag|>code_interpreter.call(code=\"print('hey')\")");
-    test_templates(impl, tmpls.get(), end_tokens, message_assist_call_python, tools,
-                    "<|python_tag|>python.call(code=\"print('hey')\")");
-    test_templates(impl, tmpls.get(), end_tokens, message_assist_call, tools,
-                    "{\"name\": \"special_function\", \"parameters\": {\"arg1\": 1}}");
+        // test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist, tools, R"(?)", /* expect_grammar_triggered= */ false);
+        test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist_call_code_interpreter, llama_3_1_tools,
+                        "<|python_tag|>code_interpreter.call(code=\"print('hey')\")");
+        test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist_call_python, tools,
+                        "<|python_tag|>python.call(code=\"print('hey')\")");
+        test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist_call, tools,
+                        "{\"name\": \"special_function\", \"parameters\": {\"arg1\": 1}}");
+    }
 }

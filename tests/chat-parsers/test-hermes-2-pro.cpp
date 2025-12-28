@@ -17,7 +17,6 @@ void test_hermes_2_pro_parser(chat_parser_impl impl)
 
     {
         auto tmpls = read_templates("models/templates/Qwen-QwQ-32B.jinja");
-        std::vector<std::string> end_tokens{ "<|im_end|>" };
 
         assert_equals(COMMON_CHAT_FORMAT_HERMES_2_PRO, common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);
         assert_equals(COMMON_CHAT_FORMAT_HERMES_2_PRO, common_chat_templates_apply(tmpls.get(), inputs_tools).format);
@@ -37,7 +36,7 @@ void test_hermes_2_pro_parser(chat_parser_impl impl)
     template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::No;
     template_caps.supports_disable_thinking = SupportsDisableThinking::No;
     template_caps.supports_reasoning_only = SupportsReasoningOnly::No;
-    std::vector<std::string> end_tokens{ "<|im_end|>" };
+    template_caps.end_tokens = { "<|im_end|>" };
 
     assert_equals(COMMON_CHAT_FORMAT_HERMES_2_PRO, common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);
     assert_equals(COMMON_CHAT_FORMAT_HERMES_2_PRO, common_chat_templates_apply(tmpls.get(), inputs_tools).format);
@@ -346,8 +345,8 @@ void test_hermes_2_pro_parser(chat_parser_impl impl)
                 /* .thinking_forced_open = */ true,
             }));
 
-    test_templates(impl, tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
-    test_templates(impl, tmpls.get(), end_tokens, message_assist_call, tools,
+    test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
+    test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist_call, tools,
                     "<tool_call>\n"
                     "{\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
                     "</tool_call>");
@@ -359,7 +358,7 @@ void test_hermes_2_pro_parser(chat_parser_impl impl)
     message_assist_multiple_calls_template.tool_calls.push_back({"special_function", "{\"arg1\": 1}", ""});
     message_assist_multiple_calls_template.tool_calls.push_back({"python", "{\"code\":\"print('test')\"}", ""});
 
-    test_templates(impl, tmpls.get(), end_tokens, message_assist_multiple_calls_template, tools,
+    test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist_multiple_calls_template, tools,
                     "<tool_call>\n"
                     "{\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}\n"
                     "</tool_call>\n"
@@ -368,7 +367,7 @@ void test_hermes_2_pro_parser(chat_parser_impl impl)
                     "</tool_call>");
 
     // TODO(ochafik): Fix this test - the template produces a format that doesn't match expected
-    // test_templates(impl, tmpls.get(), end_tokens, message_assist_call_python_lines, tools,
+    // test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist_call_python_lines, tools,
     //               "<tool_call>\n"
     //               "{\"name\": \"python\", \"arguments\": {\"code\":\"# This is a program:\\nprint('hey')\"}}\n"
     //               "</tool_call>");

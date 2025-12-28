@@ -29,11 +29,11 @@ void test_apertus_parser(chat_parser_impl impl)
         template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::No;
         template_caps.supports_disable_thinking = SupportsDisableThinking::Yes;
         template_caps.supports_reasoning_only = SupportsReasoningOnly::Yes;
+        template_caps.end_tokens = {"<|assistant_end|>" };
 
         auto tmpls = read_templates(template_caps.jinja_path);
         test_systematic_needle_streaming(impl, template_caps, tmpls);
 
-        std::vector<std::string> end_tokens{ "<|assistant_end|>" };
 
         assert_equals(COMMON_CHAT_FORMAT_APERTUS, common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);
         assert_equals(COMMON_CHAT_FORMAT_APERTUS, common_chat_templates_apply(tmpls.get(), inputs_tools).format);
@@ -115,12 +115,12 @@ void test_apertus_parser(chat_parser_impl impl)
 // srv  log_server_r: request:  {"max_tokens": 512, "messages": [{"role": "system", "content": "You are a coding assistant."}, {"role": "user", "content": "Write an example"}], "tool_choice": "required", "tools": [{"type": "function", "function": {"name": "test", "description": "", "parameters": {"type": "object", "properties": {"success": {"type": "boolean", "const": true}}, "required": ["success"]}}}], "parallel_tool_calls": false, "stream": false}
 
         // Test template generation for regular content
-        test_templates(impl, tmpls.get(), end_tokens, message_assist, tools,
+        test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist, tools,
                       "Hello, world!\nWhat's up?",
                       /* expect_grammar_triggered= */ false);
 
         // Test template generation for tool calls
-        test_templates(impl, tmpls.get(), end_tokens, message_assist_call, tools,
+        test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist_call, tools,
                       "<|tools_prefix|>[{\"special_function\": {\"arg1\": 1}}]<|tools_suffix|>",
                       /* expect_grammar_triggered= */ true
         );

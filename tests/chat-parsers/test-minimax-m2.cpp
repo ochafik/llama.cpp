@@ -24,7 +24,7 @@ void test_minimax_m2_parser(chat_parser_impl impl)
     template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::No;
     template_caps.supports_disable_thinking = SupportsDisableThinking::No;
     template_caps.supports_reasoning_only = SupportsReasoningOnly::No;
-    std::vector<std::string> end_tokens{ "[e~[" };
+    template_caps.end_tokens = { "[e~[" };
 
     auto tmpls = read_templates(template_caps.jinja_path);
 
@@ -129,12 +129,12 @@ void test_minimax_m2_parser(chat_parser_impl impl)
     } // end PEG parser-specific tests
 
     // Test template generation for regular content
-    test_templates(impl, tmpls.get(), end_tokens, message_assist, tools,
+    test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist, tools,
                   "Hello, world!\nWhat's up?",
                   /* expect_grammar_triggered= */ false);
 
     // Test template generation for tool calls
-    test_templates(impl, tmpls.get(), end_tokens, message_assist_call, tools,
+    test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist_call, tools,
                   "<minimax:tool_call>\n<invoke name=\"special_function\">\n<parameter name=\"arg1\">1</parameter>\n</invoke>\n</minimax:tool_call>",
                   /* expect_grammar_triggered= */ true,
                   /* test_grammar_if_triggered= */ true,
@@ -143,14 +143,14 @@ void test_minimax_m2_parser(chat_parser_impl impl)
     );
 
     // Test template generation for tools with optional parameters
-    test_templates(impl, tmpls.get(), end_tokens, message_assist_call_noopt, tools,
+    test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist_call_noopt, tools,
                   "<minimax:tool_call>\n<invoke name=\"special_function_with_opt\">\n<parameter name=\"arg1\">1</parameter>\n</invoke>\n</minimax:tool_call>",
                   /* expect_grammar_triggered= */ true,
                   /* test_grammar_if_triggered= */ true,
                   /* reasoning_format= */ COMMON_REASONING_FORMAT_NONE,
                   /* ignore_whitespace_differences= */ true
     );
-    test_templates(impl, tmpls.get(), end_tokens, message_assist_call_withopt, tools,
+    test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist_call_withopt, tools,
                   "<minimax:tool_call>\n<invoke name=\"special_function_with_opt\">\n<parameter name=\"arg1\">1</parameter>\n<parameter name=\"arg2\">2</parameter>\n</invoke>\n</minimax:tool_call>",
                   /* expect_grammar_triggered= */ true,
                   /* test_grammar_if_triggered= */ true,

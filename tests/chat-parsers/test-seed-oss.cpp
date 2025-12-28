@@ -24,17 +24,17 @@ void test_seed_oss_parser(chat_parser_impl impl)
     template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::No;
     template_caps.supports_disable_thinking = SupportsDisableThinking::Yes;
     template_caps.supports_reasoning_only = SupportsReasoningOnly::Yes;
+    template_caps.end_tokens = { "<seed:eos>" };
 
     // Seed-OSS format tests
     auto tmpls = read_templates(template_caps.jinja_path);
-    std::vector<std::string> end_tokens{ "<seed:eos>" };
 
     test_systematic_needle_streaming(impl, template_caps, tmpls);
 
     assert_equals(COMMON_CHAT_FORMAT_SEED_OSS, common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);
     assert_equals(COMMON_CHAT_FORMAT_SEED_OSS, common_chat_templates_apply(tmpls.get(), inputs_tools).format);
 
-    test_templates(impl, tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
+    test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
 
     // Create inputs with reasoning enabled (includes process_data for multi-param tests)
     common_chat_templates_inputs inputs_tools_reasoning;
@@ -156,7 +156,7 @@ void test_seed_oss_parser(chat_parser_impl impl)
 
         auto make_invalid_delta = [&](const std::function<void(std::string &)> & mutate) {
             test_templates(
-                impl, tmpls.get(), end_tokens, message_assist_call, tools,
+                impl, tmpls.get(), template_caps.end_tokens, message_assist_call, tools,
                 /* expected_delta = */ "", /* expect_grammar_triggered = */ true,
                 /* test_grammar_if_triggered = */ true,
                 COMMON_REASONING_FORMAT_NONE,

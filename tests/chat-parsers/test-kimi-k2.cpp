@@ -29,9 +29,9 @@ void test_kimi_k2_parser(chat_parser_impl impl)
     template_caps.supports_disable_thinking = SupportsDisableThinking::Yes;
     template_caps.supports_reasoning_only = SupportsReasoningOnly::Yes;
     template_caps.tool_calls_have_ids = ToolCallsHaveIds::Yes;
+    template_caps.end_tokens = { "<|im_end|>" };
     
     auto tmpls = read_templates(template_caps.jinja_path);
-    std::vector<std::string> end_tokens{ "<|im_end|>" };
 
     assert_equals(COMMON_CHAT_FORMAT_KIMI_K2, common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);
     assert_equals(COMMON_CHAT_FORMAT_KIMI_K2, common_chat_templates_apply(tmpls.get(), inputs_tools).format);
@@ -245,7 +245,7 @@ void test_kimi_k2_parser(chat_parser_impl impl)
     // assert_equals(common_chat_templates_apply(tmpls.get(), conversation_with_tools).prompt, std::string("<|im_system|>tool_declare<|im_middle|>[{\"type\": \"function\", \"function\": {\"name\": \"special_function\", \"description\": \"I'm special\", \"parameters\": {\"type\": \"object\", \"properties\": {\"arg1\": {\"type\": \"integer\", \"description\": \"The arg.\"}}, \"required\": [\"arg1\"]}}}]<|im_end|><|im_system|>system<|im_middle|>You are Kimi, an AI assistant created by Moonshot AI.<|im_end|><|im_user|>user<|im_middle|>Hey there!<|im_end|><|im_assistant|>assistant<|im_middle|><think>Think first</think>Let's do it<|tool_calls_section_begin|><|tool_call_begin|>functions.complex_function:0<|tool_call_argument_begin|>{\"name\":\"John Doe\",\"age\":30,\"active\":true,\"score\":95.5}<|tool_call_end|><|tool_calls_section_end|><|im_end|><|im_system|>complex_function<|im_middle|>## Return of functions.complex_function:0\nTool response 1<|im_end|><|im_assistant|>assistant<|im_middle|><think>Think next</think>Continue<|tool_calls_section_begin|><|tool_call_begin|>functions.web_search:1<|tool_call_argument_begin|>{\"query\":\"\\\"From Zero\\\" Linkin Park album tracklist complete songs\",\"limit\":3,\"type\":\"text\"}<|tool_call_end|><|tool_calls_section_end|><|im_end|><|im_system|>web_search<|im_middle|>## Return of functions.web_search:1\nTool response 2<|im_end|><|im_assistant|>assistant<|im_middle|><think>Think last</think>CC<|tool_calls_section_begin|><|tool_call_begin|>functions.read_file:2<|tool_call_argument_begin|>{\"args\": [{\"path\": \"src/providers/ThemeProvider.tsx\"}, {\"path\": \"src/components/Header.tsx\"}, {\"path\": \"src/components/ThemeToggle.tsx\"}, {\"path\": \"src/app/globals.css\"}, {\"path\": \"src/app/layout.tsx\"}]}<|tool_call_end|><|tool_calls_section_end|><|im_end|><|im_system|>read_file<|im_middle|>## Return of functions.read_file:2\nTool response 3<|im_end|><|im_assistant|>assistant<|im_middle|>"));
 
     // Test template generation for regular content
-    test_templates(impl, tmpls.get(), end_tokens, message_assist, tools,
+    test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist, tools,
                     "<think></think>Hello, world!\nWhat's up?",
                     /* expect_grammar_triggered= */ false);
 
@@ -253,7 +253,7 @@ void test_kimi_k2_parser(chat_parser_impl impl)
     if (impl == chat_parser_impl::EXPERIMENTAL) {
         // Test template generation for tool calls (Kimi format includes ID after colon)
         // Note: JSON formatting may vary, so we skip delta comparison and just test parsing
-        test_templates(impl, tmpls.get(), end_tokens, message_assist_call_idx, tools,
+        test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist_call_idx, tools,
                         /* expected_delta= */ "",
                         /* expect_grammar_triggered= */ true,
                         /* test_grammar_if_triggered= */ true,
@@ -262,14 +262,14 @@ void test_kimi_k2_parser(chat_parser_impl impl)
         );
 
         // Test template generation for tools with optional parameters
-        test_templates(impl, tmpls.get(), end_tokens, simple_assist_msg("", "", "special_function_with_opt", "{\"arg1\": 1}", "0"), tools,
+        test_templates(impl, tmpls.get(), template_caps.end_tokens, simple_assist_msg("", "", "special_function_with_opt", "{\"arg1\": 1}", "0"), tools,
                         /* expected_delta= */ "",
                         /* expect_grammar_triggered= */ true,
                         /* test_grammar_if_triggered= */ true,
                         /* reasoning_format= */ COMMON_REASONING_FORMAT_DEEPSEEK,
                         /* ignore_whitespace_differences= */ true
         );
-        test_templates(impl, tmpls.get(), end_tokens, simple_assist_msg("", "", "special_function_with_opt", "{\"arg1\": 1, \"arg2\": 2}", "0"), tools,
+        test_templates(impl, tmpls.get(), template_caps.end_tokens, simple_assist_msg("", "", "special_function_with_opt", "{\"arg1\": 1, \"arg2\": 2}", "0"), tools,
                         /* expected_delta= */ "",
                         /* expect_grammar_triggered= */ true,
                         /* test_grammar_if_triggered= */ true,

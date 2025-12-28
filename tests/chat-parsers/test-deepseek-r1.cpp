@@ -47,17 +47,16 @@ void test_deepseek_r1_parser(chat_parser_impl impl)
         template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::Yes;
         template_caps.supports_disable_thinking = SupportsDisableThinking::No;
         template_caps.supports_reasoning_only = SupportsReasoningOnly::No;
+        template_caps.end_tokens = { "<｜end▁of▁sentence｜>" };
 
         auto tmpls = read_templates(template_caps.jinja_path);
         test_systematic_needle_streaming(impl, template_caps, tmpls);
 
-        std::vector<std::string>   end_tokens{ "<｜end▁of▁sentence｜>" };
-
         assert_equals(COMMON_CHAT_FORMAT_DEEPSEEK_R1,                   common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);
         assert_equals(COMMON_CHAT_FORMAT_DEEPSEEK_R1,                   common_chat_templates_apply(tmpls.get(), inputs_tools).format);
 
-        test_templates(impl, tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
-        test_templates(impl, tmpls.get(), end_tokens, message_assist_thoughts, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
+        test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
+        test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist_thoughts, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
         assert_msg_equals(message_assist_thoughts_unparsed_deepseek,
             common_chat_parse(
                 "<think>I'm\nthinking</think>Hello, world!\nWhat's up?",
@@ -113,7 +112,7 @@ void test_deepseek_r1_parser(chat_parser_impl impl)
                     /* .reasoning_format = */ COMMON_REASONING_FORMAT_DEEPSEEK,
                 }));
         // TODO(ochafik): DeepSeek R1 has unicode chars in its tokens, PEG parsing infra escapes them incorrectly:
-        // test_templates(impl, tmpls.get(), end_tokens, message_assist_call, tools,
+        // test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist_call, tools,
         //         "<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>function<｜tool▁sep｜>special_function\n"
         //         "```json\n"
         //         "{\"arg1\": 1}\n"

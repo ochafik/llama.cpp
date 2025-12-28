@@ -29,12 +29,12 @@ void test_lfm2_parser(chat_parser_impl impl)
     template_caps.supports_disable_thinking = SupportsDisableThinking::Yes;
     template_caps.supports_reasoning_only = SupportsReasoningOnly::Yes;
     template_caps.tool_calls_have_ids = ToolCallsHaveIds::Yes;
+    template_caps.end_tokens = { "<|im_end|>" };
     
     auto tmpls = read_templates(template_caps.jinja_path);
 
     test_systematic_needle_streaming(impl, template_caps, tmpls);
     
-    std::vector<std::string> end_tokens{ "<|im_end|>" };
 
     auto inputs_tools_forced_json_schema = std::invoke([&]() -> common_chat_templates_inputs {
         common_chat_templates_inputs inputs;

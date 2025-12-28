@@ -75,12 +75,12 @@ void test_functionary_v3_2_parser(chat_parser_impl impl)
             /* is_partial= */ false,
             {COMMON_CHAT_FORMAT_FUNCTIONARY_V3_2}));
 
-    test_templates(impl, tmpls.get(), end_tokens, message_assist, {},
+    test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist, {},
                   "all\n"
                   "Hello, world!\n"
                   "What's up?",
                   /* expect_grammar_triggered= */ false);
-    test_templates(impl, tmpls.get(), end_tokens, message_assist_call, tools,
+    test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist_call, tools,
                   "special_function\n"
                   "{\"arg1\": 1}");
 }

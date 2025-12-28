@@ -24,6 +24,7 @@ void test_qwen3_coder_xml_parser(chat_parser_impl impl)
     template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::No;
     template_caps.supports_disable_thinking = SupportsDisableThinking::No;
     template_caps.supports_reasoning_only = SupportsReasoningOnly::No;
+    template_caps.end_tokens = { "<|im_end|>", "<|endoftext|>" };
 
     auto tmpls = read_templates(template_caps.jinja_path);
 
@@ -32,7 +33,6 @@ void test_qwen3_coder_xml_parser(chat_parser_impl impl)
     // Test Qwen3-Coder XML format
     {
         // Load template and build parser with tools
-        std::vector<std::string> end_tokens{ "<|im_end|>", "<|endoftext|>" };
 
         // Define all tools used in these tests with proper types matching test expectations
         std::vector<common_chat_tool> qwen3_coder_tools = {
