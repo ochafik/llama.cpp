@@ -30,7 +30,7 @@ void test_deepseek_r1_parser(chat_parser_impl impl)
         template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::Yes;
         
         auto tmpls = read_templates(template_caps.jinja_path);
-        test_systematic_needle_streaming(impl, template_caps, tmpls);
+        run_template_test_suite(impl, template_caps, tmpls);
     }
     {
         // Replacement DeepSeek R1 template. Makes the Distill Qwen 7B/32B models happy to call tools and all.
@@ -50,7 +50,7 @@ void test_deepseek_r1_parser(chat_parser_impl impl)
         template_caps.end_tokens = { "<｜end▁of▁sentence｜>" };
 
         auto tmpls = read_templates(template_caps.jinja_path);
-        test_systematic_needle_streaming(impl, template_caps, tmpls);
+        run_template_test_suite(impl, template_caps, tmpls);
 
         assert_equals(COMMON_CHAT_FORMAT_DEEPSEEK_R1,                   common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);
         assert_equals(COMMON_CHAT_FORMAT_DEEPSEEK_R1,                   common_chat_templates_apply(tmpls.get(), inputs_tools).format);

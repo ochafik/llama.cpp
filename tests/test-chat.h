@@ -482,7 +482,7 @@ static const common_chat_msg message_assist_call_python_lines           = simple
 static const common_chat_msg message_assist_call_python_lines_unclosed  = simple_assist_msg("", "", "python", "{\"code\":\"# This is a program:\\nprint('hey')");
 static const common_chat_msg message_assist_call_code_interpreter       = simple_assist_msg("", "", "code_interpreter", "{\"code\":\"print('hey')\"}");
 
-void test_systematic_needle_streaming(chat_parser_impl impl, const template_capabilities & template_caps, const common_chat_templates_ptr & tmpls);
+void run_template_test_suite(chat_parser_impl impl, const template_capabilities & template_caps, const common_chat_templates_ptr & tmpls);
 
 void test_apertus_parser(chat_parser_impl impl);
 void test_apriel_1_5_parser(chat_parser_impl impl);

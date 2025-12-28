@@ -1096,7 +1096,7 @@ static std::vector<needle_scenario> build_needle_scenarios(const template_capabi
     return scenarios;
 }
 
-void test_systematic_needle_streaming(chat_parser_impl impl, const template_capabilities & template_caps, const common_chat_templates_ptr & tmpls) {
+void run_template_test_suite(chat_parser_impl impl, const template_capabilities & template_caps, const common_chat_templates_ptr & tmpls) {
     test_format_detection_with_tools(impl, template_caps, tmpls);
     
     // The rest of this test is only working / green for new peg parsers

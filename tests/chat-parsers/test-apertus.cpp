@@ -32,7 +32,7 @@ void test_apertus_parser(chat_parser_impl impl)
         template_caps.end_tokens = {"<|assistant_end|>" };
 
         auto tmpls = read_templates(template_caps.jinja_path);
-        test_systematic_needle_streaming(impl, template_caps, tmpls);
+        run_template_test_suite(impl, template_caps, tmpls);
 
 
         assert_equals(COMMON_CHAT_FORMAT_APERTUS, common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);

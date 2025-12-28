@@ -39,7 +39,7 @@ void test_ministral_3_parser(chat_parser_impl impl)
     template_caps.tool_calls_have_ids = ToolCallsHaveIds::No;
 
     auto tmpls = read_templates(template_caps.jinja_path);
-    test_systematic_needle_streaming(impl, template_caps, tmpls);
+    run_template_test_suite(impl, template_caps, tmpls);
 
     // Test basic message
     test_peg_parser(tmpls.get(), [&](auto & t) {
