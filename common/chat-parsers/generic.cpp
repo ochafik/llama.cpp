@@ -20,26 +20,28 @@ common_chat_params common_chat_params_init_generic_peg(const common_chat_templat
                 {"minLength", 4},
             };
             // Tool call: [{"name": "...", "arguments": {...}, "id": "..."}]
-            json_tool_call_format format;
-            format.tool_calls_start = p.literal("[") + p.space();
-            format.tool_calls_sep = p.space() + p.literal(",") + p.space();
-            format.tool_calls_end = p.space() + p.literal("]");
             // Generic format with optional ID at end: {"name": "...", "arguments": {...}, "id": "..."}
-            format.tool_call = [&](auto & p, const auto & name, const auto & args) {
-                using Tag = common_chat_peg_tag;
+            auto any_tool_call = p.choice();
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
                 // Make ID field optional since some models don't generate it
                 auto id_field = p.optional(
                     p.literal(",") << "\"id\"" << ":" << p.tag(Tag::TOOL_ID, p.schema(p.json(), "tool-id", id_schema))
                 );
-                return p.sequence()
+                any_tool_call |= p.tag(Tag::TOOL, p.sequence()
                     + p.literal_tag(Tag::TOOL_OPEN, "{")
                     << "\"name\"" << ":" << ("\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"") << ","
-                    << "\"arguments\"" << ":" << p.tag(Tag::TOOL_ARGS, args)
+                    << "\"arguments\"" << ":" << p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters))
                     << id_field
-                    << p.literal_tag(Tag::TOOL_CLOSE, "}");
-            };
+                    << p.literal_tag(Tag::TOOL_CLOSE, "}"));
+            });
+
+            auto tool_calls_parser =
+                p.literal("[") + p.space()
+                + any_tool_call + p.repeat(p.space() + p.literal(",") + p.space() << any_tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
+                + p.space() + p.literal("]");
+
             auto tool_calls = p.trigger_rule("tool-call-root",
-                p.literal("{") << "\"tool_calls\"" << ":" << build_json_tool_calls_peg_parser(p, inputs, format) << "}");
+                p.literal("{") << "\"tool_calls\"" << ":" << tool_calls_parser << "}");
 
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 // Only tool calls allowed when required

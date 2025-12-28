@@ -41,23 +41,21 @@ common_chat_params common_chat_params_init_magistral_peg(const common_chat_templ
                 {"type", "string"},
                 {"pattern", "^[a-zA-Z0-9]{9}$"},  // Enforce ID format (exactly 9 alphanumeric)
             };
-            // Tool call parser: [TOOL_CALLS][{"name": "...", "arguments": {...}, "id": "..."}]
-            json_tool_call_format format;
-            format.tool_calls_start = p.literal("[TOOL_CALLS][");
-            format.tool_calls_sep = p.literal(",");
-            format.tool_calls_end = p.literal("]");
-            // Magistral format with ID at end: {"name": "...", "arguments": {...}, "id": "..."}
-            format.tool_call = [&](auto & p, const auto & name, const auto & args) {
-                using Tag = common_chat_peg_tag;
-                return p.sequence()
+
+            auto any_tool_call = p.choice();
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
+                any_tool_call |= p.tag(Tag::TOOL, p.sequence()
                     + p.literal_tag(Tag::TOOL_OPEN, "{")
                     << "\"name\"" << ":" << ("\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"") << ","
-                    << "\"arguments\"" << ":" << p.tag(Tag::TOOL_ARGS, args) << ","
+                    << "\"arguments\"" << ":" << p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters)) << ","
                     << "\"id\"" << ":" << p.tag(Tag::TOOL_ID, p.schema(p.json(), "tool-id", id_schema))
-                    << p.literal_tag(Tag::TOOL_CLOSE, "}");
-            };
+                    << p.literal_tag(Tag::TOOL_CLOSE, "}"));
+            });
+
             auto tool_calls = p.trigger_rule("tool-call-root",
-                build_json_tool_calls_peg_parser(p, inputs, format));
+                p.literal("[TOOL_CALLS][")
+                    + any_tool_call + p.repeat(p.literal(",") << any_tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
+                    + p.literal("]"));
 
             if (require_tools) {
                 return reasoning << tool_calls;

@@ -80,19 +80,18 @@ common_chat_params common_chat_params_init_ministral_3_peg(const common_chat_tem
             }
 
             // Format: [TOOL_CALLS]func1[ARGS]{...}[TOOL_CALLS]func2[ARGS]{...}
-            json_tool_call_format format;
-            format.tool_calls_start = p.eps();
-            format.tool_calls_sep = std::nullopt;  // No separator (each call has its own [TOOL_CALLS] prefix)
-            format.tool_calls_end = p.eps();
-            format.tool_call = [](auto & p, const auto & name, const auto & args) {
-                return p.sequence()
+            // Note: No separator - each call has its own [TOOL_CALLS] prefix
+            auto any_tool_call = p.choice();
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
+                any_tool_call |= p.tag(Tag::TOOL, p.sequence()
                     + p.tag(Tag::TOOL_OPEN, p.literal("[TOOL_CALLS]"))
                     + p.tag(Tag::TOOL_NAME, p.literal(name))
                     + "[ARGS]"
-                    + p.tag(Tag::TOOL_ARGS, args)
-                    + p.tag(Tag::TOOL_CLOSE, p.eps());
-            };
-            auto tool_calls = build_json_tool_calls_peg_parser(p, inputs, format);
+                    + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters))
+                    + p.tag(Tag::TOOL_CLOSE, p.eps()));
+            });
+
+            auto tool_calls = p.repeat(any_tool_call, 1, inputs.parallel_tool_calls ? -1 : 1);
 
             if (require_tools) {
                 return reasoning << tool_calls;
