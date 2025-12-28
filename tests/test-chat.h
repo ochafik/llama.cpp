@@ -32,6 +32,8 @@ enum class chat_parser_impl {
     EXPERIMENTAL // Use new modular PEG parsers
 };
 
+const char * chat_parser_impl_name(chat_parser_impl impl);
+
 // Scoped enums for template capabilities - each field has its own type for type safety
 enum class ThinkingSupport { No, Yes };
 enum class ToolSupport { No, Yes };

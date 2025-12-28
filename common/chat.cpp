@@ -1227,6 +1227,7 @@ static void expect_tool_parameters(const std::string & name, const json & parame
 
 // TODO(ochafik): remove once --experimental-new-parsers graduates.
 static common_chat_params common_chat_params_init_llama_3_x(const common_chat_template & tmpl, const struct templates_params & inputs, bool allow_python_tag_builtin_tools) {
+    // TODO(ochafik): this peg parser needs both TOOL_ARG_NAME (builtins) and TOOL_ARGS (regular) so will need its own mapper
     if (inputs.experimental_new_parsers) {
         return common_chat_params_init_llama_3_x_peg(tmpl, inputs, allow_python_tag_builtin_tools);
     }

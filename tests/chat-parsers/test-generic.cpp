@@ -2,7 +2,7 @@
 
 void test_generic_parser(chat_parser_impl impl)
 {
-    printf("[%s]\n", __func__);
+    printf("[%s (%s)]\n", __func__, chat_parser_impl_name(impl));
     
     common_chat_templates_inputs inputs_no_tools;
     inputs_no_tools.messages                = {message_user};
@@ -21,7 +21,7 @@ void test_generic_parser(chat_parser_impl impl)
     template_caps.think_close_tag = nullptr;
     template_caps.reasoning_requires_tools = ReasoningRequiresTools::No;
     template_caps.tools_emit_content_with_calls = ToolsEmitContentWithCalls::No;  // Generic format: EITHER tool_calls OR response, not both
-    std::vector<std::string>   end_tokens{ "<end_of_turn>" };
+    template_caps.end_tokens = { "<end_of_turn>" };
 
     auto tmpls = read_templates(template_caps.jinja_path);
 
@@ -83,7 +83,7 @@ void test_generic_parser(chat_parser_impl impl)
             "}",
             /* is_partial= */ false,
             {COMMON_CHAT_FORMAT_GENERIC}));
-    test_templates(impl, tmpls.get(), end_tokens, message_assist_call_id, tools,
+    test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist_call_id, tools,
                   "{\n"
                   "  \"tool_calls\": [\n"
                   "    {\n"

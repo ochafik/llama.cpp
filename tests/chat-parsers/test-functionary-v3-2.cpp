@@ -2,7 +2,7 @@
 
 void test_functionary_v3_2_parser(chat_parser_impl impl)
 {
-    printf("[%s]\n", __func__);
+    printf("[%s (%s)]\n", __func__, chat_parser_impl_name(impl));
 
     common_chat_templates_inputs inputs_no_tools;
     inputs_no_tools.messages                = {message_user};
@@ -26,6 +26,8 @@ void test_functionary_v3_2_parser(chat_parser_impl impl)
     template_caps.supports_reasoning_only = SupportsReasoningOnly::Yes;
 
     auto tmpls = read_templates(template_caps.jinja_path);
+
+    test_systematic_needle_streaming(impl, template_caps, tmpls);
     
     std::vector<std::string>   end_tokens{ "<|eom_id|>", "<|eot_id|>" };
 
@@ -81,6 +83,4 @@ void test_functionary_v3_2_parser(chat_parser_impl impl)
     test_templates(impl, tmpls.get(), end_tokens, message_assist_call, tools,
                   "special_function\n"
                   "{\"arg1\": 1}");
-
-    test_systematic_needle_streaming(impl, template_caps, tmpls);
 }
