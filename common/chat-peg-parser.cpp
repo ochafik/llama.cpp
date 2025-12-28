@@ -70,7 +70,12 @@ void common_chat_peg_native_mapper::map(const common_peg_ast_node & node) {
             current_tool = nullptr;
             break;
         case Tag::TOOL_ID:
-            if (current_tool) {
+            {
+                // Create tool call lazily on first of TOOL_ID or TOOL_NAME
+                if (!current_tool) {
+                    result.tool_calls.emplace_back();
+                    current_tool = &result.tool_calls.back();
+                }
                 auto text = std::string(trim_trailing_space(node.text));
                 // Strip surrounding quotes if present (JSON string value)
                 if (text.size() >= 2 && text.front() == '"' && text.back() == '"') {
@@ -80,9 +85,11 @@ void common_chat_peg_native_mapper::map(const common_peg_ast_node & node) {
             }
             break;
         case Tag::TOOL_NAME:
-            // Create tool call lazily on TOOL_NAME, not on TOOL_OPEN
-            result.tool_calls.emplace_back();
-            current_tool = &result.tool_calls.back();
+            // Create tool call lazily on first of TOOL_ID or TOOL_NAME
+            if (!current_tool) {
+                result.tool_calls.emplace_back();
+                current_tool = &result.tool_calls.back();
+            }
             current_tool->name = std::string(trim_trailing_space(node.text));
             break;
         case Tag::TOOL_ARGS:
