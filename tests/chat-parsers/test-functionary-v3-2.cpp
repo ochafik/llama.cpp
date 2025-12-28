@@ -24,13 +24,12 @@ void test_functionary_v3_2_parser(chat_parser_impl impl)
     template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::No;
     template_caps.supports_disable_thinking = SupportsDisableThinking::Yes;
     template_caps.supports_reasoning_only = SupportsReasoningOnly::Yes;
+    template_caps.end_tokens = { "<|eom_id|>", "<|eot_id|>" };
 
     auto tmpls = read_templates(template_caps.jinja_path);
 
     test_systematic_needle_streaming(impl, template_caps, tmpls);
     
-    std::vector<std::string>   end_tokens{ "<|eom_id|>", "<|eot_id|>" };
-
     assert_equals(COMMON_CHAT_FORMAT_FUNCTIONARY_V3_2, common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);
     assert_equals(COMMON_CHAT_FORMAT_FUNCTIONARY_V3_2, common_chat_templates_apply(tmpls.get(), inputs_tools).format);
 

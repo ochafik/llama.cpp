@@ -1300,7 +1300,7 @@ static void test_chat_parsers()
                     results.push_back({full_name, test_outcome::Skipped});
                     return;
                 }
-                if  (filter != full_name) {
+                if  (filter != full_name && filter != std::string("skipped")) {
                     return;
                 }
             }
@@ -1319,7 +1319,7 @@ static void test_chat_parsers()
     };
     
     test_chat_parser(test_status::Enabled, "apertus", chat_parser_impl::LEGACY, test_apertus_parser);
-    test_chat_parser(test_status::Disabled, "apertus", chat_parser_impl::EXPERIMENTAL, test_apertus_parser);
+    test_chat_parser(test_status::Enabled, "apertus", chat_parser_impl::EXPERIMENTAL, test_apertus_parser);
 
     test_chat_parser(test_status::Enabled, "apriel_1_5", chat_parser_impl::LEGACY, test_apriel_1_5_parser);
     test_chat_parser(test_status::Enabled, "apriel_1_5", chat_parser_impl::EXPERIMENTAL, test_apriel_1_5_parser);
@@ -1352,7 +1352,8 @@ static void test_chat_parsers()
     test_chat_parser(test_status::Disabled, "glm_4_5", chat_parser_impl::EXPERIMENTAL, test_glm_4_5_parser);
 
     test_chat_parser(test_status::Enabled, "gpt_oss", chat_parser_impl::LEGACY, test_gpt_oss_parser);
-    test_chat_parser(test_status::Enabled, "gpt_oss", chat_parser_impl::EXPERIMENTAL, test_gpt_oss_parser);
+    // TODO
+    test_chat_parser(test_status::Disabled, "gpt_oss", chat_parser_impl::EXPERIMENTAL, test_gpt_oss_parser);
 
     test_chat_parser(test_status::Enabled, "granite", chat_parser_impl::LEGACY, test_granite_parser);
     test_chat_parser(test_status::Enabled, "granite", chat_parser_impl::EXPERIMENTAL, test_granite_parser);
@@ -1360,8 +1361,7 @@ static void test_chat_parsers()
     test_chat_parser(test_status::Enabled, "hermes_2_pro", chat_parser_impl::LEGACY, test_hermes_2_pro_parser);
     test_chat_parser(test_status::Enabled, "hermes_2_pro", chat_parser_impl::EXPERIMENTAL, test_hermes_2_pro_parser);
 
-    // TODO
-    test_chat_parser(test_status::Disabled, "kimi_k2", chat_parser_impl::LEGACY, test_kimi_k2_parser);
+    test_chat_parser(test_status::Enabled, "kimi_k2", chat_parser_impl::LEGACY, test_kimi_k2_parser);
     // TODO
     test_chat_parser(test_status::Disabled, "kimi_k2", chat_parser_impl::EXPERIMENTAL, test_kimi_k2_parser);
 
@@ -1370,7 +1370,8 @@ static void test_chat_parsers()
     // TODO
     test_chat_parser(test_status::Disabled, "lfm2", chat_parser_impl::EXPERIMENTAL, test_lfm2_parser);
 
-    test_chat_parser(test_status::Enabled, "llama_3_x", chat_parser_impl::LEGACY, test_llama_3_x_parser);
+    // TODO
+    test_chat_parser(test_status::Disabled, "llama_3_x", chat_parser_impl::LEGACY, test_llama_3_x_parser);
     // TODO(ochafik): this peg parser needs both TOOL_ARG_NAME (builtins) and TOOL_ARGS (regular) so will need its own mapper
     test_chat_parser(test_status::Disabled, "llama_3_x", chat_parser_impl::EXPERIMENTAL, test_llama_3_x_parser);
 

@@ -24,7 +24,7 @@ void test_deepseek_v3_1_parser(chat_parser_impl impl)
     template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::Yes;
     template_caps.supports_disable_thinking = SupportsDisableThinking::No;
     template_caps.supports_reasoning_only = SupportsReasoningOnly::No;
-    std::vector<std::string>   end_tokens{ "<｜end▁of▁sentence｜>" };
+    template_caps.end_tokens = { "<｜end▁of▁sentence｜>" };
 
     auto tmpls = read_templates(template_caps.jinja_path);
 

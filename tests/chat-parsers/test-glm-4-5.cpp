@@ -24,7 +24,7 @@ void test_glm_4_5_parser(chat_parser_impl impl)
     template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::No;
     template_caps.supports_disable_thinking = SupportsDisableThinking::Yes;
     template_caps.supports_reasoning_only = SupportsReasoningOnly::Yes;
-    std::vector<std::string>   end_tokens{ "<|assistant|>", "<|observation|>" };
+    template_caps.end_tokens = { "<|assistant|>", "<|observation|>" };
 
     auto tmpls = read_templates(template_caps.jinja_path);
 
