@@ -36,7 +36,7 @@ void test_ministral_3_parser(chat_parser_impl impl)
     template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::No;
     template_caps.supports_disable_thinking = SupportsDisableThinking::No;
     template_caps.supports_reasoning_only = SupportsReasoningOnly::No;
-    template_caps.tool_calls_have_ids = ToolCallsHaveIds::Yes;
+    template_caps.tool_calls_have_ids = ToolCallsHaveIds::No;
 
     auto tmpls = read_templates(template_caps.jinja_path);
     test_systematic_needle_streaming(impl, template_caps, tmpls);
