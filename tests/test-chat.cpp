@@ -1289,7 +1289,7 @@ static void test_chat_parsers()
     auto test_chat_parser = [&](test_status status, const std::string & name, chat_parser_impl impl, const std::function<void(chat_parser_impl)> & test_fn)
     {
         auto full_name = name + "_" + chat_parser_impl_name(impl);
-        if (!(filter && filter == std::string("*"))) {
+        if (!(filter && filter == std::string("all"))) {
             if (status == test_status::Enabled) {
                 if (filter && filter != full_name) {
                     return;
