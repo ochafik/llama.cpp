@@ -4,15 +4,20 @@
 
 #include "chat-parsers-internal.h"
 #include "chat.h"
+#include "common.h"
 
 static void expect_tool_parameters(const std::string & name, const json & parameters, const std::vector<std::string> & expected_properties) {
     if (!parameters.contains("properties") || !parameters.at("properties").is_object()) {
         throw std::runtime_error("Tool " + name + " is missing properties");
     }
-    const auto & props = parameters.at("properties");
+    const auto & properties = parameters.at("properties");
     for (const auto & prop_name : expected_properties) {
-        if (!props.contains(prop_name)) {
-            throw std::runtime_error("Tool " + name + " is missing property: " + prop_name);
+        if (!properties.contains(prop_name)) {
+            std::vector<std::string> prop_names;
+            for (auto it = properties.begin(); it != properties.end(); ++it) {
+                prop_names.push_back(it.key());
+            }
+            throw std::runtime_error("Tool " + name + " is missing property: " + prop_name + " (found: " + string_join(prop_names, ", ") + ")");
         }
     }
 }

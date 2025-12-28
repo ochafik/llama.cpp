@@ -3,6 +3,7 @@
 // Also supports: <|python_tag|>code...
 
 #include "chat-parsers-internal.h"
+#include "common.h"
 
 static void validate_python_tool_schema(const std::string & name, const json & parameters) {
     if (!parameters.contains("type")) {
@@ -17,18 +18,19 @@ static void validate_python_tool_schema(const std::string & name, const json & p
         }
 
         const auto & properties = parameters.at("properties");
-        std::string string_property;
+        std::vector<std::string> string_properties;
         for (auto it = properties.begin(); it != properties.end(); ++it) {
             if (it.value().contains("type") && it.value().at("type") == "string") {
-                if (!string_property.empty()) {
-                    throw std::runtime_error("Python tool '" + name + "' has multiple string properties (ambiguous code argument)");
-                }
-                string_property = it.key();
+                const auto & prop_name = it.key();
+                string_properties.push_back(prop_name);
             }
         }
 
-        if (string_property.empty()) {
+        if (string_properties.empty()) {
             throw std::runtime_error("Python tool '" + name + "' has type 'object' but no string properties (code argument)");
+        }
+        if (string_properties.size() > 1) {
+            throw std::runtime_error("Python tool '" + name + "' has multiple string properties (ambiguous code argument): " + string_join(string_properties, ", "));
         }
     } else if (type != "string") {
         throw std::runtime_error("Python tool '" + name + "' has invalid type '" + type.dump() + "' (expected 'object' or 'string')");
