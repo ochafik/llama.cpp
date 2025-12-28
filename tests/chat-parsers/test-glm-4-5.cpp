@@ -142,7 +142,7 @@ void test_glm_4_5_parser(chat_parser_impl impl)
     }
 
     // Test template generation for regular content
-    test_templates(impl, tmpls.get(), end_tokens, message_assist, tools,
+    test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist, tools,
                   "\nHello, world!\nWhat's up?",
                   /* expect_grammar_triggered= */ false);
 
@@ -150,7 +150,7 @@ void test_glm_4_5_parser(chat_parser_impl impl)
     // These tests are temporarily disabled because building params with reasoning_format=DEEPSEEK
     // causes grammar stack overflow during llama_grammar_advance_stack (recursive grammar structure).
     // This is a pre-existing issue that needs to be fixed separately.
-    // test_templates(impl, tmpls.get(), end_tokens, message_assist_call, tools,
+    // test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist_call, tools,
     //               "\n<think></think>\n<tool_call>special_function\n<arg_key>arg1</arg_key>\n<arg_value>1</arg_value>\n</tool_call>\n",
     //               /* expect_grammar_triggered= */ true,
     //               /* test_grammar_if_triggered= */ false,

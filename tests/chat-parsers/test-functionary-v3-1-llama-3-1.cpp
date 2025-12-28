@@ -59,8 +59,8 @@ void test_functionary_v3_1_llama_3_1_parser(chat_parser_impl impl)
             /* is_partial= */ true,
             {COMMON_CHAT_FORMAT_FUNCTIONARY_V3_1_LLAMA_3_1}));
 
-    test_templates(impl, tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
-    test_templates(impl, tmpls.get(), end_tokens, message_assist_call, tools,
+    test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
+    test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist_call, tools,
                     "<function=special_function>{\"arg1\": 1}</function>");
 
 }

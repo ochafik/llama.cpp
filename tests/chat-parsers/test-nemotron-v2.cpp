@@ -25,7 +25,7 @@ void test_nemotron_v2_parser(chat_parser_impl impl)
     template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::No;
     template_caps.supports_disable_thinking = SupportsDisableThinking::No;
     template_caps.supports_reasoning_only = SupportsReasoningOnly::No;
-    std::vector<std::string> end_tokens{ "<SPECIAL_12>" };
+    template_caps.end_tokens = { "<SPECIAL_12>" };
 
     auto tmpls = read_templates("models/templates/NVIDIA-Nemotron-Nano-v2.jinja");
 
@@ -87,12 +87,12 @@ void test_nemotron_v2_parser(chat_parser_impl impl)
             }));
 
     // Test template generation for regular content
-    test_templates(impl, tmpls.get(), end_tokens, message_assist, tools,
+    test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist, tools,
                   "Hello, world!\nWhat's up?\n",
                   /* expect_grammar_triggered= */ false);
 
     // Test template generation for tool calls
-    test_templates(impl, tmpls.get(), end_tokens, message_assist_call, tools,
+    test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist_call, tools,
                   "<TOOLCALL>[{\"name\": \"special_function\", \"arguments\": {\"arg1\": 1}}]</TOOLCALL>",
                   /* expect_grammar_triggered= */ true
     );

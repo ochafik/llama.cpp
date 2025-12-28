@@ -36,8 +36,8 @@ void test_deepseek_v3_1_parser(chat_parser_impl impl)
         assert_equals(true, params.thinking_forced_open);
     }
 
-    test_templates(impl, tmpls.get(), end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
-    test_templates(impl, tmpls.get(), end_tokens, message_assist_thoughts, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
+    test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
+    test_templates(impl, tmpls.get(), template_caps.end_tokens, message_assist_thoughts, tools, "Hello, world!\nWhat's up?", /* expect_grammar_triggered= */ false);
     assert_msg_equals(
         simple_assist_msg("Hello, world!\nWhat's up?", "I'm\nthinking"),
         common_chat_parse(

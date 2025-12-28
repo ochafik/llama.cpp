@@ -32,6 +32,7 @@ void test_nemotron_v3_parser(chat_parser_impl impl)
     template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::No;
     template_caps.supports_disable_thinking = SupportsDisableThinking::No;
     template_caps.supports_reasoning_only = SupportsReasoningOnly::No;
+    template_caps.end_tokens = { "<|im_end|>" };
 
     auto tmpls = read_templates(template_caps.jinja_path);
 
