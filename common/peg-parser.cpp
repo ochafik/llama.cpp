@@ -1150,7 +1150,7 @@ common_peg_parser common_peg_parser_builder::json_member(const std::string & key
 common_peg_parser common_peg_parser_builder::schema_or_raw_string_until(
     const std::string & rule_name,
     const nlohmann::ordered_json & param_schema,
-    const std::string & end_delimiter,
+    const std::vector<std::string> & end_delimiters,
     const common_schema_info & schema_info,
     int string_tag,
     int json_tag,
@@ -1164,9 +1164,9 @@ common_peg_parser common_peg_parser_builder::schema_or_raw_string_until(
         }
 
         if (max_length > 0) {
-            return tag(string_tag, until_max(end_delimiter, max_length));
+            return tag(string_tag, until_max_one_of(end_delimiters, max_length));
         }
-        return tag(string_tag, until(end_delimiter));
+        return tag(string_tag, until_one_of(end_delimiters));
     }
 
     // For non-string types (integers, booleans, objects, etc.)

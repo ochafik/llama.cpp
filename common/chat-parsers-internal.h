@@ -281,7 +281,7 @@ struct generic_tool_call_format {
     // Parameter structure (required)
     std::optional<common_peg_parser> param_start;           // e.g., <parameter=
     std::optional<common_peg_parser> param_name_value_sep;  // e.g., >
-    std::string param_end;  // e.g., </parameter> (string for schema_or_raw_string_until)
+    std::vector<std::string> param_ends;  // e.g., </parameter> (string for schema_or_raw_string_until)
 
     bool allow_raw_string_param_value = true;
 };
@@ -298,7 +298,7 @@ inline common_peg_parser build_generic_tool_calls_peg_parser(
     if (!format.tool_call_start || !format.tool_call_name_params_sep || !format.tool_call_end) {
         throw std::runtime_error("tool_call_start, tool_call_name_params_sep, and tool_call_end are required");
     }
-    if (!format.param_start || !format.param_name_value_sep || format.param_end.empty()) {
+    if (!format.param_start || !format.param_name_value_sep || format.param_ends.empty()) {
         throw std::runtime_error("param_start, param_name_value_sep, and param_end are required");
     }
 
@@ -311,15 +311,19 @@ inline common_peg_parser build_generic_tool_calls_peg_parser(
     foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto & schema_info) {
         auto args = p.sequence();
         foreach_parameter(p, parameters, [&](const std::string & param_name, const common_peg_parser & param_p, const json & param_schema, ParameterType param_type) {
+            auto close = p.choice();
+            for (const auto & end : format.param_ends) {
+                close |= p.literal(end);
+            }
             auto arg = p.rule("tool-" + name + "-arg-" + param_name,
                 p.tag(Tag::TOOL_ARG_OPEN, *format.param_start)
                 + p.tag(Tag::TOOL_ARG_NAME, param_p)
                 + *format.param_name_value_sep
                 + (format.allow_raw_string_param_value
-                    ? p.schema_or_raw_string_until("tool-" + name + "-arg-" + param_name + "-schema", param_schema, format.param_end,
+                    ? p.schema_or_raw_string_until("tool-" + name + "-arg-" + param_name + "-schema", param_schema, format.param_ends,
                         schema_info, Tag::TOOL_ARG_STRING_VALUE, Tag::TOOL_ARG_JSON_VALUE, true)
                     : p.schema(p.json(), "tool-" + name + "-arg-" + param_name, param_schema))
-                + p.literal_tag(Tag::TOOL_ARG_CLOSE, format.param_end));
+                + p.tag(Tag::TOOL_ARG_CLOSE, close));
             switch (param_type) {
                 case ParameterType::Required:
                     args += arg;

@@ -73,7 +73,7 @@ common_chat_params common_chat_params_init_seed_oss_peg(const common_chat_templa
             format.tool_call_end = "</function>" + p.space() + "</seed:tool_call>";
             format.param_start = p.literal("<parameter=");
             format.param_name_value_sep = p.literal(">");
-            format.param_end = "</parameter>\n";
+            format.param_ends = { "</parameter>\n", "</parameter>" };
             auto tool_calls = build_generic_tool_calls_peg_parser(p, inputs, format);
 
             auto stop_before = std::vector<std::string> {

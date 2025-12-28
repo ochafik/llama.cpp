@@ -116,7 +116,7 @@ common_chat_params common_chat_params_init_glm_4_5_peg(const common_chat_templat
             format.tool_call_end = p.space() + "</tool_call>";
             format.param_start = p.space() + "<arg_key>";
             format.param_name_value_sep = "</arg_key>" + p.space() + "<arg_value>";
-            format.param_end = "</arg_value>\n";
+            format.param_ends = { "</arg_value>\n", "</arg_value>" };
             format.allow_raw_string_param_value = true;
             auto tool_calls = build_generic_tool_calls_peg_parser(p, inputs, format);
             
