@@ -13,8 +13,8 @@ void test_nemotron_v2_parser(chat_parser_impl impl)
     inputs_tools.tools                      = {special_function_tool};
 
     template_capabilities template_caps;
-    template_caps.name = "Nemotron V3";
-    template_caps.jinja_path = "models/templates/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16.jinja";
+    template_caps.name = "Nemotron V2";
+    template_caps.jinja_path = "models/templates/NVIDIA-Nemotron-Nano-v2.jinja";
     template_caps.legacy_format = COMMON_CHAT_FORMAT_NEMOTRON_V2;
     template_caps.experimental_format = COMMON_CHAT_FORMAT_PEG_NATIVE;
     template_caps.supports_thinking = ThinkingSupport::Yes;
@@ -27,7 +27,7 @@ void test_nemotron_v2_parser(chat_parser_impl impl)
     template_caps.supports_reasoning_only = SupportsReasoningOnly::No;
     template_caps.end_tokens = { "<SPECIAL_12>" };
 
-    auto tmpls = read_templates("models/templates/NVIDIA-Nemotron-Nano-v2.jinja");
+    auto tmpls = read_templates(template_caps.jinja_path);
 
     run_template_test_suite(impl, template_caps, tmpls);
 
