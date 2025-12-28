@@ -17,12 +17,12 @@ void test_kimi_k2_parser(chat_parser_impl impl)
 
     template_capabilities template_caps;
     template_caps.name = "Kimi K2";
-    template_caps.jinja_path = "models/templates/Kimi-K2-Instruct.jinja";
+    template_caps.jinja_path = "models/templates/Kimi-K2-Thinking.jinja";
     template_caps.legacy_format = COMMON_CHAT_FORMAT_KIMI_K2;
     template_caps.experimental_format = COMMON_CHAT_FORMAT_PEG_NATIVE;
-    template_caps.supports_thinking = ThinkingSupport::No;
-    template_caps.think_open_tag = nullptr;
-    template_caps.think_close_tag = nullptr;
+    template_caps.supports_thinking = ThinkingSupport::Yes;
+    template_caps.think_open_tag = "<think>";
+    template_caps.think_close_tag = "</think>";
     template_caps.reasoning_requires_tools = ReasoningRequiresTools::No;
     template_caps.tools_emit_content_with_calls = ToolsEmitContentWithCalls::Yes;
     template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::No;
