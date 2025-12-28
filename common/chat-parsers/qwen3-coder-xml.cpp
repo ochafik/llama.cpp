@@ -66,7 +66,7 @@ common_chat_params common_chat_params_init_qwen3_coder_xml_peg(const common_chat
             format.tool_call_end = "</function>" + p.space() + "</tool_call>";
             format.param_start = p.literal("<parameter=");
             format.param_name_value_sep = ">" + p.space();
-            format.param_end = "\n</parameter>\n";
+            format.param_ends = { "\n</parameter>\n", "</parameter>\n", "</parameter>" };
             format.allow_raw_string_param_value = true;
             auto tool_calls = build_generic_tool_calls_peg_parser(p, inputs, format);
 

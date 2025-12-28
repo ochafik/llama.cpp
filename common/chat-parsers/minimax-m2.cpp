@@ -75,7 +75,7 @@ common_chat_params common_chat_params_init_minimax_m2_peg(const common_chat_temp
             format.tool_call_end = p.space() + "</invoke>" + p.space();
             format.param_start = p.space() + "<parameter name=\"";
             format.param_name_value_sep = p.literal("\">");
-            format.param_end = "</parameter>";
+            format.param_ends = { "</parameter>" };
             format.allow_raw_string_param_value = true;
             auto tool_calls = build_generic_tool_calls_peg_parser(p, inputs, format);
             

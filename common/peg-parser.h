@@ -455,7 +455,7 @@ class common_peg_parser_builder {
     common_peg_parser schema_or_raw_string_until(
         const std::string & rule_name,
         const nlohmann::ordered_json & param_schema,
-        const std::string & end_delimiter,
+        const std::vector<std::string> & end_delimiters,
         const common_schema_info & schema_info,
         int string_tag,
         int json_tag,
@@ -466,13 +466,13 @@ class common_peg_parser_builder {
     common_peg_parser schema_or_raw_string_until(
         const std::string & rule_name,
         const nlohmann::ordered_json & param_schema,
-        const std::string & end_delimiter,
+        const std::vector<std::string> & end_delimiters,
         const common_schema_info & schema_info,
         E string_tag,
         E json_tag,
         bool space_around_json = false)
     {
-        return schema_or_raw_string_until(rule_name, param_schema, end_delimiter, schema_info,
+        return schema_or_raw_string_until(rule_name, param_schema, end_delimiters, schema_info,
             static_cast<int>(string_tag), static_cast<int>(json_tag), space_around_json);
     }
 
