@@ -76,36 +76,56 @@ static std::string renormalize_json(const std::string & json_str) {
         return json_str;
     }
 }
+
+// Helper to format a message as OpenAI-compatible JSON for error messages
+static std::string msg_to_oai_json(const common_chat_msg & msg) {
+    return common_chat_msgs_to_json_oaicompat<json>({msg}).at(0).dump(2);
+}
+
 void assert_msg_equals(const common_chat_msg & expected, const common_chat_msg & actual, bool ignore_whitespace_differences) {
-    assert_equals(expected.role, actual.role);
-    if (ignore_whitespace_differences) {
-        assert_equals(string_strip(expected.content), string_strip(actual.content));
-    } else {
-        assert_equals(expected.content, actual.content);
-    }
-    assert_equals(expected.content_parts.size(), actual.content_parts.size());
-    for (size_t i = 0; i < expected.content_parts.size(); i++) {
-        const auto & expected_part = expected.content_parts[i];
-        const auto & actual_part   = actual.content_parts[i];
-        assert_equals(expected_part.type, actual_part.type);
+    try {
+        assert_equals(expected.role, actual.role, "role mismatch");
         if (ignore_whitespace_differences) {
-            assert_equals(string_strip(expected_part.text), string_strip(actual_part.text));
+            assert_equals(string_strip(expected.content), string_strip(actual.content), "content mismatch");
         } else {
-            assert_equals(expected_part.text, actual_part.text);
+            assert_equals(expected.content, actual.content, "content mismatch");
         }
-    }
-    if (ignore_whitespace_differences) {
-        assert_equals(string_strip(expected.reasoning_content), string_strip(actual.reasoning_content));
-    } else {
-        assert_equals(expected.reasoning_content, actual.reasoning_content);
-    }
-    assert_equals(expected.tool_calls.size(), actual.tool_calls.size(), "tool call number mismatch");
-    for (size_t i = 0; i < expected.tool_calls.size(); i++) {
-        const auto & expected_tool_call = expected.tool_calls[i];
-        const auto & actual_tool_call   = actual.tool_calls[i];
-        assert_equals(expected_tool_call.name, actual_tool_call.name);
-        assert_equals(renormalize_json(expected_tool_call.arguments), renormalize_json(actual_tool_call.arguments));
-        assert_equals(expected_tool_call.id, actual_tool_call.id);
+        assert_equals(expected.content_parts.size(), actual.content_parts.size(), "content_parts count mismatch");
+        for (size_t i = 0; i < expected.content_parts.size(); i++) {
+            const auto & expected_part = expected.content_parts[i];
+            const auto & actual_part   = actual.content_parts[i];
+            assert_equals(expected_part.type, actual_part.type, "content_parts[" + std::to_string(i) + "].type mismatch");
+            if (ignore_whitespace_differences) {
+                assert_equals(string_strip(expected_part.text), string_strip(actual_part.text),
+                              "content_parts[" + std::to_string(i) + "].text mismatch");
+            } else {
+                assert_equals(expected_part.text, actual_part.text,
+                              "content_parts[" + std::to_string(i) + "].text mismatch");
+            }
+        }
+        if (ignore_whitespace_differences) {
+            assert_equals(string_strip(expected.reasoning_content), string_strip(actual.reasoning_content),
+                          "reasoning_content mismatch");
+        } else {
+            assert_equals(expected.reasoning_content, actual.reasoning_content, "reasoning_content mismatch");
+        }
+        assert_equals(expected.tool_calls.size(), actual.tool_calls.size(), "tool_calls count mismatch");
+        for (size_t i = 0; i < expected.tool_calls.size(); i++) {
+            const auto & expected_tool_call = expected.tool_calls[i];
+            const auto & actual_tool_call   = actual.tool_calls[i];
+            assert_equals(expected_tool_call.name, actual_tool_call.name,
+                          "tool_calls[" + std::to_string(i) + "].name mismatch");
+            assert_equals(renormalize_json(expected_tool_call.arguments), renormalize_json(actual_tool_call.arguments),
+                          "tool_calls[" + std::to_string(i) + "].arguments mismatch");
+            assert_equals(expected_tool_call.id, actual_tool_call.id,
+                          "tool_calls[" + std::to_string(i) + "].id mismatch");
+        }
+    } catch (const std::runtime_error & e) {
+        // Re-throw with full JSON context
+        throw std::runtime_error(
+            std::string(e.what()) +
+            "\n\nExpected (OpenAI format):\n" + msg_to_oai_json(expected) +
+            "\n\nActual (OpenAI format):\n" + msg_to_oai_json(actual));
     }
 }
 
@@ -221,9 +241,9 @@ void test_templates(chat_parser_impl impl, const struct common_chat_templates * 
         auto data = init_delta(impl, tmpls, end_tokens, user_message, test_message, tools, tool_choice, reasoning_format, {});
         if (!expected_delta.empty()) {
             if (ignore_whitespace_differences) {
-                assert_equals(string_strip(expected_delta), string_strip(data.delta));
+                assert_equals(string_strip(expected_delta), string_strip(data.delta), "delta mismatch (ignoring whitespace)");
             } else {
-                assert_equals(expected_delta, data.delta);
+                assert_equals(expected_delta, data.delta, "delta mismatch");
             }
         }
 
@@ -660,6 +680,13 @@ static needle_test_result test_streaming_with_needles(
 }
 
 static void verify_needle_results(const needle_test_context & ctx, const needle_test_result & result) {
+    // Helper to build error message with expected/actual JSON
+    auto make_error = [&](const std::string & msg) {
+        return msg +
+               "\n\nExpected:\n" + msg_to_oai_json(ctx.expected_msg) +
+               "\n\nActual:\n" + msg_to_oai_json(result.final_msg);
+    };
+
     if (ctx.has_content) {
         verify_field_state("Content", result.content_state, ctx.content_needles);
     }
@@ -667,50 +694,65 @@ static void verify_needle_results(const needle_test_context & ctx, const needle_
         verify_field_state("Reasoning", result.reasoning_state, ctx.reasoning_needles);
     }
 
-        if (!ctx.tool_expectations.empty()) {
-            if (result.unexpected_tool_count) {
-                throw std::runtime_error("Tool call: Parser produced more tool calls than expected");
-            }
-            if (result.final_msg.tool_calls.size() != ctx.tool_expectations.size()) {
-                throw std::runtime_error("Tool call: Final tool call count mismatch");
-            }
-            for (size_t call_idx = 0; call_idx < ctx.tool_expectations.size(); ++call_idx) {
-                const auto & expectation = ctx.tool_expectations[call_idx];
-                const auto & state = result.tool_states[call_idx];
-                const auto & final_call = result.final_msg.tool_calls[call_idx];
+    if (!ctx.tool_expectations.empty()) {
+        if (result.unexpected_tool_count) {
+            throw std::runtime_error(make_error(
+                "Tool call: Parser produced more tool calls than expected (expected " +
+                std::to_string(ctx.tool_expectations.size()) + ", got " +
+                std::to_string(result.final_msg.tool_calls.size()) + ")"));
+        }
+        if (result.final_msg.tool_calls.size() != ctx.tool_expectations.size()) {
+            throw std::runtime_error(make_error(
+                "Tool call: Final tool call count mismatch (expected " +
+                std::to_string(ctx.tool_expectations.size()) + ", got " +
+                std::to_string(result.final_msg.tool_calls.size()) + ")"));
+        }
+        for (size_t call_idx = 0; call_idx < ctx.tool_expectations.size(); ++call_idx) {
+            const auto & expectation = ctx.tool_expectations[call_idx];
+            const auto & state = result.tool_states[call_idx];
+            const auto & final_call = result.final_msg.tool_calls[call_idx];
 
-                if (state.args_regressed) {
-                    throw std::runtime_error("Tool call: Arguments regressed (got shorter) during streaming!");
+            if (state.args_regressed) {
+                throw std::runtime_error(make_error(
+                    "Tool call[" + std::to_string(call_idx) + "]: Arguments regressed (got shorter) during streaming"));
+            }
+
+            for (size_t arg_idx = 0; arg_idx < expectation.args.size(); ++arg_idx) {
+                const auto & arg_expect = expectation.args[arg_idx];
+                if (arg_idx >= state.arg_states.size()) {
+                    throw std::runtime_error(make_error(
+                        "Tool call[" + std::to_string(call_idx) + "]: Missing argument state in tracker for arg " +
+                        std::to_string(arg_idx)));
+                }
+                const auto & arg_state = state.arg_states[arg_idx];
+
+                verify_field_state("Tool arg key", arg_state.key_state, arg_expect.key_needles);
+                verify_field_state("Tool arg value", arg_state.value_state, arg_expect.value_needles);
+
+                // Verify keys stream in order (key N completes before key N+1)
+                if (arg_idx > 0) {
+                    const auto & prev_state = state.arg_states[arg_idx - 1];
+                    if (prev_state.key_completion_seq == 0 || arg_state.key_completion_seq == 0 ||
+                        prev_state.key_completion_seq > arg_state.key_completion_seq) {
+                        throw std::runtime_error(make_error(
+                            "Tool call[" + std::to_string(call_idx) + "]: Argument keys streamed out of order at arg " +
+                            std::to_string(arg_idx)));
+                    }
                 }
 
-                for (size_t arg_idx = 0; arg_idx < expectation.args.size(); ++arg_idx) {
-                    const auto & arg_expect = expectation.args[arg_idx];
-                    if (arg_idx >= state.arg_states.size()) {
-                        throw std::runtime_error("Tool call: Missing argument state in tracker");
-                    }
-                    const auto & arg_state = state.arg_states[arg_idx];
-
-                    verify_field_state("Tool arg key", arg_state.key_state, arg_expect.key_needles);
-                    verify_field_state("Tool arg value", arg_state.value_state, arg_expect.value_needles);
-
-                    // Verify keys stream in order (key N completes before key N+1)
-                    if (arg_idx > 0) {
-                        const auto & prev_state = state.arg_states[arg_idx - 1];
-                        if (prev_state.key_completion_seq == 0 || arg_state.key_completion_seq == 0 ||
-                            prev_state.key_completion_seq > arg_state.key_completion_seq) {
-                            throw std::runtime_error("Tool call: Argument keys streamed out of order");
-                        }
-                    }
-
-                    if (final_call.arguments.find(arg_expect.key_text) == std::string::npos) {
-                        throw std::runtime_error("Tool call: Final arguments missing expected key");
-                    }
-                    if (final_call.arguments.find(arg_expect.value_text) == std::string::npos) {
-                        throw std::runtime_error("Tool call: Final arguments missing expected value");
-                    }
+                if (final_call.arguments.find(arg_expect.key_text) == std::string::npos) {
+                    throw std::runtime_error(make_error(
+                        "Tool call[" + std::to_string(call_idx) + "]: Final arguments missing expected key '" +
+                        arg_expect.key_text + "'"));
+                }
+                if (final_call.arguments.find(arg_expect.value_text) == std::string::npos) {
+                    throw std::runtime_error(make_error(
+                        "Tool call[" + std::to_string(call_idx) + "]: Final arguments missing expected value '" +
+                        arg_expect.value_text + "'"));
                 }
             }
         }
+    }
 
     assert_msg_equals(ctx.expected_msg, result.final_msg, false);
 }
