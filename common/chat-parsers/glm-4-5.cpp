@@ -110,15 +110,48 @@ common_chat_params common_chat_params_init_glm_4_5_peg(const common_chat_templat
                 data.grammar_triggers.push_back({COMMON_GRAMMAR_TRIGGER_TYPE_WORD, "<tool_call>"});
             }
 
-            generic_tool_call_format format;
-            format.tool_call_start = p.space() + "<tool_call>";
-            format.tool_call_name_params_sep = p.space();
-            format.tool_call_end = p.space() + "</tool_call>";
-            format.param_start = p.space() + "<arg_key>";
-            format.param_name_value_sep = "</arg_key>" + p.space() + "<arg_value>";
-            format.param_end = "</arg_value>\n";
-            format.allow_raw_string_param_value = true;
-            auto tool_calls = build_generic_tool_calls_peg_parser(p, inputs, format);
+            auto tool_call_start = p.space() + "<tool_call>";
+            auto tool_call_name_params_sep = p.space();
+            auto tool_call_end = p.space() + "</tool_call>";
+            auto param_start = p.space() + "<arg_key>";
+            auto param_name_value_sep = "</arg_key>" + p.space() + "<arg_value>";
+            auto param_end = "</arg_value>\n";
+
+            auto tool_call = p.choice();
+            foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto & schema_info) {
+                auto args = p.sequence();
+                foreach_parameter(p, parameters, [&](const std::string & param_name, const common_peg_parser & param_p, const json & param_schema, ParameterType param_type) {
+                    auto arg = p.rule("tool-" + name + "-arg-" + param_name,
+                        p.tag(Tag::TOOL_ARG_OPEN, param_start)
+                        + p.tag(Tag::TOOL_ARG_NAME, param_p)
+                        + param_name_value_sep
+                        + p.schema_or_raw_string_until("tool-" + name + "-arg-" + param_name + "-schema", param_schema, param_end,
+                            schema_info, Tag::TOOL_ARG_STRING_VALUE, Tag::TOOL_ARG_JSON_VALUE, true)
+                        + p.literal_tag(Tag::TOOL_ARG_CLOSE, param_end));
+                    switch (param_type) {
+                        case ParameterType::Required:
+                            args += arg;
+                            break;
+                        case ParameterType::Optional:
+                            args += p.optional(arg);
+                            break;
+                        case ParameterType::Additional:
+                            args += p.repeat(arg, 0, -1);
+                            break;
+                        default:
+                            throw std::runtime_error("Unhandled param type");
+                    }
+                });
+
+                tool_call |= p.rule("tool-" + name,
+                    p.tag(Tag::TOOL_OPEN, tool_call_start)
+                    + p.literal_tag(Tag::TOOL_NAME, name)
+                    + tool_call_name_params_sep
+                    + args
+                    + p.tag(Tag::TOOL_CLOSE, tool_call_end));
+            });
+
+            auto tool_calls = tool_call + p.repeat(tool_call, 0, inputs.parallel_tool_calls ? -1 : 0);
             
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 // thinking? space? tools
