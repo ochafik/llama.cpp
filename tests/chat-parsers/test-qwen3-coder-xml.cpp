@@ -53,8 +53,19 @@ void test_qwen3_coder_xml_parser(chat_parser_impl impl)
                 "\n",
                 /* is_partial= */ false,
                 syntax));
+
+        // Test streaming diff computation (used by the server for SSE streaming).
+        // This catches bugs that run_template_test_suite misses because it exercises
+        // common_chat_msg_diff::compute_diffs() which the server uses for streaming.
+        test_parser_with_streaming(
+            message_assist_call,
+            " <tool_call>\n"
+            "<function=special_function> <parameter=arg1>1\n"
+            "</parameter>\n"
+            "</function> </tool_call>\n",
+            [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, syntax); });
     }
-    
+
     // Test Qwen3-Coder XML format
     {
         // Load template and build parser with tools
