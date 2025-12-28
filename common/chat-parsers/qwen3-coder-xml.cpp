@@ -9,6 +9,11 @@ common_chat_params common_chat_params_init_qwen3_coder_xml_peg(const common_chat
 
     data.prompt = apply(tmpl, inputs);
 
+    data.additional_stops = {
+        "<|im_end|>",
+        "<|endoftext|>",
+    };
+
     data.preserved_tokens = {
         "<tool_call>",
         "</tool_call>",
@@ -24,14 +29,6 @@ common_chat_params common_chat_params_init_qwen3_coder_xml_peg(const common_chat
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
 
-        const auto consume_end_block = [&]() {
-            auto optional_end = p.optional(p.choice({
-                p.literal("<|im_end|>"),
-                p.literal("<|endoftext|>")
-            }));
-            return p.optional(p.literal("\n")) + optional_end + p.optional(p.literal("\n"));
-        };
-
         const auto content_until = [&](const std::string & marker, bool allow_inline) {
             std::vector<std::string> delimiters = {
                 std::string("\r\n") + marker,
@@ -43,15 +40,18 @@ common_chat_params common_chat_params_init_qwen3_coder_xml_peg(const common_chat
             return p.tag(Tag::CONTENT, p.until_one_of(delimiters));
         };
 
-        const auto content_before_tool = p.optional(p.rule("qwen-tool-prefix",
-            p.tag(Tag::CONTENT, p.until("<tool_call>"))
-            + p.peek(p.literal("<tool_call>"))
-        ));
+        // Match optional content before <tool_call>, but don't tag whitespace-only content
+        const auto content_before_tool = p.optional(
+            p.space()  // Consume leading whitespace without tagging
+            + p.optional(p.rule("qwen-tool-prefix",
+                p.tag(Tag::CONTENT, p.until("<tool_call>"))
+                + p.peek(p.literal("<tool_call>"))
+            ))
+        );
 
         // Response format parser
         if (inputs.json_schema.is_object() && !inputs.json_schema.empty()) {
-            return p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema))
-                << consume_end_block();
+            return p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema));
         }
 
         // Tool call parser
@@ -71,18 +71,14 @@ common_chat_params common_chat_params_init_qwen3_coder_xml_peg(const common_chat
             auto tool_calls = build_generic_tool_calls_peg_parser(p, inputs, format);
 
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
-                return tool_calls + consume_end_block();
+                return tool_calls;
             }
-            return p.optional(content_before_tool) + tool_calls + consume_end_block();
+            return p.optional(content_before_tool) + tool_calls;
         }
 
         // Content only parser
         include_grammar = false;
-        return p.choice({
-            content_until("<|im_end|>", /* allow_inline = */ true) << consume_end_block(),
-            content_until("<|endoftext|>", /* allow_inline = */ true) << consume_end_block(),
-            p.tag(Tag::CONTENT, p.rest())
-        });
+        return p.tag(Tag::CONTENT, p.rest());
     });
 
     common_chat_build_peg_grammar(inputs, parser, data);
