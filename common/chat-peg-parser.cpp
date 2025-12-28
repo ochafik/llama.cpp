@@ -81,6 +81,11 @@ void common_chat_peg_native_mapper::map(const common_peg_ast_node & node) {
             }
             break;
         case Tag::TOOL_NAME:
+            // Skip partial nodes - the name isn't complete yet.
+            // See comment in common_chat_peg_mapper for rationale.
+            if (node.is_partial) {
+                break;
+            }
             // Create tool call lazily on first of TOOL_ID or TOOL_NAME
             if (!current_tool) {
                 result.tool_calls.emplace_back();
@@ -115,6 +120,13 @@ void common_chat_peg_constructed_mapper::map(const common_peg_ast_node & node) {
             arg_count = 0;
             break;
         case Tag::TOOL_NAME:
+            // Skip partial nodes - the name isn't complete yet.
+            // Note: Using p.atomic(p.literal_tag(Tag::TOOL_NAME, name)) in parsers would
+            // achieve the same effect by preventing partial nodes from being created,
+            // but this mapper-level check is more defensive and handles all parsers uniformly.
+            if (node.is_partial) {
+                break;
+            }
             if (current_tool) {
                 throw std::runtime_error("bad state");
             }
@@ -127,6 +139,10 @@ void common_chat_peg_constructed_mapper::map(const common_peg_ast_node & node) {
             needs_closing_quote = false;
             break;
         case Tag::TOOL_ARG_NAME:
+            // Skip partial nodes - the name isn't complete yet
+            if (node.is_partial) {
+                break;
+            }
             if (!current_tool) {
                 throw std::runtime_error("bad state");
             }
@@ -278,6 +294,10 @@ common_chat_peg_mapper_func common_chat_peg_native_mapper_func() {
                     }
                     break;
                 case Tag::TOOL_NAME:
+                    // Skip partial nodes - see comment in common_chat_peg_mapper.
+                    if (node.is_partial) {
+                        break;
+                    }
                     if (current_tool) {
                         current_tool->name = std::string(trim_trailing_space(node.text));
                     }
@@ -313,7 +333,11 @@ common_chat_peg_mapper_func common_chat_peg_constructed_mapper_func() {
                     args_complete = false;
                     break;
                 case Tag::TOOL_NAME:
-                    // Create tool call lazily on TOOL_NAME, not on TOOL_OPEN
+                    // Create tool call lazily on TOOL_NAME, not on TOOL_OPEN.
+                    // Skip partial nodes - see comment in common_chat_peg_mapper.
+                    if (node.is_partial) {
+                        break;
+                    }
                     result.tool_calls.emplace_back();
                     current_tool = &result.tool_calls.back();
                     current_tool->name = std::string(node.text);
@@ -323,6 +347,10 @@ common_chat_peg_mapper_func common_chat_peg_constructed_mapper_func() {
                     needs_closing_quote = false;
                     break;
                 case Tag::TOOL_ARG_NAME:
+                    // Skip partial nodes - the name isn't complete yet
+                    if (node.is_partial) {
+                        break;
+                    }
                     if (current_tool) {
                         if (arg_count > 0) {
                             current_tool->arguments += ",";

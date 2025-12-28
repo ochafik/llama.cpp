@@ -443,7 +443,7 @@ static void test_parser_with_streaming(const common_chat_msg & expected, const s
                     merged.tool_calls.back().id = diff.tool_call_delta.id;
                 }
             }
-            LOG_INF("Streaming merged: %s\n", common_chat_msgs_to_json_oaicompat<json>({merged}).dump().c_str());
+            LOG_DBG("Streaming merged: %s\n", common_chat_msgs_to_json_oaicompat<json>({merged}).dump().c_str());
         }
         assert_msg_equals(curr_msg, merged, true);
         last_msg = curr_msg;
