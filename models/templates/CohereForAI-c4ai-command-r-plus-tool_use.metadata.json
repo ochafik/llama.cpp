@@ -1,0 +1,6 @@
+{
+  "model_id": "CohereForAI/c4ai-command-r-plus",
+  "eos_tokens": [
+    "<|END_OF_TURN_TOKEN|>"
+  ]
+}

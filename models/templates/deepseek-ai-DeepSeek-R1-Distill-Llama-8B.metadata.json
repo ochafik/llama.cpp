@@ -1,0 +1,6 @@
+{
+  "model_id": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+  "eos_tokens": [
+    "<id:128001>"
+  ]
+}

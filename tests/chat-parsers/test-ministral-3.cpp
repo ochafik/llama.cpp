@@ -23,9 +23,12 @@ void test_ministral_3_parser(chat_parser_impl impl)
     inputs_tools_builtin.messages           = {message_user};
     inputs_tools_builtin.tools              = {python_tool};
     
+    std::string base_path = "models/templates/mistralai-Ministral-3-14B-Reasoning-2512";
+    auto tmpls = read_templates(base_path + ".jinja");
+    auto metadata = json::parse(read_file(base_path + ".metadata.json"));
+
     template_capabilities template_caps;
     template_caps.name = "Ministral V3";
-    template_caps.jinja_path = "models/templates/mistralai-Ministral-3-14B-Reasoning-2512.jinja";
     template_caps.legacy_format = COMMON_CHAT_FORMAT_PEG_NATIVE;
     template_caps.experimental_format = COMMON_CHAT_FORMAT_PEG_NATIVE;
     template_caps.supports_thinking = ThinkingSupport::No;
@@ -37,8 +40,8 @@ void test_ministral_3_parser(chat_parser_impl impl)
     template_caps.supports_disable_thinking = SupportsDisableThinking::No;
     template_caps.supports_reasoning_only = SupportsReasoningOnly::No;
     template_caps.tool_calls_have_ids = ToolCallsHaveIds::No;
-
-    auto tmpls = read_templates(template_caps.jinja_path);
+    template_caps.end_tokens = metadata.at("eos_tokens");
+    
     run_template_test_suite(impl, template_caps, tmpls);
 
     // Test basic message

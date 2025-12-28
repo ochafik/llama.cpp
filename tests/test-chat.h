@@ -47,7 +47,6 @@ enum class ToolCallsHaveIds { No, Yes };
 
 struct template_capabilities {
     std::string name;
-    std::string jinja_path;
     common_chat_format legacy_format;
     common_chat_format experimental_format;
     ThinkingSupport supports_thinking = ThinkingSupport::No;
@@ -143,6 +142,7 @@ inline void assert_throws(const std::function<void()> & fn, const std::string & 
     }
 }
 
+std::string read_file(const std::string & path);
 common_chat_templates_ptr read_templates(const std::string & path);
 
 // TODO: extract to common helper (copied from test-grammar-integration.cpp)

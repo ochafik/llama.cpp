@@ -15,10 +15,13 @@ void test_llama_3_x_parser(chat_parser_impl impl)
     inputs_tools_builtin.messages           = {message_user};
     inputs_tools_builtin.tools              = {python_tool};
     
+    std::string base_path = "models/templates/meta-llama-Llama-3.1-8B-Instruct";
+    auto tmpls = read_templates(base_path + ".jinja");
+    auto metadata = json::parse(read_file(base_path + ".metadata.json"));
+
     {
         template_capabilities template_caps;
         template_caps.name = "Llama 3.1";
-        template_caps.jinja_path = "models/templates/meta-llama-Llama-3.1-8B-Instruct.jinja";
         template_caps.legacy_format = COMMON_CHAT_FORMAT_LLAMA_3_X;
         template_caps.experimental_format = COMMON_CHAT_FORMAT_PEG_NATIVE;
         template_caps.supports_thinking = ThinkingSupport::No;
@@ -28,9 +31,7 @@ void test_llama_3_x_parser(chat_parser_impl impl)
         template_caps.supports_disable_thinking = SupportsDisableThinking::No;
         template_caps.supports_reasoning_only = SupportsReasoningOnly::No;
         template_caps.tool_calls_have_ids = ToolCallsHaveIds::No;
-        template_caps.end_tokens = { "<|eom_id|>", "<|eot_id|>" };
-
-        auto tmpls = read_templates(template_caps.jinja_path);
+        template_caps.end_tokens = metadata.at("eos_tokens");
 
         // Skip run_template_test_suite - it uses python_tool which triggers builtin tools format
         // The second block below tests builtin tools
@@ -46,7 +47,6 @@ void test_llama_3_x_parser(chat_parser_impl impl)
     {
         template_capabilities template_caps;
         template_caps.name = "Llama 3.1";
-        template_caps.jinja_path = "models/templates/meta-llama-Llama-3.1-8B-Instruct.jinja";
         template_caps.legacy_format = COMMON_CHAT_FORMAT_LLAMA_3_X_WITH_BUILTIN_TOOLS;
         template_caps.experimental_format = COMMON_CHAT_FORMAT_PEG_NATIVE;
         template_caps.supports_thinking = ThinkingSupport::No;
@@ -56,9 +56,7 @@ void test_llama_3_x_parser(chat_parser_impl impl)
         template_caps.supports_disable_thinking = SupportsDisableThinking::No;
         template_caps.supports_reasoning_only = SupportsReasoningOnly::No;
         template_caps.tool_calls_have_ids = ToolCallsHaveIds::No;
-        template_caps.end_tokens = { "<|eom_id|>", "<|eot_id|>" };
-
-        auto tmpls = read_templates(template_caps.jinja_path);
+        template_caps.end_tokens = metadata.at("eos_tokens");
 
         run_template_test_suite(impl, template_caps, tmpls);
 

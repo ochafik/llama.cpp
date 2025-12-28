@@ -1,0 +1,7 @@
+{
+  "model_id": "Qwen/Qwen2.5-7B-Instruct",
+  "eos_tokens": [
+    "<|im_end|>",
+    "<|endoftext|>"
+  ]
+}

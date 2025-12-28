@@ -16,9 +16,11 @@ void test_apertus_parser(chat_parser_impl impl)
     inputs_tools_builtin.tools              = {python_tool};
 
     {
+        auto tmpls = read_templates("models/templates/Apertus-8B-Instruct.jinja");
+        auto metadata = json::parse(read_file("models/templates/swiss-ai-Apertus-8B-Instruct-2509.metadata.json"));
+
         template_capabilities template_caps;
         template_caps.name = "Apertus";
-        template_caps.jinja_path = "models/templates/Apertus-8B-Instruct.jinja";
         template_caps.legacy_format = COMMON_CHAT_FORMAT_APERTUS;
         template_caps.experimental_format = COMMON_CHAT_FORMAT_PEG_NATIVE;
         template_caps.supports_thinking = ThinkingSupport::Yes;
@@ -29,11 +31,9 @@ void test_apertus_parser(chat_parser_impl impl)
         template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::No;
         template_caps.supports_disable_thinking = SupportsDisableThinking::Yes;
         template_caps.supports_reasoning_only = SupportsReasoningOnly::Yes;
-        template_caps.end_tokens = {"<|assistant_end|>" };
+        template_caps.end_tokens = metadata.at("eos_tokens");
 
-        auto tmpls = read_templates(template_caps.jinja_path);
         run_template_test_suite(impl, template_caps, tmpls);
-
 
         assert_equals(COMMON_CHAT_FORMAT_APERTUS, common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);
         assert_equals(COMMON_CHAT_FORMAT_APERTUS, common_chat_templates_apply(tmpls.get(), inputs_tools).format);

@@ -36,7 +36,7 @@ const char * chat_parser_impl_name(chat_parser_impl impl) {
     return "unknown";
 }
 
-static std::string read_file(const std::string & path) {
+std::string read_file(const std::string & path) {
     std::cerr << "# Reading: " << path << '\n' << std::flush;
     std::ifstream fs(path, std::ios_base::binary);
     if (!fs.is_open()) {
@@ -963,6 +963,36 @@ static void test_format_detection_with_tools(chat_parser_impl impl, const common
     }
 }
 
+static void test_additional_stops(chat_parser_impl impl, const template_capabilities & template_caps, const common_chat_templates_ptr & tmpls) {
+    const auto * tmpl_src = common_chat_templates_source(tmpls.get(), "tool_use");
+    if (!tmpl_src) {
+        tmpl_src = common_chat_templates_source(tmpls.get(), "default");
+    }
+    if (!tmpl_src) {
+        throw std::runtime_error("missing template source");
+    }
+    const std::string tmpl_str(tmpl_src);
+
+    // Apply template with tools and experimental_new_parsers
+    common_chat_templates_inputs inputs;
+    inputs.messages = {message_user};
+    inputs.tools = {python_tool};
+    inputs.experimental_new_parsers = impl == chat_parser_impl::EXPERIMENTAL;
+
+    common_chat_params params = common_chat_templates_apply(tmpls.get(), inputs);
+
+    for (const auto & eos_token : template_caps.end_tokens) {
+        if (tmpl_str.find(eos_token) != std::string::npos) {
+            // Verify every end token that appear in the template source makes it to params.additional_stops.
+            // This is so that using a tool call syntax on a different model still works even if that model
+            // doesn't have the right end tokens.
+            if (std::find(params.additional_stops.begin(), params.additional_stops.end(), eos_token) == params.additional_stops.end()) {
+                throw std::runtime_error("Missing " + eos_token + " in additional_stops; found: " + string_join(params.additional_stops, ", "));
+            }
+        }
+    }
+}
+
 static std::vector<needle_scenario> build_needle_scenarios(const template_capabilities & info) {
     std::vector<needle_scenario> scenarios;
 
@@ -1102,6 +1132,10 @@ void run_template_test_suite(chat_parser_impl impl, const template_capabilities 
     // The rest of this test is only working / green for new peg parsers
     if (impl != chat_parser_impl::EXPERIMENTAL) {
         return;
+    }
+
+    if (template_caps.name != "Generic") {
+        test_additional_stops(impl, template_caps, tmpls);
     }
     
     if (template_caps.supports_disable_thinking == SupportsDisableThinking::Yes) {

@@ -11,9 +11,10 @@ void test_generic_parser(chat_parser_impl impl)
     inputs_tools.messages                   = {message_user};
     inputs_tools.tools                      = {special_function_tool};
 
+    auto tmpls = read_templates("models/templates/google-gemma-2-2b-it.jinja");
+
     template_capabilities template_caps;
     template_caps.name = "Generic";
-    template_caps.jinja_path = "models/templates/google-gemma-2-2b-it.jinja";
     template_caps.legacy_format = COMMON_CHAT_FORMAT_GENERIC;
     template_caps.experimental_format = COMMON_CHAT_FORMAT_PEG_NATIVE;
     template_caps.supports_thinking = ThinkingSupport::No;
@@ -22,8 +23,6 @@ void test_generic_parser(chat_parser_impl impl)
     template_caps.reasoning_requires_tools = ReasoningRequiresTools::No;
     template_caps.tools_emit_content_with_calls = ToolsEmitContentWithCalls::No;  // Generic format: EITHER tool_calls OR response, not both
     template_caps.end_tokens = { "<end_of_turn>" };
-
-    auto tmpls = read_templates(template_caps.jinja_path);
 
     run_template_test_suite(impl, template_caps, tmpls);
 

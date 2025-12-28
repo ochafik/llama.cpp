@@ -1,0 +1,6 @@
+{
+  "model_id": "fireworks-ai/llama-3-firefunction-v2",
+  "eos_tokens": [
+    "<|eot_id|>"
+  ]
+}

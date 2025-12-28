@@ -22,10 +22,12 @@ void test_hermes_2_pro_parser(chat_parser_impl impl)
         assert_equals(COMMON_CHAT_FORMAT_HERMES_2_PRO, common_chat_templates_apply(tmpls.get(), inputs_tools).format);
     }
     
-    auto tmpls = read_templates("models/templates/NousResearch-Hermes-2-Pro-Llama-3-8B-tool_use.jinja");
+    std::string base_path = "models/templates/NousResearch-Hermes-2-Pro-Llama-3-8B-tool_use";
+    auto tmpls = read_templates(base_path + ".jinja");
+    auto metadata = json::parse(read_file(base_path + ".metadata.json"));
+
     template_capabilities template_caps;
     template_caps.name = "Hermes 2 Pro";
-    template_caps.jinja_path = "models/templates/NousResearch-Hermes-2-Pro-Llama-3-8B-tool_use.jinja";
     template_caps.legacy_format = COMMON_CHAT_FORMAT_HERMES_2_PRO;
     template_caps.experimental_format = COMMON_CHAT_FORMAT_PEG_NATIVE;
     template_caps.supports_thinking = ThinkingSupport::No;
@@ -36,7 +38,9 @@ void test_hermes_2_pro_parser(chat_parser_impl impl)
     template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::No;
     template_caps.supports_disable_thinking = SupportsDisableThinking::No;
     template_caps.supports_reasoning_only = SupportsReasoningOnly::No;
-    template_caps.end_tokens = { "<|im_end|>" };
+    template_caps.end_tokens = metadata.at("eos_tokens");
+
+    run_template_test_suite(impl, template_caps, tmpls);
 
     assert_equals(COMMON_CHAT_FORMAT_HERMES_2_PRO, common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);
     assert_equals(COMMON_CHAT_FORMAT_HERMES_2_PRO, common_chat_templates_apply(tmpls.get(), inputs_tools).format);
@@ -380,6 +384,4 @@ void test_hermes_2_pro_parser(chat_parser_impl impl)
                 /* .format = */ COMMON_CHAT_FORMAT_HERMES_2_PRO,
                 /* .reasoning_format = */ COMMON_REASONING_FORMAT_DEEPSEEK,
             }));
-
-    run_template_test_suite(impl, template_caps, tmpls);
 }

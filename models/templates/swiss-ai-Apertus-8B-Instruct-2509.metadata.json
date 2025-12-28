@@ -1,0 +1,8 @@
+{
+  "model_id": "swiss-ai/Apertus-8B-Instruct-2509",
+  "eos_tokens": [
+    "</s>",
+    "<|assistant_end|>",
+    "<|tools_suffix|>"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "model_id": "google/gemma-2-2b-it",
+  "eos_tokens": [
+    "<eos>",
+    "<end_of_turn>"
+  ]
+}

@@ -11,16 +11,17 @@ void test_firefunction_v2_parser(chat_parser_impl impl)
     inputs_tools.messages                   = {message_user};
     inputs_tools.tools                      = {special_function_tool};
 
+    std::string base_path = "models/templates/fireworks-ai-llama-3-firefunction-v2";
+    auto tmpls = read_templates(base_path + ".jinja");
+    auto metadata = json::parse(read_file(base_path + ".metadata.json"));
+
     // Note: template uses `functions` not `tools`, so minja's supports_tools detection returns false
     template_capabilities template_caps;
     template_caps.name = "Firefunction V2";
-    template_caps.jinja_path = "models/templates/fireworks-ai-llama-3-firefunction-v2.jinja";
     template_caps.legacy_format = COMMON_CHAT_FORMAT_FIREFUNCTION_V2;
     template_caps.experimental_format = COMMON_CHAT_FORMAT_PEG_NATIVE;
     template_caps.supports_thinking = ThinkingSupport::No;
-    template_caps.end_tokens = { "<|eot_id|>" };
-
-    auto tmpls = read_templates(template_caps.jinja_path);
+    template_caps.end_tokens = metadata.at("eos_tokens");
 
     run_template_test_suite(impl, template_caps, tmpls);
 

@@ -15,11 +15,14 @@ void test_deepseek_r1_parser(chat_parser_impl impl)
     inputs_tools_builtin.messages           = {message_user};
     inputs_tools_builtin.tools              = {python_tool};
 
+    auto metadata = json::parse(read_file("models/templates/deepseek-ai-DeepSeek-R1-Distill-Llama-8B.metadata.json"));
+
     {
+        auto tmpls = read_templates("models/templates/deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja");
+
         // Templates with thinking support
         template_capabilities template_caps;
         template_caps.name = "DeepSeek R1";
-        template_caps.jinja_path = "models/templates/deepseek-ai-DeepSeek-R1-Distill-Llama-8B.jinja";
         template_caps.legacy_format = COMMON_CHAT_FORMAT_DEEPSEEK_R1;
         template_caps.experimental_format = COMMON_CHAT_FORMAT_PEG_NATIVE;
         template_caps.supports_thinking = ThinkingSupport::Yes;
@@ -28,15 +31,16 @@ void test_deepseek_r1_parser(chat_parser_impl impl)
         template_caps.reasoning_requires_tools = ReasoningRequiresTools::No;
         template_caps.tools_emit_content_with_calls = ToolsEmitContentWithCalls::No;
         template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::Yes;
+        template_caps.end_tokens = metadata.at("eos_tokens");
         
-        auto tmpls = read_templates(template_caps.jinja_path);
         run_template_test_suite(impl, template_caps, tmpls);
     }
     {
+        auto tmpls = read_templates("models/templates/llama-cpp-deepseek-r1.jinja");
+
         // Replacement DeepSeek R1 template. Makes the Distill Qwen 7B/32B models happy to call tools and all.
         template_capabilities template_caps;
         template_caps.name = "DeepSeek R1 (fixed)";
-        template_caps.jinja_path = "models/templates/llama-cpp-deepseek-r1.jinja";
         template_caps.legacy_format = COMMON_CHAT_FORMAT_DEEPSEEK_R1;
         template_caps.experimental_format = COMMON_CHAT_FORMAT_PEG_NATIVE;
         template_caps.supports_thinking = ThinkingSupport::Yes;
@@ -47,9 +51,8 @@ void test_deepseek_r1_parser(chat_parser_impl impl)
         template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::Yes;
         template_caps.supports_disable_thinking = SupportsDisableThinking::No;
         template_caps.supports_reasoning_only = SupportsReasoningOnly::No;
-        template_caps.end_tokens = { "<｜end▁of▁sentence｜>" };
+        template_caps.end_tokens = metadata.at("eos_tokens");
 
-        auto tmpls = read_templates(template_caps.jinja_path);
         run_template_test_suite(impl, template_caps, tmpls);
 
         assert_equals(COMMON_CHAT_FORMAT_DEEPSEEK_R1,                   common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);

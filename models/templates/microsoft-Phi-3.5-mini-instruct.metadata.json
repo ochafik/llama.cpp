@@ -1,0 +1,8 @@
+{
+  "model_id": "microsoft/Phi-3.5-mini-instruct",
+  "eos_tokens": [
+    "<|end|>",
+    "<|assistant|>",
+    "<|endoftext|>"
+  ]
+}

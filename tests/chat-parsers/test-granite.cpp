@@ -11,9 +11,10 @@ void test_granite_parser(chat_parser_impl impl)
     inputs_tools.messages                   = {message_user};
     inputs_tools.tools                      = {special_function_tool};
 
+    auto tmpls = read_templates("models/templates/llama-cpp-ibm-granite-granite-3.3-2B-Instruct.jinja");
+    
     template_capabilities template_caps;
     template_caps.name = "Granite";
-    template_caps.jinja_path = "models/templates/llama-cpp-ibm-granite-granite-3.3-2B-Instruct.jinja";
     template_caps.legacy_format = COMMON_CHAT_FORMAT_GRANITE;
     template_caps.experimental_format = COMMON_CHAT_FORMAT_PEG_NATIVE;
     template_caps.supports_thinking = ThinkingSupport::Yes;
@@ -26,7 +27,6 @@ void test_granite_parser(chat_parser_impl impl)
     template_caps.supports_reasoning_only = SupportsReasoningOnly::No;
     template_caps.end_tokens = { "<|end_of_text|>" };
 
-    auto tmpls = read_templates(template_caps.jinja_path);
     run_template_test_suite(impl, template_caps, tmpls);
 
 

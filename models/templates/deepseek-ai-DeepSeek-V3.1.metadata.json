@@ -1,0 +1,6 @@
+{
+  "model_id": "deepseek-ai/DeepSeek-V3.1",
+  "eos_tokens": [
+    "<id:1>"
+  ]
+}

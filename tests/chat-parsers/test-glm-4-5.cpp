@@ -11,9 +11,12 @@ void test_glm_4_5_parser(chat_parser_impl impl)
     inputs_tools.messages                   = {message_user};
     inputs_tools.tools                      = glm_4_5_tools;
 
+    std::string base_path = "models/templates/GLM-4.6";
+    auto tmpls = read_templates(base_path + ".jinja");
+    auto metadata = json::parse(read_file(base_path + ".metadata.json"));
+
     template_capabilities template_caps;
     template_caps.name = "GLM 4.6";
-    template_caps.jinja_path = "models/templates/GLM-4.6.jinja";
     template_caps.legacy_format = COMMON_CHAT_FORMAT_GLM_4_5;
     template_caps.experimental_format = COMMON_CHAT_FORMAT_PEG_CONSTRUCTED;
     template_caps.supports_thinking = ThinkingSupport::Yes;
@@ -24,9 +27,7 @@ void test_glm_4_5_parser(chat_parser_impl impl)
     template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::No;
     template_caps.supports_disable_thinking = SupportsDisableThinking::Yes;
     template_caps.supports_reasoning_only = SupportsReasoningOnly::Yes;
-    template_caps.end_tokens = { "<|assistant|>", "<|observation|>" };
-
-    auto tmpls = read_templates(template_caps.jinja_path);
+    template_caps.end_tokens = metadata.at("eos_tokens");
 
     run_template_test_suite(impl, template_caps, tmpls);
 

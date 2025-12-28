@@ -1,0 +1,8 @@
+{
+  "model_id": "openai/gpt-oss-120b",
+  "eos_tokens": [
+    "<|return|>",
+    "<|endoftext|>",
+    "<|call|>"
+  ]
+}

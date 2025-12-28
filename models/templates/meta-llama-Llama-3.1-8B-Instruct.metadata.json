@@ -1,0 +1,8 @@
+{
+  "model_id": "meta-llama/Llama-3.1-8B-Instruct",
+  "eos_tokens": [
+    "<|end_of_text|>",
+    "<|eom_id|>",
+    "<|eot_id|>"
+  ]
+}

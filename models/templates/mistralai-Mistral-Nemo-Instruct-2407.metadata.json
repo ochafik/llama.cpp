@@ -1,0 +1,6 @@
+{
+  "model_id": "mistralai/Mistral-Nemo-Instruct-2407",
+  "eos_tokens": [
+    "</s>"
+  ]
+}

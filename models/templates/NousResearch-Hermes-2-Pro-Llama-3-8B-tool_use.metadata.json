@@ -1,0 +1,6 @@
+{
+  "model_id": "NousResearch/Hermes-2-Pro-Llama-3-8B",
+  "eos_tokens": [
+    "<|im_end|>"
+  ]
+}

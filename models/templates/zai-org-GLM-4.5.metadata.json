@@ -1,0 +1,8 @@
+{
+  "model_id": "zai-org/GLM-4.5",
+  "eos_tokens": [
+    "<|endoftext|>",
+    "<|user|>",
+    "<|observation|>"
+  ]
+}

@@ -15,9 +15,10 @@ void test_lfm2_parser(chat_parser_impl impl)
     inputs_tools_builtin.messages           = {message_user};
     inputs_tools_builtin.tools              = {python_tool};
 
+    auto tmpls = read_templates("models/templates/llama-cpp-lfm2.jinja");
+
     template_capabilities template_caps;
     template_caps.name = "LFM2";
-    template_caps.jinja_path = "models/templates/llama-cpp-lfm2.jinja";
     template_caps.legacy_format = COMMON_CHAT_FORMAT_LFM2_WITH_JSON_TOOLS;
     template_caps.experimental_format = COMMON_CHAT_FORMAT_PEG_NATIVE;
     template_caps.supports_thinking = ThinkingSupport::No;
@@ -30,8 +31,6 @@ void test_lfm2_parser(chat_parser_impl impl)
     template_caps.supports_reasoning_only = SupportsReasoningOnly::Yes;
     template_caps.tool_calls_have_ids = ToolCallsHaveIds::Yes;
     template_caps.end_tokens = { "<|im_end|>" };
-    
-    auto tmpls = read_templates(template_caps.jinja_path);
 
     run_template_test_suite(impl, template_caps, tmpls);
     

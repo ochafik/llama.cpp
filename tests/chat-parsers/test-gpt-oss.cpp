@@ -11,9 +11,12 @@ void test_gpt_oss_parser(chat_parser_impl impl)
     inputs_tools.messages                   = {message_user};
     inputs_tools.tools                      = {special_function_tool};
 
+    std::string base_path = "models/templates/openai-gpt-oss-120b";
+    auto tmpls = read_templates(base_path + ".jinja");
+    auto metadata = json::parse(read_file(base_path + ".metadata.json"));
+
     template_capabilities template_caps;
     template_caps.name = "GPT OSS";
-    template_caps.jinja_path = "models/templates/openai-gpt-oss-120b.jinja";
     template_caps.legacy_format = COMMON_CHAT_FORMAT_GPT_OSS;
     template_caps.experimental_format = COMMON_CHAT_FORMAT_PEG_NATIVE;
     template_caps.supports_thinking = ThinkingSupport::Yes;
@@ -24,13 +27,9 @@ void test_gpt_oss_parser(chat_parser_impl impl)
     template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::No;
     template_caps.supports_disable_thinking = SupportsDisableThinking::Yes;
     template_caps.supports_reasoning_only = SupportsReasoningOnly::No;  // Template always outputs final content
-    // See eos_token_id in https://huggingface.co/openai/gpt-oss-20b/blob/main/generation_config.json
-    template_caps.end_tokens = { "<|return|>", "<|call|>", "<|endoftext|>" };
-
-    auto tmpls = read_templates(template_caps.jinja_path);
-
+    template_caps.end_tokens = metadata.at("eos_tokens");
+    
     run_template_test_suite(impl, template_caps, tmpls);
-
 
     assert_equals(COMMON_CHAT_FORMAT_GPT_OSS, common_chat_templates_apply(tmpls.get(), inputs_no_tools).format);
     assert_equals(COMMON_CHAT_FORMAT_GPT_OSS, common_chat_templates_apply(tmpls.get(), inputs_tools).format);

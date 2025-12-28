@@ -1,0 +1,7 @@
+{
+  "model_id": "Qwen/Qwen3-0.6B",
+  "eos_tokens": [
+    "<|im_end|>",
+    "<|endoftext|>"
+  ]
+}

@@ -11,9 +11,12 @@ void test_deepseek_v3_1_parser(chat_parser_impl impl)
     inputs_tools.messages                   = {message_user};
     inputs_tools.tools                      = {special_function_tool};
 
+    std::string base_path = "models/templates/deepseek-ai-DeepSeek-V3.1";
+    auto tmpls = read_templates(base_path + ".jinja");
+    auto metadata = json::parse(read_file(base_path + ".metadata.json"));
+
     template_capabilities template_caps;
     template_caps.name = "DeepSeek V3.1";
-    template_caps.jinja_path = "models/templates/deepseek-ai-DeepSeek-V3.1.jinja";
     template_caps.legacy_format = COMMON_CHAT_FORMAT_DEEPSEEK_V3_1;
     template_caps.experimental_format = COMMON_CHAT_FORMAT_PEG_NATIVE;
     template_caps.supports_thinking = ThinkingSupport::Yes;
@@ -24,9 +27,7 @@ void test_deepseek_v3_1_parser(chat_parser_impl impl)
     template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::Yes;
     template_caps.supports_disable_thinking = SupportsDisableThinking::No;
     template_caps.supports_reasoning_only = SupportsReasoningOnly::No;
-    template_caps.end_tokens = { "<｜end▁of▁sentence｜>" };
-
-    auto tmpls = read_templates(template_caps.jinja_path);
+    template_caps.end_tokens = metadata.at("eos_tokens");
 
     run_template_test_suite(impl, template_caps, tmpls);
 
