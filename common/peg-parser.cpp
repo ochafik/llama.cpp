@@ -860,6 +860,10 @@ std::string common_peg_arena::dump(common_peg_parser_id id) const {
             return "Rule(" + p.name + ", " + dump(p.child) + ")";
         } else if constexpr (std::is_same_v<T, common_peg_ref_parser>) {
             return "Ref(" + p.name + ")";
+        } else if constexpr (std::is_same_v<T, common_peg_atomic_parser>) {
+            return "Atomic(" + dump(p.child) + ")";
+        } else if constexpr (std::is_same_v<T, common_peg_tag_parser>) {
+            return "Tag(" + std::to_string(p.tag_id) + ", " + dump(p.child) + ")";
         } else {
             return "Unknown";
         }

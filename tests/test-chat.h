@@ -431,7 +431,9 @@ static void test_parser_with_streaming(const common_chat_msg & expected, const s
                 merged.content += diff.content_delta;
             }
             if (diff.tool_call_index != std::string::npos) {
-                if (!diff.tool_call_delta.name.empty()) {
+                // Check if this is a new tool call or an update to an existing one
+                bool is_new_tool_call = diff.tool_call_index >= merged.tool_calls.size();
+                if (is_new_tool_call && !diff.tool_call_delta.name.empty()) {
                     merged.tool_calls.push_back({diff.tool_call_delta.name, "", diff.tool_call_delta.id});
                 }
                 if (!diff.tool_call_delta.arguments.empty()) {

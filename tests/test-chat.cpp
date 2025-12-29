@@ -1307,6 +1307,17 @@ void run_template_test_suite(chat_parser_impl impl, const template_capabilities 
 
             auto result = test_streaming_with_needles(ctx, raw_message, parse_fn);
             verify_needle_results(ctx, result);
+
+            // Also test diff computation - this is what the server uses for SSE streaming.
+            // This catches bugs that test_streaming_with_needles misses because it exercises
+            // common_chat_msg_diff::compute_diffs().
+            test_parser_with_streaming(
+                ctx.expected_msg,
+                raw_message,
+                [&](const std::string & msg) {
+                    // Use is_partial=true for partial messages, is_partial=false for the full message
+                    return parse_fn(msg, msg.size() < raw_message.size());
+                });
         } catch (const std::exception & e) {
             throw std::runtime_error(scenario.name + " failed for " + template_caps.name + ": " + e.what() + "\n" + debug_info);
         }

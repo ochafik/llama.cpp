@@ -108,6 +108,7 @@ class common_chat_peg_native_builder : public common_chat_peg_builder {
 
 class common_chat_peg_native_mapper : public common_chat_peg_mapper {
     common_chat_tool_call * current_tool = nullptr;
+    std::string pending_tool_id;  // Buffer ID in case it comes before TOOL_NAME
 
   public:
     common_chat_peg_native_mapper(common_chat_msg & msg) : common_chat_peg_mapper(msg) {}
