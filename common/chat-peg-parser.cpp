@@ -61,37 +61,47 @@ void common_chat_peg_native_mapper::map(const common_peg_ast_node & node) {
             // Structural wrappers - do nothing.
             break;
         case Tag::TOOL_OPEN:
-            // Be lazy: don't create tool call here, wait for TOOL_NAME
-            // This avoids creating spurious tool calls during backtracking
+            // Be lazy: don't create tool call here, wait for TOOL_NAME.
+            // This avoids creating spurious tool calls during partial parsing.
             current_tool = nullptr;
+            pending_tool_id.clear();
             break;
         case Tag::TOOL_ID:
+            // Skip partial nodes - the ID isn't complete yet
+            if (node.is_partial) {
+                break;
+            }
             {
-                // Create tool call lazily on first of TOOL_ID or TOOL_NAME
-                if (!current_tool) {
-                    result.tool_calls.emplace_back();
-                    current_tool = &result.tool_calls.back();
-                }
                 auto text = std::string(trim_trailing_space(node.text));
                 // Strip surrounding quotes if present (JSON string value)
                 if (text.size() >= 2 && text.front() == '"' && text.back() == '"') {
                     text = text.substr(1, text.size() - 2);
                 }
-                current_tool->id = text;
+                if (current_tool) {
+                    current_tool->id = text;
+                } else {
+                    // Buffer ID - TOOL_ID may come before TOOL_NAME (e.g., Command R7B)
+                    pending_tool_id = text;
+                }
             }
             break;
         case Tag::TOOL_NAME:
             // Skip partial nodes - the name isn't complete yet.
-            // See comment in common_chat_peg_mapper for rationale.
+            // Note: Using p.atomic(p.literal_tag(Tag::TOOL_NAME, name)) in parsers would
+            // achieve the same effect by preventing partial nodes from being created,
+            // but this mapper-level check is more defensive and handles all parsers uniformly.
             if (node.is_partial) {
                 break;
             }
-            // Create tool call lazily on first of TOOL_ID or TOOL_NAME
-            if (!current_tool) {
-                result.tool_calls.emplace_back();
-                current_tool = &result.tool_calls.back();
-            }
+            // Create tool call lazily on TOOL_NAME, not on TOOL_OPEN.
+            result.tool_calls.emplace_back();
+            current_tool = &result.tool_calls.back();
             current_tool->name = std::string(trim_trailing_space(node.text));
+            // Apply pending ID if any
+            if (!pending_tool_id.empty()) {
+                current_tool->id = pending_tool_id;
+                pending_tool_id.clear();
+            }
             break;
         case Tag::TOOL_ARGS:
             if (current_tool) {
@@ -272,17 +282,24 @@ common_chat_peg_mapper_func common_chat_peg_base_mapper() {
 common_chat_peg_mapper_func common_chat_peg_native_mapper_func() {
     return [](common_chat_msg & result) -> common_chat_peg_map_func {
         common_chat_tool_call * current_tool = nullptr;
+        std::string pending_tool_id;  // Buffer ID in case it comes before TOOL_NAME
 
-        return [&result, current_tool](const common_peg_ast_node & node) mutable {
+        return [&result, current_tool, pending_tool_id](const common_peg_ast_node & node) mutable {
             handle_base_tags(result, node);
 
             switch (static_cast<Tag>(node.tag_id)) {
                 case Tag::TOOL_OPEN:
-                    result.tool_calls.emplace_back();
-                    current_tool = &result.tool_calls.back();
+                    // Be lazy: don't create tool call here, wait for TOOL_NAME.
+                    // This avoids creating spurious tool calls during partial parsing.
+                    current_tool = nullptr;
+                    pending_tool_id.clear();
                     break;
                 case Tag::TOOL_ID:
-                    if (current_tool) {
+                    // Skip partial nodes - the ID isn't complete yet
+                    if (node.is_partial) {
+                        break;
+                    }
+                    {
                         auto text = std::string(trim_trailing_space(node.text));
                         // HACK: Strip surrounding quotes if present (JSON string value)
                         // TODO(ochafik): clean this up - ideally the parser should capture
@@ -290,16 +307,30 @@ common_chat_peg_mapper_func common_chat_peg_native_mapper_func() {
                         if (text.size() >= 2 && text.front() == '"' && text.back() == '"') {
                             text = text.substr(1, text.size() - 2);
                         }
-                        current_tool->id = text;
+                        if (current_tool) {
+                            current_tool->id = text;
+                        } else {
+                            // Buffer ID - TOOL_ID may come before TOOL_NAME (e.g., Command R7B)
+                            pending_tool_id = text;
+                        }
                     }
                     break;
                 case Tag::TOOL_NAME:
                     // Skip partial nodes - see comment in common_chat_peg_mapper.
+                    // Note: Using p.atomic(p.literal_tag(Tag::TOOL_NAME, name)) in parsers would
+                    // achieve the same effect by preventing partial nodes from being created,
+                    // but this mapper-level check is more defensive and handles all parsers uniformly.
                     if (node.is_partial) {
                         break;
                     }
-                    if (current_tool) {
-                        current_tool->name = std::string(trim_trailing_space(node.text));
+                    // Create tool call lazily on TOOL_NAME, not on TOOL_OPEN.
+                    result.tool_calls.emplace_back();
+                    current_tool = &result.tool_calls.back();
+                    current_tool->name = std::string(trim_trailing_space(node.text));
+                    // Apply pending ID if any
+                    if (!pending_tool_id.empty()) {
+                        current_tool->id = pending_tool_id;
+                        pending_tool_id.clear();
                     }
                     break;
                 case Tag::TOOL_ARGS:

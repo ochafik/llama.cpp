@@ -177,6 +177,7 @@ def test_completion_with_required_tool_tiny_slow(template_name: str, tool: dict,
 @pytest.mark.parametrize("stream", [CompletionMode.NORMAL, CompletionMode.STREAMED])
 @pytest.mark.parametrize("tool,argument_key", [(TEST_TOOL, "success"), (PYTHON_TOOL, "code")])
 @pytest.mark.parametrize("template_file", [
+    "models/templates/Qwen3-Coder.jinja",
     "models/templates/Apertus-8B-Instruct.jinja",
     "models/templates/ByteDance-Seed-OSS.jinja",
     # "models/templates/CohereForAI-c4ai-command-r-plus-tool_use.jinja",
@@ -213,7 +214,6 @@ def test_completion_with_required_tool_tiny_slow(template_name: str, tool: dict,
     "models/templates/Qwen-Qwen2.5-7B-Instruct.jinja",
     "models/templates/Qwen-Qwen3-0.6B.jinja",
     "models/templates/Qwen-QwQ-32B.jinja",
-    "models/templates/Qwen3-Coder.jinja",
     "models/templates/unsloth-Apriel-1.5.jinja",
     "models/templates/unsloth-mistral-Devstral-Small-2507.jinja",
 ])

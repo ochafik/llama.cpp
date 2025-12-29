@@ -96,7 +96,8 @@ void test_glm_4_5_parser(chat_parser_impl impl)
             glm_syntax_reasoning), true);
 
     // Streaming tests only run with experimental PEG parsers
-    if (impl == chat_parser_impl::EXPERIMENTAL) {
+    if (impl == chat_parser_impl::EXPERIMENTAL)
+    {
         test_parser_with_streaming(message_assist_call_thoughts_content,
             "\n<think>I'm\nthinking</think>Hello, world!\nWhat's up?\n<tool_call>special_function\n<arg_key>arg1</arg_key>\n<arg_value>1</arg_value>\n</tool_call>",
             [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, glm_syntax_reasoning); });

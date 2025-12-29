@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -1548,7 +1549,20 @@ common_chat_msg common_chat_peg_parse(const common_peg_arena & parser, const std
     common_peg_parse_context ctx(input, is_partial);
     auto result = parser.parse(ctx);
     if (result.fail()) {
-        throw std::runtime_error(std::string("Failed to parse input at pos ") + std::to_string(result.end));
+        std::ostringstream oss;
+        oss << "Failed to parse input at pos " << result.end;
+        oss << " (format: " << common_chat_format_name(syntax.format) << ")";
+        oss << "\n\nInput (" << input.size() << " chars):\n" << input;
+        if (result.end < input.size()) {
+            oss << "\n\nContext around failure (pos " << result.end << "):\n";
+            size_t start = result.end > 20 ? result.end - 20 : 0;
+            size_t end = std::min(result.end + 20, input.size());
+            if (start > 0) oss << "...";
+            oss << input.substr(start, end - start);
+            if (end < input.size()) oss << "...";
+            oss << "\n" << std::string(start > 0 ? 3 : 0, ' ') << std::string(result.end - start, ' ') << "^";
+        }
+        throw std::runtime_error(oss.str());
     }
 
     common_chat_msg msg;
