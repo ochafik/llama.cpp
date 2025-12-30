@@ -194,6 +194,11 @@ void common_chat_peg_constructed_mapper::map(const common_peg_ast_node & node) {
             }
             break;
         case Tag::TOOL_CLOSE:
+            // Skip partial nodes - we shouldn't close arguments until we've seen
+            // the full closing tag.
+            if (node.is_partial) {
+                break;
+            }
             if (!current_tool) {
                 throw std::runtime_error("bad state");
             }
@@ -419,6 +424,11 @@ common_chat_peg_mapper_func common_chat_peg_constructed_mapper_func() {
                     }
                     break;
                 case Tag::TOOL_CLOSE:
+                    // Skip partial nodes - we shouldn't close arguments until we've seen
+                    // the full closing tag (e.g., </function></tool_call>).
+                    if (node.is_partial) {
+                        break;
+                    }
                     if (current_tool && !args_complete) {
                         if (needs_closing_quote) {
                             current_tool->arguments += "\"";
