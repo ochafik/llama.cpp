@@ -1152,6 +1152,11 @@ void run_template_test_suite(chat_parser_impl impl, const template_capabilities 
         if (scenario.require_thinking_support && template_caps.supports_thinking == ThinkingSupport::No) {
             continue;
         }
+        if (scenario.force_disable_thinking && template_caps.supports_disable_thinking == SupportsDisableThinking::No) {
+            // Skip scenarios that require disabling thinking when the template doesn't support it
+            // (e.g., Kimi template always outputs <think></think> tags regardless of enable_thinking)
+            continue;
+        }
         if (scenario.parallel_tool_calls && !common_chat_templates_support_parallel_tool_calls(tmpls.get())) {
             continue;
         }
@@ -1341,7 +1346,7 @@ static void test_chat_parsers()
 
     auto test_chat_parser = [&](test_status status, const std::string & name, chat_parser_impl impl, const std::function<void(chat_parser_impl)> & test_fn)
     {
-        auto full_name = name + "_" + chat_parser_impl_name(impl);
+        auto full_name = name + ":" + chat_parser_impl_name(impl);
         auto matches_filter = filter && full_name.find(filter) != std::string::npos;
         if (!(filter && filter == std::string("all"))) {
             if (status == test_status::Enabled) {
@@ -1382,12 +1387,10 @@ static void test_chat_parsers()
     test_chat_parser(test_status::Enabled, "command_r7b", chat_parser_impl::EXPERIMENTAL, test_command_r7b_parser);
 
     test_chat_parser(test_status::Enabled, "deepseek_r1", chat_parser_impl::LEGACY, test_deepseek_r1_parser);
-    // TODO: DeepSeek R1 has unicode chars in its tokens, PEG parsing infra escapes them incorrectly:
-    test_chat_parser(test_status::Disabled, "deepseek_r1", chat_parser_impl::EXPERIMENTAL, test_deepseek_r1_parser);
+    test_chat_parser(test_status::Enabled, "deepseek_r1", chat_parser_impl::EXPERIMENTAL, test_deepseek_r1_parser);
 
     test_chat_parser(test_status::Enabled, "deepseek_v3_1", chat_parser_impl::LEGACY, test_deepseek_v3_1_parser);
-    // TODO: DeepSeek v3.1 has unicode chars in its tokens, PEG parsing infra escapes them incorrectly:
-    test_chat_parser(test_status::Disabled, "deepseek_v3_1", chat_parser_impl::EXPERIMENTAL, test_deepseek_v3_1_parser);
+    test_chat_parser(test_status::Enabled, "deepseek_v3_1", chat_parser_impl::EXPERIMENTAL, test_deepseek_v3_1_parser);
 
     test_chat_parser(test_status::Enabled, "firefunction_v2", chat_parser_impl::LEGACY, test_firefunction_v2_parser);
     test_chat_parser(test_status::Enabled, "firefunction_v2", chat_parser_impl::EXPERIMENTAL, test_firefunction_v2_parser);
@@ -1402,8 +1405,7 @@ static void test_chat_parsers()
     test_chat_parser(test_status::Enabled, "generic", chat_parser_impl::EXPERIMENTAL, test_generic_parser);
 
     test_chat_parser(test_status::Enabled, "glm_4_5", chat_parser_impl::LEGACY, test_glm_4_5_parser);
-    // TODO(ochafik): fix! (chokes on "Hello, world!\nWhat's up?")
-    test_chat_parser(test_status::Disabled, "glm_4_5", chat_parser_impl::EXPERIMENTAL, test_glm_4_5_parser);
+    test_chat_parser(test_status::Enabled, "glm_4_5", chat_parser_impl::EXPERIMENTAL, test_glm_4_5_parser);
 
     test_chat_parser(test_status::Enabled, "gpt_oss", chat_parser_impl::LEGACY, test_gpt_oss_parser);
     test_chat_parser(test_status::Enabled, "gpt_oss", chat_parser_impl::EXPERIMENTAL, test_gpt_oss_parser);
@@ -1415,8 +1417,7 @@ static void test_chat_parsers()
     test_chat_parser(test_status::Enabled, "hermes_2_pro", chat_parser_impl::EXPERIMENTAL, test_hermes_2_pro_parser);
 
     test_chat_parser(test_status::Enabled, "kimi_k2", chat_parser_impl::LEGACY, test_kimi_k2_parser);
-    // TODO
-    test_chat_parser(test_status::Disabled, "kimi_k2", chat_parser_impl::EXPERIMENTAL, test_kimi_k2_parser);
+    test_chat_parser(test_status::Enabled, "kimi_k2", chat_parser_impl::EXPERIMENTAL, test_kimi_k2_parser);
 
     // TODO
     test_chat_parser(test_status::Disabled, "lfm2", chat_parser_impl::LEGACY, test_lfm2_parser);
@@ -1427,19 +1428,14 @@ static void test_chat_parsers()
     // TODO(ochafik): this peg parser needs both TOOL_ARG_NAME (builtins) and TOOL_ARGS (regular) so will need its own mapper
     test_chat_parser(test_status::Disabled, "llama_3_x", chat_parser_impl::EXPERIMENTAL, test_llama_3_x_parser);
 
-    // TODO (completely new test)
-    test_chat_parser(test_status::Disabled, "magistral", chat_parser_impl::LEGACY, test_magistral_parser);
-    // TODO
-    test_chat_parser(test_status::Disabled, "magistral", chat_parser_impl::EXPERIMENTAL, test_magistral_parser);
+    test_chat_parser(test_status::Enabled, "magistral", chat_parser_impl::LEGACY, test_magistral_parser);
+    test_chat_parser(test_status::Enabled, "magistral", chat_parser_impl::EXPERIMENTAL, test_magistral_parser);
 
     test_chat_parser(test_status::Enabled, "minimax_m2", chat_parser_impl::LEGACY, test_minimax_m2_parser);
-    // TODO:
-    test_chat_parser(test_status::Disabled, "minimax_m2", chat_parser_impl::EXPERIMENTAL, test_minimax_m2_parser);
+    test_chat_parser(test_status::Enabled, "minimax_m2", chat_parser_impl::EXPERIMENTAL, test_minimax_m2_parser);
 
-    // TODO(ochafik): tool call number mismatch
-    test_chat_parser(test_status::Disabled, "ministral_3", chat_parser_impl::LEGACY, test_ministral_3_parser);
-    // TODO(ochafik): Debug auto-single
-    test_chat_parser(test_status::Disabled, "ministral_3", chat_parser_impl::EXPERIMENTAL, test_ministral_3_parser);
+    test_chat_parser(test_status::Enabled, "ministral_3", chat_parser_impl::LEGACY, test_ministral_3_parser);
+    test_chat_parser(test_status::Enabled, "ministral_3", chat_parser_impl::EXPERIMENTAL, test_ministral_3_parser);
 
     test_chat_parser(test_status::Enabled, "mistral_nemo", chat_parser_impl::LEGACY, test_mistral_nemo_parser);
     test_chat_parser(test_status::Enabled, "mistral_nemo", chat_parser_impl::EXPERIMENTAL, test_mistral_nemo_parser);

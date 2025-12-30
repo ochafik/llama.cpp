@@ -37,30 +37,30 @@ common_chat_params common_chat_params_init_magistral_peg(const common_chat_templ
                 data.preserved_tokens.push_back("[TOOL_CALLS]");
             }
 
-            static const json id_schema {
-                {"type", "string"},
-                {"pattern", "^[a-zA-Z0-9]{9}$"},  // Enforce ID format (exactly 9 alphanumeric)
-            };
-
+            // Template format: [TOOL_CALLS]name[ARGS]{...}
             auto any_tool_call = p.choice();
             foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
                 any_tool_call |= p.tag(Tag::TOOL, p.sequence()
-                    + p.literal_tag(Tag::TOOL_OPEN, "{")
-                    << "\"name\"" << ":" << ("\"" + p.literal_tag(Tag::TOOL_NAME, name) + "\"") << ","
-                    << "\"arguments\"" << ":" << p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters)) << ","
-                    << "\"id\"" << ":" << p.tag(Tag::TOOL_ID, p.schema(p.json(), "tool-id", id_schema))
-                    << p.literal_tag(Tag::TOOL_CLOSE, "}"));
+                    + p.literal_tag(Tag::TOOL_OPEN, "[TOOL_CALLS]")
+                    // Wrap name + delimiter in atomic so TOOL_NAME isn't emitted prematurely
+                    // when one tool name is a prefix of another (e.g., special_function vs special_function_with_opt).
+                    + p.atomic(p.literal_tag(Tag::TOOL_NAME, name) + p.literal("[ARGS]"))
+                    + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters))
+                    + p.literal_tag(Tag::TOOL_CLOSE, ""));
             });
 
             auto tool_calls = p.trigger_rule("tool-call-root",
-                p.literal("[TOOL_CALLS][")
-                    + any_tool_call + p.repeat(p.literal(",") << any_tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
-                    + p.literal("]"));
+                p.space()
+                    + any_tool_call + p.repeat(any_tool_call, 0, inputs.parallel_tool_calls ? -1 : 0));
 
             if (require_tools) {
                 return reasoning << tool_calls;
             }
-            return reasoning << p.tag(Tag::CONTENT, p.until("[TOOL_CALLS]")) << tool_calls;
+            // Allow either: content before tool calls, or content only
+            auto content_before = p.tag(Tag::CONTENT, p.until("[TOOL_CALLS]"));
+            auto with_tools = content_before << tool_calls;
+            auto content_only = p.tag(Tag::CONTENT, p.rest());
+            return reasoning << p.choice({with_tools, content_only});
         }
 
         // Content only parser

@@ -41,7 +41,12 @@ common_chat_params common_chat_params_init_generic_peg(const common_chat_templat
                 + p.space() + p.literal("]");
 
             auto tool_calls = p.trigger_rule("tool-call-root",
-                p.literal("{") << "\"tool_calls\"" << ":" << tool_calls_parser << "}");
+                p.space()  // Allow optional leading whitespace
+                + p.literal("{")
+                << "\"tool_calls\""
+                << ":"
+                << tool_calls_parser
+                << "}");
 
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {
                 // Only tool calls allowed when required

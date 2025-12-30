@@ -101,7 +101,8 @@ common_chat_params common_chat_params_init_lfm2_peg(const common_chat_template &
             });
 
             auto tool_calls_parser =
-                p.literal("<|tool_call_start|>[")
+                p.space()
+                + p.literal("<|tool_call_start|>[")
                 + any_tool_call + p.repeat(p.literal(",") << any_tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
                 + p.literal("]<|tool_call_end|>");
 

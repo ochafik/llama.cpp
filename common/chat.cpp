@@ -2790,15 +2790,17 @@ static common_chat_params common_chat_templates_apply_jinja(
         return common_chat_params_init_llama_3_x(tmpl, params, allow_python_tag_builtin_tools);
     }
 
+    // Magistral (Unsloth variant with [THINK]...[/THINK] tags) - check before ministral_3 since both have [TOOL_CALLS][ARGS]
+    if (src.find("Unsloth") != std::string::npos &&
+        src.find("[THINK]") != std::string::npos && src.find("[/THINK]") != std::string::npos) {
+        return common_chat_params_init_magistral(tmpl, params);
+    }
+
     // Ministral/Mistral Large 3
     if (src.find("[SYSTEM_PROMPT]") != std::string::npos &&
         src.find("[TOOL_CALLS]") != std::string::npos &&
         src.find("[ARGS]") != std::string::npos) {
         return common_chat_params_init_ministral_3(tmpl, params);
-    }
-
-    if (src.find("[THINK]") != std::string::npos && src.find("[/THINK]") != std::string::npos) {
-        return common_chat_params_init_magistral(tmpl, params);
     }
 
     // Plain handler (no tools)

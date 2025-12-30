@@ -119,7 +119,8 @@ common_chat_params common_chat_params_init_apertus_peg(const common_chat_templat
             });
 
             auto tool_calls =
-                p.literal("<|tools_prefix|>[")
+                p.space()  // Allow optional leading whitespace
+                + p.literal("<|tools_prefix|>[")
                 + any_tool_call + p.repeat(p.literal(", ") << any_tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
                 + p.literal("]<|tools_suffix|>");
 

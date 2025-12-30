@@ -73,14 +73,15 @@ common_chat_params common_chat_params_init_deepseek_v3_1_peg(const common_chat_t
                     + p.tag(Tag::TOOL_OPEN, p.literal("<｜tool▁call▁begin｜>"))
                     + p.tag(Tag::TOOL_NAME, p.literal(name))
                     + "<｜tool▁sep｜>"
-                    + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters))
-                    + p.tag(Tag::TOOL_CLOSE, p.optional(p.literal("<｜tool▁call▁end｜>"))));
+                    << p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters))
+                    << p.tag(Tag::TOOL_CLOSE, p.literal("<｜tool▁call▁end｜>")));
             });
 
             auto tool_calls =
-                p.literal("<｜tool▁calls▁begin｜>")
+                p.space()  // Allow optional leading whitespace
+                + p.literal("<｜tool▁calls▁begin｜>")
                 + any_tool_call + p.repeat(p.space() << any_tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
-                + p.optional(p.literal("<｜tool▁calls▁end｜>"))
+                + p.literal("<｜tool▁calls▁end｜>")
                 << consume_eos();
 
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {

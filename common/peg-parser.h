@@ -411,7 +411,7 @@ class common_peg_parser_builder {
     // Matches between min and max repetitions of a parser (inclusive).
     //   S -> A{m,n}
     // Use -1 for max to represent unbounded repetition (equivalent to {m,})
-    common_peg_parser repeat(const common_peg_parser & p, int min, int max) { return add(common_peg_repetition_parser{p, min,max}); }
+    common_peg_parser repeat(const common_peg_parser & p, int min, int max) { return max == 0 ? eps() : add(common_peg_repetition_parser{p, min,max}); }
 
     // Matches exactly n repetitions of a parser.
     //   S -> A{n}

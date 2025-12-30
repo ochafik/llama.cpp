@@ -40,7 +40,8 @@ common_chat_params common_chat_params_init_mistral_nemo_peg(const common_chat_te
             });
 
             auto tool_calls = p.trigger_rule("tool-call-root",
-                p.literal("[TOOL_CALLS][")
+                p.space()
+                    + p.literal("[TOOL_CALLS][")
                     + any_tool_call + p.repeat(p.literal(",") << any_tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
                     + p.literal("]"));
 

@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <iomanip>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -1562,6 +1563,20 @@ common_chat_msg common_chat_peg_parse(const common_peg_arena & parser, const std
             if (end < input.size()) oss << "...";
             oss << "\n" << std::string(start > 0 ? 3 : 0, ' ') << std::string(result.end - start, ' ') << "^";
         }
+        // Log hex bytes around the failure position to help debug Unicode issues
+        if (result.end < input.size()) {
+            oss << "\n\nHex bytes around failure (pos " << result.end << "):";
+            size_t start = result.end > 10 ? result.end - 10 : 0;
+            size_t end = std::min(result.end + 30, input.size());
+            for (size_t i = start; i < end; ++i) {
+                if (i == result.end) oss << " [";
+                oss << " " << std::hex << std::setfill('0') << std::setw(2) << (unsigned)(unsigned char)input[i];
+                if (i == result.end) oss << "]";
+            }
+            oss << std::dec;
+        }
+        // Dump parser structure for debugging (crashes, so disabled)
+        // oss << "\n\nParser structure:\n" << parser.dump(parser.root());
         throw std::runtime_error(oss.str());
     }
 

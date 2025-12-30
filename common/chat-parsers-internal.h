@@ -341,8 +341,11 @@ inline common_peg_parser build_generic_tool_calls_peg_parser(
 
         tool_call |= p.rule("tool-" + name,
             p.tag(Tag::TOOL_OPEN, *format.tool_call_start)
-            + p.literal_tag(Tag::TOOL_NAME, name)
-            + *format.tool_call_name_params_sep
+            // Wrap name + delimiter in atomic so TOOL_NAME isn't emitted prematurely.
+            // Without this, "special_function" would match as complete when input is
+            // "special_function_" (prefix of "special_function_with_opt"), causing
+            // streaming regressions (tool count decreases when more input arrives).
+            + p.atomic(p.literal_tag(Tag::TOOL_NAME, name) + *format.tool_call_name_params_sep)
             + args
             + p.tag(Tag::TOOL_CLOSE, *format.tool_call_end));
     });

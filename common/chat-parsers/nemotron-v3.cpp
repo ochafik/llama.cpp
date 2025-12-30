@@ -77,12 +77,14 @@ common_chat_params common_chat_params_init_nemotron_v3_peg(const common_chat_tem
             }
 
             generic_tool_call_format format;
-            format.tool_call_start = "<tool_call>" + p.space() + "<function=";
+            format.tool_call_start = p.space() + "<tool_call>" + p.space() + "<function=";
             format.tool_call_name_params_sep = ">" + p.space();
             format.tool_call_end = "</function>" + p.space() + "</tool_call>" + p.space();
             format.param_start = p.literal("<parameter=");
             format.param_name_value_sep = ">" + p.space();
-            format.param_ends = { "\n</parameter>\n", "</parameter>", "\n</parameter>" };
+            // Note: The leading \n is consumed by the space() in the value parser (space_around_json=true),
+            // so param_ends should NOT include it. The trailing \n should be included to consume it.
+            format.param_ends = { "</parameter>\n", "</parameter>" };
             auto tool_calls = build_generic_tool_calls_peg_parser(p, inputs, format);
 
             auto stop_before = std::vector<std::string>{
@@ -96,17 +98,19 @@ common_chat_params common_chat_params_init_nemotron_v3_peg(const common_chat_tem
             auto content_after = p.optional(p.tag(Tag::CONTENT, p.until_one_of(stop_after)));
             auto pre_tool_gap = p.repeat(newline, 0, -1);
             if (require_tools) {
-                return assistant_prefix + reasoning + after_reasoning_gap + pre_tool_gap + tool_calls + assistant_suffix;
+                // Simplified: just space + tool_calls, no extra patterns
+                return p.space() + tool_calls;
             }
             return assistant_prefix + reasoning + after_reasoning_gap + content_before + pre_tool_gap + tool_calls + content_after + assistant_suffix;
         }
 
         // Content only parser
         include_grammar = false;
-        auto content_body = p.optional(p.tag(Tag::CONTENT, p.until_one_of({
-            "\n<|im_end|>", "\r\n<|im_end|>", "<|im_end|>"
-        })));
-        return assistant_prefix + reasoning + after_reasoning_gap + content_body + assistant_suffix;
+        // Handle reasoning only when enabled, otherwise just capture all content
+        if (inputs.enable_thinking && extract_reasoning) {
+            return reasoning + after_reasoning_gap + p.tag(Tag::CONTENT, p.rest());
+        }
+        return p.tag(Tag::CONTENT, p.rest());
     });
 
     common_chat_build_peg_grammar(inputs, parser, data);

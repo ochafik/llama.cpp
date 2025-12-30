@@ -29,7 +29,8 @@ void test_magistral_parser(chat_parser_impl impl)
     template_caps.inject_reasoning_after_format = InjectReasoningAfterFormat::No;
     template_caps.supports_disable_thinking = SupportsDisableThinking::Yes;
     template_caps.supports_reasoning_only = SupportsReasoningOnly::Yes;
-    template_caps.tool_calls_have_ids = ToolCallsHaveIds::Yes;
+    // Template format [TOOL_CALLS]name[ARGS]{...} doesn't include ids
+    template_caps.tool_calls_have_ids = ToolCallsHaveIds::No;
     
     auto tmpls = read_templates(template_caps.jinja_path);
 
