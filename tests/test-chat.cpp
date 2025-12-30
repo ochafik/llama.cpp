@@ -1425,10 +1425,8 @@ static void test_chat_parsers()
     // TODO(ochafik): this peg parser needs both TOOL_ARG_NAME (builtins) and TOOL_ARGS (regular) so will need its own mapper
     test_chat_parser(test_status::Disabled, "llama_3_x", chat_parser_impl::EXPERIMENTAL, test_llama_3_x_parser);
 
-    // TODO (completely new test)
-    test_chat_parser(test_status::Disabled, "magistral", chat_parser_impl::LEGACY, test_magistral_parser);
-    // TODO
-    test_chat_parser(test_status::Disabled, "magistral", chat_parser_impl::EXPERIMENTAL, test_magistral_parser);
+    test_chat_parser(test_status::Enabled, "magistral", chat_parser_impl::LEGACY, test_magistral_parser);
+    test_chat_parser(test_status::Enabled, "magistral", chat_parser_impl::EXPERIMENTAL, test_magistral_parser);
 
     test_chat_parser(test_status::Enabled, "minimax_m2", chat_parser_impl::LEGACY, test_minimax_m2_parser);
     // TODO:
