@@ -1400,8 +1400,7 @@ static void test_chat_parsers()
     test_chat_parser(test_status::Enabled, "generic", chat_parser_impl::EXPERIMENTAL, test_generic_parser);
 
     test_chat_parser(test_status::Enabled, "glm_4_5", chat_parser_impl::LEGACY, test_glm_4_5_parser);
-    // TODO(ochafik): fix! (chokes on "Hello, world!\nWhat's up?")
-    test_chat_parser(test_status::Disabled, "glm_4_5", chat_parser_impl::EXPERIMENTAL, test_glm_4_5_parser);
+    test_chat_parser(test_status::Enabled, "glm_4_5", chat_parser_impl::EXPERIMENTAL, test_glm_4_5_parser);
 
     test_chat_parser(test_status::Enabled, "gpt_oss", chat_parser_impl::LEGACY, test_gpt_oss_parser);
     test_chat_parser(test_status::Enabled, "gpt_oss", chat_parser_impl::EXPERIMENTAL, test_gpt_oss_parser);
@@ -1429,13 +1428,10 @@ static void test_chat_parsers()
     test_chat_parser(test_status::Enabled, "magistral", chat_parser_impl::EXPERIMENTAL, test_magistral_parser);
 
     test_chat_parser(test_status::Enabled, "minimax_m2", chat_parser_impl::LEGACY, test_minimax_m2_parser);
-    // TODO:
-    test_chat_parser(test_status::Disabled, "minimax_m2", chat_parser_impl::EXPERIMENTAL, test_minimax_m2_parser);
+    test_chat_parser(test_status::Enabled, "minimax_m2", chat_parser_impl::EXPERIMENTAL, test_minimax_m2_parser);
 
-    // TODO(ochafik): tool call number mismatch
-    test_chat_parser(test_status::Disabled, "ministral_3", chat_parser_impl::LEGACY, test_ministral_3_parser);
-    // TODO(ochafik): Debug auto-single
-    test_chat_parser(test_status::Disabled, "ministral_3", chat_parser_impl::EXPERIMENTAL, test_ministral_3_parser);
+    test_chat_parser(test_status::Enabled, "ministral_3", chat_parser_impl::LEGACY, test_ministral_3_parser);
+    test_chat_parser(test_status::Enabled, "ministral_3", chat_parser_impl::EXPERIMENTAL, test_ministral_3_parser);
 
     test_chat_parser(test_status::Enabled, "mistral_nemo", chat_parser_impl::LEGACY, test_mistral_nemo_parser);
     test_chat_parser(test_status::Enabled, "mistral_nemo", chat_parser_impl::EXPERIMENTAL, test_mistral_nemo_parser);

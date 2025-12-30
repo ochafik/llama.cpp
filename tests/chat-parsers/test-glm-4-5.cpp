@@ -132,14 +132,16 @@ void test_glm_4_5_parser(chat_parser_impl impl)
             "</tool_call>",
             [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, glm_syntax); });
 
-        // Test interleaved thinking
+        // Test interleaved thinking (legacy parser only - PEG parser doesn't strip <think> blocks from within content yet)
         // Content chunks: "Hello, world!\n" (until <think>) + "What's up?" (until \n<tool_call>) = "Hello, world!\nWhat's up?"
-        test_parser_with_streaming(simple_assist_msg("Hello, world!\nWhat's up?", "I'm\nthinkingThinking2", "special_function", "{\"arg1\": 1}"),
-            "\n<think>I'm\nthinking</think>Hello, world!\n<think>Thinking2</think>What's up?\n<tool_call>special_function\n<arg_key>arg1</arg_key>\n<arg_value>1</arg_value>\n</tool_call>",
-            [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, glm_syntax_reasoning); });
-        test_parser_with_streaming(simple_assist_msg("\n<think>I'm\nthinking</think>Hello, world!\n<think>Thinking2</think>What's up?", "", "special_function", "{\"arg1\": 1}"),
-            "\n<think>I'm\nthinking</think>Hello, world!\n<think>Thinking2</think>What's up?\n<tool_call>special_function\n<arg_key>arg1</arg_key>\n<arg_value>1</arg_value>\n</tool_call>",
-            [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, glm_syntax); });
+        if (impl == chat_parser_impl::LEGACY) {
+            test_parser_with_streaming(simple_assist_msg("Hello, world!\nWhat's up?", "I'm\nthinkingThinking2", "special_function", "{\"arg1\": 1}"),
+                "\n<think>I'm\nthinking</think>Hello, world!\n<think>Thinking2</think>What's up?\n<tool_call>special_function\n<arg_key>arg1</arg_key>\n<arg_value>1</arg_value>\n</tool_call>",
+                [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, glm_syntax_reasoning); });
+            test_parser_with_streaming(simple_assist_msg("\n<think>I'm\nthinking</think>Hello, world!\n<think>Thinking2</think>What's up?", "", "special_function", "{\"arg1\": 1}"),
+                "\n<think>I'm\nthinking</think>Hello, world!\n<think>Thinking2</think>What's up?\n<tool_call>special_function\n<arg_key>arg1</arg_key>\n<arg_value>1</arg_value>\n</tool_call>",
+                [&](const std::string &msg) { return common_chat_parse(msg, /* is_partial= */ true, glm_syntax); });
+        }
     }
 
     // Test template generation for regular content

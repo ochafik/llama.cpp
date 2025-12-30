@@ -85,18 +85,25 @@ common_chat_params common_chat_params_init_ministral_3_peg(const common_chat_tem
             foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
                 any_tool_call |= p.tag(Tag::TOOL, p.sequence()
                     + p.tag(Tag::TOOL_OPEN, p.literal("[TOOL_CALLS]"))
-                    + p.tag(Tag::TOOL_NAME, p.literal(name))
-                    + "[ARGS]"
+                    // Wrap name + delimiter in atomic so TOOL_NAME isn't emitted prematurely
+                    // when one tool name is a prefix of another (e.g., special_function vs special_function_with_opt).
+                    + p.atomic(p.literal_tag(Tag::TOOL_NAME, name) + p.literal("[ARGS]"))
                     + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters))
                     + p.tag(Tag::TOOL_CLOSE, p.eps()));
             });
 
-            auto tool_calls = p.repeat(any_tool_call, 1, inputs.parallel_tool_calls ? -1 : 1);
+            auto tool_calls = 
+                p.space()
+                + p.repeat(any_tool_call, 1, inputs.parallel_tool_calls ? -1 : 1);
 
             if (require_tools) {
                 return reasoning << tool_calls;
             }
-            return reasoning << p.tag(Tag::CONTENT, p.until("[TOOL_CALLS]")) << tool_calls;
+            // Allow either: content before tool calls, or content only
+            auto content_before = p.tag(Tag::CONTENT, p.until("[TOOL_CALLS]"));
+            auto with_tools = content_before << tool_calls;
+            auto content_only = p.tag(Tag::CONTENT, p.rest());
+            return reasoning << p.choice({with_tools, content_only});
         }
 
         return reasoning << p.tag(Tag::CONTENT, p.rest());

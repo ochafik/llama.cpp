@@ -104,7 +104,12 @@ common_chat_params common_chat_params_init_minimax_m2_peg(const common_chat_temp
                 p.sequence({p.tag(Tag::CONTENT, p.until_one_of(stop_after)), consume_footer()}),
                 p.tag(Tag::CONTENT, p.rest())
             }));
-            return reasoning << content_before << tool_calls << content_after;
+            auto with_tools = content_before << tool_calls << content_after;
+            auto content_only = p.choice({
+                p.sequence({p.tag(Tag::CONTENT, p.until_one_of(stop_before)), consume_footer()}),
+                p.tag(Tag::CONTENT, p.rest())
+            });
+            return reasoning << p.choice({with_tools, content_only});
         }
 
         // Content only parser

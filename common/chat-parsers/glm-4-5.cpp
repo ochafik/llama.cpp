@@ -125,13 +125,16 @@ common_chat_params common_chat_params_init_glm_4_5_peg(const common_chat_templat
                 return thinking + p.space() + tool_calls;
             }
 
-            // thinking? content? space? tools content?
+            // Either: thinking? content_before? space? tools content_after?
+            // Or:     thinking? content (when no tool calls present)
             auto content_before = p.optional(
                 p.optional(p.literal("\n"))
                 + p.tag(Tag::CONTENT, p.until_one_of({"\n<tool_call>", "<tool_call>"}))
             );
             auto content_after = p.optional(p.tag(Tag::CONTENT, p.rest()));
-            return thinking + content_before + p.space() + tool_calls + content_after;
+            auto with_tools = content_before + p.space() + tool_calls + content_after;
+            auto content_only = p.optional(p.literal("\n")) + p.tag(Tag::CONTENT, p.rest());
+            return thinking + p.choice({with_tools, content_only});
         }
 
         // No tools: thinking? content
