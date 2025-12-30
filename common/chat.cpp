@@ -1021,50 +1021,12 @@ static common_chat_params common_chat_params_init_lfm2(const common_chat_templat
 static common_chat_params common_chat_params_init_ministral_3(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
 
-    // Build up messages to follow the format: https://huggingface.co/mistralai/Ministral-3-14B-Reasoning-2512/blob/main/chat_template.jinja
-    auto adjusted_messages = json::array();
-    for (const auto & msg : inputs.messages) {
-        auto role = msg.value("role", "");
-        if (role != "system" && role != "assistant") {
-            // Only adjust system and assistant messages. Interestingly, the system message may contain thinking.
-            adjusted_messages.push_back(msg);
-            continue;
-        }
-
-        auto content = json::array();
-
-        // If message contains `reasoning_content`, add it as a block of type `thinking`
-        if (msg.contains("reasoning_content") && msg.at("reasoning_content").is_string()) {
-            content.push_back({
-                {"type", "thinking"},
-                {"thinking", msg.at("reasoning_content").get<std::string>()},
-            });
-        }
-
-        // If message contains `content`, add it as a block of type `text`
-        if (msg.contains("content")) {
-            if (msg.at("content").is_string()) {
-                content.push_back({
-                    {"type", "text"},
-                    {"text", msg.at("content").get<std::string>()},
-                });
-            } else if (msg.at("content").is_array()) {
-                auto blocks = msg.at("content");
-                content.insert(content.end(), blocks.begin(), blocks.end());
-            }
-        }
-
-        auto adjusted = msg;
-        adjusted["content"] = content;
-        adjusted.erase("reasoning_content");
-        adjusted_messages.push_back(adjusted);
-    }
-
+    // Note: minja now handles reasoning_content → content blocks polyfill automatically (CONTENT_BLOCK_THINKING format)
     auto has_tools = inputs.tools.is_array() && !inputs.tools.empty();
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
     auto include_grammar = true;
 
-    data.prompt = apply(tmpl, inputs, /* messages_override = */ adjusted_messages);
+    data.prompt = apply(tmpl, inputs);
     data.format = COMMON_CHAT_FORMAT_PEG_NATIVE;
     data.preserved_tokens = {
         "[THINK]",
@@ -1191,20 +1153,8 @@ static common_chat_params common_chat_params_init_magistral(const common_chat_te
 static common_chat_params common_chat_params_init_command_r7b(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
 
-    auto adjusted_messages = json::array();
-    for (const auto & msg : inputs.messages) {
-        auto has_reasoning_content = msg.contains("reasoning_content") && msg.at("reasoning_content").is_string();
-        auto has_tool_calls = msg.contains("tool_calls") && msg.at("tool_calls").is_array();
-        if (has_reasoning_content && has_tool_calls) {
-            auto adjusted_message = msg;
-            adjusted_message["tool_plan"] = msg.at("reasoning_content");
-            adjusted_message.erase("reasoning_content");
-            adjusted_messages.push_back(adjusted_message);
-        } else {
-            adjusted_messages.push_back(msg);
-        }
-    }
-    data.prompt = apply(tmpl, inputs, /* messages_override= */ adjusted_messages);
+    // Note: minja now handles reasoning_content → tool_plan polyfill automatically
+    data.prompt = apply(tmpl, inputs);
     data.format = COMMON_CHAT_FORMAT_COMMAND_R7B;
     if (string_ends_with(data.prompt, "<|START_THINKING|>")) {
         if (!inputs.enable_thinking) {
@@ -1940,22 +1890,8 @@ static common_chat_params common_chat_params_init_xiaomi_mimo(const common_chat_
 static common_chat_params common_chat_params_init_gpt_oss(const common_chat_template & tmpl, const struct templates_params & inputs) {
     common_chat_params data;
 
-    // Copy reasoning to the "thinking" field as expected by the gpt-oss template
-    auto adjusted_messages = json::array();
-    for (const auto & msg : inputs.messages) {
-        auto has_reasoning_content = msg.contains("reasoning_content") && msg.at("reasoning_content").is_string();
-        auto has_tool_calls = msg.contains("tool_calls") && msg.at("tool_calls").is_array();
-
-        if (has_reasoning_content && has_tool_calls) {
-            auto adjusted_message = msg;
-            adjusted_message["thinking"] = msg.at("reasoning_content");
-            adjusted_messages.push_back(adjusted_message);
-        } else {
-            adjusted_messages.push_back(msg);
-        }
-    }
-
-    auto prompt = apply(tmpl, inputs, /* messages_override= */ adjusted_messages);
+    // Note: minja now handles reasoning_content → thinking polyfill automatically
+    auto prompt = apply(tmpl, inputs);
 
     // Check if we need to replace the return token with end token during
     // inference and without generation prompt. For more details see:
@@ -2598,7 +2534,7 @@ static common_chat_params common_chat_templates_apply_jinja(
         : *tmpls->template_default;
     const auto & src = tmpl.source();
     const auto & caps = tmpl.original_caps();
-    params.messages = common_chat_msgs_to_json_oaicompat<json>(inputs.messages, /* concat_text= */ !tmpl.original_caps().requires_typed_content);
+    params.messages = common_chat_msgs_to_json_oaicompat<json>(inputs.messages, /* concat_text= */ !tmpl.original_caps().requires_typed_content_blocks);
     params.add_generation_prompt = inputs.add_generation_prompt;
     params.tool_choice = inputs.tool_choice;
     params.reasoning_format = inputs.reasoning_format;

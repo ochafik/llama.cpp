@@ -95,7 +95,7 @@ private:
     }
     out << string_quote;
   }
-  void dump(std::ostringstream & out, int indent = -1, int level = 0, bool to_json = false) const {
+  void dump(std::ostringstream & out, int indent, int level, bool to_json, const std::string & item_sep, const std::string & key_sep) const {
     auto print_indent = [&](int level) {
       if (indent > 0) {
           out << "\n";
@@ -103,9 +103,11 @@ private:
       }
     };
     auto print_sub_sep = [&]() {
-      out << ',';
-      if (indent < 0) out << ' ';
-      else print_indent(level + 1);
+      if (indent < 0) out << item_sep;
+      else {
+        out << ',';
+        print_indent(level + 1);
+      }
     };
 
     auto string_quote = to_json ? '"' : '\'';
@@ -116,7 +118,7 @@ private:
       print_indent(level + 1);
       for (size_t i = 0; i < array_->size(); ++i) {
         if (i) print_sub_sep();
-        (*array_)[i].dump(out, indent, level + 1, to_json);
+        (*array_)[i].dump(out, indent, level + 1, to_json, item_sep, key_sep);
       }
       print_indent(level);
       out << "]";
@@ -130,8 +132,8 @@ private:
         } else {
           out << string_quote << it->first.dump() << string_quote;
         }
-        out << ": ";
-        it->second.dump(out, indent, level + 1, to_json);
+        out << key_sep;
+        it->second.dump(out, indent, level + 1, to_json, item_sep, key_sep);
       }
       print_indent(level);
       out << "}";
@@ -447,9 +449,9 @@ public:
     throw std::runtime_error("get<T> not defined for this value type: " + dump());
   }
 
-  std::string dump(int indent=-1, bool to_json=false) const {
+  std::string dump(int indent=-1, bool to_json=false, const std::string & item_sep = ", ", const std::string & key_sep = ": ") const {
     std::ostringstream out;
-    dump(out, indent, 0, to_json);
+    dump(out, indent, 0, to_json, item_sep, key_sep);
     return out.str();
   }
 
@@ -1467,6 +1469,7 @@ static std::vector<std::string> split(const std::string & s, const std::string &
 static std::string capitalize(const std::string & s) {
   if (s.empty()) return s;
   auto result = s;
+  std::transform(result.begin(), result.end(), result.begin(), ::tolower);
   result[0] = std::toupper(result[0]);
   return result;
 }
@@ -2600,8 +2603,8 @@ private:
 
               auto text = text_token->text;
               if (post_space == SpaceHandling::Strip) {
-                static std::regex trailing_space_regex(R"(\s+$)");
-                text = std::regex_replace(text, trailing_space_regex, "");
+                auto pos = text.find_last_not_of(" \t\n\r\f\v");
+                text.resize(pos == std::string::npos ? 0 : pos + 1);
               } else if (options.lstrip_blocks && it != end) {
                 auto i = text.size();
                 while (i > 0 && (text[i - 1] == ' ' || text[i - 1] == '\t')) i--;
@@ -2610,8 +2613,7 @@ private:
                 }
               }
               if (pre_space == SpaceHandling::Strip) {
-                static std::regex leading_space_regex(R"(^\s+)");
-                text = std::regex_replace(text, leading_space_regex, "");
+                text.erase(0, text.find_first_not_of(" \t\n\r\f\v"));
               } else if (options.trim_blocks && (it - 1) != begin && !dynamic_cast<ExpressionTemplateToken*>((*(it - 2)).get())) {
                 if (!text.empty() && text[0] == '\n') {
                   text.erase(0, 1);
@@ -2736,8 +2738,17 @@ inline std::shared_ptr<Context> Context::builtins() {
   globals.set("raise_exception", simple_function("raise_exception", { "message" }, [](const std::shared_ptr<Context> &, Value & args) -> Value {
     throw std::runtime_error(args.at("message").get<std::string>());
   }));
-  globals.set("tojson", simple_function("tojson", { "value", "indent", "ensure_ascii" }, [](const std::shared_ptr<Context> &, Value & args) {
-    return Value(args.at("value").dump(args.get<int64_t>("indent", -1), /* to_json= */ true));
+  globals.set("tojson", simple_function("tojson", { "value", "indent", "ensure_ascii", "separators" }, [](const std::shared_ptr<Context> &, Value & args) {
+    std::string item_sep = ", ";
+    std::string key_sep = ": ";
+    if (args.contains("separators")) {
+      const auto & sep = args.at("separators");
+      if (sep.is_array() && sep.size() == 2) {
+        item_sep = sep.at(0).get<std::string>();
+        key_sep = sep.at(1).get<std::string>();
+      }
+    }
+    return Value(args.at("value").dump(args.get<int64_t>("indent", -1), /* to_json= */ true, item_sep, key_sep));
   }));
   globals.set("items", simple_function("items", { "object" }, [](const std::shared_ptr<Context> &, Value & args) {
     auto items = Value::array();
@@ -2752,6 +2763,12 @@ inline std::shared_ptr<Context> Context::builtins() {
     }
     return items;
   }));
+  globals.set("first", simple_function("first", { "items" }, [](const std::shared_ptr<Context> &, Value & args) {
+    auto items = args.at("items");
+    if (!items.is_array()) throw std::runtime_error("object is not a list");
+    if (items.empty()) return Value();
+    return items.at(0);
+  }));
   globals.set("last", simple_function("last", { "items" }, [](const std::shared_ptr<Context> &, Value & args) {
     auto items = args.at("items");
     if (!items.is_array()) throw std::runtime_error("object is not a list");
@@ -2761,6 +2778,10 @@ inline std::shared_ptr<Context> Context::builtins() {
   globals.set("trim", simple_function("trim", { "text" }, [](const std::shared_ptr<Context> &, Value & args) {
     auto & text = args.at("text");
     return text.is_null() ? text : Value(strip(text.get<std::string>()));
+  }));
+  globals.set("capitalize", simple_function("capitalize", { "text" }, [](const std::shared_ptr<Context> &, Value & args) {
+    auto & text = args.at("text");
+    return text.is_null() ? text : Value(capitalize(text.get<std::string>()));
   }));
   auto char_transform_function = [](const std::string & name, const std::function<char(char)> & fn) {
     return simple_function(name, { "text" }, [=](const std::shared_ptr<Context> &, Value & args) {
