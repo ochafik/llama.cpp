@@ -85,7 +85,7 @@ common_chat_params common_chat_params_init_kimi_k2_peg(const common_chat_templat
             auto content_before = optional_newline() + p.tag(Tag::CONTENT, p.until("<|tool_calls_section_begin|>"));
             auto content_after = optional_newline() + p.tag(Tag::CONTENT, p.rest());
             if (require_tools) {
-                return reasoning << tool_calls;
+                return p.space() + reasoning + tool_calls;
             }
             return reasoning << content_before << tool_calls << content_after;
         }

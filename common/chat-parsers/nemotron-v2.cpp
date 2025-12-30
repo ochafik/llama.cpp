@@ -94,7 +94,8 @@ common_chat_params common_chat_params_init_nemotron_v2_peg(const common_chat_tem
             });
 
             auto tool_calls = p.trigger_rule("tool-call-root",
-                p.literal("<TOOLCALL>[")
+                p.space()
+                    + p.literal("<TOOLCALL>[")
                     + any_tool_call + p.repeat(p.literal(",") << any_tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
                     + p.literal("]</TOOLCALL>"));
 

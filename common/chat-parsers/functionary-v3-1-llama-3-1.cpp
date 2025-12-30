@@ -88,6 +88,7 @@ common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1_peg(const 
                     + p.literal_tag(Tag::TOOL_NAME, name)
                     + ">"
                     + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-params", parameters))
+                    + p.space()  // Allow optional whitespace before closing tag
                     + p.atomic_tag(Tag::TOOL_CLOSE, p.literal("</function>"))
                 ));
             });
@@ -109,7 +110,9 @@ common_chat_params common_chat_params_init_functionary_v3_1_llama_3_1_peg(const 
                 delimiters.push_back("<|python_tag|>");
             }
 
-            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_choice, min_calls, max_calls));
+            auto tool_calls = p.trigger_rule("tool-call-root", 
+                p.space()  // Allow optional leading whitespace
+                + p.repeat(tool_choice, min_calls, max_calls));
             bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
             if (require_tools) {
                 return tool_calls;

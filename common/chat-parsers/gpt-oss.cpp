@@ -150,7 +150,9 @@ common_chat_params common_chat_params_init_gpt_oss_peg(const common_chat_templat
 
             auto min_calls = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED ? 1 : 0;
             auto max_calls = inputs.parallel_tool_calls ? -1 : 1;
-            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_choice, min_calls, max_calls));
+            auto tool_calls = p.trigger_rule("tool-call-root",
+                p.space()
+                + p.repeat(tool_choice, min_calls, max_calls));
 
             bool require_tools = inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED;
             if (require_tools) {

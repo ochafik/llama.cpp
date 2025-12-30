@@ -103,7 +103,8 @@ common_chat_params common_chat_params_init_apriel_1_5_peg(const common_chat_temp
             });
 
             auto tool_calls =
-                p.literal("<tool_calls>[")
+                p.space()  // Allow optional leading whitespace
+                + p.literal("<tool_calls>[")
                 + any_tool_call + p.repeat(p.literal(", ") << any_tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
                 + p.literal("]</tool_calls>");
 

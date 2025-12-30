@@ -115,7 +115,8 @@ common_chat_params common_chat_params_init_command_r7b_peg(const common_chat_tem
             });
 
             auto tool_calls =
-                p.literal("<|START_ACTION|>[") + p.space()
+                p.space()  // Allow optional leading whitespace
+                + p.literal("<|START_ACTION|>[") + p.space()
                 + any_tool_call + p.repeat(p.literal(",") + p.space() << any_tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
                 + p.space() + "]<|END_ACTION|>";
 

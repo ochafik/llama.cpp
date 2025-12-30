@@ -43,7 +43,8 @@ common_chat_params common_chat_params_init_xiaomi_mimo_peg(const common_chat_tem
             });
 
             auto tool_calls = p.trigger_rule("tool-call-root",
-                p.literal("<tool_call>\n")
+                p.space()
+                    + p.literal("<tool_call>\n")
                     + any_tool_call + p.repeat(p.literal("\n</tool_call>\n<tool_call>\n") << any_tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
                     + p.literal("\n</tool_call>"));
 

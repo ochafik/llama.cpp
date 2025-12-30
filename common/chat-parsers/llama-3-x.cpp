@@ -145,7 +145,9 @@ common_chat_params common_chat_params_init_llama_3_x_peg(const common_chat_templ
                 delimiters.push_back("<|python_tag|>");
             }
             auto content = p.tag(Tag::CONTENT, p.until_one_of(delimiters)) << consume_message_end();
-            auto tool_calls = p.trigger_rule("tool-call-root", p.repeat(tool_choice, min_calls, max_calls));
+            auto tool_calls = p.trigger_rule("tool-call-root",
+                p.space()
+                + p.repeat(tool_choice, min_calls, max_calls));
 
             if (require_tools) {
                 return tool_calls;
