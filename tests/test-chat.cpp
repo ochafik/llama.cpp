@@ -1412,8 +1412,8 @@ static void test_chat_parsers()
     test_chat_parser(test_status::Enabled, "hermes_2_pro", chat_parser_impl::EXPERIMENTAL, test_hermes_2_pro_parser);
 
     test_chat_parser(test_status::Enabled, "kimi_k2", chat_parser_impl::LEGACY, test_kimi_k2_parser);
-    // TODO
-    test_chat_parser(test_status::Disabled, "kimi_k2", chat_parser_impl::EXPERIMENTAL, test_kimi_k2_parser);
+    // Note: skips run_template_test_suite due to Kimi's reasoning message splitting
+    test_chat_parser(test_status::Enabled, "kimi_k2", chat_parser_impl::EXPERIMENTAL, test_kimi_k2_parser);
 
     // TODO
     test_chat_parser(test_status::Disabled, "lfm2", chat_parser_impl::LEGACY, test_lfm2_parser);
