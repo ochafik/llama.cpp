@@ -1382,12 +1382,10 @@ static void test_chat_parsers()
     test_chat_parser(test_status::Enabled, "command_r7b", chat_parser_impl::EXPERIMENTAL, test_command_r7b_parser);
 
     test_chat_parser(test_status::Enabled, "deepseek_r1", chat_parser_impl::LEGACY, test_deepseek_r1_parser);
-    // TODO: DeepSeek R1 has unicode chars in its tokens, PEG parsing infra escapes them incorrectly:
-    test_chat_parser(test_status::Disabled, "deepseek_r1", chat_parser_impl::EXPERIMENTAL, test_deepseek_r1_parser);
+    test_chat_parser(test_status::Enabled, "deepseek_r1", chat_parser_impl::EXPERIMENTAL, test_deepseek_r1_parser);
 
     test_chat_parser(test_status::Enabled, "deepseek_v3_1", chat_parser_impl::LEGACY, test_deepseek_v3_1_parser);
-    // TODO: DeepSeek v3.1 has unicode chars in its tokens, PEG parsing infra escapes them incorrectly:
-    test_chat_parser(test_status::Disabled, "deepseek_v3_1", chat_parser_impl::EXPERIMENTAL, test_deepseek_v3_1_parser);
+    test_chat_parser(test_status::Enabled, "deepseek_v3_1", chat_parser_impl::EXPERIMENTAL, test_deepseek_v3_1_parser);
 
     test_chat_parser(test_status::Enabled, "firefunction_v2", chat_parser_impl::LEGACY, test_firefunction_v2_parser);
     test_chat_parser(test_status::Enabled, "firefunction_v2", chat_parser_impl::EXPERIMENTAL, test_firefunction_v2_parser);
