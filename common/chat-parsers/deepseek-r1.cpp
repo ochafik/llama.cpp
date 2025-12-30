@@ -43,6 +43,10 @@ common_chat_params common_chat_params_init_deepseek_r1_peg(const common_chat_tem
     bool has_tools = inputs.tools.is_array() && !inputs.tools.empty();
     auto extract_reasoning = inputs.reasoning_format != COMMON_REASONING_FORMAT_NONE;
 
+    data.additional_stops = {
+        "<｜end▁of▁sentence｜>",
+    };
+
     data.preserved_tokens = {
         "<think>",
         "</think>",
@@ -58,10 +62,6 @@ common_chat_params common_chat_params_init_deepseek_r1_peg(const common_chat_tem
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
 
-        auto consume_eos = [&]() {
-            return p.optional(p.literal("<｜end▁of▁sentence｜>")) + p.optional(p.space());
-        };
-
         // Optional thinking block
         auto reasoning = p.eps();
         if (extract_reasoning) {
@@ -74,7 +74,7 @@ common_chat_params common_chat_params_init_deepseek_r1_peg(const common_chat_tem
 
         // Response format parser (json_schema support)
         if (inputs.json_schema.is_object() && !inputs.json_schema.empty()) {
-            return reasoning << p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema)) << consume_eos();
+            return reasoning << p.tag(Tag::CONTENT, p.schema(p.json(), "response-format", inputs.json_schema));
         }
 
         if (has_tools && inputs.tool_choice != COMMON_CHAT_TOOL_CHOICE_NONE) {
@@ -90,19 +90,31 @@ common_chat_params common_chat_params_init_deepseek_r1_peg(const common_chat_tem
             auto any_tool_call = p.choice();
             foreach_function(inputs.tools, [&](const auto &, const auto & name, const json & parameters, const auto &) {
                 using Tag = common_chat_peg_tag;
-                any_tool_call |= p.tag(Tag::TOOL, p.sequence()
+                any_tool_call |= p.rule("tool-" + name,
+                    p.tag(Tag::TOOL, p.sequence()
                     + p.tag(Tag::TOOL_OPEN, p.literal("<｜tool▁call▁begin｜>function<｜tool▁sep｜>"))
                     + p.literal_tag(Tag::TOOL_NAME, name)
-                    + p.literal("\n```json\n") << p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters))
-                    + p.literal_tag(Tag::TOOL_CLOSE, "\n```<｜tool▁call▁end｜>"));
+                    + p.literal("\n```json\n")
+                    + p.tag(Tag::TOOL_ARGS, p.schema(p.json(), "tool-" + name + "-args", parameters))
+                    // Allow optional whitespace before the closing backticks (model may output trailing spaces)
+                    // Note: space() eats whitespace INCLUDING newlines, so the close literal must not start with \n
+                    + p.space()
+                    + p.literal_tag(Tag::TOOL_CLOSE, "```<｜tool▁call▁end｜>")));
             });
+            auto any_tool = p.rule("any-tool", any_tool_call);
 
             auto tool_calls =
-                p.literal("<｜tool▁calls▁begin｜>")
-                + any_tool_call + p.repeat(p.space() << any_tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
+                p.space()
+                + p.literal("<｜tool▁calls▁begin｜>")
+                + any_tool
+                + (inputs.parallel_tool_calls ? p.repeat(p.space() + any_tool, 0, -1) : p.eps())
                 + p.optional(p.literal("<｜tool▁calls▁end｜>"))
-                << consume_eos();
+                + p.space();
 
+            if (require_tools) {
+                return reasoning << tool_calls;
+            }
+            
             // Content until tool calls marker
             auto content = p.tag(Tag::CONTENT, p.until_one_of({
                 "<｜tool▁calls▁begin｜>",
@@ -112,18 +124,11 @@ common_chat_params common_chat_params_init_deepseek_r1_peg(const common_chat_tem
                 "<｜tool▁calls｜>",
             }));
 
-            if (require_tools) {
-                return reasoning << tool_calls;
-            }
             return reasoning << content << tool_calls;
         }
 
         // Content only parser
-        auto content_only = p.sequence({
-            p.tag(Tag::CONTENT, p.until("<｜end▁of▁sentence｜>")),
-            consume_eos()
-        });
-        return reasoning << p.choice({content_only, p.tag(Tag::CONTENT, p.rest())});
+        return reasoning << p.tag(Tag::CONTENT, p.rest());
     });
 
     common_chat_build_peg_grammar(inputs, parser, data);
