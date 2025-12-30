@@ -1152,6 +1152,11 @@ void run_template_test_suite(chat_parser_impl impl, const template_capabilities 
         if (scenario.require_thinking_support && template_caps.supports_thinking == ThinkingSupport::No) {
             continue;
         }
+        if (scenario.force_disable_thinking && template_caps.supports_disable_thinking == SupportsDisableThinking::No) {
+            // Skip scenarios that require disabling thinking when the template doesn't support it
+            // (e.g., Kimi template always outputs <think></think> tags regardless of enable_thinking)
+            continue;
+        }
         if (scenario.parallel_tool_calls && !common_chat_templates_support_parallel_tool_calls(tmpls.get())) {
             continue;
         }
@@ -1341,7 +1346,7 @@ static void test_chat_parsers()
 
     auto test_chat_parser = [&](test_status status, const std::string & name, chat_parser_impl impl, const std::function<void(chat_parser_impl)> & test_fn)
     {
-        auto full_name = name + "_" + chat_parser_impl_name(impl);
+        auto full_name = name + ":" + chat_parser_impl_name(impl);
         auto matches_filter = filter && full_name.find(filter) != std::string::npos;
         if (!(filter && filter == std::string("all"))) {
             if (status == test_status::Enabled) {
