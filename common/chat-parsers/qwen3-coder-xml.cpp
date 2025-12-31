@@ -29,17 +29,6 @@ common_chat_params common_chat_params_init_qwen3_coder_xml_peg(const common_chat
     auto parser = build_chat_peg_parser([&](auto & p) {
         using Tag = common_chat_peg_tag;
 
-        const auto content_until = [&](const std::string & marker, bool allow_inline) {
-            std::vector<std::string> delimiters = {
-                std::string("\r\n") + marker,
-                std::string("\n") + marker,
-            };
-            if (allow_inline) {
-                delimiters.push_back(marker);
-            }
-            return p.tag(Tag::CONTENT, p.until_one_of(delimiters));
-        };
-
         // Match optional content before <tool_call>, but don't tag whitespace-only content
         const auto content_before_tool = p.optional(
             p.space()  // Consume leading whitespace without tagging

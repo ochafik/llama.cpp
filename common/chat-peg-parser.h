@@ -163,35 +163,3 @@ inline common_peg_arena build_chat_peg_constructed_parser(const std::function<co
     builder.set_root(fn(builder));
     return builder.build();
 }
-
-// ============================================================================
-// Functional mapper infrastructure (used by experimental new PEG parsers in chat-parsers/)
-// ============================================================================
-
-// Mapper types: curried functions for AST-to-message conversion
-typedef std::function<void(const common_peg_ast_node & node)> common_chat_peg_map_func;
-typedef std::function<common_chat_peg_map_func(common_chat_msg & result)> common_chat_peg_mapper_func;
-
-// Alias for the tag enum
-using Tag = common_chat_peg_tag;
-
-// Base mapper: handles reasoning and content tags
-common_chat_peg_mapper_func common_chat_peg_base_mapper();
-
-// Native mapper: handles tool calls with pre-parsed JSON args
-common_chat_peg_mapper_func common_chat_peg_native_mapper_func();
-
-// Constructed mapper: builds JSON args from individual parsed pieces
-common_chat_peg_mapper_func common_chat_peg_constructed_mapper_func();
-
-// Short form mapper: handles {"function_name": {...}} format (used by Apertus)
-common_chat_peg_mapper_func common_chat_peg_short_form_mapper();
-
-// Generic mapper: handles general purpose parsing
-common_chat_peg_mapper_func common_chat_peg_generic_mapper();
-
-// OAI array mapper: handles OpenAI-style tool call arrays
-common_chat_peg_mapper_func common_chat_peg_oai_array_mapper();
-
-// Command R7B mapper: handles Command-R7B specific format
-common_chat_peg_mapper_func common_chat_peg_command_r7b_mapper();
