@@ -40,19 +40,19 @@ void test_nemotron_v3_parser(chat_parser_impl impl)
 
     if (impl == chat_parser_impl::LEGACY) {
         // Test basic message
-        test_peg_parser(tmpls.get(), [&](auto & t) {
+        test_peg_parser(impl, tmpls.get(), [&](auto & t) {
             t.input = "Hello, world!\nWhat's up?";
             t.expect = message_assist;
         });
 
         // Test basic message and reasoning with reasoning_format = none
-        test_peg_parser(tmpls.get(), [&](auto & t) {
+        test_peg_parser(impl, tmpls.get(), [&](auto & t) {
             t.input = "I'm\nthinking\n</think>\nHello, world!\nWhat's up?";
             t.expect.content = "I'm\nthinking\n</think>\nHello, world!\nWhat's up?";
         });
 
         // Test basic message and reasoning with reasoning_format = auto
-        test_peg_parser(tmpls.get(), [&](auto & t) {
+        test_peg_parser(impl, tmpls.get(), [&](auto & t) {
             t.input = "I'm\nthinking\n</think>\nHello, world!\nWhat's up?";
             t.params.enable_thinking = true;
             t.params.reasoning_format = COMMON_REASONING_FORMAT_AUTO;
@@ -61,7 +61,7 @@ void test_nemotron_v3_parser(chat_parser_impl impl)
         });
 
         // Test tool call
-        test_peg_parser(tmpls.get(), [&](auto & t) {
+        test_peg_parser(impl, tmpls.get(), [&](auto & t) {
             t.input =
                 "<tool_call>\n"
                 "<function=special_function>\n"
@@ -78,7 +78,7 @@ void test_nemotron_v3_parser(chat_parser_impl impl)
         });
 
         // Test tool call with reasoning
-        test_peg_parser(tmpls.get(), [&](auto & t) {
+        test_peg_parser(impl, tmpls.get(), [&](auto & t) {
             t.input =
                 "I'm\nthinking\n</think>\n"
                 "<tool_call>\n"
@@ -95,7 +95,7 @@ void test_nemotron_v3_parser(chat_parser_impl impl)
         });
 
         // Test parallel tool calls
-        test_peg_parser(tmpls.get(), [&](auto & t) {
+        test_peg_parser(impl, tmpls.get(), [&](auto & t) {
             t.input =
                 "<tool_call>\n"
                 "<function=special_function>\n"
@@ -131,7 +131,7 @@ void test_nemotron_v3_parser(chat_parser_impl impl)
         });
 
         // Test tool call with string parameter
-        test_peg_parser(tmpls.get(), [&](auto & t) {
+        test_peg_parser(impl, tmpls.get(), [&](auto & t) {
             t.input =
                 "<tool_call>\n"
                 "<function=python>\n"
@@ -155,7 +155,7 @@ void test_nemotron_v3_parser(chat_parser_impl impl)
         });
 
         // Test tool call with string parameter and no closing </parameter> tag
-        test_peg_parser(tmpls.get(), [&](auto & t) {
+        test_peg_parser(impl, tmpls.get(), [&](auto & t) {
             t.input =
                 "<tool_call>\n"
                 "<function=python>\n"
@@ -178,7 +178,7 @@ void test_nemotron_v3_parser(chat_parser_impl impl)
         });
 
         // Test response format
-        test_peg_parser(tmpls.get(), [&](auto & t) {
+        test_peg_parser(impl, tmpls.get(), [&](auto & t) {
             t.input =
                 "I need to output the invoice details in JSON\n"
                 "</think>\n"

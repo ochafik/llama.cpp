@@ -379,7 +379,7 @@ struct peg_test_case {
     common_chat_msg expect;
 };
 
-void test_peg_parser(common_chat_templates * tmpls, const std::function<void(peg_test_case &)> & init);
+void test_peg_parser(chat_parser_impl impl, common_chat_templates * tmpls, const std::function<void(peg_test_case &)> & init);
 
 /**
  * Test if streaming=true is consistant with streaming=false for given partial parser

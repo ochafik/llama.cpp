@@ -771,7 +771,7 @@ struct make_peg_parser {
     }
 };
 
-void test_peg_parser(common_chat_templates * tmpls, const std::function<void(peg_test_case &)> & init) {
+void test_peg_parser(chat_parser_impl impl, common_chat_templates * tmpls, const std::function<void(peg_test_case &)> & init) {
     peg_test_case tc;
     init(tc);
     if (tc.params.messages.empty()) {
@@ -780,8 +780,7 @@ void test_peg_parser(common_chat_templates * tmpls, const std::function<void(peg
     if (tc.expect.role.empty()) {
         tc.expect.role = "assistant";
     }
-    // PEG parser tests always use new parsers
-    tc.params.experimental_new_parsers = true;
+    tc.params.experimental_new_parsers = (impl == chat_parser_impl::EXPERIMENTAL);
 
     auto parser = make_peg_parser(tmpls, tc.params);
 
@@ -1444,8 +1443,7 @@ static void test_chat_parsers()
     // TODO(ochafik): debug: content-with-reasoning failed for Nemotron V3: Content: Never saw NEEDLE1
     test_chat_parser(test_status::Disabled, "nemotron_v2", chat_parser_impl::EXPERIMENTAL, test_nemotron_v2_parser);
 
-    // TODO(ochafk): fix (chokes on "Hello, world!\nWhat's up?")
-    test_chat_parser(test_status::Disabled, "nemotron_v3", chat_parser_impl::LEGACY, test_nemotron_v3_parser);
+    test_chat_parser(test_status::Enabled, "nemotron_v3", chat_parser_impl::LEGACY, test_nemotron_v3_parser);
     test_chat_parser(test_status::Enabled, "nemotron_v3", chat_parser_impl::EXPERIMENTAL, test_nemotron_v3_parser);
 
     test_chat_parser(test_status::Enabled, "qwen3_coder_xml", chat_parser_impl::LEGACY, test_qwen3_coder_xml_parser);

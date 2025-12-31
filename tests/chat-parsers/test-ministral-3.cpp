@@ -42,19 +42,19 @@ void test_ministral_3_parser(chat_parser_impl impl)
     run_template_test_suite(impl, template_caps, tmpls);
 
     // Test basic message
-    test_peg_parser(tmpls.get(), [&](auto & t) {
+    test_peg_parser(impl, tmpls.get(), [&](auto & t) {
         t.input = "Hello, world!\nWhat's up?";
         t.expect = message_assist;
     });
 
     // Test basic message and reasoning with reasoning_format = none
-    test_peg_parser(tmpls.get(), [&](auto & t) {
+    test_peg_parser(impl, tmpls.get(), [&](auto & t) {
         t.input = "[THINK]I'm\nthinking[/THINK]Hello, world!\nWhat's up?";
         t.expect.content = "[THINK]I'm\nthinking[/THINK]Hello, world!\nWhat's up?";
     });
 
     // Test basic message and reasoning with reasoning_format = auto
-    test_peg_parser(tmpls.get(), [&](auto & t) {
+    test_peg_parser(impl, tmpls.get(), [&](auto & t) {
         t.input = "[THINK]I'm\nthinking[/THINK]Hello, world!\nWhat's up?";
         t.params.reasoning_format = COMMON_REASONING_FORMAT_AUTO;
 
@@ -62,7 +62,7 @@ void test_ministral_3_parser(chat_parser_impl impl)
     });
 
     // Test tool call
-    test_peg_parser(tmpls.get(), [&](auto & t) {
+    test_peg_parser(impl, tmpls.get(), [&](auto & t) {
         t.input = R"([TOOL_CALLS]special_function[ARGS]{"arg1":1})";
         t.params.reasoning_format = COMMON_REASONING_FORMAT_AUTO;
         t.params.tools = {special_function_tool};
@@ -71,7 +71,7 @@ void test_ministral_3_parser(chat_parser_impl impl)
     });
 
     // Test tool call with reasoning
-    test_peg_parser(tmpls.get(), [&](auto & t) {
+    test_peg_parser(impl, tmpls.get(), [&](auto & t) {
         t.input = "[THINK]I'm\nthinking[/THINK]"
                     R"([TOOL_CALLS]special_function[ARGS]{"arg1":1})";
         t.params.reasoning_format = COMMON_REASONING_FORMAT_AUTO;
@@ -81,7 +81,7 @@ void test_ministral_3_parser(chat_parser_impl impl)
     });
 
     // Test parallel tool calls
-    test_peg_parser(tmpls.get(), [&](auto & t) {
+    test_peg_parser(impl, tmpls.get(), [&](auto & t) {
         t.input = R"([TOOL_CALLS]special_function[ARGS]{"arg1": 1})"
                     R"([TOOL_CALLS]special_function_with_opt[ARGS]{"arg1": 1, "arg2": 2})";
         t.params.reasoning_format = COMMON_REASONING_FORMAT_AUTO;
@@ -100,7 +100,7 @@ void test_ministral_3_parser(chat_parser_impl impl)
     });
 
     // Test response format
-    test_peg_parser(tmpls.get(), [&](auto & t) {
+    test_peg_parser(impl, tmpls.get(), [&](auto & t) {
         t.input = "[THINK]I need to output the invoice details in JSON[/THINK]"
                     "```json\n"
                     R"({"amount": 123.45, "date": "2025-12-03"})"
