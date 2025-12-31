@@ -40,12 +40,18 @@ common_chat_params common_chat_params_init_generic_peg(const common_chat_templat
                 + any_tool_call + p.repeat(p.space() + p.literal(",") + p.space() << any_tool_call, 0, inputs.parallel_tool_calls ? -1 : 0)
                 + p.space() + p.literal("]");
 
+            // Allow optional "content": "" field after tool_calls (upstream now adds this by default)
+            auto optional_content_field = p.optional(
+                p.literal(",") << "\"content\"" << ":" << "\"\""
+            );
+
             auto tool_calls = p.trigger_rule("tool-call-root",
                 p.space()  // Allow optional leading whitespace
                 + p.literal("{")
                 << "\"tool_calls\""
                 << ":"
                 << tool_calls_parser
+                << optional_content_field
                 << "}");
 
             if (inputs.tool_choice == COMMON_CHAT_TOOL_CHOICE_REQUIRED) {

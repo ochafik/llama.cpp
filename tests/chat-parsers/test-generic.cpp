@@ -93,7 +93,8 @@ void test_generic_parser(chat_parser_impl impl)
                   "      },\n"
                   "      \"id\": \"123456789\"\n"
                   "    }\n"
-                  "  ]\n"
+                  "  ],\n"
+                  "  \"content\": \"\"\n"
                   "}");
 }
             
