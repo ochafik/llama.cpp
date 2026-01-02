@@ -747,6 +747,10 @@ extern "C" {
     LLAMA_API DEPRECATED(size_t llama_get_state_size(struct llama_context * ctx),
         "use llama_state_get_size instead");
 
+    // Returns the maximum possible state size in bytes for this context.
+    // This is a conservative upper bound suitable for pre-allocating mmap buffers.
+    LLAMA_API size_t llama_state_size_max(const struct llama_context * ctx);
+
     // Copies the state to the specified destination address.
     // Destination needs to have allocated enough memory.
     // Returns the number of bytes copied
@@ -860,35 +864,24 @@ extern "C" {
                       const char * path_session);
 
     // Open a session file with copy-on-write semantics
-    // - Initial data is read from file (zero-copy)
+    // - Initial data is read from file (zero-copy via MAP_PRIVATE)
     // - Writes modify memory only, NOT the file
-    // - The writable_size parameter specifies how much writable memory to allocate
-    //   (must be >= file size; if 0, uses file size)
     // This is useful for loading a base session and making temporary modifications
+    // The file must have been created with llama_state_mmap_open_rw (fixed max size)
     // Returns NULL on failure
     // The returned handle must be freed with llama_state_mmap_free
     LLAMA_API struct llama_state_mmap * llama_state_mmap_open_cow(
             struct llama_context * ctx,
-                      const char * path_session,
-                          size_t   writable_size);
+                      const char * path_session);
 
     // Open a session file for read-write memory-mapped access
-    // If the file doesn't exist, it will be created
+    // If the file doesn't exist, it will be created at max size for this context
+    // Note: Files are pre-allocated to llama_state_size_max() to avoid resize
     // Returns NULL on failure
     // The returned handle must be freed with llama_state_mmap_free
     LLAMA_API struct llama_state_mmap * llama_state_mmap_open_rw(
             struct llama_context * ctx,
                       const char * path_session);
-
-    // Open a session file for read-write memory-mapped access with explicit size
-    // If size is 0, it will be calculated based on current state
-    // If size > 0, the file will be pre-allocated to exactly that size
-    // Returns NULL on failure
-    // The returned handle must be freed with llama_state_mmap_free
-    LLAMA_API struct llama_state_mmap * llama_state_mmap_open_rw_sized(
-            struct llama_context * ctx,
-                      const char * path_session,
-                          size_t   size);
 
     // Free a memory-mapped session cache handle
     // For read-write maps, this will sync changes to disk before closing

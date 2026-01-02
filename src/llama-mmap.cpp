@@ -606,20 +606,21 @@ struct llama_mmap_rw::impl {
         }
     }
 
-    // Copy-on-write constructor - anonymous memory initialized from file
-    impl(struct llama_file * file, size_t writable_size) : mmap_mode(llama_mmap_mode::COPY_ON_WRITE) {
-        const size_t file_size = file->size();
-        size = (writable_size > 0 && writable_size >= file_size) ? writable_size : file_size;
+    // Copy-on-write constructor - true MAP_PRIVATE on the file
+    impl(struct llama_file * file, bool cow) : mmap_mode(cow ? llama_mmap_mode::COPY_ON_WRITE : llama_mmap_mode::READ_ONLY) {
+        size = file->size();
+        int file_fd = file->file_id();
 
-        // Allocate anonymous memory
-        addr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (addr == MAP_FAILED) {
-            throw std::runtime_error(format("mmap anonymous failed: %s", strerror(errno)));
+        if (cow) {
+            // MAP_PRIVATE: writes create private copies (copy-on-write)
+            addr = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE, file_fd, 0);
+        } else {
+            addr = mmap(NULL, size, PROT_READ, MAP_SHARED, file_fd, 0);
         }
 
-        // Read file contents into the buffer
-        file->seek(0, SEEK_SET);
-        file->read_raw(addr, file_size);
+        if (addr == MAP_FAILED) {
+            throw std::runtime_error(format("mmap %s failed: %s", cow ? "COW" : "read-only", strerror(errno)));
+        }
     }
 
     void sync() {
@@ -629,34 +630,6 @@ struct llama_mmap_rw::impl {
             }
         }
         // No-op for COW - changes don't persist
-    }
-
-    void resize(size_t new_size) {
-        if (mmap_mode != llama_mmap_mode::READ_WRITE) {
-            throw std::runtime_error("cannot resize non-read-write mmap");
-        }
-
-        if (new_size == size) {
-            return;
-        }
-
-        // Unmap current mapping
-        if (addr) {
-            munmap(addr, size);
-        }
-
-        // Resize the file
-        if (ftruncate(fd, new_size) == -1) {
-            throw std::runtime_error(format("failed to resize file to %zu bytes: %s", new_size, strerror(errno)));
-        }
-
-        // Remap at new size
-        addr = mmap(NULL, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-        if (addr == MAP_FAILED) {
-            throw std::runtime_error(format("mmap rw failed after resize: %s", strerror(errno)));
-        }
-
-        size = new_size;
     }
 
     ~impl() {
@@ -749,21 +722,36 @@ struct llama_mmap_rw::impl {
         }
     }
 
-    // Copy-on-write constructor - allocate memory and read file
-    impl(struct llama_file * file, size_t writable_size) : mmap_mode(llama_mmap_mode::COPY_ON_WRITE) {
-        const size_t file_size = file->size();
-        size = (writable_size > 0 && writable_size >= file_size) ? writable_size : file_size;
+    // Copy-on-write constructor - true COW using PAGE_WRITECOPY
+    impl(struct llama_file * file, bool cow) : mmap_mode(cow ? llama_mmap_mode::COPY_ON_WRITE : llama_mmap_mode::READ_ONLY) {
+        size = file->size();
+        HANDLE hFileOrig = (HANDLE)_get_osfhandle(file->file_id());
 
-        // Allocate anonymous memory using VirtualAlloc
-        addr = VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-        if (addr == NULL) {
-            throw std::runtime_error(format("VirtualAlloc failed: %s",
-                llama_format_win_err(GetLastError()).c_str()));
+        if (cow) {
+            // PAGE_WRITECOPY: writes create private copies (copy-on-write)
+            hMapping = CreateFileMappingA(hFileOrig, NULL, PAGE_WRITECOPY, 0, 0, NULL);
+            if (hMapping == NULL) {
+                throw std::runtime_error(format("CreateFileMappingA COW failed: %s",
+                    llama_format_win_err(GetLastError()).c_str()));
+            }
+
+            addr = MapViewOfFile(hMapping, FILE_MAP_COPY, 0, 0, 0);
+        } else {
+            hMapping = CreateFileMappingA(hFileOrig, NULL, PAGE_READONLY, 0, 0, NULL);
+            if (hMapping == NULL) {
+                throw std::runtime_error(format("CreateFileMappingA failed: %s",
+                    llama_format_win_err(GetLastError()).c_str()));
+            }
+
+            addr = MapViewOfFile(hMapping, FILE_MAP_READ, 0, 0, 0);
         }
 
-        // Read file contents into the buffer
-        file->seek(0, SEEK_SET);
-        file->read_raw(addr, file_size);
+        if (addr == NULL) {
+            DWORD error = GetLastError();
+            CloseHandle(hMapping);
+            throw std::runtime_error(format("MapViewOfFile failed: %s",
+                llama_format_win_err(error).c_str()));
+        }
     }
 
     void sync() {
@@ -776,62 +764,12 @@ struct llama_mmap_rw::impl {
         // No-op for COW - changes don't persist
     }
 
-    void resize(size_t new_size) {
-        if (mmap_mode != llama_mmap_mode::READ_WRITE) {
-            throw std::runtime_error("cannot resize non-read-write mmap");
-        }
-
-        if (new_size == size) {
-            return;
-        }
-
-        // Unmap and close mapping
-        if (addr) {
-            FlushViewOfFile(addr, 0);
-            UnmapViewOfFile(addr);
-            addr = nullptr;
-        }
-        if (hMapping) {
-            CloseHandle(hMapping);
-            hMapping = NULL;
-        }
-
-        // Resize the file
-        LARGE_INTEGER li;
-        li.QuadPart = new_size;
-        if (!SetFilePointerEx(hFile, li, NULL, FILE_BEGIN) || !SetEndOfFile(hFile)) {
-            throw std::runtime_error(format("failed to resize file: %s",
-                llama_format_win_err(GetLastError()).c_str()));
-        }
-
-        // Recreate mapping
-        hMapping = CreateFileMappingA(hFile, NULL, PAGE_READWRITE, 0, 0, NULL);
-        if (hMapping == NULL) {
-            throw std::runtime_error(format("CreateFileMappingA failed after resize: %s",
-                llama_format_win_err(GetLastError()).c_str()));
-        }
-
-        addr = MapViewOfFile(hMapping, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, 0);
-        if (addr == NULL) {
-            DWORD error = GetLastError();
-            CloseHandle(hMapping);
-            throw std::runtime_error(format("MapViewOfFile failed after resize: %s",
-                llama_format_win_err(error).c_str()));
-        }
-
-        size = new_size;
-    }
-
     ~impl() {
         if (addr) {
             if (mmap_mode == llama_mmap_mode::READ_WRITE) {
                 FlushViewOfFile(addr, 0);
-                UnmapViewOfFile(addr);
-            } else if (mmap_mode == llama_mmap_mode::COPY_ON_WRITE) {
-                VirtualFree(addr, 0, MEM_RELEASE);
-            } else {
-                UnmapViewOfFile(addr);
             }
+            UnmapViewOfFile(addr);
         }
         if (hMapping) {
             CloseHandle(hMapping);
@@ -852,23 +790,14 @@ struct llama_mmap_rw::impl {
         throw std::runtime_error("mmap not supported");
     }
 
-    impl(struct llama_file * file, size_t writable_size) {
+    impl(struct llama_file * file, bool cow) {
         GGML_UNUSED(file);
-        GGML_UNUSED(writable_size);
+        GGML_UNUSED(cow);
         throw std::runtime_error("mmap not supported");
     }
 
     void sync() {
         throw std::runtime_error("mmap not supported");
-    }
-
-    void resize(size_t new_size) {
-        GGML_UNUSED(new_size);
-        throw std::runtime_error("mmap not supported");
-    }
-
-    llama_mmap_mode mode() const {
-        return llama_mmap_mode::READ_ONLY;
     }
 
     void * addr = nullptr;
@@ -881,14 +810,13 @@ llama_mmap_rw::llama_mmap_rw(const char * filepath, size_t min_size)
     : pimpl(std::make_unique<impl>(filepath, min_size)) {}
 llama_mmap_rw::llama_mmap_rw(struct llama_file * file)
     : pimpl(std::make_unique<impl>(file)) {}
-llama_mmap_rw::llama_mmap_rw(struct llama_file * file, size_t writable_size)
-    : pimpl(std::make_unique<impl>(file, writable_size)) {}
+llama_mmap_rw::llama_mmap_rw(struct llama_file * file, bool cow)
+    : pimpl(std::make_unique<impl>(file, cow)) {}
 llama_mmap_rw::~llama_mmap_rw() = default;
 
 size_t llama_mmap_rw::size() const { return pimpl->size; }
 void * llama_mmap_rw::addr() const { return pimpl->addr; }
 void llama_mmap_rw::sync() { pimpl->sync(); }
-void llama_mmap_rw::resize(size_t new_size) { pimpl->resize(new_size); }
 llama_mmap_mode llama_mmap_rw::mode() const { return pimpl->mmap_mode; }
 
 #if defined(_POSIX_MAPPED_FILES) || defined(_WIN32)

@@ -118,6 +118,7 @@ struct llama_context {
     //
 
     size_t state_get_size();
+    size_t state_size_max() const;
     size_t state_get_data(      uint8_t * dst, size_t size);
     size_t state_set_data(const uint8_t * src, size_t size);
 

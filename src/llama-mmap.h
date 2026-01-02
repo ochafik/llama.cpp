@@ -67,18 +67,16 @@ struct llama_mmap_rw {
     llama_mmap_rw(const llama_mmap_rw &) = delete;
 
     // Create a new file or open existing for read-write mmap
-    // If the file exists and is smaller than min_size, it will be extended
-    // If the file doesn't exist, it will be created with min_size
+    // The file will be extended to min_size if smaller
     llama_mmap_rw(const char * filepath, size_t min_size);
 
     // Map an existing file for read-only access
     llama_mmap_rw(struct llama_file * file);
 
-    // Copy-on-write: read file into anonymous writable memory
-    // - writable_size: total size of writable buffer (must be >= file size, or 0 for file size)
-    // - file_size: actual file size (bytes to read from file)
-    // Writes do NOT persist to disk
-    llama_mmap_rw(struct llama_file * file, size_t writable_size);
+    // Map an existing file with copy-on-write semantics (MAP_PRIVATE)
+    // If cow=true: writes modify memory only, NOT the file
+    // If cow=false: same as read-only constructor
+    llama_mmap_rw(struct llama_file * file, bool cow);
 
     ~llama_mmap_rw();
 
@@ -87,9 +85,6 @@ struct llama_mmap_rw {
 
     // Sync changes to disk (for read-write maps only, no-op for COW)
     void sync();
-
-    // Resize the mapping (only for read-write maps created with filepath)
-    void resize(size_t new_size);
 
     llama_mmap_mode mode() const;
 

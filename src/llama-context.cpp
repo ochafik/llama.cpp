@@ -1793,21 +1793,20 @@ private:
 
 struct llama_state_mmap {
     std::unique_ptr<llama_mmap_rw> mmap;
-    std::unique_ptr<llama_file> file;  // kept alive for read-only and COW modes
 
     // Read-only constructor
-    llama_state_mmap(llama_file * f) : file(nullptr) {
+    llama_state_mmap(llama_file * f) {
         mmap = std::make_unique<llama_mmap_rw>(f);
     }
 
     // Read-write constructor (persists to disk)
-    llama_state_mmap(const char * path, size_t size) : file(nullptr) {
+    llama_state_mmap(const char * path, size_t size) {
         mmap = std::make_unique<llama_mmap_rw>(path, size);
     }
 
-    // Copy-on-write constructor (writable but not persisted)
-    llama_state_mmap(llama_file * f, size_t writable_size) : file(nullptr) {
-        mmap = std::make_unique<llama_mmap_rw>(f, writable_size);
+    // Copy-on-write constructor (true MAP_PRIVATE, writable but not persisted)
+    llama_state_mmap(llama_file * f, bool cow) {
+        mmap = std::make_unique<llama_mmap_rw>(f, cow);
     }
 
     void * addr() const { return mmap->addr(); }
@@ -1817,12 +1816,6 @@ struct llama_state_mmap {
     void sync() {
         if (mmap->mode() == llama_mmap_mode::READ_WRITE) {
             mmap->sync();
-        }
-    }
-
-    void resize(size_t new_size) {
-        if (mmap->mode() == llama_mmap_mode::READ_WRITE) {
-            mmap->resize(new_size);
         }
     }
 };
@@ -1835,6 +1828,46 @@ size_t llama_context::state_get_size() {
         LLAMA_LOG_ERROR("%s: error getting state size: %s\n", __func__, err.what());
         return 0;
     }
+}
+
+size_t llama_context::state_size_max() const {
+    // Calculate maximum possible state size for this context
+    // This is a conservative upper bound used for pre-allocating mmap buffers
+
+    size_t size = 0;
+
+    // Model info (arch string + length prefix)
+    const std::string arch_str = llm_arch_name(model.arch);
+    size += sizeof(uint32_t) + arch_str.size();
+
+    // Output IDs: n_outputs (4 bytes) + up to n_batch positions
+    size += sizeof(uint32_t);
+    size += n_batch() * sizeof(int32_t);
+
+    // Logits: size (8 bytes) + data
+    size += sizeof(uint64_t);
+    size += logits_size * sizeof(float);
+
+    // Embeddings: size (8 bytes) + data
+    size += sizeof(uint64_t);
+    size += embd_size * sizeof(float);
+
+    // Memory module (KV cache)
+    if (memory) {
+        // Get total memory buffer sizes
+        auto breakdown = memory->memory_breakdown();
+        for (const auto & [buft, buf_size] : breakdown) {
+            size += buf_size;
+        }
+        // Add overhead for metadata (cell info, types, etc.)
+        // Estimate: 1KB per 1000 cells, plus fixed overhead
+        size += 64 * 1024;  // 64KB overhead for metadata
+    }
+
+    // Add 10% safety margin
+    size = size + size / 10;
+
+    return size;
 }
 
 size_t llama_context::state_get_data(uint8_t * dst, size_t size) {
@@ -2848,6 +2881,12 @@ size_t llama_state_get_size(llama_context * ctx) {
     return ctx->state_get_size();
 }
 
+// Returns the maximum possible state size for this context.
+// Intended to be used for pre-allocating mmap session buffers.
+size_t llama_state_size_max(const llama_context * ctx) {
+    return ctx->state_size_max();
+}
+
 size_t llama_state_get_data(llama_context * ctx, uint8_t * dst, size_t size) {
     ctx->synchronize();
 
@@ -2976,28 +3015,23 @@ llama_state_mmap * llama_state_mmap_open(llama_context * ctx, const char * path_
     }
 }
 
-llama_state_mmap * llama_state_mmap_open_rw_sized(llama_context * ctx, const char * path_session, size_t size) {
+llama_state_mmap * llama_state_mmap_open_rw(llama_context * ctx, const char * path_session) {
     if (!llama_mmap_rw::SUPPORTED) {
         LLAMA_LOG_ERROR("%s: mmap not supported on this platform\n", __func__);
         return nullptr;
     }
 
     try {
-        size_t min_size = size;
+        // Calculate fixed size: header + max tokens + max state
+        const size_t header_size = sizeof(uint32_t) * 3; // magic + version + token_count
+        const size_t max_tokens = ctx->n_ctx();
+        const size_t max_state = ctx->state_size_max();
+        const size_t total_size = header_size + max_tokens * sizeof(llama_token) + max_state;
 
-        if (min_size == 0) {
-            // Auto-calculate size based on current state
-            const size_t header_size = sizeof(uint32_t) * 3; // magic + version + token_count
-            const size_t state_size = ctx->state_get_size();
-
-            // Reserve space for header + max possible tokens + current state
-            const size_t max_tokens = ctx->n_ctx();
-            min_size = header_size + max_tokens * sizeof(llama_token) + state_size;
-        }
-
-        // Create or open file with read-write mmap
-        auto * mmap = new llama_state_mmap(path_session, min_size);
-        LLAMA_LOG_DEBUG("%s: opened read-write mmap, size = %zu bytes\n", __func__, mmap->size());
+        // Create or open file with read-write mmap at fixed size
+        auto * mmap = new llama_state_mmap(path_session, total_size);
+        LLAMA_LOG_DEBUG("%s: opened read-write mmap, size = %zu bytes (max_state = %zu)\n",
+            __func__, mmap->size(), max_state);
         return mmap;
     } catch (const std::exception & err) {
         LLAMA_LOG_ERROR("%s: failed to create/open session file for mmap: %s\n", __func__, err.what());
@@ -3005,11 +3039,9 @@ llama_state_mmap * llama_state_mmap_open_rw_sized(llama_context * ctx, const cha
     }
 }
 
-llama_state_mmap * llama_state_mmap_open_rw(llama_context * ctx, const char * path_session) {
-    return llama_state_mmap_open_rw_sized(ctx, path_session, 0);
-}
+llama_state_mmap * llama_state_mmap_open_cow(llama_context * ctx, const char * path_session) {
+    GGML_UNUSED(ctx);
 
-llama_state_mmap * llama_state_mmap_open_cow(llama_context * ctx, const char * path_session, size_t writable_size) {
     if (!llama_mmap_rw::SUPPORTED) {
         LLAMA_LOG_ERROR("%s: mmap not supported on this platform\n", __func__);
         return nullptr;
@@ -3030,27 +3062,10 @@ llama_state_mmap * llama_state_mmap_open_cow(llama_context * ctx, const char * p
 
         file->seek(0, SEEK_SET);
 
-        const size_t file_size = file->size();
-
-        // If writable_size is 0, calculate a reasonable default
-        size_t buffer_size = writable_size;
-        if (buffer_size == 0) {
-            // Use max capacity: header + max tokens + max state
-            const size_t header_size = 3 * sizeof(uint32_t);
-            const size_t max_tokens = ctx->n_ctx();
-            const size_t state_size = ctx->state_get_size();
-            buffer_size = header_size + max_tokens * sizeof(llama_token) + state_size;
-        }
-
-        // Ensure buffer is at least as large as file
-        if (buffer_size < file_size) {
-            buffer_size = file_size;
-        }
-
-        // Create COW mmap (reads file, writes go to anonymous memory)
-        auto * mmap = new llama_state_mmap(file.get(), buffer_size);
-        LLAMA_LOG_DEBUG("%s: opened copy-on-write mmap, file_size = %zu, buffer_size = %zu bytes\n",
-            __func__, file_size, mmap->size());
+        // Create COW mmap using MAP_PRIVATE (true copy-on-write)
+        // The file must be pre-allocated to max size by llama_state_mmap_open_rw
+        auto * mmap = new llama_state_mmap(file.get(), true);  // true = COW mode
+        LLAMA_LOG_DEBUG("%s: opened copy-on-write mmap, size = %zu bytes\n", __func__, mmap->size());
         return mmap;
     } catch (const std::exception & err) {
         LLAMA_LOG_ERROR("%s: failed to open session file for COW mmap: %s\n", __func__, err.what());
@@ -3156,9 +3171,11 @@ size_t llama_state_mmap_save(llama_context * ctx, llama_state_mmap * mmap, const
         const size_t state_size = ctx->state_get_size();
         const size_t total_size = header_size + tokens_size + state_size;
 
-        // Resize mmap if needed
+        // Check if state fits in the pre-allocated mmap
         if (mmap->size() < total_size) {
-            mmap->resize(total_size);
+            LLAMA_LOG_ERROR("%s: state size (%zu) exceeds mmap capacity (%zu)\n",
+                __func__, total_size, mmap->size());
+            return 0;
         }
 
         uint8_t * data = (uint8_t *)mmap->addr();
