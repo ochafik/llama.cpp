@@ -5,7 +5,13 @@
 	import { chatStore } from '$lib/stores/chat.svelte';
 	import { conversationsStore, activeConversation } from '$lib/stores/conversations.svelte';
 	import { config } from '$lib/stores/settings.svelte';
-	import { copyToClipboard, formatMessageForClipboard, getMessageSiblings } from '$lib/utils';
+	import {
+		copyToClipboard,
+		formatMessageForClipboard,
+		getMessageSiblings,
+		isToolResultMessage,
+		parseToolResult
+	} from '$lib/utils';
 
 	interface Props {
 		class?: string;
@@ -102,14 +108,47 @@
 		}
 	});
 
+	// Build a map from parent message ID -> tool results for ToolCallBlock display
+	let toolResultsMap = $derived.by(() => {
+		const map = new Map<string, Map<string, { result: string; timestamp?: number }>>();
+		for (const msg of messages) {
+			if (isToolResultMessage(msg)) {
+				const parsed = parseToolResult(msg.content);
+				if (parsed && msg.parent) {
+					if (!map.has(msg.parent)) {
+						map.set(msg.parent, new Map());
+					}
+					map.get(msg.parent)!.set(parsed.toolName, {
+						result: parsed.result,
+						timestamp: msg.timestamp
+					});
+				}
+			}
+		}
+		return map;
+	});
+
+	// Set of message IDs that are tool results (to hide from display)
+	let toolResultMessageIds = $derived.by(() => {
+		const ids = new Set<string>();
+		for (const msg of messages) {
+			if (isToolResultMessage(msg)) {
+				ids.add(msg.id);
+			}
+		}
+		return ids;
+	});
+
 	let displayMessages = $derived.by(() => {
 		if (!messages.length) {
 			return [];
 		}
 
 		const filteredMessages = currentConfig.showSystemMessage
-			? messages
-			: messages.filter((msg) => msg.type !== MessageRole.SYSTEM);
+			? messages.filter((msg) => !toolResultMessageIds.has(msg.id))
+			: messages.filter(
+					(msg) => msg.type !== MessageRole.SYSTEM && !toolResultMessageIds.has(msg.id)
+				);
 
 		let lastAssistantIndex = -1;
 
@@ -129,6 +168,7 @@
 			return {
 				message,
 				isLastAssistantMessage,
+				toolResults: toolResultsMap.get(message.id),
 				siblingInfo: siblingInfo || {
 					message,
 					siblingIds: [message.id],
@@ -141,11 +181,12 @@
 </script>
 
 <div class="flex h-full flex-col space-y-10 pt-24 {className}" style="height: auto; ">
-	{#each displayMessages as { message, isLastAssistantMessage, siblingInfo } (message.id)}
+	{#each displayMessages as { message, isLastAssistantMessage, toolResults, siblingInfo } (message.id)}
 		<ChatMessage
 			class="mx-auto w-full max-w-[48rem]"
 			{message}
 			{isLastAssistantMessage}
+			{toolResults}
 			{siblingInfo}
 		/>
 	{/each}

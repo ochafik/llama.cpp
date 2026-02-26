@@ -7,6 +7,7 @@
 		ModelsSelector
 	} from '$lib/components/app';
 	import ChatMessageThinkingBlock from './ChatMessageThinkingBlock.svelte';
+	import ToolCallBlock from './ToolCallBlock.svelte';
 	import { getMessageEditContext } from '$lib/contexts';
 	import { useProcessingState } from '$lib/hooks/use-processing-state.svelte';
 	import { isLoading, isChatStreaming } from '$lib/stores/chat.svelte';
@@ -47,6 +48,7 @@
 		showDeleteDialog: boolean;
 		siblingInfo?: ChatMessageSiblingInfo | null;
 		textareaElement?: HTMLTextAreaElement;
+		toolResults?: Map<string, { result: string; timestamp?: number }>;
 	}
 
 	interface ParsedReasoningContent {
@@ -117,7 +119,8 @@
 		onShowDeleteDialogChange,
 		showDeleteDialog,
 		siblingInfo = null,
-		textareaElement = $bindable()
+		textareaElement = $bindable(),
+		toolResults
 	}: Props = $props();
 
 	// Get edit context
@@ -220,6 +223,17 @@
 		}
 	});
 
+	// Parse tool calls from the message's toolCalls JSON string
+	let toolCalls = $derived.by(() => {
+		if (!message.toolCalls) return [];
+		try {
+			const parsed = JSON.parse(message.toolCalls);
+			return Array.isArray(parsed) ? (parsed as ApiChatCompletionToolCall[]) : [];
+		} catch {
+			return [];
+		}
+	});
+
 	$effect(() => {
 		if (showProcessingInfoTop || showProcessingInfoBottom) {
 			processingState.startMonitoring();
@@ -304,6 +318,23 @@
 	{:else}
 		<div class="text-sm whitespace-pre-wrap">
 			{messageContent}
+		</div>
+	{/if}
+
+	{#if toolCalls.length > 0}
+		<div class="mt-4 space-y-2">
+			{#each toolCalls as toolCall (toolCall.id)}
+				{@const qualifiedName = toolCall.function?.name || ''}
+				{@const toolResultEntry = toolResults?.get(qualifiedName)}
+				{@const hasResult = !!toolResultEntry}
+				{@const resultText = toolResultEntry?.result ?? null}
+				{@const durationMs =
+					hasResult && toolResultEntry?.timestamp && message.timestamp
+						? toolResultEntry.timestamp - message.timestamp
+						: null}
+				{@const status = hasResult ? 'complete' : isActivelyProcessing ? 'calling' : 'complete'}
+				<ToolCallBlock {toolCall} result={resultText} {status} {durationMs} />
+			{/each}
 		</div>
 	{/if}
 

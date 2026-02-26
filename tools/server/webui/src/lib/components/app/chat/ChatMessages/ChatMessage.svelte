@@ -18,6 +18,7 @@
 		class?: string;
 		message: DatabaseMessage;
 		isLastAssistantMessage?: boolean;
+		toolResults?: Map<string, { result: string; timestamp?: number }>;
 		siblingInfo?: ChatMessageSiblingInfo | null;
 	}
 
@@ -25,6 +26,7 @@
 		class: className = '',
 		message,
 		isLastAssistantMessage = false,
+		toolResults,
 		siblingInfo = null
 	}: Props = $props();
 
@@ -267,6 +269,7 @@
 		{isLastAssistantMessage}
 		{message}
 		messageContent={message.content}
+		{toolResults}
 		onConfirmDelete={handleConfirmDelete}
 		onContinue={handleContinue}
 		onCopy={handleCopy}
