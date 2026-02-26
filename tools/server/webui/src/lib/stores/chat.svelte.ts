@@ -534,12 +534,15 @@ class ChatStore {
 		}
 	}
 
+	private static readonly MAX_TOOL_CALL_ITERATIONS = 10;
+
 	private async streamChatCompletion(
 		allMessages: DatabaseMessage[],
 		assistantMessage: DatabaseMessage,
 		onComplete?: (content: string) => Promise<void>,
 		onError?: (error: Error) => void,
-		modelOverride?: string | null
+		modelOverride?: string | null,
+		toolCallIteration: number = 0
 	): Promise<void> {
 		let effectiveModel = modelOverride;
 
@@ -678,7 +681,7 @@ class ChatStore {
 				await conversationsStore.updateCurrentNode(assistantMessage.id);
 
 				// If there are tool calls, execute them and continue generation
-				if (resolvedToolCalls && mcpTools.length > 0) {
+				if (resolvedToolCalls && mcpTools.length > 0 && toolCallIteration < ChatStore.MAX_TOOL_CALL_ITERATIONS) {
 					let parsedToolCalls: Array<{
 						id?: string;
 						function?: { name?: string; arguments?: string };
@@ -748,7 +751,8 @@ class ChatStore {
 							newAssistant,
 							onComplete,
 							onError,
-							effectiveModel
+							effectiveModel,
+							toolCallIteration + 1
 						);
 						return;
 					}
