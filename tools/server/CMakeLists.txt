@@ -28,10 +28,6 @@ target_link_libraries(${TARGET} PUBLIC common mtmd ${CMAKE_THREAD_LIBS_INIT})
 
 set(TARGET llama-server)
 
-if (NOT LLAMA_HTTPLIB)
-    message(FATAL_ERROR "LLAMA_HTTPLIB is OFF, cannot build llama-server. Hint: to skip building server, set -DLLAMA_BUILD_SERVER=OFF")
-endif()
-
 set(TARGET_SRCS
     server.cpp
     server-http.cpp
@@ -42,14 +38,6 @@ set(TARGET_SRCS
     server-ws.h
     server-mcp-stdio.cpp
     server-mcp-stdio.h
-    server-task.cpp
-    server-task.h
-    server-queue.cpp
-    server-queue.h
-    server-common.cpp
-    server-common.h
-    server-context.cpp
-    server-context.h
     # SHA1 for WebSocket handshake
     ${CMAKE_SOURCE_DIR}/examples/gguf-hash/deps/sha1/sha1.c
 )
@@ -77,9 +65,5 @@ target_include_directories(${TARGET} PRIVATE ../mtmd)
 target_include_directories(${TARGET} PRIVATE ${CMAKE_SOURCE_DIR})
 target_include_directories(${TARGET} PRIVATE ${CMAKE_SOURCE_DIR}/examples/gguf-hash/deps)
 target_link_libraries(${TARGET} PRIVATE server-context PUBLIC common cpp-httplib ${CMAKE_THREAD_LIBS_INIT})
-
-if (WIN32)
-    TARGET_LINK_LIBRARIES(${TARGET} PRIVATE ws2_32)
-endif()
 
 target_compile_features(${TARGET} PRIVATE cxx_std_17)

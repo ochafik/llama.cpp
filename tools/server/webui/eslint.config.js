@@ -29,7 +29,9 @@ export default ts.config(
 			'no-undef': 'off',
 			'svelte/no-at-html-tags': 'off',
 			// Allow unused variables prefixed with underscore (common convention for intentionally unused params)
-			'@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }]
+			'@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+			// This app uses hash-based routing (#/) where resolve() from $app/paths does not apply
+			'svelte/no-navigation-without-resolve': 'off'
 		}
 	},
 	{
