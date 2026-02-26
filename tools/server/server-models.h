@@ -187,6 +187,14 @@ public:
                       int32_t timeout_read,
                       int32_t timeout_write
                       );
+    // Overload accepting scheme://host:port URL (supports HTTPS)
+    server_http_proxy(const std::string & method,
+                      const std::string & scheme_host_port,
+                      const std::string & path,
+                      const std::map<std::string, std::string> & headers,
+                      const std::string & body,
+                      const std::function<bool()> should_stop
+                      );
     ~server_http_proxy() {
         if (cleanup) {
             cleanup();

@@ -7,6 +7,7 @@
 		ChatFormActionSubmit,
 		ModelsSelector
 	} from '$lib/components/app';
+	import ChatFormActionMcp from './ChatFormActionMcp.svelte';
 	import { FileTypeCategory } from '$lib/enums';
 	import { getFileTypeCategory } from '$lib/utils';
 	import { config } from '$lib/stores/settings.svelte';
@@ -164,6 +165,7 @@
 			{onFileUpload}
 			{onSystemPromptClick}
 		/>
+		<ChatFormActionMcp />
 	</div>
 
 	<div class="ml-auto flex items-center gap-1.5">

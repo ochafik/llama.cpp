@@ -1094,3 +1094,94 @@ server_http_proxy::server_http_proxy(
         }
     }
 }
+
+// Overload: accepts scheme://host:port URL string (supports HTTPS via httplib URL parsing)
+server_http_proxy::server_http_proxy(
+        const std::string & method,
+        const std::string & scheme_host_port,
+        const std::string & path,
+        const std::map<std::string, std::string> & headers,
+        const std::string & body,
+        const std::function<bool()> should_stop
+        ) {
+    auto cli  = std::make_shared<httplib::Client>(scheme_host_port);
+    auto pipe = std::make_shared<pipe_t<msg_t>>();
+
+    cli->set_connection_timeout(0, 200000);
+    cli->set_write_timeout(30, 0);
+    cli->set_read_timeout(30, 0);
+    this->status = 500;
+    this->cleanup = [pipe]() {
+        pipe->close_read();
+        pipe->close_write();
+    };
+
+    this->next = [pipe, should_stop](std::string & out) -> bool {
+        msg_t msg;
+        bool has_next = pipe->read(msg, should_stop);
+        if (!msg.data.empty()) {
+            out = std::move(msg.data);
+        }
+        return has_next;
+    };
+
+    httplib::ResponseHandler response_handler = [pipe, cli](const httplib::Response & response) {
+        msg_t msg;
+        msg.status = response.status;
+        for (const auto & [key, value] : response.headers) {
+            const auto lowered = to_lower_copy(key);
+            if (should_strip_proxy_header(lowered)) {
+                continue;
+            }
+            if (lowered == "content-type") {
+                msg.content_type = value;
+                continue;
+            }
+            msg.headers[key] = value;
+        }
+        return pipe->write(std::move(msg));
+    };
+    httplib::ContentReceiverWithProgress content_receiver = [pipe](const char * data, size_t data_length, size_t, size_t) {
+        return pipe->write({{}, 0, std::string(data, data_length), ""});
+    };
+
+    httplib::Request req;
+    {
+        req.method = method;
+        req.path = path;
+        for (const auto & [key, value] : headers) {
+            req.set_header(key, value);
+        }
+        req.body = body;
+        req.response_handler = response_handler;
+        req.content_receiver = content_receiver;
+    }
+
+    SRV_DBG("start proxy thread %s %s%s\n", req.method.c_str(), scheme_host_port.c_str(), req.path.c_str());
+    this->thread = std::thread([cli, pipe, req]() {
+        auto result = cli->send(std::move(req));
+        if (result.error() != httplib::Error::Success) {
+            auto err_str = httplib::to_string(result.error());
+            SRV_ERR("http client error: %s\n", err_str.c_str());
+            pipe->write({{}, 500, "", ""});
+            pipe->write({{}, 0, "proxy error: " + err_str, ""});
+        }
+        pipe->close_write();
+        SRV_DBG("%s", "client request thread ended\n");
+    });
+    this->thread.detach();
+
+    {
+        msg_t header;
+        if (pipe->read(header, should_stop)) {
+            SRV_DBG("%s", "received response headers\n");
+            this->status  = header.status;
+            this->headers = std::move(header.headers);
+            if (!header.content_type.empty()) {
+                this->content_type = std::move(header.content_type);
+            }
+        } else {
+            SRV_DBG("%s", "no response headers received (request cancelled?)\n");
+        }
+    }
+}
