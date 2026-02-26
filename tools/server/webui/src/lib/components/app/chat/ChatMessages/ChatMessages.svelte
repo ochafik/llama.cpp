@@ -108,11 +108,16 @@
 		}
 	});
 
+	// Check if a message is a tool result (either role:'tool' or legacy user-role format)
+	function isToolResult(msg: DatabaseMessage): boolean {
+		return msg.role === 'tool' || isToolResultMessage(msg);
+	}
+
 	// Build a map from parent message ID -> tool results for ToolCallBlock display
 	let toolResultsMap = $derived.by(() => {
 		const map = new Map<string, Map<string, { result: string; timestamp?: number }>>();
 		for (const msg of messages) {
-			if (isToolResultMessage(msg)) {
+			if (isToolResult(msg)) {
 				const parsed = parseToolResult(msg.content);
 				if (parsed && msg.parent) {
 					if (!map.has(msg.parent)) {
@@ -132,7 +137,7 @@
 	let toolResultMessageIds = $derived.by(() => {
 		const ids = new Set<string>();
 		for (const msg of messages) {
-			if (isToolResultMessage(msg)) {
+			if (isToolResult(msg)) {
 				ids.add(msg.id);
 			}
 		}

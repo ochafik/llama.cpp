@@ -6,6 +6,7 @@
 #include "sha1/sha1.h"
 
 #include <cstring>
+#include <csignal>
 #include <random>
 #include <iomanip>
 #include <sstream>
@@ -424,6 +425,10 @@ bool server_ws_context::start() {
         SRV_ERR("%s: WSAStartup failed\n", __func__);
         return false;
     }
+#else
+    // Ignore SIGPIPE to prevent the process from being killed when writing
+    // to a broken socket (e.g., when a WebSocket client disconnects)
+    signal(SIGPIPE, SIG_IGN);
 #endif
 
     // Create listening socket
@@ -596,7 +601,13 @@ void server_ws_context::Impl::accept_loop() {
 
         // Handle connection in a thread
         std::thread([this, client_sock, client_addr]() {
-            this->handle_connection(client_sock, client_addr);
+            try {
+                this->handle_connection(client_sock, client_addr);
+            } catch (const std::exception & e) {
+                SRV_ERR("%s: unhandled exception in WebSocket connection handler: %s\n", __func__, e.what());
+            } catch (...) {
+                SRV_ERR("%s: unknown exception in WebSocket connection handler\n", __func__);
+            }
         }).detach();
     }
 }
@@ -866,7 +877,13 @@ void server_ws_context::Impl::handle_connection(socket_t sock, const struct sock
         conn->handle_data(recv_buf, [this, conn](const std::string & msg) {
             SRV_DBG("%s: handle_data callback: msg length=%zu\n", __func__, msg.length());
             if (on_message_cb) {
-                on_message_cb(conn, msg);
+                try {
+                    on_message_cb(conn, msg);
+                } catch (const std::exception & e) {
+                    SRV_ERR("%s: exception in on_message callback: %s\n", __func__, e.what());
+                } catch (...) {
+                    SRV_ERR("%s: unknown exception in on_message callback\n", __func__);
+                }
             }
         });
     }

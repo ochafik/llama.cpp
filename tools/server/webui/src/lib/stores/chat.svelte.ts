@@ -42,6 +42,9 @@ import type {
 } from '$lib/types/chat';
 import type { ApiProcessingState, DatabaseMessage, DatabaseMessageExtra } from '$lib/types';
 import { ErrorDialogType, MessageRole, MessageType } from '$lib/enums';
+import { conversationMcpStore } from '$lib/stores/conversation-mcp.svelte';
+import { createToolResultContent } from '$lib/utils/tool-results';
+import type { ApiChatCompletionTool } from '$lib/types/api';
 
 interface ConversationStateEntry {
 	lastAccessed: number;
@@ -654,9 +657,10 @@ class ChatStore {
 				const combinedContent = hasStreamedChunks
 					? streamedContent
 					: wrapReasoningContent(finalContent || '', reasoningContent);
+				const resolvedToolCalls = toolCallContent || streamedToolCallContent;
 				const updateData: Record<string, unknown> = {
 					content: combinedContent,
-					toolCalls: toolCallContent || streamedToolCallContent,
+					toolCalls: resolvedToolCalls,
 					timings
 				};
 				if (streamedExtras.length > 0) updateData.extra = streamedExtras;
@@ -672,6 +676,84 @@ class ChatStore {
 				if (resolvedModel) uiUpdate.model = resolvedModel;
 				conversationsStore.updateMessageAtIndex(idx, uiUpdate);
 				await conversationsStore.updateCurrentNode(assistantMessage.id);
+
+				// If there are tool calls, execute them and continue generation
+				if (resolvedToolCalls && mcpTools.length > 0) {
+					let parsedToolCalls: Array<{
+						id?: string;
+						function?: { name?: string; arguments?: string };
+					}> = [];
+					try {
+						const parsed = JSON.parse(resolvedToolCalls);
+						parsedToolCalls = Array.isArray(parsed) ? parsed : [];
+					} catch {
+						parsedToolCalls = [];
+					}
+
+					if (parsedToolCalls.length > 0) {
+						const convId = assistantMessage.convId;
+						let lastParentId = assistantMessage.id;
+
+						// Execute each tool call and create role:'tool' result messages
+						for (const tc of parsedToolCalls) {
+							const toolName = tc.function?.name || '';
+							const toolCallId = tc.id || '';
+							let args: Record<string, unknown> = {};
+							try {
+								args = tc.function?.arguments
+									? JSON.parse(tc.function.arguments)
+									: {};
+							} catch {
+								args = {};
+							}
+
+							let resultStr: string;
+							try {
+								const result = await conversationMcpStore.executeToolCall(
+									toolName,
+									args
+								);
+								resultStr =
+									typeof result === 'string'
+										? result
+										: JSON.stringify(result, null, 2);
+							} catch (err) {
+								resultStr = `Error: ${err instanceof Error ? err.message : String(err)}`;
+							}
+
+							// Create a proper role:'tool' message with tool_call_id
+							const toolResultMessage = await DatabaseService.createMessageBranch(
+								{
+									convId,
+									role: MessageRole.TOOL,
+									content: createToolResultContent(toolName, resultStr),
+									type: MessageType.TEXT,
+									timestamp: Date.now(),
+									toolCallId,
+									toolCalls: '',
+									children: []
+								},
+								lastParentId
+							);
+							conversationsStore.addMessageToActive(toolResultMessage);
+							await conversationsStore.updateCurrentNode(toolResultMessage.id);
+							lastParentId = toolResultMessage.id;
+						}
+
+						// Continue generation with updated conversation including tool results
+						const newAssistant = await this.createAssistantMessage(lastParentId);
+						conversationsStore.addMessageToActive(newAssistant);
+						await this.streamChatCompletion(
+							conversationsStore.activeMessages.slice(0, -1),
+							newAssistant,
+							onComplete,
+							onError,
+							effectiveModel
+						);
+						return;
+					}
+				}
+
 				if (onComplete) await onComplete(combinedContent);
 				this.setChatLoading(assistantMessage.convId, false);
 				this.clearChatStreaming(assistantMessage.convId);
@@ -707,9 +789,23 @@ class ChatStore {
 			}
 		};
 
+		// Collect MCP tools from connected servers
+		const mcpToolEntries = await conversationMcpStore.getAllToolsForConversation(
+			assistantMessage.convId
+		);
+		const mcpTools: ApiChatCompletionTool[] = mcpToolEntries.map((entry) => ({
+			type: 'function' as const,
+			function: {
+				name: entry.qualifiedName,
+				description: entry.tool.description || '',
+				parameters: (entry.tool.inputSchema as Record<string, unknown>) || { type: 'object', properties: {} }
+			}
+		}));
+
 		const completionOptions = {
 			...this.getApiOptions(),
 			...(effectiveModel ? { model: effectiveModel } : {}),
+			...(mcpTools.length > 0 ? { tools: mcpTools, tool_choice: 'auto' as const } : {}),
 			...streamCallbacks
 		};
 
