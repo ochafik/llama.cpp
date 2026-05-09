@@ -13,15 +13,27 @@ ggml_cgraph * clip_graph_qwen3vl::build() {
 
     int mrope_sections[4] = {d_head/4, d_head/4, d_head/4, d_head/4};
 
-    ggml_tensor * inp_raw = build_inp_raw();
-    ggml_tensor * inp = ggml_conv_2d(ctx0, model.patch_embeddings_0, inp_raw, patch_size, patch_size, 0, 0, 1, 1);
+    // Patch-embed stem.
+    //
+    // Default path: shared inp_raw fed into both Conv2D heads — algebraically
+    // equivalent to a t=2 Conv3D *if* both halves see the same frame, which
+    // for a single image is fine.
+    //
+    // Video-pair path (set by `clip_image_video_pair_encode`): two distinct
+    // input tensors, ref into _0 and cur into _1. This is the genuine t=2,
+    // stride=2 Conv3D, just decomposed along the temporal kernel axis.
+    // See VIDEO_CONV3D_CPP_DESIGN.md §3.3.
+    ggml_tensor * inp_raw_ref = video_pair ? build_inp_raw_named("inp_raw_ref") : build_inp_raw();
+    ggml_tensor * inp_raw_cur = video_pair ? build_inp_raw_named("inp_raw_cur") : inp_raw_ref;
+
+    ggml_tensor * inp = ggml_conv_2d(ctx0, model.patch_embeddings_0, inp_raw_ref, patch_size, patch_size, 0, 0, 1, 1);
 
     GGML_ASSERT(img.nx % (patch_size * 2) == 0);
     GGML_ASSERT(img.ny % (patch_size * 2) == 0);
 
     // second conv dimension
     {
-        auto inp_1 = ggml_conv_2d(ctx0, model.patch_embeddings_1, inp_raw, patch_size, patch_size, 0, 0, 1, 1);
+        auto inp_1 = ggml_conv_2d(ctx0, model.patch_embeddings_1, inp_raw_cur, patch_size, patch_size, 0, 0, 1, 1);
         inp = ggml_add(ctx0, inp, inp_1);
 
         inp = ggml_permute(ctx0, inp, 1, 2, 0, 3);  // [w, h, c, b] -> [c, w, h, b]

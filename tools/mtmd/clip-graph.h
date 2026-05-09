@@ -71,6 +71,18 @@ struct clip_graph {
 
     ggml_tensor * build_inp_raw(int channels = 3);
 
+    // For video / temporal-pair encoding (Qwen2-VL/2.5-VL/3-VL).
+    // Same shape as `build_inp_raw` but the tensor is named so the
+    // encoder can route distinct (reference, current) frames into
+    // patch_embeddings_0 / patch_embeddings_1. See VIDEO_CONV3D_CPP_DESIGN.md
+    // §3.3 for the math.
+    ggml_tensor * build_inp_raw_named(const char * name, int channels = 3);
+
+    // Set to true by `clip_image_video_pair_encode` to ask the per-arch
+    // builder to emit the two-input form (`inp_raw_ref` / `inp_raw_cur`)
+    // instead of the shared-input form (`inp_raw`).
+    bool video_pair = false;
+
     ggml_tensor * build_norm(
             ggml_tensor * cur,
             ggml_tensor * mw,
