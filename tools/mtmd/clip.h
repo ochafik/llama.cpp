@@ -102,6 +102,16 @@ struct ggml_tensor * clip_get_newline_tensor(const struct clip_ctx * ctx);
 bool clip_image_encode      (struct clip_ctx * ctx, int n_threads, struct clip_image_f32 * img, float * vec);
 bool clip_image_batch_encode(struct clip_ctx * ctx, int n_threads, const struct clip_image_f32_batch * imgs, float * vec);
 
+// Video / temporal-pair encode for Qwen-VL family. Routes ref into
+// patch_embeddings_0 and cur into patch_embeddings_1 via two distinct
+// `inp_raw_ref` / `inp_raw_cur` graph inputs. See VIDEO_CONV3D_CPP_DESIGN.md
+// §3.3. `vec` must be sized for the standard single-image output shape.
+bool clip_image_video_pair_encode(struct clip_ctx * ctx, int n_threads,
+                                  uint32_t nx, uint32_t ny,
+                                  const float * frame_ref_f32,
+                                  const float * frame_cur_f32,
+                                  float * vec);
+
 int clip_is_minicpmv(const struct clip_ctx * ctx);
 bool clip_is_glm(const struct clip_ctx * ctx);
 bool clip_is_llava(const struct clip_ctx * ctx);

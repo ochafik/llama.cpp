@@ -260,7 +260,7 @@ int32_t mtmd_helper_decode_image_chunk(
     decode_embd_batch batch_embd(encoded_embd, n_tokens, n_pos_per_embd, n_mmproj_embd);
 
     if (mtmd_decode_use_mrope(ctx)) {
-        if (chunk_type == MTMD_INPUT_CHUNK_TYPE_IMAGE) {
+        if (chunk_type == MTMD_INPUT_CHUNK_TYPE_IMAGE || chunk_type == MTMD_INPUT_CHUNK_TYPE_VIDEO) {
             const auto image_tokens = mtmd_input_chunk_get_tokens_image(chunk);
             if (!image_tokens) {
                 LOG_ERR("failed to decode chunk: image tokens are null\n");
@@ -357,8 +357,11 @@ int32_t mtmd_helper_eval_chunk_single(mtmd_context * ctx,
             *new_n_past += text_batch.n_tokens;
         }
 
-    } else if (chunk_type == MTMD_INPUT_CHUNK_TYPE_IMAGE || chunk_type == MTMD_INPUT_CHUNK_TYPE_AUDIO) {
-        const char * name = chunk_type == MTMD_INPUT_CHUNK_TYPE_IMAGE ? "image" : "audio";
+    } else if (chunk_type == MTMD_INPUT_CHUNK_TYPE_IMAGE ||
+               chunk_type == MTMD_INPUT_CHUNK_TYPE_AUDIO ||
+               chunk_type == MTMD_INPUT_CHUNK_TYPE_VIDEO) {
+        const char * name = (chunk_type == MTMD_INPUT_CHUNK_TYPE_IMAGE) ? "image"
+                          : (chunk_type == MTMD_INPUT_CHUNK_TYPE_VIDEO) ? "video" : "audio";
         int64_t t0 = ggml_time_ms();
 
         LOG_INF("encoding %s slice...\n", name);

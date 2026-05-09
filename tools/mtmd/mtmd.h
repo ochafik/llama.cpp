@@ -54,6 +54,7 @@ enum mtmd_input_chunk_type {
     MTMD_INPUT_CHUNK_TYPE_TEXT,
     MTMD_INPUT_CHUNK_TYPE_IMAGE,
     MTMD_INPUT_CHUNK_TYPE_AUDIO,
+    MTMD_INPUT_CHUNK_TYPE_VIDEO,
 };
 
 // opaque types
@@ -137,11 +138,18 @@ MTMD_API int mtmd_get_audio_sample_rate(const mtmd_context * ctx);
 //     the data is in float format (PCM F32)
 MTMD_API mtmd_bitmap *         mtmd_bitmap_init           (uint32_t nx, uint32_t ny, const unsigned char * data);
 MTMD_API mtmd_bitmap *         mtmd_bitmap_init_from_audio(size_t n_samples,         const float         * data);
+// Video / image-sequence input. `nt` is the number of frames laid out
+// sequentially in `data` (RGBRGB...; frame stride == nx*ny*3). Mirrors PR
+// #21858's `_init_from_seq` API surface — see VIDEO_CONV3D_CPP_DESIGN.md
+// §8 risk #7 for the rationale.
+MTMD_API mtmd_bitmap *         mtmd_bitmap_init_from_seq (uint32_t nx, uint32_t ny, uint32_t nt, const unsigned char * data);
 MTMD_API uint32_t              mtmd_bitmap_get_nx     (const mtmd_bitmap * bitmap);
 MTMD_API uint32_t              mtmd_bitmap_get_ny     (const mtmd_bitmap * bitmap);
+MTMD_API uint32_t              mtmd_bitmap_get_nt     (const mtmd_bitmap * bitmap);
 MTMD_API const unsigned char * mtmd_bitmap_get_data   (const mtmd_bitmap * bitmap);
 MTMD_API size_t                mtmd_bitmap_get_n_bytes(const mtmd_bitmap * bitmap);
 MTMD_API bool                  mtmd_bitmap_is_audio   (const mtmd_bitmap * bitmap);
+MTMD_API bool                  mtmd_bitmap_is_seq     (const mtmd_bitmap * bitmap);
 MTMD_API void                  mtmd_bitmap_free       (mtmd_bitmap * bitmap);
 // bitmap ID is optional, but useful for KV cache tracking
 // these getters/setters are dedicated functions, so you can for example calculate the hash of the image based on mtmd_bitmap_get_data()
@@ -235,6 +243,26 @@ MTMD_API int32_t mtmd_encode(mtmd_context * ctx,
 MTMD_API int32_t mtmd_encode_chunk(mtmd_context * ctx,
                                    const mtmd_input_chunk * chunk);
 
+// Encode one (reference, current) frame pair through the vision tower's
+// temporal-pair patch-embedding heads, writing token embeddings to
+// `out_embd`. Both frames must already be preprocessed to (nx, ny) in RGB
+// f32 NHWC layout (length nx*ny*3 each).
+//
+// The exact reshaping the qwen3vl/qwen2vl graph applies — feeding ref into
+// `inp_raw_ref` (mapped to `patch_embeddings_0`) and cur into `inp_raw_cur`
+// (mapped to `patch_embeddings_1`), then summing — is mathematically a
+// `Conv3D(t=2, stride=2)` because the GGUF stores the original 3D kernel
+// pre-split along KT. See VIDEO_CONV3D_CPP_DESIGN.md §3.3.
+//
+// `out_embd` must be sized as `clip_n_mmproj_embd(ctx_v) * n_tokens`.
+//
+// Returns 0 on success, non-zero on failure (e.g. unsupported projector).
+MTMD_API int32_t mtmd_encode_video_pair(mtmd_context * ctx,
+                                        uint32_t nx, uint32_t ny,
+                                        const float * frame_ref_f32,
+                                        const float * frame_cur_f32,
+                                        float * out_embd);
+
 // get output embeddings from the last encode pass
 // the reading size (in bytes) is equal to:
 // llama_model_n_embd_inp(model) * mtmd_input_chunk_get_n_tokens(chunk) * sizeof(float)
@@ -289,9 +317,14 @@ struct bitmap {
     bitmap(uint32_t nx, uint32_t ny, const unsigned char * data) {
         ptr.reset(mtmd_bitmap_init(nx, ny, data));
     }
+    bitmap(uint32_t nx, uint32_t ny, uint32_t nt, const unsigned char * data) {
+        ptr.reset(mtmd_bitmap_init_from_seq(nx, ny, nt, data));
+    }
     ~bitmap() = default;
     uint32_t nx() const { return mtmd_bitmap_get_nx(ptr.get()); }
     uint32_t ny() const { return mtmd_bitmap_get_ny(ptr.get()); }
+    uint32_t nt() const { return mtmd_bitmap_get_nt(ptr.get()); }
+    bool is_seq() const { return mtmd_bitmap_is_seq(ptr.get()); }
     const unsigned char * data() const { return mtmd_bitmap_get_data(ptr.get()); }
     size_t n_bytes() const { return mtmd_bitmap_get_n_bytes(ptr.get()); }
     std::string id() const { return mtmd_bitmap_get_id(ptr.get()); }

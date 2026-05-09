@@ -24,13 +24,15 @@
 #include <vector>
 
 // represents raw image data, layout is RGBRGBRGB...
-// length of data must be nx * ny * 3
+// length of data must be nx * ny * 3 (or nx * ny * 3 * nt for sequences)
 struct mtmd_bitmap {
     uint32_t nx;
     uint32_t ny;
+    uint32_t nt = 1; // number of frames; >1 means a video / image sequence
     std::vector<unsigned char> data;
     std::string id; // optional user-defined id, for ex: can be set to image hash, useful for KV cache tracking
     bool is_audio = false; // true if the bitmap is audio
+    bool is_seq   = false; // true if the bitmap is a video / image sequence
 };
 
 // position indexing for decoder model
@@ -565,7 +567,8 @@ struct mtmd_context {
 
     // get clip ctx based on chunk type
     clip_ctx * get_clip_ctx(const mtmd_input_chunk * chunk) const {
-        if (chunk->type == MTMD_INPUT_CHUNK_TYPE_IMAGE) {
+        if (chunk->type == MTMD_INPUT_CHUNK_TYPE_IMAGE ||
+            chunk->type == MTMD_INPUT_CHUNK_TYPE_VIDEO) {
             return ctx_v;
         } else if (chunk->type == MTMD_INPUT_CHUNK_TYPE_AUDIO) {
             return ctx_a;
@@ -1024,7 +1027,16 @@ int32_t mtmd_encode_chunk(mtmd_context * ctx, const mtmd_input_chunk * chunk) {
     if (chunk->type == MTMD_INPUT_CHUNK_TYPE_TEXT) {
         LOG_WRN("mtmd_encode_chunk has no effect for text chunks\n");
         return 0;
-    } else if (chunk->type == MTMD_INPUT_CHUNK_TYPE_IMAGE) {
+    } else if (chunk->type == MTMD_INPUT_CHUNK_TYPE_IMAGE ||
+               chunk->type == MTMD_INPUT_CHUNK_TYPE_VIDEO) {
+        // Video chunks reuse the image-tokens carrier; the per-arch graph
+        // builder picks up the temporal-pair flag via the encoder front-end
+        // (see mtmd_encode_video_pair). For helper-driven encoding we
+        // currently treat VIDEO identically to IMAGE — the bitmap stores
+        // both frames stacked sequentially in `data`, and the dispatcher
+        // could route to clip_image_video_pair_encode. For v1 the session
+        // calls mtmd_encode_video_pair directly and bypasses this path,
+        // so we only need to make sure VIDEO chunks don't hard-fault here.
         if (!ctx->ctx_v) {
             LOG_ERR("%s: model does not support vision input\n", __func__);
             return 1;
@@ -1087,6 +1099,33 @@ int32_t mtmd_encode(mtmd_context * ctx, const mtmd_image_tokens * image_tokens) 
 
 float * mtmd_get_output_embd(mtmd_context * ctx) {
     return ctx->image_embd_v.data();
+}
+
+// S4: real implementation lives in clip.cpp's clip_image_video_pair_encode().
+// Forward-declare the bridge here.
+bool clip_image_video_pair_encode(struct clip_ctx * ctx, int n_threads,
+                                  uint32_t nx, uint32_t ny,
+                                  const float * frame_ref_f32,
+                                  const float * frame_cur_f32,
+                                  float * vec);
+
+int32_t mtmd_encode_video_pair(mtmd_context * ctx,
+                               uint32_t nx, uint32_t ny,
+                               const float * frame_ref_f32,
+                               const float * frame_cur_f32,
+                               float * out_embd) {
+    if (ctx == nullptr || ctx->ctx_v == nullptr) {
+        LOG_ERR("%s: vision context not initialized\n", __func__);
+        return 1;
+    }
+    if (frame_ref_f32 == nullptr || frame_cur_f32 == nullptr || out_embd == nullptr) {
+        return 2;
+    }
+    bool ok = clip_image_video_pair_encode(ctx->ctx_v, ctx->n_threads,
+                                           nx, ny,
+                                           frame_ref_f32, frame_cur_f32,
+                                           out_embd);
+    return ok ? 0 : 3;
 }
 
 bool mtmd_decode_use_non_causal(const mtmd_context * ctx, const mtmd_input_chunk * chunk) {
@@ -1152,6 +1191,19 @@ mtmd_bitmap * mtmd_bitmap_init_from_audio(size_t n_samples,
     return bitmap;
 }
 
+mtmd_bitmap * mtmd_bitmap_init_from_seq(uint32_t nx, uint32_t ny, uint32_t nt,
+                                        const unsigned char * data) {
+    mtmd_bitmap * bitmap = new mtmd_bitmap;
+    bitmap->nx = nx;
+    bitmap->ny = ny;
+    bitmap->nt = nt;
+    bitmap->is_seq = (nt > 1);
+    size_t data_size = (size_t)nx * (size_t)ny * 3 * (size_t)nt;
+    bitmap->data.resize(data_size);
+    std::memcpy(bitmap->data.data(), data, data_size);
+    return bitmap;
+}
+
 uint32_t mtmd_bitmap_get_nx(const mtmd_bitmap * bitmap) {
     return bitmap->nx;
 }
@@ -1170,6 +1222,14 @@ size_t mtmd_bitmap_get_n_bytes(const mtmd_bitmap * bitmap) {
 
 bool mtmd_bitmap_is_audio(const mtmd_bitmap * bitmap) {
     return bitmap->is_audio;
+}
+
+uint32_t mtmd_bitmap_get_nt(const mtmd_bitmap * bitmap) {
+    return bitmap->nt;
+}
+
+bool mtmd_bitmap_is_seq(const mtmd_bitmap * bitmap) {
+    return bitmap->is_seq;
 }
 
 const char * mtmd_bitmap_get_id(const mtmd_bitmap * bitmap) {
@@ -1229,7 +1289,8 @@ const llama_token * mtmd_input_chunk_get_tokens_text(const mtmd_input_chunk * ch
 }
 
 const mtmd_image_tokens * mtmd_input_chunk_get_tokens_image(const mtmd_input_chunk * chunk) {
-    if (chunk->type == MTMD_INPUT_CHUNK_TYPE_IMAGE) {
+    if (chunk->type == MTMD_INPUT_CHUNK_TYPE_IMAGE ||
+        chunk->type == MTMD_INPUT_CHUNK_TYPE_VIDEO) {
         return chunk->tokens_image.get();
     }
     return nullptr;
@@ -1238,7 +1299,8 @@ const mtmd_image_tokens * mtmd_input_chunk_get_tokens_image(const mtmd_input_chu
 size_t mtmd_input_chunk_get_n_tokens(const mtmd_input_chunk * chunk) {
     if (chunk->type == MTMD_INPUT_CHUNK_TYPE_TEXT) {
         return chunk->tokens_text.size();
-    } else if (chunk->type == MTMD_INPUT_CHUNK_TYPE_IMAGE) {
+    } else if (chunk->type == MTMD_INPUT_CHUNK_TYPE_IMAGE ||
+               chunk->type == MTMD_INPUT_CHUNK_TYPE_VIDEO) {
         return mtmd_image_tokens_get_n_tokens(chunk->tokens_image.get());
     } else if (chunk->type == MTMD_INPUT_CHUNK_TYPE_AUDIO) {
         return chunk->tokens_audio->n_tokens;
@@ -1250,7 +1312,8 @@ size_t mtmd_input_chunk_get_n_tokens(const mtmd_input_chunk * chunk) {
 llama_pos mtmd_input_chunk_get_n_pos(const mtmd_input_chunk * chunk) {
     if (chunk->type == MTMD_INPUT_CHUNK_TYPE_TEXT) {
         return chunk->tokens_text.size();
-    } else if (chunk->type == MTMD_INPUT_CHUNK_TYPE_IMAGE) {
+    } else if (chunk->type == MTMD_INPUT_CHUNK_TYPE_IMAGE ||
+               chunk->type == MTMD_INPUT_CHUNK_TYPE_VIDEO) {
         return mtmd_image_tokens_get_n_pos(chunk->tokens_image.get());
     } else if (chunk->type == MTMD_INPUT_CHUNK_TYPE_AUDIO) {
         return chunk->tokens_audio->n_tokens;
@@ -1260,7 +1323,8 @@ llama_pos mtmd_input_chunk_get_n_pos(const mtmd_input_chunk * chunk) {
 }
 
 const char * mtmd_input_chunk_get_id(const mtmd_input_chunk * chunk) {
-    if (chunk->type == MTMD_INPUT_CHUNK_TYPE_IMAGE) {
+    if (chunk->type == MTMD_INPUT_CHUNK_TYPE_IMAGE ||
+        chunk->type == MTMD_INPUT_CHUNK_TYPE_VIDEO) {
         return chunk->tokens_image->id.c_str();
     } else if (chunk->type == MTMD_INPUT_CHUNK_TYPE_AUDIO) {
         return chunk->tokens_audio->id.c_str();

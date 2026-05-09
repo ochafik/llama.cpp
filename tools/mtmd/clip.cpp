@@ -521,6 +521,13 @@ ggml_tensor * clip_graph::build_inp_raw(int channels) {
     return inp_raw;
 }
 
+ggml_tensor * clip_graph::build_inp_raw_named(const char * name, int channels) {
+    ggml_tensor * inp_raw = ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, img.nx, img.ny, channels);
+    ggml_set_name(inp_raw, name);
+    ggml_set_input(inp_raw);
+    return inp_raw;
+}
+
 ggml_tensor * clip_graph::build_norm(
         ggml_tensor * cur,
         ggml_tensor * mw,
@@ -825,8 +832,15 @@ ggml_tensor * clip_graph::build_patch_merge_permute(ggml_tensor * cur, int scale
     return cur;
 }
 
-static ggml_cgraph * clip_image_build_graph(clip_ctx * ctx, const clip_image_f32_batch & imgs) {
-    GGML_ASSERT(imgs.entries.size() == 1 && "n_batch > 1 is not supported");
+static ggml_cgraph * clip_image_build_graph(clip_ctx * ctx, const clip_image_f32_batch & imgs, bool video_pair = false) {
+    // The video-pair path passes a 2-image batch (ref, cur) but only a single
+    // graph is built — the per-arch builder branches on the `video_pair` flag
+    // to emit `inp_raw_ref` / `inp_raw_cur` instead of a shared `inp_raw`.
+    if (video_pair) {
+        GGML_ASSERT(imgs.entries.size() == 2 && "video pair requires exactly 2 frames");
+    } else {
+        GGML_ASSERT(imgs.entries.size() == 1 && "n_batch > 1 is not supported");
+    }
 
     const clip_image_f32 & img = *imgs.entries[0];
     std::unique_ptr<clip_graph> builder;
@@ -964,6 +978,7 @@ static ggml_cgraph * clip_image_build_graph(clip_ctx * ctx, const clip_image_f32
             GGML_ABORT("missing cgraph builder");
     }
 
+    builder->video_pair = video_pair;
     return builder->build();
 }
 
@@ -4050,6 +4065,146 @@ bool clip_image_batch_encode(clip_ctx * ctx, const int n_threads, const clip_ima
         LOG_INF("=== END MTMD_DEBUG_EMBEDDINGS ===\n\n");
     }
 
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Video / temporal-pair encode (Qwen2-VL/2.5-VL/3-VL).
+// ---------------------------------------------------------------------------
+//
+// Builds a graph with `video_pair=true`, which causes the per-arch builder
+// to emit two distinct input tensors (`inp_raw_ref`, `inp_raw_cur`). We then
+// upload `frame_ref` into the first and `frame_cur` into the second. The rest
+// of the existing setup (per-projector inputs like `positions`, `pos_h`, etc.)
+// is reused via a re-entry into the regular encode path with batch_size==1
+// — only the input-stem step is special.
+//
+// See VIDEO_CONV3D_CPP_DESIGN.md §3.3 for the math.
+bool clip_image_video_pair_encode(struct clip_ctx * ctx, int n_threads,
+                                  uint32_t nx, uint32_t ny,
+                                  const float * frame_ref_f32,
+                                  const float * frame_cur_f32,
+                                  float * vec) {
+    if (ctx == nullptr) return false;
+
+    // Only the Qwen-VL family has a temporal-pair patch-embed (split GGUF
+    // weights for patch_embeddings_0 / _1). Other projectors fall back to
+    // single-image encode.
+    auto proj = clip_get_projector_type(ctx);
+    if (proj != PROJECTOR_TYPE_QWEN2VL  &&
+        proj != PROJECTOR_TYPE_QWEN25VL &&
+        proj != PROJECTOR_TYPE_QWEN3VL) {
+        // Caller picked the wrong path; fall back to a single-frame encode
+        // of the current frame so we still produce *something* useful.
+        clip_image_f32 img;
+        img.nx = (int)nx;
+        img.ny = (int)ny;
+        img.buf.resize((size_t)nx * ny * 3);
+        std::memcpy(img.buf.data(), frame_cur_f32, img.buf.size() * sizeof(float));
+        return clip_image_encode(ctx, n_threads, &img, vec);
+    }
+
+    // Build a 2-image batch for the warmup-shape check.
+    clip_image_f32_batch imgs;
+    auto make_entry = [&](const float * src) {
+        clip_image_f32_ptr e(clip_image_f32_init());
+        e->nx = (int)nx;
+        e->ny = (int)ny;
+        e->buf.resize((size_t)nx * ny * 3);
+        std::memcpy(e->buf.data(), src, e->buf.size() * sizeof(float));
+        return e;
+    };
+    imgs.entries.push_back(make_entry(frame_ref_f32));
+    imgs.entries.push_back(make_entry(frame_cur_f32));
+
+    // Warmup once if not yet allocated. Use a single-image batch since the
+    // graph shape is identical aside from one extra input tensor.
+    if (!ctx->is_allocated) {
+        clip_image_f32_batch warm;
+        warm.entries.push_back(make_entry(frame_ref_f32));
+        clip_model_loader::warmup(*ctx, warm);
+    }
+
+    ggml_backend_sched_reset(ctx->sched.get());
+    ggml_cgraph * gf = clip_image_build_graph(ctx, imgs, /*video_pair=*/true);
+    ggml_backend_sched_alloc_graph(ctx->sched.get(), gf);
+
+    const auto & model   = ctx->model;
+    const auto & hparams = model.hparams;
+
+    const int patch_size = hparams.patch_size;
+    const int pos_w      = (int)nx / patch_size;
+    const int pos_h      = (int)ny / patch_size;
+    const int num_patches = pos_w * pos_h;
+    const int n_pos      = num_patches + (model.class_embedding ? 1 : 0);
+
+    auto get_inp_tensor = [&gf](const char * name) {
+        ggml_tensor * inp = ggml_graph_get_tensor(gf, name);
+        if (inp == nullptr) {
+            GGML_ABORT("Failed to get tensor %s", name);
+        }
+        if (!(inp->flags & GGML_TENSOR_FLAG_INPUT)) {
+            GGML_ABORT("Tensor %s is not an input tensor", name);
+        }
+        return inp;
+    };
+
+    // Helper: pack one NHWC f32 frame into the planar [W,H,C] layout the
+    // graph's inp_raw* tensors expect. This is the same dance as the
+    // single-image path in clip_image_batch_encode.
+    auto upload_frame = [&](const char * tname, const float * src) {
+        std::vector<float> planar((size_t)nx * (size_t)ny * 3);
+        const int n = (int)nx * (int)ny;
+        for (uint32_t y = 0; y < ny; y++) {
+            for (uint32_t x = 0; x < nx; x++) {
+                size_t base_src = 3 * ((size_t)y * nx + x);
+                size_t base_dst =     (size_t)y * nx + x;
+                planar[          base_dst] = src[base_src    ];
+                planar[1*n     + base_dst] = src[base_src + 1];
+                planar[2*n     + base_dst] = src[base_src + 2];
+            }
+        }
+        ggml_tensor * t = get_inp_tensor(tname);
+        GGML_ASSERT(t->type == GGML_TYPE_F32);
+        GGML_ASSERT(ggml_nelements(t) == (int64_t)planar.size());
+        ggml_backend_tensor_set(t, planar.data(), 0, ggml_nbytes(t));
+    };
+    upload_frame("inp_raw_ref", frame_ref_f32);
+    upload_frame("inp_raw_cur", frame_cur_f32);
+
+    // Set the M-RoPE positions tensor expected by qwen{2,3}vl. Same scheme
+    // as the single-image path: 4 groups (mrope sections), filled with the
+    // patch positions in row-major order. We populate (t, h, w, image_idx)
+    // sections; t is left at 0 here — the session shifts pos_0 by cumulative
+    // video time when feeding embeddings into llama_decode.
+    {
+        ggml_tensor * positions = get_inp_tensor("positions");
+        const int64_t need = ggml_nelements(positions);
+        std::vector<int32_t> pdata((size_t)need, 0);
+        // section 0: t — leave at 0
+        // section 1: h
+        for (int i = 0; i < num_patches; ++i) {
+            pdata[(size_t)num_patches * 1 + i] = (int32_t)(i / pos_w);
+        }
+        // section 2: w
+        for (int i = 0; i < num_patches; ++i) {
+            pdata[(size_t)num_patches * 2 + i] = (int32_t)(i % pos_w);
+        }
+        // section 3: image_idx — leave at 0 for a single pair
+        ggml_backend_tensor_set(positions, pdata.data(), 0, ggml_nbytes(positions));
+    }
+
+    (void)n_threads; // backend sched picks threads via ggml_backend_dev
+    (void)n_pos;
+
+    if (ggml_backend_sched_graph_compute(ctx->sched.get(), gf) != GGML_STATUS_SUCCESS) {
+        return false;
+    }
+
+    // Output tensor is the last leaf — same as in clip_image_batch_encode.
+    ggml_tensor * out = ggml_graph_node(gf, -1);
+    if (out == nullptr) return false;
+    ggml_backend_tensor_get(out, vec, 0, ggml_nbytes(out));
     return true;
 }
 
