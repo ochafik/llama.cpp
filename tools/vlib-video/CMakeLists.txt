@@ -16,10 +16,12 @@ add_library(vlib-video STATIC
     vlib_video_tool_parser.cpp
     vlib_video_session.cpp
     vlib_video_encoder.cpp
+    vlib_video_frame_filter.cpp
     vlib_video.h
     vlib_video_tool_parser.h
     vlib_video_session.h
     vlib_video_encoder.h
+    vlib_video_frame_filter.h
 )
 
 set_target_properties(vlib-video PROPERTIES POSITION_INDEPENDENT_CODE ON)

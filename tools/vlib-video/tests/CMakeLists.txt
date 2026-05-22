@@ -25,3 +25,8 @@ add_executable(test-vlib-mrope test_mrope.cpp)
 target_link_libraries   (test-vlib-mrope PRIVATE vlib-video)
 target_compile_features (test-vlib-mrope PRIVATE cxx_std_17)
 add_test(NAME vlib-mrope COMMAND test-vlib-mrope)
+
+add_executable(test-vlib-pixel-diff-filter test_pixel_diff_filter.cpp)
+target_link_libraries   (test-vlib-pixel-diff-filter PRIVATE vlib-video)
+target_compile_features (test-vlib-pixel-diff-filter PRIVATE cxx_std_17)
+add_test(NAME vlib-pixel-diff-filter COMMAND test-vlib-pixel-diff-filter)

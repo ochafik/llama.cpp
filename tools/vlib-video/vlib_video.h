@@ -12,3 +12,4 @@
 #include "vlib_video_tool_parser.h"
 #include "vlib_video_encoder.h"
 #include "vlib_video_session.h"
+#include "vlib_video_frame_filter.h"
