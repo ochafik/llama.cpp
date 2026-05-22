@@ -45,6 +45,46 @@ int main() {
         return 1;
     }
 
-    std::printf("mrope: ok (cumulative_t=5 → pop → 4)\n");
+    // U4b — Rewind-sync scenario (MLX_VLM_IMAGE_DIFFING_AUDIT.md Gap #2).
+    // Three frames pushed, frame 2 ignored, then a "frame 3" pushed.
+    // The cumulative_t must equal 3 (1+1+1), not 4 (1+1+1+1).
+    {
+        std::vector<grid_thw> g;
+        g.push_back({1, 18, 14}); // frame 1
+        g.push_back({1, 18, 14}); // frame 2
+        g.push_back({1, 18, 14}); // frame 3
+        if (cumulative_t(g) != 3) {
+            std::fprintf(stderr, "mrope rewind: pre-pop cum_t=%d want 3\n", cumulative_t(g));
+            return 1;
+        }
+
+        // Ignore frame 3 (simulate ignore_frame action — session pops the
+        // most recent push).
+        const grid_thw popped = g.back();
+        g.pop_back();
+        if (popped.t != 1 || popped.h != 18 || popped.w != 14) {
+            std::fprintf(stderr, "mrope rewind: popped wrong entry t/h/w=%d/%d/%d\n",
+                         popped.t, popped.h, popped.w);
+            return 1;
+        }
+        if (cumulative_t(g) != 2) {
+            std::fprintf(stderr, "mrope rewind: post-pop cum_t=%d want 2\n", cumulative_t(g));
+            return 1;
+        }
+
+        // Push the *new* frame 3 (kept).
+        g.push_back({1, 18, 14});
+        if (cumulative_t(g) != 3) {
+            std::fprintf(stderr, "mrope rewind: final cum_t=%d want 3 (NOT 4)\n",
+                         cumulative_t(g));
+            return 1;
+        }
+        if ((int)g.size() != 3) {
+            std::fprintf(stderr, "mrope rewind: grid size=%zu want 3\n", g.size());
+            return 1;
+        }
+    }
+
+    std::printf("mrope: ok (U3=5, U4 pop→4, U4b rewind-sync 3-frame=3)\n");
     return 0;
 }

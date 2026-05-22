@@ -156,8 +156,19 @@ public:
         const std::string & name = tc.name;
         const bool is_ignore = (name == "do_nothing" || name == "ignore_frame");
         if (is_ignore) {
-            // Selective rewind. Recurrent state is intentionally NOT rolled
-            // back (matches MLX ghost-memory semantic).
+            // MRoPE rewind sync — audited 2026-05-09 (see audit doc §2 / Gap #2).
+            // On ignore_frame we pop the cumulative {t,h,w} entry we pushed
+            // for this frame; the next process_frame call recomputes
+            // pos_0_t = sum(m_grid_thw[i].t) over the popped vector, which
+            // is the correct cumulative video-time for the next kept frame.
+            // Unlike MLX (whose language model holds a stateful
+            // `_rope_deltas`), llama.cpp's llama_decode computes RoPE
+            // per-token from explicit positions supplied in batch.pos[].
+            // Trimming KV via llama_memory_seq_rm + restoring m_n_past is
+            // sufficient — no internal rope-delta accumulator to resync.
+            //
+            // Recurrent state is intentionally NOT rolled back (matches
+            // MLX ghost-memory semantic).
             llama_memory_t mem = llama_get_memory(m_lctx);
             if (mem) {
                 llama_memory_seq_rm(mem, m_seq_id, rewind_floor, -1);
