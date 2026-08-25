@@ -120,7 +120,10 @@ struct llama_grammar_trigger_pattern {
     std::string pattern;
     std::regex  regex;
 
-    size_t find(const std::string & input) const;
+    // Finds the constrained-start position of the earliest match at or after `from`
+    // (std::string::npos if none). For full-anchored (^...$) patterns with from > 0,
+    // the anchor is reinterpreted relative to `from`.
+    size_t find(const std::string & input, size_t from = 0) const;
 };
 
 struct llama_grammar {
@@ -141,6 +144,9 @@ struct llama_grammar {
     // (useful e.g. for tool_choice=required)
     bool                     lazy             = false;
     bool                     awaiting_trigger = false; // Initialized to true for lazy grammars only
+    size_t                   trigger_scan_offset = 0;  // Buffer offset to scan triggers from; advanced past occurrences whose
+                                                       // buffered continuation failed to parse (e.g. the trigger marker quoted
+                                                       // in prose), so they are not re-tried.
     std::string              trigger_buffer;           // Output buffered by lazy grammar. Will be cleared once trigger is found.
     std::vector<token_pos>   trigger_buffer_positions; // Tokens buffered by lazy grammar. Used to replay when a trigger is found.
     std::vector<llama_token> trigger_tokens;           // Tokens that trigger a lazy grammar, or tokens to force printing of (even if special).

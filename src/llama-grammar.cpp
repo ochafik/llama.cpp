@@ -379,8 +379,8 @@ static void print_rule(
 // Regex utilities
 //
 
-size_t llama_grammar_trigger_pattern::find(const std::string & input) const {
-    auto find_start_pos = [](const std::smatch & match) {
+size_t llama_grammar_trigger_pattern::find(const std::string & input, size_t from) const {
+    auto find_start_pos = [&](const std::smatch & match) {
         // get from the first matched capturing group to the end of the string
         size_t start = std::string::npos;
         for (auto i = 1u; i < match.size(); i++) {
@@ -392,20 +392,25 @@ size_t llama_grammar_trigger_pattern::find(const std::string & input) const {
         if (start == std::string::npos) {
             start = match.position(0);
         }
-        return start;
+        return start + from;
     };
 
+    if (from >= input.size()) {
+        return std::string::npos;
+    }
+    const std::string scanned = from == 0 ? input : input.substr(from);
+
     if (!pattern.empty() && pattern.front() == '^' && pattern.back() == '$') {
-        // match against the entire input
+        // match against the entire (remaining) input
         std::smatch match;
-        if (std::regex_match(input, match, regex)) {
+        if (std::regex_match(scanned, match, regex)) {
             return find_start_pos(match);
         }
     }
 
     // search anywhere
     std::smatch match;
-    if (std::regex_search(input, match, regex)) {
+    if (std::regex_search(scanned, match, regex)) {
         return find_start_pos(match);
     }
 
@@ -1205,6 +1210,7 @@ struct llama_grammar * llama_grammar_init_impl(
         /* .partial_utf8 = */             {},
         /* .lazy = */                     false,
         /* .awaiting_trigger = */         false,
+        /* .trigger_scan_offset = */      0,
         /* .trigger_buffer = */           "",
         /* .trigger_buffer_positions = */ {},
         /* .trigger_tokens = */           {},
@@ -1311,6 +1317,7 @@ struct llama_grammar * llama_grammar_init_impl(
         /* .partial_utf8 = */             {},
         /* .lazy = */                     lazy,
         /* .awaiting_trigger = */         lazy,
+        /* .trigger_scan_offset = */      0,
         /* .trigger_buffer = */           "",
         /* .trigger_buffer_positions = */ {},
         std::move(vec_trigger_tokens),
@@ -1334,6 +1341,7 @@ struct llama_grammar * llama_grammar_clone_impl(const struct llama_grammar & gra
         grammar.partial_utf8,
         grammar.lazy,
         grammar.awaiting_trigger,
+        grammar.trigger_scan_offset,
         grammar.trigger_buffer,
         grammar.trigger_buffer_positions,
         grammar.trigger_tokens,
@@ -1406,39 +1414,70 @@ void llama_grammar_accept_impl(struct llama_grammar & grammar, llama_token token
 
     if (grammar.awaiting_trigger) {
         if (std::find(grammar.trigger_tokens.begin(), grammar.trigger_tokens.end(), token) != grammar.trigger_tokens.end()) {
-            grammar.awaiting_trigger = false;
-            grammar.trigger_buffer.clear();
-            llama_grammar_accept_token(grammar, token, piece);
-            LLAMA_LOG_DEBUG("Grammar triggered on token %u (`%s`)", token, piece.c_str());
-            return;
-        } else {
+            // Speculative arming: the trigger token was sampled unconstrained, so it may
+            // not actually start a parseable payload (e.g. a mismatched grammar root).
+            // Only commit if it parses; otherwise keep watching.
+            const auto saved_stacks  = grammar.stacks;
+            const auto saved_partial = grammar.partial_utf8;
+            try {
+                llama_grammar_accept_token(grammar, token, piece);
+                grammar.awaiting_trigger = false;
+                grammar.trigger_buffer.clear();
+                grammar.trigger_buffer_positions.clear();
+                grammar.trigger_scan_offset = 0;
+                LLAMA_LOG_DEBUG("Grammar triggered on token %u (`%s`)", token, piece.c_str());
+                return;
+            } catch (const std::exception & e) {
+                grammar.stacks       = saved_stacks;
+                grammar.partial_utf8 = saved_partial;
+                LLAMA_LOG_DEBUG("Grammar trigger token %u (`%s`) rejected (does not parse): %s\n", token, piece.c_str(), e.what());
+                // fall through to buffer the token and keep scanning patterns
+            }
+        }
+        {
             auto position = std::make_pair(grammar.trigger_buffer.size(), grammar.trigger_buffer.size() + piece.size());
             grammar.trigger_buffer_positions.push_back(std::make_pair(token, position));
             grammar.trigger_buffer += piece;
 
             for (const auto & trigger_pattern : grammar.trigger_patterns) {
-                auto start = trigger_pattern.find(grammar.trigger_buffer);
+                auto start = trigger_pattern.find(grammar.trigger_buffer, grammar.trigger_scan_offset);
                 if (start != std::string::npos) {
-                    grammar.awaiting_trigger = false;
+                    // Speculative arming: everything in the buffer after the trigger was
+                    // sampled unconstrained, so the "trigger" may be a quotation of the
+                    // marker rather than an actual payload start (e.g. the model reciting
+                    // tool-use instructions that contain the marker verbatim). Replay the
+                    // buffered continuation against a saved parser state and only commit
+                    // if it parses; otherwise roll back and scan past this occurrence.
+                    const auto saved_stacks  = grammar.stacks;
+                    const auto saved_partial = grammar.partial_utf8;
+                    try {
+                        // replay tokens that overlap with [start, end)
+                        for (const auto & [tok, tok_pos] : grammar.trigger_buffer_positions) {
+                            auto [tok_start, tok_end] = tok_pos;
+                            if (tok_end <= start) {
+                                continue;
+                            }
 
-                    // replay tokens that overlap with [start, end)
-                    for (const auto & [tok, tok_pos] : grammar.trigger_buffer_positions) {
-                        auto [tok_start, tok_end] = tok_pos;
-                        if (tok_end <= start) {
-                            continue;
+                            size_t piece_start = (tok_start < start) ? start : tok_start; // allow for partial token pieces
+                            size_t piece_len = tok_end - piece_start;
+                            auto tok_piece = grammar.trigger_buffer.substr(piece_start, piece_len);
+                            llama_grammar_accept_token(grammar, tok, tok_piece);
                         }
 
-                        size_t piece_start = (tok_start < start) ? start : tok_start; // allow for partial token pieces
-                        size_t piece_len = tok_end - piece_start;
-                        auto tok_piece = grammar.trigger_buffer.substr(piece_start, piece_len);
-                        llama_grammar_accept_token(grammar, tok, tok_piece);
+                        auto constrained_str = grammar.trigger_buffer.substr(start);
+                        grammar.awaiting_trigger = false;
+                        grammar.trigger_buffer.clear();
+                        grammar.trigger_buffer_positions.clear();
+                        grammar.trigger_scan_offset = 0;
+                        LLAMA_LOG_DEBUG("Grammar triggered on regex: '%s'\n", constrained_str.c_str());
+                        return;
+                    } catch (const std::exception & e) {
+                        grammar.stacks       = saved_stacks;
+                        grammar.partial_utf8 = saved_partial;
+                        grammar.trigger_scan_offset = start + 1;
+                        LLAMA_LOG_DEBUG("Grammar trigger at buffer offset %zu rejected (buffered text does not parse): %s\n", start, e.what());
+                        // stay in awaiting_trigger mode; later occurrences can still arm
                     }
-
-                    auto constrained_str = grammar.trigger_buffer.substr(start);
-                    grammar.trigger_buffer.clear();
-                    grammar.trigger_buffer_positions.clear();
-                    LLAMA_LOG_DEBUG("Grammar triggered on regex: '%s'\n", constrained_str.c_str());
-                    return;
                 }
             }
             LLAMA_LOG_DEBUG("Grammar still awaiting trigger after token %d (`%s`)\n", token, piece.c_str());

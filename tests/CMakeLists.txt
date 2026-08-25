@@ -148,6 +148,8 @@ if (LLAMA_LLGUIDANCE)
     llama_build_and_test(test-grammar-llguidance.cpp ARGS ${PROJECT_SOURCE_DIR}/models/ggml-vocab-llama-bpe.gguf)
 endif ()
 
+llama_build_and_test(test-grammar-lazy-trigger.cpp ARGS ${PROJECT_SOURCE_DIR}/models/ggml-vocab-llama-bpe.gguf)
+
 llama_build(test-recurrent-state-rollback.cpp)
 llama_build(test-save-load-state.cpp)
 
