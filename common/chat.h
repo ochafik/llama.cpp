@@ -294,6 +294,12 @@ struct common_chat_parser_params {
     bool                    is_continuation      = false;
     bool                    echo                 = false;  // Include assistant prefilled msg in output
     bool                    debug                = false;  // Enable debug output for PEG parser
+    // On a final (non-partial) parse failure, return the raw output as content instead of
+    // throwing. Used by the server: with lazy-grammar constrained sampling, unparseable
+    // output means the tool-call trigger was a quotation/recitation that the grammar
+    // rolled back on, i.e. the text is genuinely plain content (better a text reply than
+    // an HTTP 500 for a model-output quirk).
+    bool                    fallback_to_content  = false;
     common_peg_arena        parser               = {};
     common_chat_parser_params() = default;
     common_chat_parser_params(const common_chat_params & chat_params) {

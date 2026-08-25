@@ -296,6 +296,10 @@ std::vector<std::unique_ptr<field>> make_llama_cmpl_schema(const common_params &
         ->set_desc("Chat format used internally by the server")
         ->set_handler([&](field_eval_context & ctx, const json & data) {
             ctx.params.chat_parser_params.format = static_cast<common_chat_format>(data.at("chat_format").get<int>());
+            // Server policy: an unparseable final output degrades to plain content
+            // instead of erroring the request (e.g. a rolled-back lazy-grammar
+            // trigger quotation that never became a real tool call).
+            ctx.params.chat_parser_params.fallback_to_content = true;
             SRV_TRC("chat format: %s\n", common_chat_format_name(ctx.params.chat_parser_params.format));
         }));
 
